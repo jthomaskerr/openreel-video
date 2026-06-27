@@ -1,1 +1,1 @@
-export { neuralframesRouter } from "./neuralframes.js";
+export { neuralframesRouter } from "./neuralframes";
