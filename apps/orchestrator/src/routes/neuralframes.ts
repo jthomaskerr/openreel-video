@@ -1,5 +1,4 @@
 import { Router } from "express";
-import { readFileSync } from "node:fs";
 import { importNeuralFrames } from "@openreel/music-video-domain";
 import type { NeuralFramesStoryboard } from "@openreel/music-video-domain";
 
@@ -7,28 +6,22 @@ export const neuralframesRouter = Router();
 
 /**
  * POST /api/import/neuralframes
- * Body: { path: "/absolute/path/to/neuralframes.storyboard.json" }
+ * Body: NeuralFramesStoryboard JSON (the file contents, parsed by the client)
  * Returns: NeuralFramesImportResult
  *
- * Strips all account/user identity fields — only creative content is returned.
+ * The client reads the file locally and sends the parsed JSON — no server-side
+ * filesystem access needed. Account/user identity fields are stripped.
  */
 neuralframesRouter.post("/", (req, res) => {
-  const { path: filePath } = req.body as { path?: string };
-  if (!filePath) {
-    res.status(400).json({ error: "path required" });
-    return;
-  }
+  const raw = req.body as NeuralFramesStoryboard;
 
-  let raw: NeuralFramesStoryboard;
-  try {
-    raw = JSON.parse(readFileSync(filePath, "utf8")) as NeuralFramesStoryboard;
-  } catch (e) {
-    res.status(400).json({ error: `Could not read file: ${(e as Error).message}` });
+  if (!raw?.storyboard_props) {
+    res.status(400).json({ error: "Invalid Neural Frames storyboard: missing storyboard_props" });
     return;
   }
 
   try {
-    const result = importNeuralFrames(raw, filePath);
+    const result = importNeuralFrames(raw, "");
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: `Import failed: ${(e as Error).message}` });

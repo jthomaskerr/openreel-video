@@ -1,6 +1,7 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
+import { Upload } from "lucide-react";
 import { useMusicVideoStore } from "../../../stores/music-video-store";
-import type { NeuralFramesImportResult } from "@openreel/music-video-domain";
+import type { NeuralFramesImportResult, NeuralFramesStoryboard } from "@openreel/music-video-domain";
 
 interface Props {
   openreelProjectId: string;
@@ -12,22 +13,31 @@ export const NeuralFramesImportTab: React.FC<Props> = ({
   orchestratorUrl,
 }) => {
   const { applyNeuralFramesImport } = useMusicVideoStore();
-  const [filePath, setFilePath] = useState(
-    "/Volumes/Joseph/Documents/Just Down/neuralframes.storyboard.json",
-  );
+  const inputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
   const [message, setMessage] = useState("");
   const [result, setResult] = useState<NeuralFramesImportResult | null>(null);
+  const [fileName, setFileName] = useState("");
 
-  const handleImport = async () => {
-    if (!filePath.trim()) return;
+  const handleFile = async (file: File) => {
+    setFileName(file.name);
     setStatus("loading");
     setMessage("");
+
+    let raw: NeuralFramesStoryboard;
+    try {
+      raw = JSON.parse(await file.text()) as NeuralFramesStoryboard;
+    } catch {
+      setStatus("error");
+      setMessage("Not valid JSON.");
+      return;
+    }
+
     try {
       const res = await fetch(`${orchestratorUrl}/api/import/neuralframes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ path: filePath.trim() }),
+        body: JSON.stringify(raw),
       });
       const data = (await res.json()) as NeuralFramesImportResult & { error?: string };
       if (!res.ok || data.error) {
@@ -49,44 +59,53 @@ export const NeuralFramesImportTab: React.FC<Props> = ({
 
   return (
     <div className="p-4 space-y-4">
-      <div>
-        <p className="text-white/50 text-xs mb-3">
-          Import a Neural Frames storyboard JSON file. Scenes become storyboard shots and
-          metadata tracks. Account fields are stripped.
-        </p>
+      <p className="text-white/50 text-xs">
+        Import a Neural Frames storyboard JSON. Scenes become storyboard shots
+        and metadata tracks. Account fields are stripped.
+      </p>
 
-        <label className="block text-[11px] text-white/40 mb-1.5">
-          Absolute path to storyboard JSON
-        </label>
-        <input
-          type="text"
-          value={filePath}
-          onChange={(e) => setFilePath(e.target.value)}
-          placeholder="/path/to/neuralframes.storyboard.json"
-          className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-xs text-white/80 placeholder-white/20 focus:outline-none focus:border-blue-400/50"
-        />
-      </div>
-
+      {/* Drop zone / file picker */}
       <button
-        onClick={handleImport}
-        disabled={status === "loading" || !filePath.trim()}
-        className="w-full py-2 rounded bg-blue-500/80 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs font-medium transition-colors"
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          const file = e.dataTransfer.files[0];
+          if (file) handleFile(file);
+        }}
+        className="w-full border border-dashed border-white/20 hover:border-blue-400/60 rounded-lg py-8 flex flex-col items-center gap-2 text-white/40 hover:text-white/70 transition-colors cursor-pointer"
       >
-        {status === "loading" ? "Importing…" : "Import storyboard"}
+        <Upload size={20} />
+        <span className="text-xs">
+          {fileName || "Click or drop a .storyboard.json file"}
+        </span>
       </button>
 
-      {status === "done" && (
-        <div className="rounded bg-green-500/10 border border-green-500/20 px-3 py-2 text-green-300 text-xs">
-          ✓ {message}
-          {result && (
-            <ul className="mt-1.5 text-green-300/70 space-y-0.5">
-              <li>• {result.metadataTracks.length} metadata tracks added</li>
-              <li>• {result.shots.length} storyboard shots created</li>
-              {result.timingHints.bpm && (
-                <li>• BPM: {result.timingHints.bpm}</li>
-              )}
-            </ul>
-          )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) handleFile(file);
+          e.target.value = "";
+        }}
+      />
+
+      {status === "loading" && (
+        <div className="text-white/50 text-xs animate-pulse">Importing…</div>
+      )}
+
+      {status === "done" && result && (
+        <div className="rounded bg-green-500/10 border border-green-500/20 px-3 py-2 text-green-300 text-xs space-y-1">
+          <div>✓ {message}</div>
+          <ul className="text-green-300/70 space-y-0.5 mt-1">
+            <li>• {result.metadataTracks.length} metadata tracks added</li>
+            <li>• {result.shots.length} storyboard shots created</li>
+            {result.timingHints.bpm ? <li>• BPM: {result.timingHints.bpm}</li> : null}
+          </ul>
         </div>
       )}
 
