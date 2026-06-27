@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "dist",
+    "rootDir": "src",
+    "paths": {
+      "@openreel/music-video-domain": ["../../packages/music-video-domain/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}
