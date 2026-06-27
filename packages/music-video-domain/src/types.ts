@@ -314,5 +314,6 @@ export interface NeuralFramesImportResult {
   lorasImported: number;
   metadataTracks: MetadataTrack[];
   shots: StoryboardShot[];
+  generatedAssets: GeneratedAsset[];
   timingHints: Pick<TimingAnalysis, "bpm" | "sections">;
 }

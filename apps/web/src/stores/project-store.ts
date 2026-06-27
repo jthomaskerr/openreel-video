@@ -133,7 +133,7 @@ export interface ProjectState {
 
   // Track actions
   addTrack: (
-    trackType: "video" | "audio" | "image" | "text" | "graphics",
+    trackType: "video" | "audio" | "image" | "text" | "graphics" | "metadata",
     position?: number,
   ) => Promise<ActionResult>;
   removeTrack: (trackId: string) => Promise<ActionResult>;
@@ -150,6 +150,7 @@ export interface ProjectState {
     trackId: string,
     mediaId: string,
     startTime: number,
+    options?: { duration?: number; metadata?: Record<string, unknown> },
   ) => Promise<ActionResult>;
   addClipToNewTrack: (
     mediaId: string,
@@ -2170,7 +2171,7 @@ export const useProjectStore = create<ProjectState>()(
 
       // Track actions
       addTrack: async (
-        trackType: "video" | "audio" | "image" | "text" | "graphics",
+        trackType: "video" | "audio" | "image" | "text" | "graphics" | "metadata",
         position?: number,
       ) => {
         const { project, actionExecutor } = get();
@@ -2316,19 +2317,19 @@ export const useProjectStore = create<ProjectState>()(
       },
 
       // Clip actions
-      addClip: async (trackId: string, mediaId: string, startTime: number) => {
+      addClip: async (
+        trackId: string,
+        mediaId: string,
+        startTime: number,
+        options?: { duration?: number; metadata?: Record<string, unknown> },
+      ) => {
         const { project, actionExecutor } = get();
-
-        // IMPORTANT: Deep clone the project BEFORE mutation
-        // actionExecutor mutates the project directly, so we need a fresh copy
-        // to ensure Zustand detects the state change
         const projectCopy = structuredClone(project);
-
         const action: Action = {
           type: "clip/add",
           id: uuidv4(),
           timestamp: Date.now(),
-          params: { trackId, mediaId, startTime },
+          params: { trackId, mediaId, startTime, ...options },
         };
 
         const result = await actionExecutor.execute(action, projectCopy);

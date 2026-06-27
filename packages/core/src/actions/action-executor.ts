@@ -469,6 +469,7 @@ export class ActionExecutor {
           speed?: number;
           reversed?: boolean;
           audioTrackIndex?: number;
+          metadata?: Record<string, unknown>;
         };
         const track = timeline.tracks.find(
           (t: MutableTrack) => t.id === params.trackId,
@@ -515,6 +516,7 @@ export class ActionExecutor {
             ...(params.audioTrackIndex !== undefined
               ? { audioTrackIndex: params.audioTrackIndex }
               : {}),
+            ...(params.metadata ? { metadata: params.metadata } : {}),
           };
           track.clips = [...track.clips, newClip];
           this.lastAddedIds.set("clip", newClip.id);

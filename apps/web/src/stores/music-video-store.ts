@@ -236,6 +236,7 @@ export const useMusicVideoStore = create<MusicVideoState>()(
           const merged: Partial<MusicVideoProject> = {
             metadataTracks: [...p.metadataTracks, ...result.metadataTracks],
             shots: result.shots,
+            generatedAssets: [...p.generatedAssets, ...result.generatedAssets],
             neuralFramesImportId: result.storyboardId,
             updatedAt: now(),
           };

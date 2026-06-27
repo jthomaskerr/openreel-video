@@ -1,27 +1,32 @@
 import React, { useRef, useState } from "react";
 import { Upload } from "lucide-react";
-import { useMusicVideoStore } from "../../../stores/music-video-store";
+import { v4 as uuidv4 } from "uuid";
+import { useProjectStore } from "../../../stores/project-store";
 import type { NeuralFramesImportResult, NeuralFramesStoryboard } from "@openreel/music-video-domain";
+import type { MediaItem } from "@openreel/core";
 
 interface Props {
   openreelProjectId: string;
   orchestratorUrl: string;
+  onImported?: () => void;
 }
 
 export const NeuralFramesImportTab: React.FC<Props> = ({
-  openreelProjectId,
   orchestratorUrl,
+  onImported,
 }) => {
-  const { applyNeuralFramesImport } = useMusicVideoStore();
+  const { addTrack, addClip, addPlaceholderMedia, replacePlaceholderMedia } = useProjectStore();
+
   const inputRef = useRef<HTMLInputElement>(null);
   const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
+  const [progress, setProgress] = useState("");
   const [message, setMessage] = useState("");
-  const [result, setResult] = useState<NeuralFramesImportResult | null>(null);
   const [fileName, setFileName] = useState("");
 
   const handleFile = async (file: File) => {
     setFileName(file.name);
     setStatus("loading");
+    setProgress("Parsing…");
     setMessage("");
 
     let raw: NeuralFramesStoryboard;
@@ -33,7 +38,9 @@ export const NeuralFramesImportTab: React.FC<Props> = ({
       return;
     }
 
+    let result: NeuralFramesImportResult;
     try {
+      setProgress("Importing scenes…");
       const res = await fetch(`${orchestratorUrl}/api/import/neuralframes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -45,26 +52,96 @@ export const NeuralFramesImportTab: React.FC<Props> = ({
         setMessage(data.error ?? "Import failed");
         return;
       }
-      applyNeuralFramesImport(openreelProjectId, data);
-      setResult(data);
-      setStatus("done");
-      setMessage(
-        `Imported ${data.scenesImported} scenes, ${data.charactersImported} characters, ${data.lorasImported} LoRAs.`,
-      );
+      result = data;
     } catch (e) {
       setStatus("error");
       setMessage((e as Error).message);
+      return;
     }
+
+    // ── Each MetadataTrack → a "metadata" track on the OpenReel timeline ──────
+    // Each MetadataBlock in that track → a clip whose clip.metadata carries the block data.
+    // No mediaId needed — pass empty string; the action tolerates missing media.
+    for (const track of result.metadataTracks) {
+      setProgress(`Creating track "${track.label}"…`);
+
+      const trackResult = await addTrack("metadata");
+      if (!trackResult.success) continue;
+
+      // Find the newly created track (last one added)
+      const currentTracks = useProjectStore.getState().project.timeline.tracks;
+      const newTrack = trackResult.actionId
+        ? currentTracks.find((t) => t.id === trackResult.actionId)
+        : currentTracks.at(-1);
+      if (!newTrack) continue;
+
+      // Rename the track to match the imported label
+      await useProjectStore.getState().renameTrack?.(newTrack.id, track.label);
+
+      for (const block of track.blocks) {
+        const duration = (block.endSeconds ?? block.startSeconds + 1) - block.startSeconds;
+        await addClip(newTrack.id, "", block.startSeconds, {
+          duration,
+          metadata: {
+            label: block.label,
+            kind: block.kind,
+            text: block.text,
+            color: block.color,
+            importSource: block.importSource,
+            importId: block.importId,
+            source: block.source,
+          },
+        });
+      }
+    }
+
+    // ── Scene images → media library, flagged as generated ───────────────────
+    let imageCount = 0;
+    for (let i = 0; i < result.generatedAssets.length; i++) {
+      const asset = result.generatedAssets[i];
+      if (!asset.outputPath) continue;
+
+      const mediaId = uuidv4();
+      const name = `${result.title} — Scene ${i + 1}.jpg`;
+
+      setProgress(`Adding image ${i + 1} / ${result.generatedAssets.length}…`);
+
+      const placeholder: MediaItem = {
+        id: mediaId,
+        name,
+        type: "image",
+        fileHandle: null,
+        blob: null,
+        metadata: { duration: 0, width: 0, height: 0, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 0 },
+        thumbnailUrl: asset.outputPath,
+        waveformData: null,
+        isPlaceholder: true,
+      };
+      addPlaceholderMedia(placeholder);
+
+      // Fetch blob in background; clip.metadata.isGenerated marks it in the timeline
+      fetch(asset.outputPath)
+        .then((r) => r.blob())
+        .then((blob) => replacePlaceholderMedia(mediaId, blob, name))
+        .catch((err) => console.warn(`[NF] image ${i + 1}:`, err));
+
+      imageCount++;
+    }
+
+    setStatus("done");
+    setMessage(
+      `${result.metadataTracks.length} tracks · ${result.shots.length} blocks · ${imageCount} images in media library`,
+    );
+    setTimeout(() => onImported?.(), 600);
   };
 
   return (
     <div className="p-4 space-y-4">
       <p className="text-white/50 text-xs">
-        Import a Neural Frames storyboard JSON. Scenes become storyboard shots
-        and metadata tracks. Account fields are stripped.
+        Import a Neural Frames storyboard. Each scene group becomes a metadata
+        track; scene images land in the media library.
       </p>
 
-      {/* Drop zone / file picker */}
       <button
         type="button"
         onClick={() => inputRef.current?.click()}
@@ -74,11 +151,14 @@ export const NeuralFramesImportTab: React.FC<Props> = ({
           const file = e.dataTransfer.files[0];
           if (file) handleFile(file);
         }}
-        className="w-full border border-dashed border-white/20 hover:border-blue-400/60 rounded-lg py-8 flex flex-col items-center gap-2 text-white/40 hover:text-white/70 transition-colors cursor-pointer"
+        disabled={status === "loading"}
+        className="w-full border border-dashed border-white/20 hover:border-blue-400/60 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg py-8 flex flex-col items-center gap-2 text-white/40 hover:text-white/70 transition-colors cursor-pointer"
       >
         <Upload size={20} />
         <span className="text-xs">
-          {fileName || "Click or drop a .storyboard.json file"}
+          {status === "loading"
+            ? progress
+            : fileName || "Click or drop a .storyboard.json file"}
         </span>
       </button>
 
@@ -94,21 +174,11 @@ export const NeuralFramesImportTab: React.FC<Props> = ({
         }}
       />
 
-      {status === "loading" && (
-        <div className="text-white/50 text-xs animate-pulse">Importing…</div>
-      )}
-
-      {status === "done" && result && (
-        <div className="rounded bg-green-500/10 border border-green-500/20 px-3 py-2 text-green-300 text-xs space-y-1">
-          <div>✓ {message}</div>
-          <ul className="text-green-300/70 space-y-0.5 mt-1">
-            <li>• {result.metadataTracks.length} metadata tracks added</li>
-            <li>• {result.shots.length} storyboard shots created</li>
-            {result.timingHints.bpm ? <li>• BPM: {result.timingHints.bpm}</li> : null}
-          </ul>
+      {status === "done" && (
+        <div className="rounded bg-green-500/10 border border-green-500/20 px-3 py-2 text-green-300 text-xs">
+          ✓ {message}
         </div>
       )}
-
       {status === "error" && (
         <div className="rounded bg-red-500/10 border border-red-500/20 px-3 py-2 text-red-300 text-xs">
           ✕ {message}

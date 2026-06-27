@@ -1,4 +1,4 @@
-import { Film, Volume2, Image, Type, Shapes, Layers } from "lucide-react";
+import { Film, Volume2, Image, Type, Shapes, Layers, Tag } from "lucide-react";
 import type { Track } from "@openreel/core";
 import type {
   SnapPoint,
@@ -194,6 +194,14 @@ export const getTrackInfo = (track: Track, index: number): TrackInfo => {
         textColor: "text-green-400",
         bgLight: "bg-green-500/20",
       };
+    case "metadata":
+      return {
+        label: `M${index + 1}`,
+        icon: Tag,
+        color: "bg-sky-500",
+        textColor: "text-sky-400",
+        bgLight: "bg-sky-500/20",
+      };
     default:
       return {
         label: `?${index + 1}`,
@@ -229,6 +237,13 @@ export const getClipStyle = (trackType: string): ClipStyle => {
         border: "border-violet-500/60",
         text: "text-white/85",
         selectedText: "text-white",
+      };
+    case "metadata":
+      return {
+        bg: "bg-sky-600/20",
+        border: "border-sky-500/50",
+        text: "text-sky-200/90",
+        selectedText: "text-sky-100",
       };
     default:
       return {

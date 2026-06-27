@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Music, Film, Layers, Import } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { Music, Film, Import } from "lucide-react";
 import { useProjectStore } from "../../../stores/project-store";
 import { useMusicVideoStore, ORCHESTRATOR_URL } from "../../../stores/music-video-store";
 import { StoryboardTab } from "./StoryboardTab";
@@ -9,16 +9,25 @@ interface MusicVideoPanelProps {
   onClose: () => void;
 }
 
-type Tab = "storyboard" | "assets" | "import";
+type Tab = "storyboard" | "import";
 
 export const MusicVideoPanel: React.FC<MusicVideoPanelProps> = ({ onClose }) => {
   const openreelProject = useProjectStore((s) => s.project);
   const projectId = openreelProject.id;
 
-  const { getProject, createProject } = useMusicVideoStore();
-  const mvProject = getProject(projectId) ?? createProject(projectId, openreelProject.name ?? "Music Video");
+  // Reactive selector — re-renders whenever the project changes in the store
+  const mvProject = useMusicVideoStore((s) => s.projects[projectId]);
+  const createProject = useMusicVideoStore((s) => s.createProject);
+
+  useEffect(() => {
+    if (!mvProject) {
+      createProject(projectId, openreelProject.name ?? "Music Video");
+    }
+  }, [projectId, mvProject, createProject, openreelProject.name]);
 
   const [tab, setTab] = useState<Tab>("storyboard");
+
+  const shotCount = mvProject?.shots.length ?? 0;
 
   return (
     <div className="flex flex-col h-full bg-[#0d1117] text-white text-sm">
@@ -41,11 +50,10 @@ export const MusicVideoPanel: React.FC<MusicVideoPanelProps> = ({ onClose }) => 
       <div className="flex border-b border-white/10">
         {(
           [
-            { id: "storyboard", label: "Storyboard", icon: Film },
-            { id: "assets", label: "Assets", icon: Layers },
-            { id: "import", label: "Import", icon: Import },
-          ] as { id: Tab; label: string; icon: React.FC<{ size?: number; className?: string }> }[]
-        ).map(({ id, label, icon: Icon }) => (
+            { id: "storyboard" as Tab, label: "Storyboard", icon: Film, badge: shotCount || undefined },
+            { id: "import" as Tab, label: "Import", icon: Import, badge: undefined },
+          ]
+        ).map(({ id, label, icon: Icon, badge }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -57,24 +65,26 @@ export const MusicVideoPanel: React.FC<MusicVideoPanelProps> = ({ onClose }) => 
           >
             <Icon size={12} />
             {label}
+            {badge !== undefined && (
+              <span className="ml-0.5 px-1 py-px rounded text-[10px] bg-white/10 text-white/60 leading-none">
+                {badge}
+              </span>
+            )}
           </button>
         ))}
       </div>
 
       {/* Tab content */}
       <div className="flex-1 overflow-y-auto">
-        {tab === "storyboard" && (
-          <StoryboardTab mvProject={mvProject} openreelProjectId={projectId} />
-        )}
-        {tab === "assets" && (
-          <div className="p-4 text-white/40 text-xs">
-            Generated assets will appear here once shots are generated.
-          </div>
-        )}
-        {tab === "import" && (
+        {tab === "storyboard" ? (
+          mvProject
+            ? <StoryboardTab mvProject={mvProject} />
+            : <div className="p-4 text-white/40 text-xs">Loading…</div>
+        ) : (
           <NeuralFramesImportTab
             openreelProjectId={projectId}
             orchestratorUrl={ORCHESTRATOR_URL}
+            onImported={() => setTab("storyboard")}
           />
         )}
       </div>

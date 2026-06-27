@@ -15,6 +15,7 @@ import type {
   MetadataTrack,
   MetadataBlock,
   StoryboardShot,
+  GeneratedAsset,
   ValidationState,
   SongSection,
 } from "./types.js";
@@ -53,23 +54,54 @@ export function importNeuralFrames(
     importId: scene.id,
   }));
 
-  const shots: StoryboardShot[] = props.scenes.map((scene, i) => ({
-    id: uuid(),
-    index: i,
-    label: `Scene ${i + 1}`,
-    startSeconds: scene.start_time,
-    endSeconds: scene.end_time,
-    prompt: scene.scene_prompt,
-    model: "veo3_fast",
-    resolution: "720p",
-    aspectRatio: "16:9",
-    includeMainAudio: true,
-    referenceAssetIds: [],
-    generatedAssetIds: scene.scene_image_url ? [scene.id + "_img"] : [],
-    validation: EMPTY_VALIDATION,
-    outputs: [],
-    selected: false,
-  }));
+  // Build shots and generated assets together so IDs stay consistent
+  const generatedAssets: GeneratedAsset[] = [];
+
+  const shots: StoryboardShot[] = props.scenes.map((scene, i) => {
+    const shotId = uuid();
+    const assetIds: string[] = [];
+
+    if (scene.scene_image_url) {
+      const assetId = uuid();
+      generatedAssets.push({
+        id: assetId,
+        label: `Scene ${i + 1} keyframe`,
+        mediaType: "image",
+        status: "realized",
+        provider: "neuralframes",
+        model: "neuralframes",
+        prompt: scene.scene_prompt,
+        sourceAssets: [],
+        sourceMetadataBlockIds: [],
+        outputPath: scene.scene_image_url,
+        validation: EMPTY_VALIDATION,
+        attempts: [],
+      });
+      assetIds.push(assetId);
+    }
+
+    // Back-link the sceneBlock to this shot
+    const block = sceneBlocks[i];
+    if (block) block.linkedShotIds.push(shotId);
+
+    return {
+      id: shotId,
+      index: i,
+      label: `Scene ${i + 1}`,
+      startSeconds: scene.start_time,
+      endSeconds: scene.end_time,
+      prompt: scene.scene_prompt,
+      model: "veo3_fast",
+      resolution: "720p",
+      aspectRatio: "16:9",
+      includeMainAudio: true,
+      referenceAssetIds: [],
+      generatedAssetIds: assetIds,
+      validation: EMPTY_VALIDATION,
+      outputs: [],
+      selected: false,
+    };
+  });
 
   const sceneTrack: MetadataTrack = {
     id: sceneTrackId,
@@ -196,6 +228,7 @@ export function importNeuralFrames(
       (t) => t.blocks.length > 0,
     ),
     shots,
+    generatedAssets,
     timingHints: { bpm, sections: [section] },
   };
 }

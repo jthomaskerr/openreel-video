@@ -4,10 +4,9 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "outDir": "dist",
-    "rootDir": "src",
     "paths": {
       "@openreel/music-video-domain": ["../../packages/music-video-domain/src/index.ts"]
     }
   },
-  "include": ["src"]
+  "include": ["src", "../../packages/music-video-domain/src"]
 }

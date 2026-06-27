@@ -6,6 +6,7 @@ import type {
   SVGClip,
   StickerClip,
 } from "@openreel/core";
+import { getClipStyle } from "./utils";
 import { ClipComponent } from "./ClipComponent";
 import { TextClipComponent } from "./TextClipComponent";
 import { ShapeClipComponent } from "./ShapeClipComponent";
@@ -238,25 +239,59 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
-        {track.clips
+        {/* Metadata clips: colored label blocks */}
+        {track.type === "metadata" &&
+          track.clips.map((clip) => {
+            const label = (clip.metadata?.["label"] as string | undefined) ?? "";
+            const color = (clip.metadata?.["color"] as string | undefined);
+            const style = getClipStyle("metadata");
+            const left = clip.startTime * pixelsPerSecond;
+            const width = Math.max(2, clip.duration * pixelsPerSecond);
+            const isSelected = selectedClipIds.includes(clip.id);
+            return (
+              <div
+                key={clip.id}
+                className={`absolute top-1 bottom-1 rounded cursor-pointer border select-none overflow-hidden flex items-center px-1.5 text-[10px] font-medium ${style.bg} ${style.border} ${isSelected ? `ring-1 ring-white/40 ${style.selectedText}` : style.text}`}
+                style={{ left, width, ...(color ? { borderColor: color, backgroundColor: color + "33" } : {}) }}
+                onClick={(e) => onSelectClip(clip.id, e.metaKey || e.ctrlKey)}
+              >
+                <span className="truncate">{label}</span>
+              </div>
+            );
+          })}
+        {/* Standard clips — generated ones get a subtle sparkle indicator */}
+        {track.type !== "metadata" &&
+          track.clips
           .filter((clip) => !textClips.some((tc) => tc.id === clip.id))
           .filter((clip) => !shapeClips.some((sc) => sc.id === clip.id))
-          .map((clip) => (
-            <ClipComponent
-              key={clip.id}
-              clip={clip}
-              track={track}
-              allTracks={allTracks}
-              pixelsPerSecond={pixelsPerSecond}
-              isSelected={selectedClipIds.includes(clip.id)}
-              trackHeights={trackHeights}
-              timelineRef={timelineRef}
-              onSelect={onSelectClip}
-              onMoveClip={onMoveClip}
-              onSnapIndicator={onSnapIndicator}
-              onTrimClip={onTrimClip}
-            />
-          ))}
+          .map((clip) => {
+            const isGenerated = !!(clip.metadata?.["isGenerated"]);
+            return (
+              <div key={clip.id} className="contents">
+                <ClipComponent
+                  clip={clip}
+                  track={track}
+                  allTracks={allTracks}
+                  pixelsPerSecond={pixelsPerSecond}
+                  isSelected={selectedClipIds.includes(clip.id)}
+                  trackHeights={trackHeights}
+                  timelineRef={timelineRef}
+                  onSelect={onSelectClip}
+                  onMoveClip={onMoveClip}
+                  onSnapIndicator={onSnapIndicator}
+                  onTrimClip={onTrimClip}
+                />
+                {isGenerated && (
+                  <div
+                    className="absolute top-1 pointer-events-none text-[8px] text-rose-300/80 leading-none"
+                    style={{ left: clip.startTime * pixelsPerSecond + 2 }}
+                  >
+                    ✦
+                  </div>
+                )}
+              </div>
+            );
+          })}
         {textClips.map((textClip) => (
           <TextClipComponent
             key={textClip.id}

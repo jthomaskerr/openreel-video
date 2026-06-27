@@ -1,8 +1,9 @@
 import { Router } from "express";
+import type { Router as ExpressRouter } from "express";
 import { importNeuralFrames } from "@openreel/music-video-domain";
 import type { NeuralFramesStoryboard } from "@openreel/music-video-domain";
 
-export const neuralframesRouter = Router();
+export const neuralframesRouter: ExpressRouter = Router();
 
 /**
  * POST /api/import/neuralframes

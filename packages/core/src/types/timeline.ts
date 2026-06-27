@@ -27,7 +27,7 @@ export interface TimelineBeatAnalysis {
 
 export interface Track {
   readonly id: string;
-  readonly type: "video" | "audio" | "image" | "text" | "graphics";
+  readonly type: "video" | "audio" | "image" | "text" | "graphics" | "metadata";
   readonly name: string;
   readonly clips: Clip[];
   readonly transitions: Transition[];
