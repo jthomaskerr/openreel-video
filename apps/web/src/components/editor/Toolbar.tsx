@@ -763,6 +763,23 @@ export const Toolbar: React.FC = () => {
           <TooltipContent>Audio mixer</TooltipContent>
         </Tooltip>
 
+        {/* Music Video panel */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => togglePanel("musicVideo")}
+              className={`w-[26px] h-[26px] grid place-items-center rounded-md transition-colors ${
+                panels.musicVideo?.visible
+                  ? "bg-accent-soft text-accent"
+                  : "text-fg-2 hover:bg-hover hover:text-fg"
+              }`}
+            >
+              <Film size={14} />
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Music Video</TooltipContent>
+        </Tooltip>
+
         {/* Comments placeholder (matches mockup) */}
         <Tooltip>
           <TooltipTrigger asChild>
