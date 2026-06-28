@@ -32,6 +32,7 @@ import { uploadFileStream } from "../../../services/kieai/file-upload";
 
 // ── Reference images ─────────────────────────────────────────────────────────
 import { ReferenceImagePicker } from "./ReferenceImagePicker";
+import { injectImageInputs, getRefImageUrls } from "./schema-injector";
 
 // ── Store ────────────────────────────────────────────────────────────────────
 import { useProjectStore } from "../../../stores/project-store";
@@ -228,10 +229,24 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
   const handleSelectModel = useCallback((m: UnifiedModel) => {
     setModel(m);
     if (m.provider === "wavespeed" && m.wsModel) {
-      setWsInputs(makeWsDefaults(m.wsModel, asset, shot));
+      const schema = m.wsModel.api_schema?.api_schemas?.[0]?.request_schema;
+      const base = makeWsDefaults(m.wsModel, asset, shot);
+      if (schema) {
+        setWsInputs(injectImageInputs(schema, base, getRefImageUrls(project?.mediaLibrary.items ?? [], refIds)));
+      } else {
+        setWsInputs(base);
+      }
     }
     setStep("form");
-  }, [asset, shot]);
+  }, [asset, shot, project, refIds]);
+
+  // Re-inject reference images into WaveSpeed inputs when refIds change
+  useEffect(() => {
+    if (!model || model.provider !== "wavespeed" || !model.wsModel) return;
+    const schema = model.wsModel.api_schema?.api_schemas?.[0]?.request_schema;
+    if (!schema) return;
+    setWsInputs((prev) => injectImageInputs(schema, prev, getRefImageUrls(project?.mediaLibrary.items ?? [], refIds)));
+  }, [refIds, model, project]);
 
   // ── Reference image upload ────────────────────────────────────────────────
   const handleRefUpload = useCallback(async (file: File) => {
@@ -254,6 +269,19 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
 
     try {
       if (model.provider === "kieai" && model.kieaiModel) {
+        // Upload reference images first
+        const refUrls: string[] = [];
+        for (const refId of refIds) {
+          const refItem = project.mediaLibrary.items.find((item) => item.id === refId);
+          if (refItem?.blob) {
+            try {
+              const uploaded = await uploadFileStream(refItem.blob);
+              const url = uploaded.fileUrl || uploaded.downloadUrl || "";
+              if (url) refUrls.push(url);
+            } catch { /* skip failed uploads */ }
+          }
+        }
+
         // Upload source if needed
         let uploadedUrl = "";
         if (model.requiresSourceImage && sourceFile) {
@@ -262,13 +290,15 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
           uploadedUrl = uploaded.fileUrl || uploaded.downloadUrl || "";
           if (!uploadedUrl) throw new Error("Upload returned no URL");
         }
+        // Merge source and reference image URLs
+        const allImageUrls = [...(uploadedUrl ? [uploadedUrl] : []), ...refUrls];
         const kinputs: Record<string, unknown> = (() => {
           switch (model.kieaiModel) {
-            case IMAGE_MODELS.SEEDREAM:    return { prompt: seedream.prompt, image_urls: uploadedUrl ? [uploadedUrl] : [], aspect_ratio: seedream.aspect_ratio, quality: seedream.quality };
+            case IMAGE_MODELS.SEEDREAM:    return { prompt: seedream.prompt, image_urls: allImageUrls, aspect_ratio: seedream.aspect_ratio, quality: seedream.quality };
             case IMAGE_MODELS.Z_IMAGE:     return { prompt: zimage.prompt, aspect_ratio: zimage.aspect_ratio };
-            case IMAGE_MODELS.NANO_BANANA2: return { prompt: nanoBanana2.prompt, image_input: uploadedUrl ? [uploadedUrl] : [], aspect_ratio: nanoBanana2.aspect_ratio, resolution: nanoBanana2.resolution, output_format: nanoBanana2.output_format };
-            case IMAGE_MODELS.FLUX2:       return { prompt: flux2.prompt, input_urls: uploadedUrl ? [uploadedUrl] : [], aspect_ratio: flux2.aspect_ratio, resolution: flux2.resolution };
-            case IMAGE_MODELS.GROK:        return { ...(grok.prompt ? { prompt: grok.prompt } : {}), image_urls: uploadedUrl ? [uploadedUrl] : [] };
+            case IMAGE_MODELS.NANO_BANANA2: return { prompt: nanoBanana2.prompt, image_input: allImageUrls, aspect_ratio: nanoBanana2.aspect_ratio, resolution: nanoBanana2.resolution, output_format: nanoBanana2.output_format };
+            case IMAGE_MODELS.FLUX2:       return { prompt: flux2.prompt, input_urls: allImageUrls, aspect_ratio: flux2.aspect_ratio, resolution: flux2.resolution };
+            case IMAGE_MODELS.GROK:        return { ...(grok.prompt ? { prompt: grok.prompt } : {}), image_urls: allImageUrls };
             case IMAGE_MODELS.QWEN:        return { prompt: qwen.prompt, image_url: uploadedUrl, strength: qwen.strength, output_format: qwen.output_format, acceleration: qwen.acceleration, ...(qwen.negative_prompt ? { negative_prompt: qwen.negative_prompt } : {}), ...(qwen.seed != null ? { seed: qwen.seed } : {}) };
             default: throw new Error("Unknown KieAI model");
           }
@@ -289,7 +319,9 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
           inputs: kinputs, projectId: project.id, linkedMediaIds: refIds,
         });
       } else if (model.provider === "wavespeed" && model.wsModel) {
-        const jobId = await submitGeneration(model.wsModel.model_id, wsInputs);
+        const schema = model.wsModel.api_schema?.api_schemas?.[0]?.request_schema;
+        const injected = schema ? injectImageInputs(schema, wsInputs, getRefImageUrls(project.mediaLibrary.items, refIds)) : wsInputs;
+        const jobId = await submitGeneration(model.wsModel.model_id, injected);
         if (ac.signal.aborted) return;
 
         const mediaId = uuidv4();
