@@ -186,6 +186,38 @@ export class ActionValidator {
           }
         }
         break;
+
+      case "media/updateMetadata": {
+        if (
+          !action.params.mediaId ||
+          typeof action.params.mediaId !== "string"
+        ) {
+          errors.push({
+            code: "INVALID_PARAMS",
+            message: "Media ID is required and must be a string",
+            path: "params.mediaId",
+          });
+        } else {
+          const mediaExists = project.mediaLibrary.items.some(
+            (item) => item.id === action.params.mediaId,
+          );
+          if (!mediaExists) {
+            errors.push({
+              code: "MEDIA_NOT_FOUND",
+              message: `Media with ID ${action.params.mediaId} not found`,
+              path: "params.mediaId",
+            });
+          }
+        }
+        if (!action.params.patch || typeof action.params.patch !== "object") {
+          errors.push({
+            code: "INVALID_PARAMS",
+            message: "Patch object is required",
+            path: "params.patch",
+          });
+        }
+        break;
+      }
     }
 
     return errors;

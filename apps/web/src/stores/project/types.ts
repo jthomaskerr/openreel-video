@@ -116,6 +116,9 @@ export interface ProjectState {
   importMedia: (file: File) => Promise<ActionResult>;
   deleteMedia: (mediaId: string) => Promise<ActionResult>;
   renameMedia: (mediaId: string, name: string) => Promise<ActionResult>;
+  /** Update user-editable metadata (title, description, tags, group) on a media item */
+  updateMediaMetadata: (mediaId: string, patch: { title?: string; description?: string; tags?: string[]; group?: string }) => Promise<ActionResult>;
+
   getMediaItem: (mediaId: string) => MediaItem | undefined;
 
   addTrack: (

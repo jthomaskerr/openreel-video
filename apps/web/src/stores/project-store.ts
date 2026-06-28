@@ -123,6 +123,7 @@ export interface ProjectState {
   deleteMedia: (mediaId: string) => Promise<ActionResult>;
   replaceMediaAsset: (mediaId: string, file: File, sourceFolder?: string) => Promise<ActionResult>;
   renameMedia: (mediaId: string, name: string) => Promise<ActionResult>;
+  updateMediaMetadata: (mediaId: string, patch: { title?: string; description?: string; tags?: string[]; group?: string }) => Promise<ActionResult>;
   getMediaItem: (mediaId: string) => MediaItem | undefined;
   /** Add a pending placeholder for a background KieAI task */
   addPlaceholderMedia: (item: MediaItem) => void;
@@ -2054,6 +2055,21 @@ export const useProjectStore = create<ProjectState>()(
           id: uuidv4(),
           timestamp: Date.now(),
           params: { mediaId, name },
+        };
+        const result = await actionExecutor.execute(action, project);
+        if (result.success) {
+          set({ project: { ...project } });
+        }
+        return result;
+      },
+
+      updateMediaMetadata: async (mediaId: string, patch: { title?: string; description?: string; tags?: string[]; group?: string }) => {
+        const { project, actionExecutor } = get();
+        const action: Action = {
+          type: "media/updateMetadata" as Action["type"],
+          id: uuidv4(),
+          timestamp: Date.now(),
+          params: { mediaId, patch },
         };
         const result = await actionExecutor.execute(action, project);
         if (result.success) {

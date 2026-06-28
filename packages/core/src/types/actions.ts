@@ -75,7 +75,8 @@ export type ProjectAction =
 export type MediaAction =
   | { type: "media/import"; params: { file: File } }
   | { type: "media/delete"; params: { mediaId: string } }
-  | { type: "media/rename"; params: { mediaId: string; name: string } };
+  | { type: "media/rename"; params: { mediaId: string; name: string } }
+  | { type: "media/updateMetadata"; params: { mediaId: string; patch: { title?: string; description?: string; tags?: string[]; group?: string } } };
 
 // Track actions
 export type TrackAction =

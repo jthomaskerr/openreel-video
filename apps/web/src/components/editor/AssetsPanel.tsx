@@ -1,9 +1,9 @@
-import React, { useCallback, useRef, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Search, Image as ImageIcon, Film, Music, Plus, Upload, Trash2,
   Square, Circle, Triangle, Star, ArrowRight, Hexagon, FileCode, AlertTriangle,
   RefreshCw, Palette, LayoutGrid, Grid2x2, List, Sparkles, Video,
-  Type, Shapes, Wand2, LayoutTemplate, Zap, Shuffle,
+  Type, Shapes, Wand2, LayoutTemplate, Zap, Shuffle, Pencil, Settings,
 } from "lucide-react";
 import {
   BACKGROUND_PRESETS,
@@ -36,9 +36,13 @@ import {
   
   
 } from "@openreel/ui";
-import { KieAIImageDialog } from "./kieai/KieAIImageDialog";
+import { GenerateAssetDialog } from "./generate/GenerateAssetDialog";
+import type { GenerateAssetDialogProps } from "./generate/GenerateAssetDialog";
 import { loadMediaBlob } from "../../services/media-storage";
 import { useKieAIStore } from "../../stores/kieai-store";
+import { useMusicVideoStore } from "../../stores/music-video-store";
+import { AssetManagerDialog } from "./AssetManagerDialog";
+import { AssetBuckets } from "./AssetBuckets";
 
 const formatDuration = (seconds: number): string => {
   const mins = Math.floor(seconds / 60);
@@ -135,9 +139,11 @@ const MediaThumbnail: React.FC<{
   onReplace: () => void;
   onDragStart: (e: React.DragEvent) => void;
   onAddToTimeline: () => void;
-  onKieAI?: () => void;
+  onGenerate?: () => void;
   onRetryKieAI?: () => void;
-}> = ({
+  onManage?: () => void;
+  onRename?: () => void;
+}> = React.memo(function MediaThumbnail({
   item,
   isSelected,
   viewMode,
@@ -146,9 +152,11 @@ const MediaThumbnail: React.FC<{
   onReplace,
   onDragStart,
   onAddToTimeline,
-  onKieAI,
+  onGenerate,
   onRetryKieAI,
-}) => {
+  onManage,
+  onRename,
+}) {
   const [isHovered, setIsHovered] = useState(false);
 
   const getIcon = () => {
@@ -229,10 +237,10 @@ const MediaThumbnail: React.FC<{
         </>
       ) : (
         <>
-          {item.type === "image" && onKieAI && (
+          {item.type === "image" && onGenerate && (
             <button
-              onClick={(e) => { e.stopPropagation(); onKieAI(); }}
-              title="Create with KieAI"
+              onClick={(e) => { e.stopPropagation(); onGenerate(); }}
+              title="Generate Asset"
               className="p-2 bg-purple-500/20 rounded-full hover:bg-purple-500/40 backdrop-blur-sm transition-colors"
             >
               <Sparkles size={14} className="text-purple-300" />
@@ -348,10 +356,10 @@ const MediaThumbnail: React.FC<{
               </>
             ) : (
               <>
-                {item.type === "image" && onKieAI && (
+                {item.type === "image" && onGenerate && (
                   <button
-                    onClick={(e) => { e.stopPropagation(); onKieAI(); }}
-                    title="Create with KieAI"
+                    onClick={(e) => { e.stopPropagation(); onGenerate(); }}
+                    title="Generate Asset"
                     className="p-1 bg-purple-500/20 rounded hover:bg-purple-500/40 transition-colors"
                   >
                     <Sparkles size={12} className="text-purple-300" />
@@ -382,15 +390,23 @@ const MediaThumbnail: React.FC<{
       </div>
         </ContextMenuTrigger>
         <ContextMenuContent>
-          {item.type === "image" && onKieAI && (
-            <ContextMenuItem onClick={onKieAI}>
+          {item.type === "image" && onGenerate && (
+            <ContextMenuItem onClick={onGenerate}>
               <Sparkles size={13} className="mr-2 text-primary" />
-              Create with KieAI
+              Generate Asset
             </ContextMenuItem>
           )}
           <ContextMenuItem onClick={(e) => { (e as React.MouseEvent).stopPropagation?.(); onAddToTimeline(); }}>
             <Plus size={13} className="mr-2" />
             Add to Timeline
+          </ContextMenuItem>
+          <ContextMenuItem onClick={(e) => { (e as React.MouseEvent).stopPropagation?.(); onRename?.(); }}>
+            <Pencil size={13} className="mr-2" />
+            Rename
+          </ContextMenuItem>
+          <ContextMenuItem onClick={(e) => { (e as React.MouseEvent).stopPropagation?.(); onManage?.(); }}>
+            <Settings size={13} className="mr-2" />
+            Manage
           </ContextMenuItem>
           <ContextMenuItem onClick={(e) => { (e as React.MouseEvent).stopPropagation?.(); onDelete(); }} className="text-red-400 focus:text-red-400">
             <Trash2 size={13} className="mr-2" />
@@ -464,7 +480,7 @@ const MediaThumbnail: React.FC<{
         )}
 
         {/* Missing Asset Badge */}
-        {!item.kieaiError && !item.isPending && item.isPlaceholder && (
+        {!item.kieaiError && !item.isPending && item.isPlaceholder && !item.thumbnailUrl && (
           <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-yellow-500 rounded text-[8px] text-black font-bold flex items-center gap-1">
             <AlertTriangle size={10} />
             Missing
@@ -533,15 +549,23 @@ const MediaThumbnail: React.FC<{
     </div>
       </ContextMenuTrigger>
       <ContextMenuContent>
-        {item.type === "image" && onKieAI && (
-          <ContextMenuItem onClick={onKieAI}>
+        {item.type === "image" && onGenerate && (
+          <ContextMenuItem onClick={onGenerate}>
             <Sparkles size={13} className="mr-2 text-primary" />
-            Create with KieAI
+            Generate Asset
           </ContextMenuItem>
         )}
         <ContextMenuItem onClick={() => onAddToTimeline()}>
           <Plus size={13} className="mr-2" />
           Add to Timeline
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => onRename?.()}>
+          <Pencil size={13} className="mr-2" />
+          Rename
+        </ContextMenuItem>
+        <ContextMenuItem onClick={() => onManage?.()}>
+          <Settings size={13} className="mr-2" />
+          Manage
         </ContextMenuItem>
         <ContextMenuItem onClick={() => onDelete()} className="text-red-400 focus:text-red-400">
           <Trash2 size={13} className="mr-2" />
@@ -550,8 +574,115 @@ const MediaThumbnail: React.FC<{
       </ContextMenuContent>
     </ContextMenu>
   );
-};
+});
 
+MediaThumbnail.displayName = "MediaThumbnail";
+
+
+/**
+ * Stable per-item row. Custom memo comparator checks item identity by id + key primitives,
+ * avoiding re-render when the store issues a new MediaItem reference with unchanged data.
+ * All handlers read from getState() — zero per-row Zustand subscriptions.
+ */
+const MediaThumbnailRow = React.memo(
+  ({ item, viewMode, isSelected, onGenerateRef, onRetryKieAIRef, onManageRef, onRenameRef }: {
+    item: MediaItem;
+    viewMode: MediaViewMode;
+    isSelected: boolean;
+    onGenerateRef?: React.MutableRefObject<(item: MediaItem) => void>;
+    onRetryKieAIRef?: React.MutableRefObject<(item: MediaItem) => void>;
+    onManageRef?: React.MutableRefObject<(item: MediaItem) => void>;
+    onRenameRef?: React.MutableRefObject<(item: MediaItem) => void>;
+  }) => {
+    const handleSelect = useCallback(() => {
+      useUIStore.getState().select({ type: "clip", id: item.id });
+    }, [item.id]);
+
+    const handleDelete = useCallback(async () => {
+      await useProjectStore.getState().deleteMedia(item.id);
+    }, [item.id]);
+
+    const handleReplace = useCallback(async () => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = "video/*,audio/*,image/*";
+      input.onchange = async (e) => {
+        const file = (e.target as HTMLInputElement).files?.[0];
+        if (file) await useProjectStore.getState().replaceMediaAsset(item.id, file);
+      };
+      input.click();
+    }, [item.id]);
+
+    const handleDragStart = useCallback(
+      (e: React.DragEvent) => {
+        e.dataTransfer.setData("application/json", JSON.stringify({ mediaId: item.id }));
+        e.dataTransfer.effectAllowed = "copy";
+        useUIStore.getState().startDrag("media", { mediaId: item.id, mediaType: item.type });
+      },
+      [item.id, item.type],
+    );
+
+    const handleAddToTimeline = useCallback(async () => {
+      await useProjectStore.getState().addClipToNewTrack(item.id);
+    }, [item.id]);
+
+    const handleOpenGenerate = useCallback(() => {
+      onGenerateRef?.current?.(item);
+    }, [onGenerateRef, item]);
+
+    const handleRetryKieAICb = useCallback(() => {
+      onRetryKieAIRef?.current?.(item);
+    }, [onRetryKieAIRef, item]);
+
+    const handleManage = useCallback(() => {
+      onManageRef?.current?.(item);
+    }, [onManageRef, item]);
+
+    const handleRename = useCallback(() => {
+      onRenameRef?.current?.(item);
+    }, [onRenameRef, item]);
+
+    return (
+      <MediaThumbnail
+        item={item}
+        isSelected={isSelected}
+        viewMode={viewMode}
+        onSelect={handleSelect}
+        onDelete={handleDelete}
+        onReplace={handleReplace}
+        onDragStart={handleDragStart}
+        onAddToTimeline={handleAddToTimeline}
+        onGenerate={item.type === "image" && !item.isPending && !item.kieaiError ? handleOpenGenerate : undefined}
+        onRetryKieAI={item.kieaiError && item.kieaiTaskId ? handleRetryKieAICb : undefined}
+        onManage={handleManage}
+        onRename={handleRename}
+      />
+    );
+  },
+  // Custom comparator: skip re-render when the item-id is the same and key display fields match
+  (prev, next) =>
+    prev.isSelected === next.isSelected &&
+    prev.item.id === next.item.id &&
+    prev.item.name === next.item.name &&
+    prev.item.title === next.item.title &&
+    prev.item.type === next.item.type &&
+    prev.item.isPlaceholder === next.item.isPlaceholder &&
+    prev.item.isPending === next.item.isPending &&
+    prev.item.kieaiError === next.item.kieaiError &&
+    prev.item.kieaiTaskId === next.item.kieaiTaskId &&
+    prev.item.thumbnailUrl === next.item.thumbnailUrl &&
+    prev.item.metadata?.duration === next.item.metadata?.duration &&
+    prev.item.metadata?.width === next.item.metadata?.width &&
+    prev.item.metadata?.height === next.item.metadata?.height &&
+    prev.item.metadata?.fileSize === next.item.metadata?.fileSize &&
+    prev.viewMode === next.viewMode &&
+    prev.onGenerateRef === next.onGenerateRef &&
+    prev.onRetryKieAIRef === next.onRetryKieAIRef &&
+    prev.onManageRef === next.onManageRef &&
+    prev.onRenameRef === next.onRenameRef,
+);
+
+MediaThumbnailRow.displayName = "MediaThumbnailRow";
 const EmptyState: React.FC<{ onImport: () => void }> = ({ onImport }) => (
   <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
     <div className="w-16 h-16 rounded-2xl bg-background-tertiary border border-border flex items-center justify-center mb-4 shadow-inner">
@@ -610,39 +741,55 @@ export const AssetsPanel: React.FC = () => {
     "all" | "solid" | "gradient" | "pattern" | "mesh"
   >("all");
 
-  // KieAI image generation dialog
-  const [kieaiDialog, setKieaiDialog] = useState<{ file: File; previewUrl: string | null } | null>(null);
+  // Generate asset dialog
+  const [generateDialog, setGenerateDialog] = useState<Omit<GenerateAssetDialogProps, "open" | "onClose"> | null>(null);
+  // Asset management dialog
+  const [managedItem, setManagedItem] = useState<MediaItem | null>(null);
 
-  // Project store
+  // Project store (selection/delete/replace/drag handled by MediaThumbnailRow)
   const {
     project,
     importMedia,
-    deleteMedia,
-    replaceMediaAsset,
     updateSettings,
     setKieAIItemState,
   } = useProjectStore();
+  // Selection tracking (for passing stable isSelected to rows)
+  const selectedItemIds = useUIStore((s) => {
+    const ids = new Set<string>();
+    for (const si of s.selectedItems) {
+      if (si.type === "clip") ids.add(si.id);
+    }
+    return ids;
+  });
   const mediaItems = project.mediaLibrary.items;
 
   // KieAI store
   const { retryTask } = useKieAIStore();
 
-  // UI store
-  const { select, isSelected, startDrag } = useUIStore();
+  // UI store (MediaThumbnailRow handles selection/drag directly)
 
   // Count missing assets
-  const missingAssetsCount = mediaItems.filter(
-    (item) => item.isPlaceholder,
-  ).length;
+  // Count missing assets (memoized)
+  const missingAssetsCount = useMemo(
+    () => mediaItems.filter((item) => item.isPlaceholder).length,
+    [mediaItems],
+  );
 
-  // Filter media items by search query and missing assets toggle
-  const filteredItems = mediaItems.filter((item) => {
-    const matchesSearch = item.name
-      .toLowerCase()
-      .includes(searchQuery.toLowerCase());
-    const matchesFilter = showOnlyMissing ? item.isPlaceholder : true;
-    return matchesSearch && matchesFilter;
-  });
+  // Filter media items by search query across all metadata fields (memoized)
+  const filteredItems = useMemo(() => {
+    const query = searchQuery.toLowerCase();
+    return mediaItems.filter((item) => {
+      if (showOnlyMissing && !item.isPlaceholder) return false;
+      if (!query) return true;
+      return (
+        item.name.toLowerCase().includes(query) ||
+        (item.title?.toLowerCase().includes(query) ?? false) ||
+        (item.description?.toLowerCase().includes(query) ?? false) ||
+        (item.tags?.some((t) => t.toLowerCase().includes(query)) ?? false) ||
+        (item.group?.toLowerCase().includes(query) ?? false)
+      );
+    });
+  }, [mediaItems, searchQuery, showOnlyMissing]);
 
   // Handle file import with loading state
   const handleFileImport = useCallback(
@@ -719,47 +866,6 @@ export const AssetsPanel: React.FC = () => {
     setIsDragOver(false);
   }, []);
 
-  // Handle media item selection
-  const handleSelectItem = useCallback(
-    (itemId: string) => {
-      select({ type: "clip", id: itemId });
-    },
-    [select],
-  );
-
-  // Handle media item deletion
-  const handleDeleteItem = useCallback(
-    async (itemId: string) => {
-      await deleteMedia(itemId);
-    },
-    [deleteMedia],
-  );
-
-  // Handle asset replacement
-  const handleReplaceAsset = useCallback(
-    async (itemId: string) => {
-      const input = document.createElement("input");
-      input.type = "file";
-      input.accept = "video/*,audio/*,image/*";
-      input.onchange = async (e) => {
-        const file = (e.target as HTMLInputElement).files?.[0];
-        if (file) {
-          setIsImporting(true);
-          setImportProgress(`Replacing asset...`);
-          try {
-            await replaceMediaAsset(itemId, file);
-          } catch (error) {
-            console.error("Asset replacement failed:", error);
-          } finally {
-            setIsImporting(false);
-            setImportProgress("");
-          }
-        }
-      };
-      input.click();
-    },
-    [replaceMediaAsset],
-  );
 
   const handleRelinkFromFolder = useCallback(async () => {
     if (!("showDirectoryPicker" in window)) {
@@ -804,7 +910,7 @@ export const AssetsPanel: React.FC = () => {
         try {
           // Save individual file handle for future auto-restore
           try { await saveFileHandle(entry.file.name, entry.file.size, entry.handle); } catch { /* best-effort */ }
-          await replaceMediaAsset(item.id, entry.file, dirHandle.name);
+          await useProjectStore.getState().replaceMediaAsset(item.id, entry.file, dirHandle.name);
           linked++;
         } catch (err) {
           console.error(`[AssetsPanel] Failed to relink ${item.name}:`, err);
@@ -819,20 +925,7 @@ export const AssetsPanel: React.FC = () => {
     } else {
       toast.error("No matches found", "None of the files in the selected folder matched the missing assets by filename.");
     }
-  }, [replaceMediaAsset]);
-
-  // Handle drag start for timeline placement
-  const handleItemDragStart = useCallback(
-    (e: React.DragEvent, item: MediaItem) => {
-      e.dataTransfer.setData(
-        "application/json",
-        JSON.stringify({ mediaId: item.id }),
-      );
-      e.dataTransfer.effectAllowed = "copy";
-      startDrag("media", { mediaId: item.id, mediaType: item.type });
-    },
-    [startDrag],
-  );
+  }, []);
 
   const addMediaToTimeline = useCallback(async (item: MediaItem) => {
     const { addClipToNewTrack } = useProjectStore.getState();
@@ -864,35 +957,6 @@ export const AssetsPanel: React.FC = () => {
     await addMediaToTimeline(itemToAdd);
   }, [aspectRatioDialogData, addMediaToTimeline]);
 
-  const handleAddToTimeline = useCallback(
-    async (item: MediaItem) => {
-      const { project: currentProject } = useProjectStore.getState();
-      const tracks = currentProject.timeline.tracks;
-      const hasClips = tracks.some((track) => track.clips.length > 0);
-
-      if (
-        !hasClips &&
-        item.type === "video" &&
-        item.metadata?.width &&
-        item.metadata?.height
-      ) {
-        const videoWidth = item.metadata.width;
-        const videoHeight = item.metadata.height;
-        const projectWidth = currentProject.settings.width;
-        const projectHeight = currentProject.settings.height;
-
-        if (videoWidth !== projectWidth || videoHeight !== projectHeight) {
-          setAspectRatioDialogData({ videoWidth, videoHeight, itemToAdd: item });
-          setShowAspectRatioDialog(true);
-          return;
-        }
-      }
-
-      await addMediaToTimeline(item);
-    },
-    [addMediaToTimeline],
-  );
-
   const triggerFileInput = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
@@ -920,13 +984,16 @@ export const AssetsPanel: React.FC = () => {
     [importMedia, project.settings],
   );
 
-  const filteredBackgrounds = BACKGROUND_PRESETS.filter(
-    (preset) =>
-      backgroundCategory === "all" || preset.category === backgroundCategory,
+  const filteredBackgrounds = useMemo(
+    () => BACKGROUND_PRESETS.filter(
+      (preset) =>
+        backgroundCategory === "all" || preset.category === backgroundCategory,
+    ),
+    [backgroundCategory],
   );
 
-  // Open KieAI dialog for an image asset
-  const handleOpenKieAI = useCallback(async (item: MediaItem) => {
+  // Open unified generate dialog for an image asset
+  const handleOpenGenerate = useCallback(async (item: MediaItem) => {
     try {
       const blob = await loadMediaBlob(item.id);
       if (!blob) {
@@ -934,11 +1001,25 @@ export const AssetsPanel: React.FC = () => {
         return;
       }
       const mimeType = blob.type || (item.name.match(/\.png$/i) ? "image/png" : "image/jpeg");
-      const file = new File([blob], item.name, { type: mimeType as string });
-      setKieaiDialog({ file, previewUrl: item.thumbnailUrl });
+      const file = new File([blob], item.name, { type: mimeType });
+
+      // Look up NF-imported asset and shot by matching thumbnailUrl → outputPath
+      const mvProjects = useMusicVideoStore.getState().projects;
+      let asset = undefined;
+      let shot = undefined;
+      for (const mvProject of Object.values(mvProjects)) {
+        const found = mvProject.generatedAssets.find((a) => a.outputPath === item.thumbnailUrl);
+        if (found) {
+          asset = found;
+          shot = mvProject.shots.find((s) => s.generatedAssetIds.includes(found.id));
+          break;
+        }
+      }
+
+      setGenerateDialog({ sourceFile: file, previewUrl: item.thumbnailUrl, asset, shot });
     } catch (err) {
-      console.error("[KieAI] Failed to load media blob:", err);
-      toast.error("Failed to open KieAI", err instanceof Error ? err.message : "Unknown error");
+      console.error("[Generate] Failed to load media blob:", err);
+      toast.error("Failed to open generator", err instanceof Error ? err.message : "Unknown error");
     }
   }, []);
 
@@ -948,6 +1029,19 @@ export const AssetsPanel: React.FC = () => {
     setKieAIItemState(item.id, true, false);
     retryTask(item.kieaiTaskId);
   }, [retryTask, setKieAIItemState]);
+
+  // Stable refs for callbacks passed through MediaThumbnailRow (avoids re-render cascades)
+  const onGenerateRef = useRef(handleOpenGenerate);
+  onGenerateRef.current = handleOpenGenerate;
+  const onRetryKieAIRef = useRef(handleRetryKieAI);
+  onRetryKieAIRef.current = handleRetryKieAI;
+  const onManageRef = useRef((item: MediaItem) => setManagedItem(item));
+  const onRenameRef = useRef((item: MediaItem) => {
+    const newName = window.prompt("Rename asset:", item.name);
+    if (newName && newName.trim() && newName.trim() !== item.name) {
+      useProjectStore.getState().renameMedia(item.id, newName.trim());
+    }
+  });
 
   const renderSectionContent = (tab: AssetsTab): React.ReactNode => {
     switch (tab) {
@@ -1025,52 +1119,48 @@ export const AssetsPanel: React.FC = () => {
                 {filteredItems.length === 0 ? (
                   <EmptyState onImport={triggerFileInput} />
                 ) : (
-                  <div className={
-                    mediaViewMode === "list"
-                      ? "flex flex-col gap-1.5"
-                      : mediaViewMode === "small"
-                        ? "grid grid-cols-3 gap-2"
-                        : "grid grid-cols-2 gap-3"
-                  }>
-                    {filteredItems.map((item) => (
-                      <MediaThumbnail
+                  <AssetBuckets
+                    items={filteredItems}
+                    viewMode={mediaViewMode}
+                    searchQuery={searchQuery}
+                    renderItem={(item) => (
+                      <MediaThumbnailRow
                         key={item.id}
                         item={item}
-                        isSelected={isSelected(item.id)}
+                        isSelected={selectedItemIds.has(item.id)}
                         viewMode={mediaViewMode}
-                        onSelect={() => handleSelectItem(item.id)}
-                        onDelete={() => handleDeleteItem(item.id)}
-                        onReplace={() => handleReplaceAsset(item.id)}
-                        onDragStart={(e) => handleItemDragStart(e, item)}
-                        onAddToTimeline={() => handleAddToTimeline(item)}
-                        onKieAI={item.type === "image" && !item.isPending && !item.kieaiError ? () => handleOpenKieAI(item) : undefined}
-                        onRetryKieAI={item.kieaiError && item.kieaiTaskId ? () => handleRetryKieAI(item) : undefined}
+                        onGenerateRef={onGenerateRef}
+                        onRetryKieAIRef={onRetryKieAIRef}
+                        onManageRef={onManageRef}
+                        onRenameRef={onRenameRef}
                       />
-                    ))}
-                    {mediaViewMode === "list" ? (
-                      <button
-                        onClick={triggerFileInput}
-                        className="flex items-center gap-3 px-2 py-1.5 rounded-lg border-2 border-dashed border-border hover:border-text-secondary cursor-pointer transition-all group"
-                      >
-                        <div className="w-12 h-8 rounded bg-background-tertiary flex items-center justify-center flex-shrink-0">
-                          <Upload size={14} className="text-text-muted group-hover:text-text-secondary transition-colors" />
-                        </div>
-                        <span className="text-[11px] text-text-muted group-hover:text-text-secondary transition-colors font-medium">Add media</span>
-                      </button>
-                    ) : (
-                      <div className="flex flex-col">
+                    )}
+                    renderAddButton={() =>
+                      mediaViewMode === "list" ? (
                         <button
                           onClick={triggerFileInput}
-                          className="aspect-video bg-background-tertiary rounded-lg border-2 border-dashed border-border hover:border-text-secondary relative flex items-center justify-center cursor-pointer transition-all overflow-hidden shadow-sm group"
+                          className="flex items-center gap-3 px-2 py-1.5 rounded-lg border-2 border-dashed border-border hover:border-text-secondary cursor-pointer transition-all group"
                         >
-                          <div className="flex flex-col items-center gap-1.5">
-                            <Upload size={mediaViewMode === "small" ? 16 : 20} className="text-text-muted group-hover:text-text-secondary transition-colors" />
-                            <span className="text-[10px] text-text-muted group-hover:text-text-secondary transition-colors">Add media</span>
+                          <div className="w-12 h-8 rounded bg-background-tertiary flex items-center justify-center flex-shrink-0">
+                            <Upload size={14} className="text-text-muted group-hover:text-text-secondary transition-colors" />
                           </div>
+                          <span className="text-[11px] text-text-muted group-hover:text-text-secondary transition-colors font-medium">Add media</span>
                         </button>
-                      </div>
-                    )}
-                  </div>
+                      ) : (
+                        <div className="flex flex-col">
+                          <button
+                            onClick={triggerFileInput}
+                            className="aspect-video bg-background-tertiary rounded-lg border-2 border-dashed border-border hover:border-text-secondary relative flex items-center justify-center cursor-pointer transition-all overflow-hidden shadow-sm group"
+                          >
+                            <div className="flex flex-col items-center gap-1.5">
+                              <Upload size={mediaViewMode === "small" ? 16 : 20} className="text-text-muted group-hover:text-text-secondary transition-colors" />
+                              <span className="text-[10px] text-text-muted group-hover:text-text-secondary transition-colors">Add media</span>
+                            </div>
+                          </button>
+                        </div>
+                      )
+                    }
+                  />
                 )}
 
                 {isDragOver && (
@@ -1589,12 +1679,19 @@ export const AssetsPanel: React.FC = () => {
         />
       )}
 
-      {kieaiDialog && (
-        <KieAIImageDialog
+      {generateDialog && (
+        <GenerateAssetDialog
           open={true}
-          onClose={() => setKieaiDialog(null)}
-          sourceFile={kieaiDialog.file}
-          previewUrl={kieaiDialog.previewUrl}
+          onClose={() => setGenerateDialog(null)}
+          {...generateDialog}
+        />
+      )}
+
+      {managedItem && (
+        <AssetManagerDialog
+          open={true}
+          item={managedItem}
+          onClose={() => setManagedItem(null)}
         />
       )}
     </div>

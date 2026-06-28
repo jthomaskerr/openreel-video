@@ -140,6 +140,23 @@ export class InverseActionGenerator {
           name: media.name,
         });
       }
+
+      case "media/updateMetadata": {
+        const media = projectBefore.mediaLibrary.items.find(
+          (item) => item.id === action.params.mediaId,
+        );
+        if (!media) return null;
+
+        return this.createInverseAction(action, "media/updateMetadata", {
+          mediaId: action.params.mediaId,
+          patch: {
+            title: media.title,
+            description: media.description,
+            tags: media.tags,
+            group: media.group,
+          },
+        });
+      }
     }
   }
 

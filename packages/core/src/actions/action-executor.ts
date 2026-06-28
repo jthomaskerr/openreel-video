@@ -313,6 +313,14 @@ export class ActionExecutor {
         break;
       }
 
+      case "media/updateMetadata": {
+        const params = action.params as { mediaId: string; patch: { title?: string; description?: string; tags?: string[]; group?: string } };
+        mediaLibrary.items = mediaLibrary.items.map((item: MediaItem) =>
+          item.id === params.mediaId ? { ...item, ...params.patch } : item,
+        );
+        break;
+      }
+
       case "media/restore": {
         const params = action.params as { mediaItem: MediaItem };
         mediaLibrary.items = [...mediaLibrary.items, params.mediaItem];

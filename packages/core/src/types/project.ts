@@ -61,6 +61,14 @@ export interface MediaItem {
     readonly inputs?: Record<string, unknown>;
     readonly jobId?: string;
   };
+  /** User-editable title for the asset (distinct from filename-based name) */
+  readonly title?: string;
+  /** User-editable description / notes for the asset */
+  readonly description?: string;
+  /** User-assigned tags for filtering and organization */
+  readonly tags?: string[];
+  /** User-assigned group / bucket for the asset */
+  readonly group?: string;
 }
 
 /** Thumbnail for filmstrip display in timeline */
