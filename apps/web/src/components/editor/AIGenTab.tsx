@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import {
   Mic,
   Subtitles,
@@ -10,6 +10,10 @@ import {
   Wand2,
   FileStack,
   Volume2,
+  Film,
+  ImagePlus,
+  Briefcase,
+  Upload,
 } from "lucide-react";
 import { ScrollArea } from "@openreel/ui";
 import { AutoCaptionPanel } from "./inspector/AutoCaptionPanel";
@@ -18,10 +22,16 @@ import { FilterPresetsPanel } from "./inspector/FilterPresetsPanel";
 import { MusicLibraryPanel } from "./inspector/MusicLibraryPanel";
 import { TemplatesBrowserPanel } from "./inspector/TemplatesBrowserPanel";
 import { MultiCameraPanel } from "./inspector/MultiCameraPanel";
+import { GenerateAssetDialog } from "./generate/GenerateAssetDialog";
+import { JobManagementPanel } from "./generate/JobManagementPanel";
+import { createMusicVideoFlow } from "../../features/music-video/timeline/create-music-video-flow";
 import { useTtsAudioStore } from "../../stores/tts-store";
 import { toast } from "../../stores/notification-store";
+import { useProjectStore } from "../../stores/project-store";
+import { useUIStore } from "../../stores/ui-store";
+import { useGenerationJobStore } from "../../stores/generation-job-store";
 
-type FeatureId = "templates" | "captions" | "tts" | "filters" | "music" | "multicam" | null;
+type FeatureId = "templates" | "captions" | "tts" | "filters" | "music" | "multicam" | "jobs" | null;
 
 interface FeatureCardProps {
   icon: React.ElementType;
@@ -99,6 +109,13 @@ const FeatureSection: React.FC<FeatureSectionProps> = ({ title, icon: Icon, chil
 export const AIGenTab: React.FC = () => {
   const [activeFeature, setActiveFeature] = useState<FeatureId>(null);
   const ttsHasUnsaved = useTtsAudioStore((s) => s.generatedAudio !== null && !s.isAudioSaved);
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const musicVideoInputRef = useRef<HTMLInputElement>(null);
+  const neuralFramesInputRef = useRef<HTMLInputElement>(null);
+  const select = useUIStore((s) => s.select);
+  const activeJobCount = useGenerationJobStore(
+    (s) => s.jobs.filter((job) => job.status === "queued" || job.status === "running").length,
+  );
 
   const navigateAway = useCallback((next: FeatureId) => {
     if (activeFeature === "tts" && next !== "tts" && ttsHasUnsaved) {
@@ -110,6 +127,20 @@ export const AIGenTab: React.FC = () => {
   const handleFeatureClick = (id: FeatureId) => {
     navigateAway(activeFeature === id ? null : id);
   };
+
+  const handleMusicVideoFile = useCallback(async (file: File) => {
+    const result = await createMusicVideoFlow(useProjectStore.getState(), { audioFile: file });
+    if (!result.success) {
+      toast.error("Music Video setup failed", result.error?.message ?? "Could not create timeline clips.");
+      return;
+    }
+    select({ type: "clip", id: result.metadataClipId, trackId: result.metadataTrackId });
+    toast.success("Music Video ready", "Audio and metadata clips were added to the timeline.");
+  }, [select]);
+
+  const handleNeuralFramesFile = useCallback((_file: File) => {
+    toast.warning("Neural Frames import", "Direct file import is being extracted from the existing import panel.");
+  }, []);
 
   const renderActivePanel = () => {
     switch (activeFeature) {
@@ -125,6 +156,8 @@ export const AIGenTab: React.FC = () => {
         return <MusicLibraryPanel />;
       case "multicam":
         return <MultiCameraPanel />;
+      case "jobs":
+        return <JobManagementPanel />;
       default:
         return null;
     }
@@ -148,6 +181,7 @@ export const AIGenTab: React.FC = () => {
   }
 
   return (
+    <>
     <ScrollArea className="flex-1 w-full">
       <div className="p-4 space-y-6 min-w-0">
         <div className="text-center pb-2">
@@ -240,6 +274,54 @@ export const AIGenTab: React.FC = () => {
             isActive={activeFeature === "multicam"}
             onClick={() => handleFeatureClick("multicam")}
           />
+          <FeatureCard
+            icon={Film}
+            title="Music Video"
+            description="Pick an audio file and create timeline-native music-video metadata"
+            iconColor="text-rose-400"
+            iconBg="bg-rose-500/20"
+            activeBorder="border-rose-500/50"
+            activeBg="bg-rose-500/10"
+            activeRing="ring-rose-500/30"
+            isActive={false}
+            onClick={() => musicVideoInputRef.current?.click()}
+          />
+          <FeatureCard
+            icon={Upload}
+            title="Neural Frames Import"
+            description="Import a Neural Frames storyboard JSON as timeline metadata clips"
+            iconColor="text-amber-400"
+            iconBg="bg-amber-500/20"
+            activeBorder="border-amber-500/50"
+            activeBg="bg-amber-500/10"
+            activeRing="ring-amber-500/30"
+            isActive={false}
+            onClick={() => neuralFramesInputRef.current?.click()}
+          />
+          <FeatureCard
+            icon={ImagePlus}
+            title="Generate Image/Video"
+            description="Create visual assets with KieAI or WaveSpeed"
+            iconColor="text-emerald-400"
+            iconBg="bg-emerald-500/20"
+            activeBorder="border-emerald-500/50"
+            activeBg="bg-emerald-500/10"
+            activeRing="ring-emerald-500/30"
+            isActive={generateOpen}
+            onClick={() => setGenerateOpen(true)}
+          />
+          <FeatureCard
+            icon={Briefcase}
+            title={activeJobCount > 0 ? `Jobs (${activeJobCount})` : "Jobs"}
+            description="Monitor, cancel, and retry generation jobs"
+            iconColor="text-indigo-400"
+            iconBg="bg-indigo-500/20"
+            activeBorder="border-indigo-500/50"
+            activeBg="bg-indigo-500/10"
+            activeRing="ring-indigo-500/30"
+            isActive={activeFeature === "jobs"}
+            onClick={() => handleFeatureClick("jobs")}
+          />
         </FeatureSection>
 
         <div className="pt-2 border-t border-border">
@@ -249,6 +331,30 @@ export const AIGenTab: React.FC = () => {
         </div>
       </div>
     </ScrollArea>
+    <input
+      ref={musicVideoInputRef}
+      type="file"
+      accept="audio/*"
+      className="hidden"
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        if (file) void handleMusicVideoFile(file);
+        event.target.value = "";
+      }}
+    />
+    <input
+      ref={neuralFramesInputRef}
+      type="file"
+      accept=".json,application/json"
+      className="hidden"
+      onChange={(event) => {
+        const file = event.target.files?.[0];
+        if (file) handleNeuralFramesFile(file);
+        event.target.value = "";
+      }}
+    />
+    <GenerateAssetDialog open={generateOpen} onClose={() => setGenerateOpen(false)} />
+    </>
   );
 };
 
