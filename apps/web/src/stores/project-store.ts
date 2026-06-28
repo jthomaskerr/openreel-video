@@ -128,6 +128,10 @@ export interface ProjectState {
   addPlaceholderMedia: (item: MediaItem) => void;
   /** Add an available generated media item and persist its blob */
   addGeneratedMedia: (item: MediaItem, blob: Blob) => Promise<ActionResult>;
+  /** Add a distinct generated version to an existing asset group */
+  addAssetVersion: (sourceMediaId: string, item: MediaItem, blob: Blob) => Promise<ActionResult>;
+  /** Mark one media item as the current version within its asset group */
+  setCurrentAssetVersion: (mediaId: string) => boolean;
   /** Replace a pending placeholder with the actual result blob */
   replacePlaceholderMedia: (mediaId: string, blob: Blob, name: string) => Promise<void>;
   /** Flip isPending / kieaiError flags on a placeholder without full replacement */
@@ -2123,6 +2127,95 @@ export const useProjectStore = create<ProjectState>()(
         });
 
         return { success: true, actionId: uuidv4() };
+      },
+
+      addAssetVersion: async (sourceMediaId: string, item: MediaItem, blob: Blob) => {
+        const { project } = get();
+        const sourceItem = project.mediaLibrary.items.find((existing) => existing.id === sourceMediaId);
+        if (!sourceItem) {
+          return {
+            success: false,
+            error: {
+              code: "MEDIA_NOT_FOUND" as const,
+              message: `Media with ID ${sourceMediaId} not found`,
+            },
+          };
+        }
+        if (project.mediaLibrary.items.some((existing) => existing.id === item.id)) {
+          return {
+            success: false,
+            error: {
+              code: "INVALID_PARAMS" as const,
+              message: `Media with ID ${item.id} already exists`,
+            },
+          };
+        }
+
+        const assetGroupId = sourceItem.assetGroupId ?? sourceItem.id;
+        const versionItem: MediaItem = {
+          ...item,
+          blob,
+          assetGroupId,
+          isCurrent: true,
+          isPlaceholder: false,
+          isPending: false,
+        };
+
+        try {
+          await saveMediaBlob(project.id, versionItem.id, blob, versionItem.metadata);
+        } catch (error) {
+          return {
+            success: false,
+            error: {
+              code: "STORAGE_FULL" as const,
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Failed to persist asset version",
+            },
+          };
+        }
+
+        const updatedItems = project.mediaLibrary.items.map((existing) => {
+          const existingGroupId = existing.assetGroupId ?? existing.id;
+          if (existingGroupId !== assetGroupId) return existing;
+          return { ...existing, assetGroupId, isCurrent: false };
+        });
+
+        set({
+          project: {
+            ...project,
+            mediaLibrary: {
+              ...project.mediaLibrary,
+              items: [...updatedItems, versionItem],
+            },
+            modifiedAt: Date.now(),
+          },
+        });
+
+        return { success: true, actionId: uuidv4() };
+      },
+
+      setCurrentAssetVersion: (mediaId: string) => {
+        const { project } = get();
+        const selected = project.mediaLibrary.items.find((item) => item.id === mediaId);
+        if (!selected) return false;
+        const assetGroupId = selected.assetGroupId ?? selected.id;
+        const updatedItems = project.mediaLibrary.items.map((item) => {
+          const itemGroupId = item.assetGroupId ?? item.id;
+          return itemGroupId === assetGroupId
+            ? { ...item, assetGroupId, isCurrent: item.id === mediaId }
+            : item;
+        });
+
+        set({
+          project: {
+            ...project,
+            mediaLibrary: { ...project.mediaLibrary, items: updatedItems },
+            modifiedAt: Date.now(),
+          },
+        });
+        return true;
       },
 
 

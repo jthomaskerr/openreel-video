@@ -353,6 +353,106 @@ describe("ProjectStore", () => {
         stored.metadata,
       );
     });
+
+    it("creates a distinct current version in the same asset group without overwriting the original", async () => {
+      const originalBlob = new Blob(["v1"], { type: "image/png" });
+      const versionBlob = new Blob(["v2"], { type: "image/png" });
+      const original: MediaItem = {
+        id: "asset-v1",
+        name: "Shot v1.png",
+        type: "image",
+        fileHandle: null,
+        blob: originalBlob,
+        metadata: {
+          duration: 0,
+          width: 16,
+          height: 16,
+          frameRate: 0,
+          codec: "png",
+          sampleRate: 0,
+          channels: 0,
+          fileSize: originalBlob.size,
+        },
+        thumbnailUrl: null,
+        waveformData: null,
+        isCurrent: true,
+      };
+      await useProjectStore.getState().addGeneratedMedia(original, originalBlob);
+
+      const version: MediaItem = {
+        ...original,
+        id: "asset-v2",
+        name: "Shot v2.png",
+        blob: versionBlob,
+        metadata: { ...original.metadata, fileSize: versionBlob.size },
+        generationMeta: {
+          provider: "wavespeed",
+          model: "image-model",
+          prompt: "new version",
+          jobId: "job-1",
+        },
+      };
+
+      const result = await useProjectStore.getState().addAssetVersion("asset-v1", version, versionBlob);
+
+      expect(result.success).toBe(true);
+      const items = useProjectStore.getState().project.mediaLibrary.items;
+      expect(items).toHaveLength(2);
+      expect(items[0]).toMatchObject({
+        id: "asset-v1",
+        assetGroupId: "asset-v1",
+        isCurrent: false,
+      });
+      expect(items[1]).toMatchObject({
+        id: "asset-v2",
+        assetGroupId: "asset-v1",
+        isCurrent: true,
+        generationMeta: expect.objectContaining({ provider: "wavespeed", jobId: "job-1" }),
+      });
+      expect(items[0].blob).toBe(originalBlob);
+      expect(items[1].blob).toBe(versionBlob);
+      expect(mockSaveMediaBlob).toHaveBeenLastCalledWith(
+        useProjectStore.getState().project.id,
+        "asset-v2",
+        versionBlob,
+        items[1].metadata,
+      );
+    });
+
+    it("switches current version only inside the selected asset group", async () => {
+      const blob = new Blob(["v"], { type: "image/png" });
+      const makeItem = (id: string, assetGroupId: string, isCurrent: boolean): MediaItem => ({
+        id,
+        name: `${id}.png`,
+        type: "image",
+        fileHandle: null,
+        blob,
+        metadata: {
+          duration: 0,
+          width: 16,
+          height: 16,
+          frameRate: 0,
+          codec: "png",
+          sampleRate: 0,
+          channels: 0,
+          fileSize: blob.size,
+        },
+        thumbnailUrl: null,
+        waveformData: null,
+        assetGroupId,
+        isCurrent,
+      });
+      await useProjectStore.getState().addGeneratedMedia(makeItem("group-a-v1", "group-a", true), blob);
+      await useProjectStore.getState().addGeneratedMedia(makeItem("group-a-v2", "group-a", false), blob);
+      await useProjectStore.getState().addGeneratedMedia(makeItem("group-b-v1", "group-b", true), blob);
+
+      expect(useProjectStore.getState().setCurrentAssetVersion("group-a-v2")).toBe(true);
+
+      const items = useProjectStore.getState().project.mediaLibrary.items;
+      expect(items.find((item) => item.id === "group-a-v1")?.isCurrent).toBe(false);
+      expect(items.find((item) => item.id === "group-a-v2")?.isCurrent).toBe(true);
+      expect(items.find((item) => item.id === "group-b-v1")?.isCurrent).toBe(true);
+    });
   });
 
   describe("project renaming", () => {

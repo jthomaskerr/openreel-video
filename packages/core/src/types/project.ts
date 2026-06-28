@@ -48,6 +48,19 @@ export interface MediaItem {
   readonly kieaiError?: boolean;
   /** KieAI task ID used to poll for completion */
   readonly kieaiTaskId?: string;
+  /** Shared identifier for all MediaItems that are versions of the same asset */
+  readonly assetGroupId?: string;
+  /** Current version flag within an asset group */
+  readonly isCurrent?: boolean;
+  /** Generation details that produced this media item */
+  readonly generationMeta?: {
+    readonly provider: string;
+    readonly model: string;
+    readonly prompt?: string;
+    readonly negativePrompt?: string;
+    readonly inputs?: Record<string, unknown>;
+    readonly jobId?: string;
+  };
 }
 
 /** Thumbnail for filmstrip display in timeline */
