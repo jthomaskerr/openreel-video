@@ -852,7 +852,7 @@ export const InspectorPanel: React.FC = () => {
       <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
       <div className="px-4 pt-3">
         {isMetadataClip ? (
-          <MetadataClipInspector clipId={selectedTimelineClip!.id} kind={metadataKind} />
+          <MetadataClipInspector clip={selectedTimelineClip!} kind={metadataKind} />
         ) : selectedClip ? (
           <InspectorTabErrorBoundary key={activeTab}>
             <InspectorTabPanel tab="effects" active={activeTab}>

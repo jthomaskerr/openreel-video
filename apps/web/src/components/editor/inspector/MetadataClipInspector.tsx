@@ -1,17 +1,14 @@
+import type { Clip } from "@openreel/core";
+import { MusicVideoMetadataInspector } from "./MusicVideoMetadataInspector";
+import { SceneMetadataInspector } from "./SceneMetadataInspector";
+import { CharacterMetadataInspector } from "./CharacterMetadataInspector";
+import { StyleMetadataInspector } from "./StyleMetadataInspector";
 
 export type MetadataKind = "music-video" | "scene" | "character" | "style";
 
 interface Props {
-  clipId: string;
+  clip: Clip;
   kind: string | undefined;
-}
-
-function KindShell({ label }: { label: string }) {
-  return (
-    <div className="p-3 space-y-1" data-kind-shell={label}>
-      <h3 className="text-xs font-semibold text-text-primary">{label}</h3>
-    </div>
-  );
 }
 
 function UnknownKindFallback({ kind }: { kind?: string }) {
@@ -23,19 +20,19 @@ function UnknownKindFallback({ kind }: { kind?: string }) {
 }
 
 /**
- * Routes a selected metadata clip to its kind-specific inspector shell.
+ * Routes a selected metadata clip to its kind-specific inspector.
  * Unknown kinds render a minimal read-only fallback rather than crashing.
  */
-export function MetadataClipInspector({ clipId: _clipId, kind }: Props) {
+export function MetadataClipInspector({ clip, kind }: Props) {
   switch (kind) {
     case "music-video":
-      return <KindShell label="Music Video" />;
+      return <MusicVideoMetadataInspector clip={clip} />;
     case "scene":
-      return <KindShell label="Scene" />;
+      return <SceneMetadataInspector clip={clip} />;
     case "character":
-      return <KindShell label="Character" />;
+      return <CharacterMetadataInspector clip={clip} />;
     case "style":
-      return <KindShell label="Style" />;
+      return <StyleMetadataInspector clip={clip} />;
     default:
       return <UnknownKindFallback kind={kind} />;
   }
