@@ -57,6 +57,7 @@ import { AnimateTab } from "./inspector/tabs/AnimateTab";
 import { StyleTab } from "./inspector/tabs/StyleTab";
 import { EffectsTab } from "./inspector/tabs/EffectsTab";
 import { AiTab } from "./inspector/tabs/AiTab";
+import { MetadataClipInspector } from "./inspector/MetadataClipInspector";
 
 // Initialize engines as singletons
 const chromaKeyEngine = new ChromaKeyEngine({ width: 1920, height: 1080 });
@@ -141,6 +142,23 @@ export const InspectorPanel: React.FC = () => {
     if (selectedClipIds.length !== 1) return null;
     return getClip(selectedClipIds[0]) || null;
   }, [getClip, project.modifiedAt, selectedClipIds]);
+
+  // Detect clips on metadata tracks or carrying a metadata kind
+  const isMetadataClip = useMemo(() => {
+    if (!selectedTimelineClip) return false;
+    if (typeof selectedTimelineClip.metadata?.kind === "string") return true;
+    return project.timeline.tracks.some(
+      (t) => t.type === "metadata" && t.clips.some((c) => c.id === selectedTimelineClip.id),
+    );
+  }, [selectedTimelineClip, project.timeline.tracks]);
+
+  const metadataKind = useMemo(
+    () =>
+      typeof selectedTimelineClip?.metadata?.kind === "string"
+        ? (selectedTimelineClip.metadata!.kind as string)
+        : undefined,
+    [selectedTimelineClip],
+  );
 
   // Get selected clip (check regular clips, text clips, and shape clips)
   const selectedClip = useMemo(() => {
@@ -816,7 +834,7 @@ export const InspectorPanel: React.FC = () => {
       data-tour="inspector"
       className="w-full min-w-0 bg-bg-1 flex flex-col h-full"
     >
-      {selectedClip && tabs.length > 0 && (
+      {!isMetadataClip && selectedClip && tabs.length > 0 && (
         <>
           <InspectorClipHeader
             name={`${selectedClip.id.substring(0, 20)}…`}
@@ -833,7 +851,9 @@ export const InspectorPanel: React.FC = () => {
 
       <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
       <div className="px-4 pt-3">
-        {selectedClip ? (
+        {isMetadataClip ? (
+          <MetadataClipInspector clipId={selectedTimelineClip!.id} kind={metadataKind} />
+        ) : selectedClip ? (
           <InspectorTabErrorBoundary key={activeTab}>
             <InspectorTabPanel tab="effects" active={activeTab}>
               <EffectsTab
