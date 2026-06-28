@@ -584,6 +584,46 @@ MediaThumbnail.displayName = "MediaThumbnail";
  * avoiding re-render when the store issues a new MediaItem reference with unchanged data.
  * All handlers read from getState() — zero per-row Zustand subscriptions.
  */
+
+/**
+ * Stabilizes the media items array reference across renders.
+ * structuredClone creates new refs for all items on every timeline edit,
+ * but most items haven't changed. This hook returns the previous array ref
+ * when no items actually changed (by id + key fields), preventing downstream
+ * re-renders of AssetBuckets and all MediaThumbnailRow instances.
+ */
+function useStableMediaItems(items: MediaItem[]): MediaItem[] {
+  const ref = useRef(items);
+  const prev = ref.current;
+
+  if (items === prev) return prev;
+  if (items.length !== prev.length) { ref.current = items; return items; }
+
+  for (let i = 0; i < items.length; i++) {
+    const a = items[i];
+    const b = prev[i];
+    if (
+      a.id !== b.id ||
+      a.name !== b.name ||
+      a.title !== b.title ||
+      a.type !== b.type ||
+      a.isPlaceholder !== b.isPlaceholder ||
+      a.isPending !== b.isPending ||
+      a.kieaiError !== b.kieaiError ||
+      a.kieaiTaskId !== b.kieaiTaskId ||
+      a.thumbnailUrl !== b.thumbnailUrl ||
+      a.metadata?.duration !== b.metadata?.duration ||
+      a.metadata?.width !== b.metadata?.width ||
+      a.metadata?.height !== b.metadata?.height ||
+      a.metadata?.fileSize !== b.metadata?.fileSize
+    ) {
+      ref.current = items;
+      return items;
+    }
+  }
+
+  return prev; // no changes — return stable reference
+}
 const MediaThumbnailRow = React.memo(
   ({ item, viewMode, isSelected, onGenerateRef, onRetryKieAIRef, onManageRef, onRenameRef }: {
     item: MediaItem;
@@ -746,35 +786,33 @@ export const AssetsPanel: React.FC = () => {
   // Asset management dialog
   const [managedItem, setManagedItem] = useState<MediaItem | null>(null);
 
-  // Project store (selection/delete/replace/drag handled by MediaThumbnailRow)
-  const {
-    project,
-    importMedia,
-    updateSettings,
-    setKieAIItemState,
-  } = useProjectStore();
-  // Selection tracking (for passing stable isSelected to rows)
-  const selectedItemIds = useUIStore((s) => {
+  // Project store — narrow subscriptions. mediaItems stabilized since structuredClone
+  // creates new refs for unchanged items on every timeline edit.
+  const rawMediaItems = useProjectStore((s) => s.project.mediaLibrary.items);
+  const mediaItems = useStableMediaItems(rawMediaItems);
+  const projectSettings = useProjectStore((s) => s.project.settings);
+  const importMedia = useProjectStore((s) => s.importMedia);
+  const updateSettings = useProjectStore((s) => s.updateSettings);
+  const setKieAIItemState = useProjectStore((s) => s.setKieAIItemState);
+
+  // Selection tracking — stable Set derived from selectedItems array
+  const selectedItems = useUIStore((s) => s.selectedItems);
+  const selectedItemIds = useMemo(() => {
     const ids = new Set<string>();
-    for (const si of s.selectedItems) {
+    for (const si of selectedItems) {
       if (si.type === "clip") ids.add(si.id);
     }
     return ids;
-  });
-  const mediaItems = project.mediaLibrary.items;
+  }, [selectedItems]);
 
   // KieAI store
   const { retryTask } = useKieAIStore();
 
-  // UI store (MediaThumbnailRow handles selection/drag directly)
-
-  // Count missing assets
   // Count missing assets (memoized)
   const missingAssetsCount = useMemo(
     () => mediaItems.filter((item) => item.isPlaceholder).length,
     [mediaItems],
   );
-
   // Filter media items by search query across all metadata fields (memoized)
   const filteredItems = useMemo(() => {
     const query = searchQuery.toLowerCase();
@@ -884,7 +922,7 @@ export const AssetsPanel: React.FC = () => {
     if (placeholders.length === 0) return;
 
     // Persist the directory handle for future auto-restore
-    try { await saveDirectoryHandle(project.id, dirHandle); } catch { /* best-effort */ }
+    try { await saveDirectoryHandle(useProjectStore.getState().project.id, dirHandle); } catch { /* best-effort */ }
 
     // Build a name:size → {File, handle} map for reliable matching
     const fileMap = new Map<string, { file: File; handle: FileSystemFileHandle }>();
@@ -965,7 +1003,7 @@ export const AssetsPanel: React.FC = () => {
     async (preset: BackgroundPreset) => {
       setGeneratingBackground(preset.id);
       try {
-        const { width, height } = project.settings;
+        const { width, height } = projectSettings;
         const blob = await generateBackgroundBlob(preset, width, height);
         const file = new File([blob], `${preset.name}_${width}x${height}.png`, {
           type: "image/png",
@@ -981,7 +1019,7 @@ export const AssetsPanel: React.FC = () => {
         setGeneratingBackground(null);
       }
     },
-    [importMedia, project.settings],
+    [importMedia, projectSettings],
   );
 
   const filteredBackgrounds = useMemo(
@@ -991,7 +1029,6 @@ export const AssetsPanel: React.FC = () => {
     ),
     [backgroundCategory],
   );
-
   // Open unified generate dialog for an image asset
   const handleOpenGenerate = useCallback(async (item: MediaItem) => {
     try {
@@ -1123,43 +1160,13 @@ export const AssetsPanel: React.FC = () => {
                     items={filteredItems}
                     viewMode={mediaViewMode}
                     searchQuery={searchQuery}
-                    renderItem={(item) => (
-                      <MediaThumbnailRow
-                        key={item.id}
-                        item={item}
-                        isSelected={selectedItemIds.has(item.id)}
-                        viewMode={mediaViewMode}
-                        onGenerateRef={onGenerateRef}
-                        onRetryKieAIRef={onRetryKieAIRef}
-                        onManageRef={onManageRef}
-                        onRenameRef={onRenameRef}
-                      />
-                    )}
-                    renderAddButton={() =>
-                      mediaViewMode === "list" ? (
-                        <button
-                          onClick={triggerFileInput}
-                          className="flex items-center gap-3 px-2 py-1.5 rounded-lg border-2 border-dashed border-border hover:border-text-secondary cursor-pointer transition-all group"
-                        >
-                          <div className="w-12 h-8 rounded bg-background-tertiary flex items-center justify-center flex-shrink-0">
-                            <Upload size={14} className="text-text-muted group-hover:text-text-secondary transition-colors" />
-                          </div>
-                          <span className="text-[11px] text-text-muted group-hover:text-text-secondary transition-colors font-medium">Add media</span>
-                        </button>
-                      ) : (
-                        <div className="flex flex-col">
-                          <button
-                            onClick={triggerFileInput}
-                            className="aspect-video bg-background-tertiary rounded-lg border-2 border-dashed border-border hover:border-text-secondary relative flex items-center justify-center cursor-pointer transition-all overflow-hidden shadow-sm group"
-                          >
-                            <div className="flex flex-col items-center gap-1.5">
-                              <Upload size={mediaViewMode === "small" ? 16 : 20} className="text-text-muted group-hover:text-text-secondary transition-colors" />
-                              <span className="text-[10px] text-text-muted group-hover:text-text-secondary transition-colors">Add media</span>
-                            </div>
-                          </button>
-                        </div>
-                      )
-                    }
+                    selectedItemIds={selectedItemIds}
+                    onGenerateRef={onGenerateRef}
+                    onRetryKieAIRef={onRetryKieAIRef}
+                    onManageRef={onManageRef}
+                    onRenameRef={onRenameRef}
+                    onAddMedia={triggerFileInput}
+                    MediaRow={MediaThumbnailRow}
                   />
                 )}
 
@@ -1672,8 +1679,8 @@ export const AssetsPanel: React.FC = () => {
           isOpen={showAspectRatioDialog}
           videoWidth={aspectRatioDialogData.videoWidth}
           videoHeight={aspectRatioDialogData.videoHeight}
-          currentWidth={project.settings.width}
-          currentHeight={project.settings.height}
+          currentWidth={projectSettings.width}
+          currentHeight={projectSettings.height}
           onConfirm={handleConfirmAspectRatioMatch}
           onCancel={handleCancelAspectRatioMatch}
         />

@@ -1,11 +1,11 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useCallback, memo } from "react";
 import type { MediaItem } from "@openreel/core";
 import {
   Collapsible,
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@openreel/ui";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Upload } from "lucide-react";
 
 type MediaViewMode = "large" | "small" | "list";
 
@@ -19,25 +19,30 @@ interface AssetBucketsProps {
   items: MediaItem[];
   viewMode: MediaViewMode;
   searchQuery: string;
-  /** Ref-based callbacks for actions (stable across renders) */
+  selectedItemIds: ReadonlySet<string>;
   onGenerateRef?: React.MutableRefObject<(item: MediaItem) => void>;
   onRetryKieAIRef?: React.MutableRefObject<(item: MediaItem) => void>;
   onManageRef?: React.MutableRefObject<(item: MediaItem) => void>;
   onRenameRef?: React.MutableRefObject<(item: MediaItem) => void>;
-  /** Renders a single media item row */
-  renderItem: (item: MediaItem) => React.ReactNode;
-  /** Renders the "Add media" placeholder button */
-  renderAddButton: () => React.ReactNode;
+  onAddMedia: () => void;
+  /** Component that renders a single media item row */
+  MediaRow: React.ComponentType<{
+    item: MediaItem;
+    viewMode: MediaViewMode;
+    isSelected: boolean;
+    onGenerateRef?: React.MutableRefObject<(item: MediaItem) => void>;
+    onRetryKieAIRef?: React.MutableRefObject<(item: MediaItem) => void>;
+    onManageRef?: React.MutableRefObject<(item: MediaItem) => void>;
+    onRenameRef?: React.MutableRefObject<(item: MediaItem) => void>;
+  }>;
 }
 
 /**
- * Computes buckets from items — "All", by type, and by tag.
- * Memoized to avoid recomputation on parent re-renders.
+ * Computes buckets from items — "All", by type, by tag, by group.
  */
 function computeBuckets(items: MediaItem[], searchQuery: string): BucketDef[] {
   const query = searchQuery.toLowerCase();
 
-  // Filter first
   const filtered = query
     ? items.filter((item) => {
         const nameMatch = item.name.toLowerCase().includes(query);
@@ -53,7 +58,7 @@ function computeBuckets(items: MediaItem[], searchQuery: string): BucketDef[] {
 
   const buckets: BucketDef[] = [];
 
-  // Always include "All"
+  // All
   buckets.push({ id: "all", label: "All Assets", items: filtered });
 
   // By type
@@ -65,12 +70,10 @@ function computeBuckets(items: MediaItem[], searchQuery: string): BucketDef[] {
     }
   }
 
-  // By tag (dynamic)
+  // By tag
   const tagSet = new Set<string>();
   for (const item of filtered) {
-    for (const tag of item.tags ?? []) {
-      tagSet.add(tag);
-    }
+    for (const tag of item.tags ?? []) tagSet.add(tag);
   }
   for (const tag of [...tagSet].sort()) {
     const tagItems = filtered.filter((i) => i.tags?.includes(tag));
@@ -79,7 +82,7 @@ function computeBuckets(items: MediaItem[], searchQuery: string): BucketDef[] {
     }
   }
 
-  // By group (dynamic)
+  // By group
   const groupSet = new Set<string>();
   for (const item of filtered) {
     if (item.group) groupSet.add(item.group);
@@ -94,30 +97,66 @@ function computeBuckets(items: MediaItem[], searchQuery: string): BucketDef[] {
   return buckets;
 }
 
+function AddMediaButton({ viewMode, onClick }: { viewMode: MediaViewMode; onClick: () => void }) {
+  if (viewMode === "list") {
+    return (
+      <button
+        onClick={onClick}
+        className="flex items-center gap-3 px-2 py-1.5 rounded-lg border-2 border-dashed border-border hover:border-text-secondary cursor-pointer transition-all group"
+      >
+        <div className="w-12 h-8 rounded bg-background-tertiary flex items-center justify-center flex-shrink-0">
+          <Upload size={14} className="text-text-muted group-hover:text-text-secondary transition-colors" />
+        </div>
+        <span className="text-[11px] text-text-muted group-hover:text-text-secondary transition-colors font-medium">Add media</span>
+      </button>
+    );
+  }
+  return (
+    <div className="flex flex-col">
+      <button
+        onClick={onClick}
+        className="aspect-video bg-background-tertiary rounded-lg border-2 border-dashed border-border hover:border-text-secondary relative flex items-center justify-center cursor-pointer transition-all overflow-hidden shadow-sm group"
+      >
+        <div className="flex flex-col items-center gap-1.5">
+          <Upload size={viewMode === "small" ? 16 : 20} className="text-text-muted group-hover:text-text-secondary transition-colors" />
+          <span className="text-[10px] text-text-muted group-hover:text-text-secondary transition-colors">Add media</span>
+        </div>
+      </button>
+    </div>
+  );
+}
+
+// Memoize AddMediaButton to avoid re-creating on every render
+const MemoAddMediaButton = memo(AddMediaButton);
+
 /**
- * Renders media items in collapsible buckets.
- * Multiple buckets can be expanded simultaneously.
+ * Renders media items in collapsible buckets. Multiple buckets expandable simultaneously.
+ * Receives data as stable props (primitives + refs) — no render-props that churn identity.
  */
 export function AssetBuckets({
   items,
   viewMode,
   searchQuery,
-  renderItem,
-  renderAddButton,
+  selectedItemIds,
+  onGenerateRef,
+  onRetryKieAIRef,
+  onManageRef,
+  onRenameRef,
+  onAddMedia,
+  MediaRow,
 }: AssetBucketsProps) {
   const buckets = useMemo(() => computeBuckets(items, searchQuery), [items, searchQuery]);
 
-  // Track which buckets are collapsed. "all" starts expanded, others collapsed.
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
-  const toggleBucket = (id: string) => {
+  const toggleBucket = useCallback((id: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
-  };
+  }, []);
 
   if (buckets.length === 0) return null;
 
@@ -136,7 +175,6 @@ export function AssetBuckets({
         return (
           <div key={bucket.id}>
             <Collapsible open={!isCollapsed} onOpenChange={() => toggleBucket(bucket.id)}>
-              {/* Bucket header */}
               <CollapsibleTrigger asChild>
                 <button className="flex items-center gap-1.5 w-full text-left px-4 py-1.5 hover:bg-background-tertiary/50 rounded transition-colors">
                   {isCollapsed ? (
@@ -144,22 +182,27 @@ export function AssetBuckets({
                   ) : (
                     <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
                   )}
-                  <span className="text-[11px] font-medium text-text-primary">
-                    {bucket.label}
-                  </span>
-                  <span className="text-[10px] text-text-muted ml-1">
-                    {bucket.items.length}
-                  </span>
+                  <span className="text-[11px] font-medium text-text-primary">{bucket.label}</span>
+                  <span className="text-[10px] text-text-muted ml-1">{bucket.items.length}</span>
                 </button>
               </CollapsibleTrigger>
 
-              {/* Bucket content */}
               <CollapsibleContent>
                 <div className="px-4 pt-1 pb-2">
                   <div className={gridClass}>
-                    {bucket.items.map((item) => renderItem(item))}
-                    {/* Show add button only in "All" bucket */}
-                    {bucket.id === "all" && renderAddButton()}
+                    {bucket.items.map((item) => (
+                      <MediaRow
+                        key={item.id}
+                        item={item}
+                        viewMode={viewMode}
+                        isSelected={selectedItemIds.has(item.id)}
+                        onGenerateRef={onGenerateRef}
+                        onRetryKieAIRef={onRetryKieAIRef}
+                        onManageRef={onManageRef}
+                        onRenameRef={onRenameRef}
+                      />
+                    ))}
+                    {bucket.id === "all" && <MemoAddMediaButton viewMode={viewMode} onClick={onAddMedia} />}
                   </div>
                 </div>
               </CollapsibleContent>
