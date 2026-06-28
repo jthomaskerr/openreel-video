@@ -4169,14 +4169,23 @@ export const useProjectStore = create<ProjectState>()(
       },
 
       recoverFromAutoSave: async (saveId: string) => {
-        const recoveredProject = await autoSaveManager.recover(saveId);
-        if (recoveredProject) {
+        try {
+          const recoveredProject = await autoSaveManager.recover(saveId);
+          if (!recoveredProject) {
+            set({ error: "No save record found for this ID." });
+            return false;
+          }
+
           const storedMedia = await loadProjectMedia(recoveredProject.id);
           const blobMap = new Map(storedMedia.map((m) => [m.id, m.blob]));
 
+          // After JSON deserialization blob fields become {} (an empty truthy
+          // object), not null. Null them out here so restoreMediaItem's guard
+          // `if (!blob) return item` correctly marks un-stored media as missing
+          // rather than treating the invalid {} as a real Blob.
           const restoredItems = await Promise.all(
             recoveredProject.mediaLibrary.items.map((item) =>
-              restoreMediaItem(item, blobMap.get(item.id)),
+              restoreMediaItem({ ...item, blob: null }, blobMap.get(item.id)),
             ),
           );
 
@@ -4221,8 +4230,12 @@ export const useProjectStore = create<ProjectState>()(
 
           await projectManager.addToRecent(projectWithMedia);
           return true;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Recovery failed";
+          console.error("[Recovery] recoverFromAutoSave failed:", err);
+          set({ error: `Recovery failed: ${message}` });
+          return false;
         }
-        return false;
       },
 
       forceSave: async () => {

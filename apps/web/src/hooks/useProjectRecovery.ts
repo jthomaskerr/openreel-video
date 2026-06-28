@@ -7,6 +7,7 @@ interface RecoveryState {
   isChecking: boolean;
   availableSaves: AutoSaveMetadata[];
   showDialog: boolean;
+  error: string | null;
 }
 
 export function useProjectRecovery() {
@@ -14,6 +15,7 @@ export function useProjectRecovery() {
     isChecking: true,
     availableSaves: [],
     showDialog: false,
+    error: null,
   });
 
   const recoverFromAutoSave = useProjectStore((s) => s.recoverFromAutoSave);
@@ -29,12 +31,14 @@ export function useProjectRecovery() {
             isChecking: false,
             availableSaves: saves,
             showDialog: true,
+            error: null,
           });
         } else {
           setState({
             isChecking: false,
             availableSaves: [],
             showDialog: false,
+            error: null,
           });
         }
       } catch (error) {
@@ -43,6 +47,7 @@ export function useProjectRecovery() {
           isChecking: false,
           availableSaves: [],
           showDialog: false,
+          error: null,
         });
       }
     };
@@ -52,9 +57,17 @@ export function useProjectRecovery() {
 
   const recover = useCallback(
     async (saveId: string) => {
+      setState((prev) => ({ ...prev, error: null }));
       const success = await recoverFromAutoSave(saveId);
       if (success) {
-        setState((prev) => ({ ...prev, showDialog: false }));
+        setState((prev) => ({ ...prev, showDialog: false, error: null }));
+      } else {
+        // Read the error message the store set during failed recovery.
+        const storeError = useProjectStore.getState().error;
+        setState((prev) => ({
+          ...prev,
+          error: storeError ?? "Recovery failed",
+        }));
       }
       return success;
     },
@@ -75,6 +88,7 @@ export function useProjectRecovery() {
     isChecking: state.isChecking,
     availableSaves: state.availableSaves,
     showDialog: state.showDialog,
+    error: state.error,
     recover,
     dismiss,
     clearAll,
