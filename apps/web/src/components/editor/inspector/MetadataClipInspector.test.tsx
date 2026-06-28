@@ -14,7 +14,6 @@ function makeClip(kind?: string): Clip {
     outPoint: 12,
     speed: 1,
     volume: 1,
-    opacity: 1,
     transform: {
       position: { x: 0, y: 0 },
       scale: { x: 1, y: 1 },
@@ -24,7 +23,6 @@ function makeClip(kind?: string): Clip {
     },
     effects: [],
     audioEffects: [],
-    transitions: [],
     keyframes: [],
     metadata: kind ? { kind, label: kind, payload: { text: `${kind} text`, loraId: "lora-1" } } : {},
   };
