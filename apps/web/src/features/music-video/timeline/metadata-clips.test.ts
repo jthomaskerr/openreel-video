@@ -122,7 +122,7 @@ function makeStore(initialProject = makeProject()) {
                         transitions: [],
                         keyframes: [],
                         metadata: options?.metadata ?? {},
-                      },
+                      } as any,
                     ],
                   }
                 : track,

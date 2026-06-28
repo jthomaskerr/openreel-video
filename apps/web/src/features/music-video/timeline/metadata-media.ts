@@ -28,13 +28,13 @@ export interface MetadataMediaResult {
  * Decode a base64 string to a Uint8Array using the browser-native atob.
  * Runs in any environment that exposes atob (browsers, jsdom, Deno).
  */
-function base64ToBytes(b64: string): Uint8Array {
+function base64ToBytes(b64: string): ArrayBuffer {
   const binary = atob(b64);
   const out = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) {
     out[i] = binary.charCodeAt(i);
   }
-  return out;
+  return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength);
 }
 
 /**

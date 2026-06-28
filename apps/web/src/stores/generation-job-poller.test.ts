@@ -112,7 +112,7 @@ function makeStore(project = makeProject(makeMedia("asset-v1"))) {
                       transitions: [],
                       keyframes: [],
                       metadata: options?.metadata ?? {},
-                    },
+                    } as any,
                   ],
                 }
               : track,
