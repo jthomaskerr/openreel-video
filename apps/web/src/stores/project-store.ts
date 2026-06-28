@@ -126,6 +126,8 @@ export interface ProjectState {
   getMediaItem: (mediaId: string) => MediaItem | undefined;
   /** Add a pending placeholder for a background KieAI task */
   addPlaceholderMedia: (item: MediaItem) => void;
+  /** Add an available generated media item and persist its blob */
+  addGeneratedMedia: (item: MediaItem, blob: Blob) => Promise<ActionResult>;
   /** Replace a pending placeholder with the actual result blob */
   replacePlaceholderMedia: (mediaId: string, blob: Blob, name: string) => Promise<void>;
   /** Flip isPending / kieaiError flags on a placeholder without full replacement */
@@ -2074,6 +2076,55 @@ export const useProjectStore = create<ProjectState>()(
           },
         });
       },
+      addGeneratedMedia: async (item: MediaItem, blob: Blob) => {
+        const { project } = get();
+        if (project.mediaLibrary.items.some((existing) => existing.id === item.id)) {
+          return {
+            success: false,
+            error: {
+              code: "INVALID_PARAMS" as const,
+              message: `Media with ID ${item.id} already exists`,
+            },
+          };
+        }
+
+        const generatedItem: MediaItem = {
+          ...item,
+          blob,
+          isPlaceholder: false,
+          isPending: false,
+          kieaiError: false,
+        };
+
+        try {
+          await saveMediaBlob(project.id, generatedItem.id, blob, generatedItem.metadata);
+        } catch (error) {
+          return {
+            success: false,
+            error: {
+              code: "STORAGE_FULL" as const,
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Failed to persist generated media",
+            },
+          };
+        }
+
+        set({
+          project: {
+            ...project,
+            mediaLibrary: {
+              ...project.mediaLibrary,
+              items: [...project.mediaLibrary.items, generatedItem],
+            },
+            modifiedAt: Date.now(),
+          },
+        });
+
+        return { success: true, actionId: uuidv4() };
+      },
+
 
       setKieAIItemState: (mediaId: string, isPending: boolean, kieaiError: boolean) => {
         const { project } = get();

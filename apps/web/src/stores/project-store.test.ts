@@ -6,6 +6,7 @@ import type { Project, Clip, MediaItem, Transition } from "@openreel/core";
 const {
   mockEffectsBridge,
   mockEffectsBridgeState,
+  mockSaveMediaBlob,
   mockTransitionBridge,
   mockTransitionBridgeState,
 } = vi.hoisted(() => {
@@ -100,6 +101,7 @@ const {
   return {
     mockEffectsBridge: effectsBridge,
     mockEffectsBridgeState: { clipEffects },
+    mockSaveMediaBlob: vi.fn().mockResolvedValue(undefined),
     mockTransitionBridge: transitionBridge,
     mockTransitionBridgeState: { trackTransitions },
   };
@@ -136,6 +138,14 @@ vi.mock("../bridges/media-bridge", () => ({
   initializeMediaBridge: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("../services/media-storage", () => ({
+  saveMediaBlob: mockSaveMediaBlob,
+  deleteMediaBlob: vi.fn().mockResolvedValue(undefined),
+  loadProjectMedia: vi.fn().mockResolvedValue([]),
+  loadFileHandle: vi.fn().mockResolvedValue(null),
+  loadDirectoryHandle: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("../bridges/effects-bridge", () => ({
   getEffectsBridge: vi.fn(() => mockEffectsBridge),
 }));
@@ -148,6 +158,7 @@ describe("ProjectStore", () => {
   beforeEach(() => {
     mockEffectsBridgeState.clipEffects.clear();
     mockTransitionBridgeState.trackTransitions.clear();
+    mockSaveMediaBlob.mockClear();
     useProjectStore.getState().createNewProject();
   });
 
@@ -296,6 +307,51 @@ describe("ProjectStore", () => {
 
       expect(project.mediaLibrary.items.length).toBe(1);
       expect(project.mediaLibrary.items[0].name).toBe("test.mp4");
+    });
+  });
+
+  describe("generated media", () => {
+    it("adds available generated media and persists its blob", async () => {
+      const blob = new Blob(["generated"], { type: "image/png" });
+      const item: MediaItem = {
+        id: "generated-media-1",
+        name: "Scene metadata.png",
+        type: "image",
+        fileHandle: null,
+        blob,
+        metadata: {
+          duration: 0,
+          width: 16,
+          height: 16,
+          frameRate: 0,
+          codec: "png",
+          sampleRate: 0,
+          channels: 0,
+          fileSize: blob.size,
+        },
+        thumbnailUrl: "data:image/png;base64,abc",
+        waveformData: null,
+        isPlaceholder: true,
+        isPending: true,
+      };
+
+      const result = await useProjectStore.getState().addGeneratedMedia(item, blob);
+
+      expect(result.success).toBe(true);
+      const stored = useProjectStore.getState().project.mediaLibrary.items[0];
+      expect(stored).toMatchObject({
+        id: "generated-media-1",
+        name: "Scene metadata.png",
+        type: "image",
+        isPlaceholder: false,
+        isPending: false,
+      });
+      expect(mockSaveMediaBlob).toHaveBeenCalledWith(
+        useProjectStore.getState().project.id,
+        "generated-media-1",
+        blob,
+        stored.metadata,
+      );
     });
   });
 
