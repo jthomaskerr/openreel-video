@@ -155,6 +155,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
 
 // ── Reference images ──────────────────────────────────────────────────────
   const [refIds, setRefIds] = useState<string[]>([]);
+  const [generateRefOpen, setGenerateRefOpen] = useState(false);
 
   // Fetch WaveSpeed models on open
   useEffect(() => {
@@ -258,6 +259,11 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
       setRefIds((prev) => [...prev, result.actionId!]);
     }
   }, [project]);
+
+  const handleRequestGenerateRef = useCallback(() => {
+    setGenerateRefOpen(true);
+  }, []);
+
 
   // ── Generate ──────────────────────────────────────────────────────────────
   const handleGenerate = useCallback(async () => {
@@ -366,6 +372,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
     : model?.name ?? "";
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
       <DialogContent className="max-w-lg h-[85vh] flex flex-col">
         <DialogHeader className="shrink-0">
@@ -478,6 +485,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
                 selectedIds={refIds}
                 onChange={setRefIds}
                 onUpload={handleRefUpload}
+                onRequestGenerate={handleRequestGenerateRef}
               />
 
               {/* KieAI per-model form */}
@@ -526,5 +534,12 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
         </div>
       </DialogContent>
     </Dialog>
+
+    {/* Secondary dialog for generating reference images */}
+    <GenerateAssetDialog
+      open={generateRefOpen}
+      onClose={() => setGenerateRefOpen(false)}
+    />
+    </>
   );
 }
