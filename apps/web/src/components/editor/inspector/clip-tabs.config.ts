@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Move, Palette, Wand2, Volume2, Gauge, Film, Sparkles, Type, AlertTriangle } from "lucide-react";
+import { Move, Palette, Wand2, Volume2, Gauge, Film, Sparkles, Type, AlertTriangle, List } from "lucide-react";
 
 export type InspectorTabId =
   | "transform"
@@ -10,7 +10,8 @@ export type InspectorTabId =
   | "animate"
   | "ai"
   | "style"
-  | "problems";
+  | "problems"
+  | "log";
 
 export type InspectorClipType =
   | "video"
@@ -37,6 +38,7 @@ export const TAB_DEFS: Record<InspectorTabId, InspectorTabDef> = {
   ai: { id: "ai", label: "AI", icon: Sparkles },
   style: { id: "style", label: "Style", icon: Type },
   problems: { id: "problems", label: "Problems", icon: AlertTriangle },
+  log: { id: "log", label: "Log", icon: List },
 };
 const TABS_BY_CLIP_TYPE: Record<InspectorClipType, InspectorTabId[]> = {
   video: ["transform", "color", "effects", "audio", "speed", "animate", "ai"],

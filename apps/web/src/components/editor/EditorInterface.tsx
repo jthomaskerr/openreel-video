@@ -9,6 +9,7 @@ import { KeyframeEditorPanel } from "./KeyframeEditorPanel";
 import { AudioMixer } from "../audio-mixer";
 import { KeyboardShortcutsOverlay } from "./KeyboardShortcutsOverlay";
 import { PanelErrorBoundary } from "../ErrorBoundary";
+import { setResolveActionHandler, problemBus, type ResolveActionId, type Problem } from "../../stores/problem-store";
 import { SpotlightTour, MoGraphTour } from "./tour";
 import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
@@ -206,6 +207,46 @@ export const EditorInterface: React.FC = () => {
   const { showShortcutsOverlay, setShowShortcutsOverlay } =
     useKeyboardShortcuts();
   useAutoSave();
+
+  // ── Resolve action handler for problem actions ────────────────────
+  useEffect(() => {
+    setResolveActionHandler((actionId: ResolveActionId, problem: Problem) => {
+      switch (actionId) {
+        case "link_file":
+          // Trigger file picker for missing media
+          if (problem.label) {
+            const { replaceMediaAsset } = useProjectStore.getState();
+            const input = document.createElement("input");
+            input.type = "file";
+            input.accept = "video/*,audio/*,image/*";
+            input.onchange = async (event) => {
+              const file = (event.target as HTMLInputElement).files?.[0];
+              if (file) await replaceMediaAsset(problem.label, file);
+              problemBus.resolve(problem.id);
+            };
+            input.click();
+          }
+          break;
+        case "remove_media":
+          if (problem.label) {
+            const { deleteMedia } = useProjectStore.getState();
+            deleteMedia(problem.label);
+          }
+          problemBus.resolve(problem.id);
+          break;
+        case "retry_import":
+        case "retry_render":
+        case "retry_export":
+        case "restart_engine":
+        case "reload_bridge":
+          // Non-resolving actions: user must verify result manually
+          window.location.reload();
+          break;
+        default:
+          break;
+      }
+    });
+  }, []);
 
   const {
     keyframeEditorOpen,

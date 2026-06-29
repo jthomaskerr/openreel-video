@@ -25,6 +25,7 @@ export default [
         CanvasTextAlign: "readonly",
         CanvasTextBaseline: "readonly",
         ImageBitmap: "readonly",
+        CanvasImageSource: "readonly",
         OffscreenCanvas: "readonly",
         OffscreenCanvasRenderingContext2D: "readonly",
         React: "readonly",

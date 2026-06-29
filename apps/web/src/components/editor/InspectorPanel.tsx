@@ -5,7 +5,6 @@ import { useTimelineStore } from "../../stores/timeline-store";
 import { useUIStore } from "../../stores/ui-store";
 import { useEngineStore } from "../../stores/engine-store";
 import type { Transform, EditingTemplatePrimitive } from "@openreel/core";
-import { useProblemCount } from "../../stores/problem-store";
 import {
   ChromaKeyEngine,
   initializeTranscriptionService,
@@ -63,6 +62,7 @@ import { MetadataClipInspector } from "./inspector/MetadataClipInspector";
 import { MetadataEditor, FileInfoGrid, TypeSection, TypeDetailRow, GenerationInfo, VersionList, formatSize, formatDuration, type InfoRow } from "./asset-manager/AssetDetailShared";
 import { ProblemsPanel } from "./inspector/ProblemsPanel";
 import { ImportErrorsPanel } from "./inspector/ImportErrorsPanel";
+import { LogPanel } from "./inspector/LogPanel";
 import { resolveAssetCategory } from "./asset-category";
 
 // Initialize engines as singletons
@@ -1122,8 +1122,6 @@ export const InspectorPanel: React.FC = () => {
     clipType === "svg" ||
     clipType === "sticker";
 
-  const problemCount = useProblemCount();
-  const hasProblems = problemCount > 0;
 
   const clipTabs = useMemo(
     () => getTabsForClipType(clipType as InspectorClipType | null),
@@ -1134,21 +1132,19 @@ export const InspectorPanel: React.FC = () => {
     [clipType],
   );
 
-  // Add Problems tab when problems exist
+  // Always include Log and Problems tabs alongside clip-specific tabs
   const tabs = useMemo(() => {
     const base = [...clipTabs];
-    if (hasProblems) {
-      base.unshift(TAB_DEFS.problems);
-    }
+    base.unshift(TAB_DEFS.problems);
+    base.unshift(TAB_DEFS.log);
     return base;
-  }, [clipTabs, hasProblems]);
+  }, [clipTabs]);
   const tabIds = useMemo(() => {
     const base = [...clipTabIds];
-    if (hasProblems) {
-      base.unshift("problems");
-    }
+    base.unshift("problems");
+    base.unshift("log");
     return base;
-  }, [clipTabIds, hasProblems]);
+  }, [clipTabIds]);
 
   const inspectorActiveTab = useUIStore((s) => s.inspectorActiveTab);
   const setInspectorActiveTab = useUIStore((s) => s.setInspectorActiveTab);
@@ -1159,6 +1155,7 @@ export const InspectorPanel: React.FC = () => {
       : tabIds[0]) ?? ("transform" as InspectorTabId);
 
   const showingProblems = activeTab === "problems";
+  const showingLog = activeTab === "log";
 
   useEffect(() => {
     if (
@@ -1174,8 +1171,8 @@ export const InspectorPanel: React.FC = () => {
       data-tour="inspector"
       className="w-full min-w-0 bg-bg-1 flex flex-col h-full"
     >
-      {/* Show header + tabs when there's a selected clip OR when problems exist */}
-      {((!isMetadataClip && selectedClip) || hasProblems) && tabs.length > 0 && (
+      {/* Show header + tabs — Log and Problems tabs are always available */}
+      {tabs.length > 0 && (
         <>
           {selectedClip && (
             <InspectorClipHeader
@@ -1200,7 +1197,9 @@ export const InspectorPanel: React.FC = () => {
       )}
 
       <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
-        {showingProblems ? (
+        {showingLog ? (
+          <LogPanel />
+        ) : showingProblems ? (
           <ProblemsPanel />
         ) : (
           <>

@@ -183,7 +183,13 @@ const DEFAULT_PLAYBACK_STATS: PlaybackStats = {
   avgFrameRenderTime: 0,
 };
 
-coreTitleEngine.initialize(1920, 1080);
+try {
+  coreTitleEngine.initialize(1920, 1080);
+} catch (err) {
+  // Engine initialization at module load time may fail if WASM isn't ready.
+  // The EngineState.initialize() method handles the full init flow with retries.
+  console.warn("[EngineStore] TitleEngine pre-init skipped (will init on demand):", err);
+}
 
 export const useEngineStore = create<EngineState>()(
   subscribeWithSelector((set, get) => ({

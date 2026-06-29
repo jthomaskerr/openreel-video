@@ -3,7 +3,6 @@ import {
   AlertTriangle,
   Bug,
   FileWarning,
-  X,
   MonitorX,
   AudioLines,
   ImageOff,
@@ -14,12 +13,19 @@ import {
   Sparkles,
   Zap,
   Cpu,
+  Filter,
 } from "lucide-react";
 import type { Problem, ProblemKind } from "../../../stores/problem-store";
-import { useProblemStore } from "../../../stores/problem-store";
-import { Tabs, TabsList, TabsTrigger } from "@openreel/ui";
+import {
+  useProblemStore,
+  RESOLVE_ACTIONS_BY_KIND,
+  executeResolveAction,
+  type ResolveActionId,
+} from "../../../stores/problem-store";
+import { useProjectStore } from "../../../stores/project-store";
+import { cn } from "@openreel/ui/lib/utils";
 
-// ── Kind metadata ────────────────────────────────────────────────────
+// ── Kind metadata ──────────────────────────────────────────────────
 
 const KIND_ICON: Partial<Record<ProblemKind, typeof AlertTriangle>> = {
   block_failed: FileWarning,
@@ -61,7 +67,7 @@ const KIND_LABEL: Partial<Record<ProblemKind, string>> = {
   unknown_error: "Error",
 };
 
-const TAB_DEFS: Array<{ value: ProblemKind | "all"; label: string }> = [
+const KIND_TABS: Array<{ value: ProblemKind | "all"; label: string }> = [
   { value: "all", label: "All" },
   { value: "missing_media", label: "Files" },
   { value: "bridge_error", label: "Bridge" },
@@ -70,7 +76,7 @@ const TAB_DEFS: Array<{ value: ProblemKind | "all"; label: string }> = [
   { value: "unknown_error", label: "Other" },
 ];
 
-// ── Problem row ──────────────────────────────────────────────────────
+// ── Problem row ────────────────────────────────────────────────────
 
 function ProblemRow({
   problem,
@@ -80,10 +86,22 @@ function ProblemRow({
   onDismiss: (id: string) => void;
 }) {
   const Icon = KIND_ICON[problem.kind] ?? Bug;
-  const label = KIND_LABEL[problem.kind] ?? problem.kind;
+  const kindLabel = KIND_LABEL[problem.kind] ?? problem.kind;
+  const actions = RESOLVE_ACTIONS_BY_KIND[problem.kind] ?? [];
+
+  const handleAction = useCallback(
+    (actionId: ResolveActionId) => {
+      if (actionId === "dismiss") {
+        onDismiss(problem.id);
+      } else {
+        executeResolveAction(actionId, problem);
+      }
+    },
+    [problem, onDismiss],
+  );
 
   return (
-    <div className="flex items-start gap-2 px-3 py-2.5 border-b border-border/40 last:border-b-0 group">
+    <div className="flex items-start gap-2 px-3 py-2 border-b border-border/40 last:border-b-0 group">
       <div className="shrink-0 mt-0.5">
         <Icon size={14} className="text-yellow-400" />
       </div>
@@ -93,31 +111,54 @@ function ProblemRow({
             {problem.label}
           </span>
           <span className="text-[9px] text-text-muted uppercase tracking-wider shrink-0">
-            {label}
+            {kindLabel}
           </span>
         </div>
         <p className="text-[10px] text-text-secondary mt-0.5 line-clamp-2">
           {problem.message}
         </p>
+        {problem.trackName && (
+          <p className="text-[9px] text-text-muted mt-0.5">
+            Track: {problem.trackName}
+          </p>
+        )}
       </div>
-      <button
-        onClick={() => onDismiss(problem.id)}
-        className="shrink-0 p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-background-tertiary transition-opacity"
-        aria-label="Dismiss"
-      >
-        <X size={12} className="text-text-muted" />
-      </button>
+      {/* Resolve actions toolbar */}
+      <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+        {actions.map((action) => (
+          <button
+            key={action.id}
+            onClick={() => handleAction(action.id)}
+            className={cn(
+              "px-2 py-0.5 rounded text-[9px] font-medium transition-colors whitespace-nowrap",
+              action.resolves
+                ? "bg-yellow-500/15 text-yellow-300 hover:bg-yellow-500/25"
+                : "bg-accent/15 text-accent hover:bg-accent/25",
+            )}
+            title={action.label}
+          >
+            {action.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
 
-// ── Main panel ───────────────────────────────────────────────────────
+// ── Main panel ─────────────────────────────────────────────────────
 
 export function ProblemsPanel() {
-  const problems = useProblemStore((s) => s.problems.filter((p) => !p.resolved));
+  const problems = useProblemStore((s) =>
+    s.problems.filter((p) => !p.resolved),
+  );
   const resolveProblem = useProblemStore((s) => s.resolveProblem);
   const clearAll = useProblemStore((s) => s.clearAll);
-  const [activeTab, setActiveTab] = useState<string>("all");
+  const project = useProjectStore((s) => s.project);
+  const projectId = project?.id;
+
+  const [activeKind, setActiveKind] = useState<string>("all");
+  const [currentProjectOnly, setCurrentProjectOnly] = useState(true);
+  const [showFilters, setShowFilters] = useState(false);
 
   const handleDismiss = useCallback(
     (id: string) => {
@@ -125,6 +166,20 @@ export function ProblemsPanel() {
     },
     [resolveProblem],
   );
+
+  // Filter problems: kind + optional project scope
+  const filtered = useMemo(() => {
+    let result = problems;
+    if (activeKind !== "all") {
+      result = result.filter((p) => p.kind === activeKind);
+    }
+    if (currentProjectOnly && projectId) {
+      result = result.filter(
+        (p) => !p.projectId || p.projectId === projectId,
+      );
+    }
+    return result;
+  }, [problems, activeKind, currentProjectOnly, projectId]);
 
   const byKind = useMemo(() => {
     const map: Partial<Record<ProblemKind, Problem[]>> = {};
@@ -134,14 +189,10 @@ export function ProblemsPanel() {
     return map;
   }, [problems]);
 
-  const visibleTabs = TAB_DEFS.filter(
-    (def) => def.value === "all" || (byKind[def.value]?.length ?? 0) > 0,
+  const visibleTabs = KIND_TABS.filter(
+    (def) =>
+      def.value === "all" || (byKind[def.value]?.length ?? 0) > 0,
   );
-
-  const filtered =
-    activeTab === "all"
-      ? problems
-      : problems.filter((p) => p.kind === activeTab);
 
   if (problems.length === 0) {
     return (
@@ -165,45 +216,73 @@ export function ProblemsPanel() {
             Problems
           </span>
           <span className="text-[10px] bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded-full font-medium">
-            {problems.length}
+            {filtered.length}
           </span>
         </div>
-        <button
-          onClick={clearAll}
-          className="text-[10px] text-text-muted hover:text-text-secondary transition-colors"
-        >
-          Clear all
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className={cn(
+              "p-1 rounded transition-colors",
+              showFilters
+                ? "bg-accent/20 text-accent"
+                : "text-text-muted hover:text-text-secondary",
+            )}
+            title="Toggle filters"
+          >
+            <Filter size={12} />
+          </button>
+          <button
+            onClick={clearAll}
+            className="text-[10px] text-text-muted hover:text-text-secondary transition-colors"
+          >
+            Clear all
+          </button>
+        </div>
       </div>
 
-      {/* Filter tabs */}
+      {/* Filters */}
+      {showFilters && (
+        <div className="px-3 py-2 border-b border-border/40 shrink-0 space-y-2">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={currentProjectOnly}
+              onChange={(e) => setCurrentProjectOnly(e.target.checked)}
+              className="rounded border-border"
+            />
+            <span className="text-[11px] text-text-secondary">
+              Current project only
+            </span>
+          </label>
+        </div>
+      )}
+
+      {/* Kind tabs */}
       {visibleTabs.length > 1 && (
-        <Tabs
-          value={activeTab}
-          onValueChange={(v) => setActiveTab(v ?? "all")}
-          className="shrink-0"
-        >
-          <TabsList className="px-3 pt-1.5 pb-1 gap-1 h-auto bg-transparent">
-            {visibleTabs.map((def) => {
-              const count =
-                def.value === "all"
-                  ? problems.length
-                  : (byKind[def.value]?.length ?? 0);
-              return (
-                <TabsTrigger
-                  key={def.value}
-                  value={def.value}
-                  className="text-[10px] h-6 px-2 data-[state=active]:bg-background-tertiary"
-                >
-                  {def.label}
-                  <span className="ml-1 text-[9px] text-text-muted">
-                    {count}
-                  </span>
-                </TabsTrigger>
-              );
-            })}
-          </TabsList>
-        </Tabs>
+        <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-border/30 overflow-x-auto scrollbar-none shrink-0">
+          {visibleTabs.map((def) => {
+            const count =
+              def.value === "all"
+                ? problems.length
+                : (byKind[def.value]?.length ?? 0);
+            return (
+              <button
+                key={def.value}
+                onClick={() => setActiveKind(def.value)}
+                className={cn(
+                  "text-[10px] px-2 py-1 rounded whitespace-nowrap transition-colors",
+                  activeKind === def.value
+                    ? "bg-accent/20 text-accent font-medium"
+                    : "text-text-muted hover:text-text-secondary hover:bg-background-tertiary",
+                )}
+              >
+                {def.label}
+                <span className="ml-1 text-[9px] opacity-60">{count}</span>
+              </button>
+            );
+          })}
+        </div>
       )}
 
       {/* Problem list */}
@@ -216,7 +295,11 @@ export function ProblemsPanel() {
           </div>
         ) : (
           filtered.map((p) => (
-            <ProblemRow key={p.id} problem={p} onDismiss={handleDismiss} />
+            <ProblemRow
+              key={p.id}
+              problem={p}
+              onDismiss={handleDismiss}
+            />
           ))
         )}
       </div>
