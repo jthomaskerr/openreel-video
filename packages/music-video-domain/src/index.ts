@@ -1,2 +1,2 @@
 export * from "./types.js";
-export { importNeuralFrames } from "./neuralframes.js";
+export { importNeuralFrames, normalizeImageJob } from "./neuralframes.js";

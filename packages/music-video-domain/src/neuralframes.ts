@@ -20,6 +20,30 @@ import type {
   SongSection,
 } from "./types.js";
 
+/**
+ * Normalize a character's `image_job` field, which may arrive as embedded JSON
+ * text from Neural Frames exports. Returns a parsed `{ assets }` object or
+ * `undefined` when the field is missing/invalid.
+ */
+export function normalizeImageJob(
+  imageJob: unknown,
+): { assets: Array<{ url: string }> } | undefined {
+  if (!imageJob) return undefined;
+  // image_job itself can be a JSON string
+  if (typeof imageJob === "string") {
+    try { imageJob = JSON.parse(imageJob); } catch { return undefined; }
+  }
+  if (typeof imageJob !== "object" || imageJob === null) return undefined;
+  const job = imageJob as Record<string, unknown>;
+  let assets = job.assets;
+  // assets can also be a JSON string
+  if (typeof assets === "string") {
+    try { assets = JSON.parse(assets); } catch { assets = undefined; }
+  }
+  if (!Array.isArray(assets)) return undefined;
+  return { assets: assets as Array<{ url: string }> };
+}
+
 function uuid(): string {
   // crypto.randomUUID is available in Node 18+ and modern browsers
   return crypto.randomUUID();
@@ -125,21 +149,24 @@ export function importNeuralFrames(
   // ── Characters → metadata track ────────────────────────────────────────────
   const charTrackId = uuid();
   const rawCharacters: typeof props.characters = Array.isArray(props.characters) ? props.characters : [];
-  const charBlocks: MetadataBlock[] = rawCharacters.map((char) => ({
-    id: uuid(),
-    trackId: charTrackId,
-    label: char.name,
-    kind: "continuity_note" as const,
-    startSeconds: 0,
-    endSeconds: duration,
-    text: `Character: ${char.name}`,
-    linkedShotIds: [],
-    linkedGeneratedAssetIds: [],
-    source: "llm" as const,
-    importSource: "neuralframes" as const,
-    importId: char.id,
-    thumbnailUrl: char.image_job?.assets?.[0]?.url,
-  }));
+  const charBlocks: MetadataBlock[] = rawCharacters.map((char) => {
+    const imageJob = normalizeImageJob(char.image_job);
+    return {
+      id: uuid(),
+      trackId: charTrackId,
+      label: char.name,
+      kind: "continuity_note" as const,
+      startSeconds: 0,
+      endSeconds: duration,
+      text: `Character: ${char.name}`,
+      linkedShotIds: [],
+      linkedGeneratedAssetIds: [],
+      source: "llm" as const,
+      importSource: "neuralframes" as const,
+      importId: char.id,
+      thumbnailUrl: imageJob?.assets?.[0]?.url,
+    };
+  });
 
   const charTrack: MetadataTrack = {
     id: charTrackId,

@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { useProjectStore } from "../../../stores/project-store";
 import { addTimelineClip, type TimelineClipStore } from "../timeline/timeline-clips";
 import type { GeneratedAsset, MetadataBlock, NeuralFramesImportResult, NeuralFramesStoryboard } from "@openreel/music-video-domain";
+import { normalizeImageJob } from "@openreel/music-video-domain";
 import type { MediaItem, Track } from "@openreel/core";
 import { useMusicVideoStore } from "../../../stores/music-video-store";
 import { useUIStore } from "../../../stores/ui-store";
@@ -83,7 +84,8 @@ function metadataForBlock(block: MetadataBlock, result: NeuralFramesImportResult
   if (block.kind === "continuity_note") {
     const characters = raw.storyboard_props?.characters ?? [];
     const character = characters.find((candidate) => candidate.id === block.importId);
-    const urls = character?.image_job?.assets.map((asset) => asset.url) ?? [];
+    const imageJob = normalizeImageJob(character?.image_job);
+    const urls = imageJob?.assets.map((asset) => asset.url) ?? [];
     return {
       ...base,
       name: character?.name ?? block.label,
@@ -301,10 +303,12 @@ export const NeuralFramesImportTab: React.FC<Props> = ({
       }
 
 
+
       // ── Character & LoRA reference images → placeholder media ────────────────
       const characters = Array.isArray(raw.storyboard_props?.characters) ? raw.storyboard_props.characters : [];
       for (const character of characters) {
-        const urls = character.image_job?.assets?.map((asset) => asset.url) ?? [];
+        const imageJob = normalizeImageJob(character.image_job);
+        const urls = imageJob?.assets.map((asset) => asset.url) ?? [];
         for (const url of urls) {
           const refName = displayFileName(url);
           const refId = uuidv4();

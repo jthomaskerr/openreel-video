@@ -3,6 +3,8 @@
  */
 
 import { ORCHESTRATOR_URL } from "../../stores/music-video-store";
+import { staleWhileRevalidate, CACHE_KEYS } from "../cache";
+import type { CacheResult } from "../cache";
 
 export interface WavespeedModel {
   model_id: string;
@@ -60,6 +62,21 @@ export async function fetchModels(): Promise<WavespeedModel[]> {
   if (!res.ok) throw new Error(`Failed to fetch WaveSpeed models: HTTP ${res.status}`);
   const json = await res.json() as { models: WavespeedModel[] };
   return json.models;
+}
+
+
+/**
+ * Fetch WaveSpeed models with stale-while-revalidate caching.
+ * Returns cached data immediately (if available) + a refresh function.
+ * Caller should: render `cached` immediately, then call `refresh()` and
+ * update UI when the promise resolves.
+ */
+export function fetchModelsCached(): CacheResult<WavespeedModel[]> {
+  return staleWhileRevalidate(
+    CACHE_KEYS.WAVESPEED_MODELS,
+    fetchModels,
+    3_600_000, // 1 hour TTL
+  );
 }
 
 export async function submitGeneration(

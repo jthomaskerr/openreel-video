@@ -25,7 +25,7 @@ import { QwenForm } from "../kieai/forms/QwenForm";
 
 // ── WaveSpeed ────────────────────────────────────────────────────────────────
 import type { WavespeedModel } from "../../../services/wavespeed/index";
-import { fetchModels, submitGeneration } from "../../../services/wavespeed/index";
+import { fetchModelsCached, submitGeneration } from "../../../services/wavespeed/index";
 import { SchemaForm } from "./SchemaForm";
 
 import { uploadFileStream } from "../../../services/kieai/file-upload";
@@ -157,11 +157,30 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
   const [refIds, setRefIds] = useState<string[]>([]);
   const [generateRefOpen, setGenerateRefOpen] = useState(false);
 
-  // Fetch WaveSpeed models on open
+  const wsFetchRef = useRef(false);
+
+  // Fetch WaveSpeed models with cache-first + background refresh
   useEffect(() => {
-    if (!open || wsModelsLoading || wsModels.length > 0) return;
+    if (!open) {
+      wsFetchRef.current = false;
+      return;
+    }
+    if (wsFetchRef.current) return;
+    wsFetchRef.current = true;
+
+    const { cached, refresh } = fetchModelsCached();
+
+    // Show cached models immediately
+    if (cached && cached.length > 0) {
+      setWsModels(cached);
+    }
+
+    // Always refresh in background (even if cached data was shown)
     setWsModelsLoading(true);
-    fetchModels().then(setWsModels).catch(() => {}).finally(() => setWsModelsLoading(false));
+    refresh()
+      .then(setWsModels)
+      .catch(() => {})
+      .finally(() => setWsModelsLoading(false));
   }, [open]);
 
   // Reset on open

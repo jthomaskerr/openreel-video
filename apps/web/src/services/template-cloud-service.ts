@@ -5,6 +5,8 @@ import type {
 } from "@openreel/core";
 
 import { OPENREEL_CLOUD_URL } from "../config/api-endpoints";
+import { staleWhileRevalidate, invalidateCache, CACHE_KEYS } from "./cache";
+import type { CacheResult } from "./cache";
 
 const CLOUD_API_URL = OPENREEL_CLOUD_URL;
 
@@ -33,6 +35,18 @@ export class TemplateCloudService {
     }
   }
 
+  /**
+   * Cached version of listTemplates() with stale-while-revalidate.
+   * Returns cached data immediately if available.
+   */
+  listTemplatesCached(): CacheResult<CloudTemplate[]> {
+    return staleWhileRevalidate(
+      CACHE_KEYS.CLOUD_TEMPLATES,
+      () => this.listTemplates(),
+      3_600_000, // 1 hour TTL
+    );
+  }
+
   async getTemplate(id: string): Promise<Template | null> {
     try {
       const response = await fetch(`${this.apiUrl}/templates/${id}`);
@@ -45,6 +59,18 @@ export class TemplateCloudService {
       console.error(`Failed to get template ${id} from cloud:`, error);
       return null;
     }
+  }
+
+  /**
+   * Cached version of getTemplate().
+   * Individual template cache uses a per-id key and a longer TTL (24h).
+   */
+  getTemplateCached(id: string): CacheResult<Template | null> {
+    return staleWhileRevalidate(
+      CACHE_KEYS.CLOUD_TEMPLATE(id),
+      () => this.getTemplate(id),
+      86_400_000, // 24 hour TTL
+    );
   }
 
   async uploadTemplate(
@@ -64,6 +90,9 @@ export class TemplateCloudService {
       if (!response.ok) {
         return { success: false, error: data.error || "Upload failed" };
       }
+
+      // Invalidate the list cache so next fetch gets the new template
+      invalidateCache(CACHE_KEYS.CLOUD_TEMPLATES);
 
       return { success: true };
     } catch (error) {
@@ -88,6 +117,10 @@ export class TemplateCloudService {
       if (!response.ok) {
         return { success: false, error: data.error || "Delete failed" };
       }
+
+      // Invalidate both list and per-template caches
+      invalidateCache(CACHE_KEYS.CLOUD_TEMPLATES);
+      invalidateCache(CACHE_KEYS.CLOUD_TEMPLATE(id));
 
       return { success: true };
     } catch (error) {

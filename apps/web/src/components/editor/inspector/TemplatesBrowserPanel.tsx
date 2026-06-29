@@ -155,21 +155,34 @@ export const TemplatesBrowserPanel: React.FC<TemplatesBrowserPanelProps> = ({
         const templateEngine = await getTemplateEngine();
         await templateEngine.initialize();
         const localTemplates = await templateEngine.listTemplates();
-        const cloudTemplates = await templateCloudService.listTemplates();
 
+        // Show local templates + cached cloud templates immediately
+        const { cached: cachedCloud, refresh: refreshCloud } =
+          templateCloudService.listTemplatesCached();
+
+        const initialCloud = cachedCloud ?? [];
+        const initialCombined = [
+          ...localTemplates.map((t) => ({ ...t, source: "local" as const })),
+          ...initialCloud.map((t) => ({ ...t, source: "cloud" as const })),
+        ];
+        const initialUnique = Array.from(
+          new Map(initialCombined.map((t) => [t.id, t])).values(),
+        );
+        setTemplates(initialUnique);
+        setIsLoading(false);
+
+        // Refresh cloud templates in background
+        const freshCloud = await refreshCloud();
         const combined = [
           ...localTemplates.map((t) => ({ ...t, source: "local" as const })),
-          ...cloudTemplates.map((t) => ({ ...t, source: "cloud" as const })),
+          ...freshCloud.map((t) => ({ ...t, source: "cloud" as const })),
         ];
-
         const unique = Array.from(
           new Map(combined.map((t) => [t.id, t])).values(),
         );
-
         setTemplates(unique);
       } catch (error) {
         console.error("Failed to load templates:", error);
-      } finally {
         setIsLoading(false);
       }
     };
@@ -195,7 +208,15 @@ export const TemplatesBrowserPanel: React.FC<TemplatesBrowserPanelProps> = ({
       let template = await templateEngine.loadTemplate(templateId);
 
       if (!template && selectedTemplate?.source === "cloud") {
-        template = await templateCloudService.getTemplate(templateId);
+        const result = templateCloudService.getTemplateCached(templateId);
+        // Show cached immediately if available, then refresh
+        template = result.cached ?? null;
+        if (!template) {
+          template = await result.refresh();
+        } else {
+          // We have cached data — silently refresh in background
+          result.refresh().catch(() => {});
+        }
       }
 
       if (template) {
@@ -235,7 +256,13 @@ export const TemplatesBrowserPanel: React.FC<TemplatesBrowserPanelProps> = ({
         template = await templateEngine.loadTemplate(selectedTemplateId);
 
         if (!template && selectedTemplate?.source === "cloud") {
-          template = await templateCloudService.getTemplate(selectedTemplateId);
+          const result = templateCloudService.getTemplateCached(selectedTemplateId);
+          template = result.cached ?? null;
+          if (!template) {
+            template = await result.refresh();
+          } else {
+            result.refresh().catch(() => {});
+          }
         }
       }
 
@@ -461,27 +488,45 @@ export const TemplatesBrowserPanel: React.FC<TemplatesBrowserPanelProps> = ({
               const templateEngine = await getTemplateEngine();
               await templateEngine.initialize();
               const localTemplates = await templateEngine.listTemplates();
-              const cloudTemplates = await templateCloudService.listTemplates();
 
+              const { cached: cachedCloud, refresh: refreshCloud } =
+                templateCloudService.listTemplatesCached();
+
+              const initialCloud = cachedCloud ?? [];
+              const initialCombined = [
+                ...localTemplates.map((t) => ({
+                  ...t,
+                  source: "local" as const,
+                })),
+                ...initialCloud.map((t) => ({
+                  ...t,
+                  source: "cloud" as const,
+                })),
+              ];
+              const initialUnique = Array.from(
+                new Map(initialCombined.map((t) => [t.id, t])).values(),
+              );
+              setTemplates(initialUnique);
+              setIsLoading(false);
+
+              // Background refresh
+              const freshCloud = await refreshCloud();
               const combined = [
                 ...localTemplates.map((t) => ({
                   ...t,
                   source: "local" as const,
                 })),
-                ...cloudTemplates.map((t) => ({
+                ...freshCloud.map((t) => ({
                   ...t,
                   source: "cloud" as const,
                 })),
               ];
-
               const unique = Array.from(
                 new Map(combined.map((t) => [t.id, t])).values(),
               );
-
               setTemplates(unique);
             } catch (error) {
               console.error("Failed to load templates:", error);
-            } finally {
               setIsLoading(false);
             }
           };
