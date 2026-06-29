@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
-import { Image } from "lucide-react";
+import { AlertTriangle, Film, Image, Music } from "lucide-react";
 import type { Clip, Track, TransitionType } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
@@ -101,6 +101,22 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const clipRef = useRef<HTMLDivElement>(null);
   const moveCommitRafRef = useRef<number | null>(null);
   const pendingCommitRef = useRef<(() => void) | null>(null);
+  const dragContextRef = useRef({
+    allTracks,
+    onMoveClip,
+    onSnapIndicator,
+    playheadPosition,
+    snapSettings,
+    trackHeights,
+  });
+  dragContextRef.current = {
+    allTracks,
+    onMoveClip,
+    onSnapIndicator,
+    playheadPosition,
+    snapSettings,
+    trackHeights,
+  };
 
   // Drag-drop highlight state: "effect" when an effect is hovered over
   // the clip body, "transition-left" / "transition-right" when a
@@ -115,12 +131,16 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const isVideo = track.type === "video";
   const isAudio = track.type === "audio";
   const isImage = track.type === "image";
+  const mediaType = mediaItem?.type ?? (isAudio ? "audio" : isImage ? "image" : "video");
   const clipStyle = getClipStyle(track.type);
+  const isMissingMedia = !!mediaItem?.isPlaceholder;
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
-    if (isDragging || isPendingDrag) return;
+    if (isDragging) return;
     e.stopPropagation();
+    dragPendingRef.current.active = false;
+    setIsPendingDrag(false);
     onSelect(clip.id, e.shiftKey || e.metaKey);
   };
 
@@ -375,10 +395,9 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       }
     };
 
-    const handlePendingMouseUp = (e: MouseEvent) => {
+    const handlePendingMouseUp = () => {
       dragPendingRef.current.active = false;
       setIsPendingDrag(false);
-      onSelect(clip.id, e.shiftKey || e.metaKey);
     };
 
     window.addEventListener("mousemove", handlePendingMouseMove);
@@ -388,7 +407,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       window.removeEventListener("mousemove", handlePendingMouseMove);
       window.removeEventListener("mouseup", handlePendingMouseUp);
     };
-  }, [isPendingDrag, clip.id, onSelect]);
+  }, [isPendingDrag]);
 
   useEffect(() => {
     if (!isDragging) return;
@@ -448,12 +467,13 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       const x = e.clientX - rect.left - dragOffset;
       const rawTime = Math.max(0, x / pixelsPerSecond);
 
-      const dragSnapSettings = { ...snapSettings, snapToPlayhead: false };
+      const dragContext = dragContextRef.current;
+      const dragSnapSettings = { ...dragContext.snapSettings, snapToPlayhead: false };
       const snapResult = calculateSnap(
         rawTime,
         clip.id,
-        allTracks,
-        playheadPosition,
+        dragContext.allTracks,
+        dragContext.playheadPosition,
         dragSnapSettings,
         pixelsPerSecond,
         clip.duration,
@@ -469,8 +489,8 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       let hoveredTrackType: string | undefined;
       let cumulativeY = 0;
 
-      for (const t of allTracks) {
-        const height = trackHeights.get(t.id) || 60;
+      for (const t of dragContext.allTracks) {
+        const height = dragContext.trackHeights.get(t.id) || 60;
         if (mouseY >= cumulativeY && mouseY < cumulativeY + height) {
           hoveredTrackType = t.type;
           if (t.type === track.type && t.id !== track.id) {
@@ -496,7 +516,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       const baseStartTime = clip.startTime;
       const companions = multiDragSnapshotRef.current;
       pendingCommitRef.current = () => {
-        onMoveClip(clip.id, moveTime, undefined);
+        dragContextRef.current.onMoveClip(clip.id, moveTime, undefined);
         // Move every companion clip in the multi-selection by the same
         // delta. Cross-track moves of the primary don't take any
         // companions along — that gets too lossy when they live on tracks
@@ -505,7 +525,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
           const deltaTime = moveTime - baseStartTime;
           for (const snap of companions) {
             const newStart = Math.max(0, snap.startTime + deltaTime);
-            onMoveClip(snap.clipId, newStart, undefined);
+            dragContextRef.current.onMoveClip(snap.clipId, newStart, undefined);
           }
         }
       };
@@ -513,7 +533,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
         moveCommitRafRef.current = requestAnimationFrame(flushPendingCommit);
       }
 
-      onSnapIndicator(snapResult.snapped && snapResult.snapPoint ? snapResult.snapPoint.time : null);
+      dragContext.onSnapIndicator(snapResult.snapped && snapResult.snapPoint ? snapResult.snapPoint.time : null);
     };
 
     let groupClosed = false;
@@ -536,17 +556,17 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       }
       const pendingCommit = pendingCommitRef.current;
       pendingCommitRef.current = null;
-      pendingCommit?.();
-
       const { time, targetTrackId } = pendingDropRef.current;
       if (targetTrackId) {
-        onMoveClip(clip.id, time, targetTrackId);
+        dragContextRef.current.onMoveClip(clip.id, time, targetTrackId);
+      } else {
+        pendingCommit?.();
       }
 
       setIsDragging(false);
       setDragYOffset(0);
       setIsInvalidDrop(false);
-      onSnapIndicator(null);
+      dragContextRef.current.onSnapIndicator(null);
       multiDragSnapshotRef.current = [];
       closeGroup();
     };
@@ -573,13 +593,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
     clip.id,
     track.id,
     track.type,
-    allTracks,
-    trackHeights,
     timelineRef,
-    playheadPosition,
-    snapSettings,
-    onMoveClip,
-    onSnapIndicator,
   ]);
 
   useEffect(() => {
@@ -626,6 +640,8 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
 
   const thumbnailCount = Math.max(1, Math.floor(width / 60));
   const clipName = mediaItem?.name || clip.mediaId.slice(0, 8);
+  const generatedStatus = mediaItem?.generationMeta?.status ?? (clip.metadata?.["generatedStatus"] as string | undefined);
+  const isGenerated = !!mediaItem?.generationMeta || !!clip.metadata?.["isGenerated"] || !!generatedStatus;
 
   const isInteracting = isDragging || isTrimming;
   const isApplyingEffect = effectApplicationClipId === clip.id;
@@ -640,7 +656,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          className={`group absolute top-1 bottom-1 rounded-lg overflow-hidden shadow-sm ${
+          className={`clip-component group absolute top-1 bottom-1 rounded-lg overflow-hidden shadow-sm ${
             isDragging
               ? `cursor-grabbing z-50 ${isInvalidDrop ? "opacity-50 ring-2 ring-red-500 border-red-500" : "opacity-90 shadow-xl"}`
               : "cursor-grab"
@@ -688,7 +704,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
         </div>
       )}
 
-      {isVideo &&
+      {mediaType === "video" &&
         (mediaItem?.filmstripThumbnails?.length || mediaItem?.thumbnailUrl) && (
           <div className="absolute inset-0 flex pointer-events-none">
             {mediaItem?.filmstripThumbnails &&
@@ -732,11 +748,17 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
           </div>
         )}
 
-      {isVideo && !mediaItem?.thumbnailUrl && (
-        <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-primary/10 pointer-events-none" />
+      {mediaType === "video" && !mediaItem?.thumbnailUrl && (
+        <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-primary/10 flex items-center justify-center pointer-events-none">
+          {isMissingMedia ? (
+            <AlertTriangle size={24} className="text-yellow-400/70" />
+          ) : (
+            <Film size={24} className="text-primary/50" />
+          )}
+        </div>
       )}
 
-      {isImage && (
+      {mediaType === "image" && (
         <div className="absolute inset-0 bg-gradient-to-r from-purple-500/20 to-purple-500/10 flex items-center justify-center pointer-events-none">
           {mediaItem?.thumbnailUrl ? (
             <img
@@ -744,9 +766,35 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
               alt={clipName}
               className="h-full object-cover opacity-60"
             />
+          ) : isMissingMedia ? (
+            <AlertTriangle size={24} className="text-yellow-400/70" />
           ) : (
             <Image size={24} className="text-purple-400/50" />
           )}
+        </div>
+      )}
+
+      {mediaType === "audio" && (
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-blue-500/10 flex items-center justify-center pointer-events-none">
+          {isMissingMedia ? (
+            <AlertTriangle size={24} className="text-yellow-400/70" />
+          ) : (
+            <Music size={24} className="text-blue-400/45" />
+          )}
+        </div>
+      )}
+
+      {isMissingMedia && (
+        <div className="absolute top-1 left-1 rounded bg-yellow-500 px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none text-black pointer-events-none">
+          Link file
+        </div>
+      )}
+
+
+
+      {isGenerated && (
+        <div className="absolute right-1 top-1 z-20 rounded bg-black/70 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-rose-200 pointer-events-none">
+          {`Generated${generatedStatus ? ` · ${generatedStatus}` : ""}`}
         </div>
       )}
 
@@ -760,9 +808,9 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
         </span>
       </div>
 
-      {(isAudio || isVideo) && (
+      {(mediaType === "audio" || mediaType === "video") && (
         <>
-          <div className={`absolute inset-x-0 px-1 pointer-events-none ${isAudio ? "inset-y-0 flex items-center opacity-50" : "bottom-0 h-1/3 flex items-end opacity-30"}`}>
+          <div className={`absolute inset-x-0 px-1 pointer-events-none ${mediaType === "audio" ? "inset-y-0 flex items-center opacity-50" : "bottom-0 h-1/3 flex items-end opacity-30"}`}>
             {mediaItem?.waveformData ? (
               <svg
                 className="w-full h-full"
@@ -772,13 +820,13 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
                 <path
                   d={generateWaveformPath(mediaItem.waveformData, 100)}
                   stroke="currentColor"
-                  className={isAudio ? "text-blue-400" : "text-green-300"}
+                  className={mediaType === "audio" ? "text-blue-400" : "text-green-300"}
                   fill="none"
                   strokeWidth="1"
                   vectorEffect="non-scaling-stroke"
                 />
               </svg>
-            ) : isAudio ? (
+            ) : mediaType === "audio" ? (
               <svg className="w-full h-full" preserveAspectRatio="none">
                 <path
                   d="M0,20 Q10,5 20,20 T40,20 T60,20 T80,20 T100,20"
@@ -790,7 +838,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
               </svg>
             ) : null}
           </div>
-          {isAudio && (
+          {mediaType === "audio" && (
             <div className="absolute inset-x-0 top-1 flex justify-center opacity-0 group-hover:opacity-60 transition-opacity pointer-events-none">
               <div className="flex gap-0.5">
                 <div className="w-1 h-1 rounded-full bg-blue-300" />

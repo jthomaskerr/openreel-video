@@ -297,8 +297,13 @@ export const HighlightExtractorPanel: React.FC<HighlightExtractorPanelProps> = (
                 );
               });
 
+              let deleteFailures = 0;
               for (const c of clipsToRemove.sort((a, b) => b.startTime - a.startTime)) {
-                await useProjectStore.getState().rippleDeleteClip(c.id);
+                const result = await useProjectStore.getState().rippleDeleteClip(c.id);
+                if (!result.success) deleteFailures++;
+              }
+              if (deleteFailures > 0) {
+                console.warn(`[HighlightExtractor] Failed to ripple-delete ${deleteFailures} clip(s)`);
               }
             }}
             disabled={selected.size === 0}

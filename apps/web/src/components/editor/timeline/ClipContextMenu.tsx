@@ -10,6 +10,8 @@ import {
   Film,
   Image,
   ArrowLeftToLine,
+  RefreshCw,
+  AlertTriangle,
 } from "lucide-react";
 import type { Clip, Track } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
@@ -48,6 +50,7 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
     pasteEffects,
     copiedEffects,
     closeGapBeforeClip,
+    replaceMediaAsset,
   } = useProjectStore();
   const { playheadPosition } = useTimelineStore();
 
@@ -124,6 +127,24 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
     onClose?.();
   };
 
+  const handleLinkFile = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "video/*,audio/*,image/*";
+    input.style.display = "none";
+    input.onchange = async (event) => {
+      try {
+        const file = (event.target as HTMLInputElement).files?.[0];
+        if (file) await replaceMediaAsset(clip.mediaId, file);
+        onClose?.();
+      } finally {
+        input.remove();
+      }
+    };
+    document.body.appendChild(input);
+    input.click();
+  };
+
   const getClipTypeLabel = () => {
     if (isVideo) return "Video Clip";
     if (isAudio) return "Audio Clip";
@@ -145,6 +166,20 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
         {getClipTypeLabel()}
       </ContextMenuLabel>
       <ContextMenuSeparator />
+
+      {mediaItem?.isPlaceholder && (
+        <>
+          <ContextMenuItem onClick={handleLinkFile}>
+            <RefreshCw className="mr-2 h-4 w-4 text-yellow-500" />
+            Link File…
+          </ContextMenuItem>
+          <ContextMenuLabel className="flex items-center text-[10px] text-yellow-500">
+            <AlertTriangle className="mr-2 h-3 w-3" />
+            Missing media placeholder
+          </ContextMenuLabel>
+          <ContextMenuSeparator />
+        </>
+      )}
 
       <ContextMenuItem onClick={handleCopy}>
         <Copy className="mr-2 h-4 w-4" />

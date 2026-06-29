@@ -6,6 +6,7 @@ import type {
   SVGClip,
   StickerClip,
 } from "@openreel/core";
+import { FileText, Film, Music2, Palette, User } from "lucide-react";
 import { getClipStyle } from "./utils";
 import { ClipComponent } from "./ClipComponent";
 import { TextClipComponent } from "./TextClipComponent";
@@ -18,6 +19,26 @@ import { useProjectStore } from "../../../stores/project-store";
 import { toast } from "../../../stores/notification-store";
 
 type GraphicClipUnion = ShapeClip | SVGClip | StickerClip;
+const METADATA_KIND_BADGE: Record<string, { label: string; Icon: typeof FileText; className: string }> = {
+  character: { label: "CH", Icon: User, className: "bg-purple-500/25 text-purple-100 border-purple-300/40" },
+  continuity_note: { label: "CH", Icon: User, className: "bg-purple-500/25 text-purple-100 border-purple-300/40" },
+  note: { label: "NT", Icon: FileText, className: "bg-slate-500/25 text-slate-100 border-slate-300/40" },
+  scene: { label: "SC", Icon: Film, className: "bg-orange-500/25 text-orange-100 border-orange-300/40" },
+  section: { label: "SC", Icon: Film, className: "bg-orange-500/25 text-orange-100 border-orange-300/40" },
+  style: { label: "ST", Icon: Palette, className: "bg-pink-500/25 text-pink-100 border-pink-300/40" },
+  "music-video": { label: "MV", Icon: Music2, className: "bg-sky-500/25 text-sky-100 border-sky-300/40" },
+  visual_motif: { label: "ST", Icon: Palette, className: "bg-pink-500/25 text-pink-100 border-pink-300/40" },
+};
+
+function getMetadataBadge(kind: string | undefined) {
+  if (!kind) return { label: "--", Icon: FileText, className: "bg-slate-500/25 text-slate-100 border-slate-300/40" };
+  return METADATA_KIND_BADGE[kind] ?? {
+    label: kind.slice(0, 2).toUpperCase(),
+    Icon: FileText,
+    className: "bg-slate-500/25 text-slate-100 border-slate-300/40",
+  };
+}
+
 
 interface TrackLaneProps {
   track: Track;
@@ -185,7 +206,7 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
         // Silently ignore parse errors
       }
     },
-    [track.id, track.name, pixelsPerSecond, scrollX, onDropMedia],
+    [track.id, track.name, pixelsPerSecond, scrollX, onDropMedia, allTracks, playheadPosition, snapSettings],
   );
 
   const handleResizeStart = useCallback(
@@ -242,8 +263,11 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
         {/* Metadata clips: colored label blocks */}
         {track.type === "metadata" &&
           track.clips.map((clip) => {
-            const label = (clip.metadata?.["label"] as string | undefined) ?? "";
+            const kind = (clip.metadata?.["kind"] as string | undefined);
+            const label = (clip.metadata?.["label"] as string | undefined) ?? kind ?? "Metadata";
             const color = (clip.metadata?.["color"] as string | undefined);
+            const badge = getMetadataBadge(kind);
+            const BadgeIcon = badge.Icon;
             const style = getClipStyle("metadata");
             const left = clip.startTime * pixelsPerSecond;
             const width = Math.max(2, clip.duration * pixelsPerSecond);
@@ -255,6 +279,10 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
                 style={{ left, width, ...(color ? { borderColor: color, backgroundColor: color + "33" } : {}) }}
                 onClick={(e) => onSelectClip(clip.id, e.metaKey || e.ctrlKey)}
               >
+                <span className={`mr-1 inline-flex h-5 min-w-5 shrink-0 items-center justify-center gap-0.5 rounded border px-1 text-[8px] font-bold leading-none ${badge.className}`} aria-label={`${kind ?? "metadata"} placeholder`}>
+                  <BadgeIcon size={10} />
+                  <span>{badge.label}</span>
+                </span>
                 <span className="truncate">{label}</span>
               </div>
             );

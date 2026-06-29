@@ -22,8 +22,9 @@ import {
   Eye,
   Sliders,
 } from "lucide-react";
-import { Dialog, DialogContent, Input } from "@openreel/ui";
+import { Dialog, DialogContent, DialogTitle, Input } from "@openreel/ui";
 import { useUIStore } from "../../stores/ui-store";
+import { useProjectStore } from "../../stores/project-store";
 
 interface SearchItem {
   id: string;
@@ -288,6 +289,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   const listRef = useRef<HTMLDivElement>(null);
 
   const { selectedItems, setPanelVisible } = useUIStore();
+  const project = useProjectStore((s) => s.project);
 
   const selectedClipType = useMemo(() => {
     const clipItem = selectedItems.find(
@@ -299,8 +301,17 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     if (!clipItem) return null;
     if (clipItem.type === "text-clip") return "text";
     if (clipItem.type === "shape-clip") return "shape";
+
+    const track = project.timeline.tracks.find((candidate) =>
+      candidate.clips.some((clip) => clip.id === clipItem.id),
+    );
+    const clip = track?.clips.find((candidate) => candidate.id === clipItem.id);
+    const mediaItem = clip ? project.mediaLibrary.items.find((item) => item.id === clip.mediaId) : null;
+    if (track?.type === "audio") return "audio";
+    if (track?.type === "image" || mediaItem?.type === "image") return "image";
+    if (track?.type === "metadata") return null;
     return "video";
-  }, [selectedItems]);
+  }, [selectedItems, project.timeline.tracks, project.mediaLibrary.items]);
 
   const filteredEffects = useMemo(() => {
     let effects = SEARCHABLE_EFFECTS;
@@ -416,6 +427,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-2xl p-0 gap-0 top-[15vh] translate-y-0 bg-background-secondary border-border rounded-2xl overflow-hidden">
+        <DialogTitle className="sr-only">Search effects and tools</DialogTitle>
         <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
           <Search size={18} className="text-text-muted" />
           <Input
