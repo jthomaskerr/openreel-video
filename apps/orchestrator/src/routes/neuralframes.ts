@@ -1,19 +1,41 @@
 import { Router } from "express";
 import type { Router as ExpressRouter } from "express";
+import { mkdirSync, createWriteStream } from "node:fs";
+import { join, extname } from "node:path";
+import { get as httpsGet } from "node:https";
+import { get as httpGet } from "node:http";
 import { importNeuralFrames } from "@openreel/music-video-domain";
 import type { NeuralFramesStoryboard } from "@openreel/music-video-domain";
+import { config } from "../env.js";
 
 export const neuralframesRouter: ExpressRouter = Router();
+
+function downloadFile(url: string, destPath: string): Promise<void> {
+  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  const get = url.startsWith("https") ? httpsGet : httpGet;
+  get(url, (res) => {
+    if (res.statusCode !== 200) {
+      reject(new Error(`HTTP ${res.statusCode} for ${url}`));
+      res.resume();
+      return;
+    }
+    const out = createWriteStream(destPath);
+    res.pipe(out);
+    out.on("finish", resolve);
+    out.on("error", reject);
+  }).on("error", reject);
+  return promise;
+}
 
 /**
  * POST /api/import/neuralframes
  * Body: NeuralFramesStoryboard JSON (the file contents, parsed by the client)
- * Returns: NeuralFramesImportResult
+ * Returns: NeuralFramesImportResult with outputPath rewritten to orchestrator-served URLs.
  *
- * The client reads the file locally and sends the parsed JSON — no server-side
- * filesystem access needed. Account/user identity fields are stripped.
+ * Scene images are downloaded into generatedAssetsDir/neuralframes/<storyboardId>/
+ * and served back as http://localhost:<port>/assets/... so the browser can fetch them.
  */
-neuralframesRouter.post("/", (req, res) => {
+neuralframesRouter.post("/", async (req, res) => {
   const raw = req.body as NeuralFramesStoryboard;
 
   if (!raw?.storyboard_props) {
@@ -23,6 +45,21 @@ neuralframesRouter.post("/", (req, res) => {
 
   try {
     const result = importNeuralFrames(raw, "");
+
+    const cacheDir = join(config.generatedAssetsDir, "neuralframes", result.storyboardId);
+    mkdirSync(cacheDir, { recursive: true });
+
+    await Promise.all(
+      result.generatedAssets.map(async (asset) => {
+        if (!asset.outputPath?.startsWith("http")) return;
+        const ext = extname(new URL(asset.outputPath).pathname) || ".webp";
+        const localFile = join(cacheDir, `${asset.id}${ext}`);
+        await downloadFile(asset.outputPath, localFile);
+        const rel = localFile.slice(config.generatedAssetsDir.length);
+        asset.outputPath = `http://localhost:${config.port}/assets${rel}`;
+      }),
+    );
+
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: `Import failed: ${(e as Error).message}` });
