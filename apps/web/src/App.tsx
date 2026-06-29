@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef, lazy, Suspense } from "react";
+import { useEffect, useCallback, useRef, useMemo, lazy, Suspense } from "react";
 import { ToastContainer } from "./components/Toast";
 import { ScriptViewDialog } from "./components/editor/ScriptViewDialog";
 import { SearchModal } from "./components/editor/SearchModal";
@@ -11,6 +11,7 @@ import { useRouter } from "./hooks/use-router";
 import { useProjectRecovery } from "./hooks/useProjectRecovery";
 import { useKieAIPoller } from "./hooks/useKieAIPoller";
 import { useGenerationJobPoller } from "./hooks/useGenerationJobPoller";
+import { SOCIAL_MEDIA_PRESETS, type SocialMediaCategory } from "@openreel/core";
 import { TooltipProvider } from "@openreel/ui";
 
 const EditorInterface = lazy(() =>
@@ -26,23 +27,48 @@ const LoadingSpinner: React.FC<{ message: string }> = ({ message }) => (
   </div>
 );
 
+const PRESET_DIMENSIONS: Record<string, SocialMediaCategory> = {
+  "1080x1920": "tiktok",
+  "1920x1080": "youtube-video",
+  "1080x1080": "instagram-post",
+  "720x1280": "instagram-stories",
+  "1280x720": "youtube-video",
+};
+
 function App() {
   const { activeModal, closeModal, skipWelcomeScreen } = useUIStore();
   const { openModal: openSearchModal } = useUIStore();
   const { showDialog, availableSaves, recover, dismiss, clearAll } = useProjectRecovery();
 
-  const { route, params, navigate } = useRouter();
+  const { route, params, navigate, parsedDimensions } = useRouter();
   const hasHandledInitialRoute = useRef(false);
 
   useKieAIPoller();
   useGenerationJobPoller();
+
+  const newProjectPreset = useMemo<SocialMediaCategory | undefined>(() => {
+    if (route !== "new") return undefined;
+
+    if (params.preset) {
+      const key = params.preset as SocialMediaCategory;
+      if (SOCIAL_MEDIA_PRESETS[key]) return key;
+    }
+
+    if (parsedDimensions) {
+      const dimKey = `${parsedDimensions.width}x${parsedDimensions.height}`;
+      const match = PRESET_DIMENSIONS[dimKey];
+      if (match) return match;
+    }
+
+    return undefined;
+  }, [route, params.preset, parsedDimensions]);
 
   useEffect(() => {
     if (hasHandledInitialRoute.current) return;
 
     if (route === "new") {
       hasHandledInitialRoute.current = true;
-      navigate("editor");
+      navigate("welcome");
     } else if (route === "editor" && skipWelcomeScreen) {
       hasHandledInitialRoute.current = true;
     } else if (["welcome", "templates", "recent"].includes(route)) {
@@ -69,7 +95,7 @@ function App() {
   }, [handleKeyDown]);
 
   const showWelcome =
-    ["welcome", "templates", "recent"].includes(route) && !skipWelcomeScreen;
+    ["welcome", "templates", "recent", "new"].includes(route) && !skipWelcomeScreen;
   const initialTab =
     route === "templates"
       ? "templates"
@@ -85,7 +111,7 @@ function App() {
         {isSharePage ? (
           <SharePage shareId={params.shareId!} />
         ) : showWelcome ? (
-          <WelcomeScreen initialTab={initialTab} />
+          <WelcomeScreen initialTab={initialTab} initialPreset={newProjectPreset} />
         ) : (
           <Suspense fallback={<LoadingSpinner message="Loading editor..." />}>
             <EditorInterface />

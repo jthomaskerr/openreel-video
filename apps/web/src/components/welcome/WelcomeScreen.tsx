@@ -130,19 +130,21 @@ type ViewMode = "home" | "templates" | "recent" | "start-from-scratch";
 
 interface WelcomeScreenProps {
   initialTab?: "templates" | "recent";
+  initialPreset?: SocialMediaCategory;
 }
 
-export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ initialTab }) => {
+export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ initialTab, initialPreset }) => {
   const setSkipWelcomeScreen = useUIStore(
     (state) => state.setSkipWelcomeScreen,
   );
   const skipWelcomeScreen = useUIStore((state) => state.skipWelcomeScreen);
   const { navigate } = useRouter();
-
-  const [viewMode, setViewMode] = useState<ViewMode>(initialTab ?? "home");
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    initialPreset ? "start-from-scratch" : initialTab ?? "home"
+  );
   const [hoveredFormat, setHoveredFormat] = useState<string | null>(null);
   const [quickStartPreset, setQuickStartPreset] =
-    useState<SocialMediaCategory | undefined>(undefined);
+    useState<SocialMediaCategory | undefined>(initialPreset);
 
   useEditorPreload(true);
 
