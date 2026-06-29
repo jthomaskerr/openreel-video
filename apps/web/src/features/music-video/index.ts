@@ -1,1 +1,1 @@
-export { NeuralFramesImportTab } from "./components/NeuralFramesImportTab";
+export { NeuralFramesImportTab, type NeuralFramesImportTabHandle } from "./components/NeuralFramesImportTab";

@@ -1,7 +1,8 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import type { MediaItem, Project, Track } from "@openreel/core";
 import { NeuralFramesImportTab } from "./NeuralFramesImportTab";
+import { toast } from "../../../stores/notification-store";
 
 const storeState = vi.hoisted(() => ({
   project: null as Project | null,
@@ -50,6 +51,23 @@ vi.mock("../../../stores/project-store", () => {
     }),
   });
   return { useProjectStore };
+});
+
+vi.mock("../../../stores/notification-store", () => {
+  const toastFns = {
+    info: vi.fn(),
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+  };
+  const useNotificationStore = {
+    getState: () => ({
+      addNotification: vi.fn(),
+      removeNotification: vi.fn(),
+      notifications: [],
+    }),
+  };
+  return { useNotificationStore, toast: toastFns };
 });
 
 function makeProject(): Project {
@@ -286,7 +304,8 @@ describe("NeuralFramesImportTab metadata import", () => {
 
     fireEvent.change(input, { target: { files: [file] } });
 
-    await waitFor(() => expect(screen.getByText(/3 blocks across 3 tracks · 0 images/)).toBeInTheDocument());
+    await waitFor(() => expect(storeState.addClip).toHaveBeenCalledTimes(3));
+    expect(toast.success).toHaveBeenCalledWith("Import complete", expect.stringContaining("3 blocks across 3 tracks"));
     expect(storeState.renameProject).toHaveBeenCalledWith("Imported Storyboard");
 
     expect(storeState.addGeneratedMedia).toHaveBeenCalledTimes(3);
@@ -355,7 +374,7 @@ describe("NeuralFramesImportTab metadata import", () => {
 
     fireEvent.change(input, { target: { files: [file] } });
 
-    await waitFor(() => expect(screen.getByText(/1 blocks across 1 track · 0 images/)).toBeInTheDocument());
+    await waitFor(() => expect(storeState.addClip).toHaveBeenCalled());
     expect(storeState.renameProject).toHaveBeenCalledWith("Imported Storyboard");
 
     expect(storeState.addClip).toHaveBeenCalledWith(
@@ -429,7 +448,8 @@ describe("NeuralFramesImportTab metadata import", () => {
 
     fireEvent.change(input, { target: { files: [file] } });
 
-    await waitFor(() => expect(screen.getByText(/0 blocks across 0 tracks · 2 images/)).toBeInTheDocument());
+    await waitFor(() => expect(storeState.addPlaceholderMedia).toHaveBeenCalledTimes(2));
+    expect(toast.success).toHaveBeenCalledWith("Import complete", expect.stringContaining("0 blocks across 0 tracks · 2 images"));
 
     expect(musicVideoStoreState.applyNeuralFramesImport).toHaveBeenCalledWith(
       "project-1",
@@ -504,7 +524,8 @@ describe("NeuralFramesImportTab metadata import", () => {
 
     fireEvent.change(input, { target: { files: [file] } });
 
-    await waitFor(() => expect(screen.getByText(/0 blocks across 0 tracks · 0 images · 1 audio/)).toBeInTheDocument());
+    await waitFor(() => expect(storeState.addClip).toHaveBeenCalled());
+    expect(toast.success).toHaveBeenCalledWith("Import complete", expect.stringContaining("0 blocks across 0 tracks · 0 images · 1 audio"));
     expect(storeState.renameProject).toHaveBeenCalledWith("Audio Storyboard");
 
     expect(storeState.addPlaceholderMedia).toHaveBeenCalledWith(

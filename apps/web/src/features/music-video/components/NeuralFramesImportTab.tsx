@@ -1,5 +1,4 @@
-import React, { useRef, useState } from "react";
-import { Upload } from "lucide-react";
+import React, { useCallback, useImperativeHandle, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { useProjectStore } from "../../../stores/project-store";
 import { addTimelineClip, type TimelineClipStore } from "../timeline/timeline-clips";
@@ -9,6 +8,7 @@ import type { MediaItem, Track } from "@openreel/core";
 import { useMusicVideoStore } from "../../../stores/music-video-store";
 import { useUIStore } from "../../../stores/ui-store";
 import type { ImportError } from "../../../stores/ui-store";
+import { toast, useNotificationStore } from "../../../stores/notification-store";
 
 /** Map NeuralFrames MetadataBlockKind → MetadataKind for timeline clips. */
 function blockKindToMetadataKind(kind: string): string {
@@ -174,295 +174,283 @@ function blockDurationSeconds(block: MetadataBlock): number {
   return Number.isFinite(rawDuration) && rawDuration >= 0 ? rawDuration : 0;
 }
 
+export interface NeuralFramesImportTabHandle {
+  openFilePicker: () => void;
+}
+
 interface Props {
   openreelProjectId: string;
   orchestratorUrl: string;
   onImported?: () => void;
 }
 
-export const NeuralFramesImportTab: React.FC<Props> = ({
-  openreelProjectId,
-  orchestratorUrl,
-  onImported,
-}) => {
-  const { addTrack, addClip, addPlaceholderMedia, replacePlaceholderMedia, addGeneratedMedia, renameTrack } = useProjectStore();
+export const NeuralFramesImportTab = React.forwardRef<NeuralFramesImportTabHandle, Props>(
+  ({ openreelProjectId, orchestratorUrl, onImported }, ref) => {
+    const { addTrack, addClip, addPlaceholderMedia, replacePlaceholderMedia, addGeneratedMedia, renameTrack } = useProjectStore();
 
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [status, setStatus] = useState<"idle" | "loading" | "done" | "error">("idle");
-  const [progress, setProgress] = useState("");
-  const [message, setMessage] = useState("");
-  const [fileName, setFileName] = useState("");
+    const inputRef = useRef<HTMLInputElement>(null);
+    const progressToastId = useRef<string | null>(null);
 
-  const handleFile = async (file: File) => {
-    setFileName(file.name);
-    setStatus("loading");
-    setProgress("Parsing…");
-    setMessage("");
+    useImperativeHandle(ref, () => ({
+      openFilePicker: () => {
+        inputRef.current?.click();
+      },
+    }));
 
-    let raw: NeuralFramesStoryboard;
-    try {
-      raw = JSON.parse(await file.text()) as NeuralFramesStoryboard;
-    } catch {
-      setStatus("error");
-      setMessage("Not valid JSON.");
-      return;
-    }
+    const showProgress = useCallback((message: string) => {
+      if (progressToastId.current) {
+        useNotificationStore.getState().removeNotification(progressToastId.current);
+      }
+      progressToastId.current = toast.info("Importing…", message);
+    }, []);
 
-    let result: NeuralFramesImportResult;
-    try {
-      setProgress("Importing scenes…");
-      const res = await fetch(`${orchestratorUrl}/api/import/neuralframes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(raw),
-      });
-      const data = (await res.json()) as NeuralFramesImportResult & { error?: string };
-      if (!res.ok || data.error) {
-        setStatus("error");
-        setMessage(data.error ?? "Import failed");
+    const clearProgress = useCallback(() => {
+      if (progressToastId.current) {
+        useNotificationStore.getState().removeNotification(progressToastId.current);
+        progressToastId.current = null;
+      }
+    }, []);
+
+    const handleFile = useCallback(async (file: File) => {
+      showProgress(`Parsing ${file.name}…`);
+
+      let raw: NeuralFramesStoryboard;
+      try {
+        raw = JSON.parse(await file.text()) as NeuralFramesStoryboard;
+      } catch {
+        clearProgress();
+        toast.error("Import failed", "Not valid JSON.");
         return;
       }
-      result = data;
-    } catch (e) {
-      setStatus("error");
-      setMessage((e as Error).message);
-      return;
-    }
 
-    try {
-      const musicVideoStore = useMusicVideoStore.getState();
-      if (!musicVideoStore.getProject(openreelProjectId)) {
-        musicVideoStore.createProject(openreelProjectId, result.title);
+      let result: NeuralFramesImportResult;
+      try {
+        showProgress("Importing scenes…");
+        const res = await fetch(`${orchestratorUrl}/api/import/neuralframes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(raw),
+        });
+        const data = (await res.json()) as NeuralFramesImportResult & { error?: string };
+        if (!res.ok || data.error) {
+          clearProgress();
+          toast.error("Import failed", data.error ?? "Import failed");
+          return;
+        }
+        result = data;
+      } catch (e) {
+        clearProgress();
+        toast.error("Import failed", (e as Error).message);
+        return;
       }
-      musicVideoStore.applyNeuralFramesImport(openreelProjectId, result);
 
-      // Name the main OpenReel project after the imported storyboard
-      useProjectStore.getState().renameProject(result.title);
+      try {
+        const musicVideoStore = useMusicVideoStore.getState();
+        if (!musicVideoStore.getProject(openreelProjectId)) {
+          musicVideoStore.createProject(openreelProjectId, result.title);
+        }
+        musicVideoStore.applyNeuralFramesImport(openreelProjectId, result);
 
-      // ── Each MetadataTrack → real metadata clips via addTimelineClip ──
-      const storeIface: TimelineClipStore = {
-        get project() { return useProjectStore.getState().project; },
-        addTrack,
-        renameTrack,
-        addGeneratedMedia,
-        addClip,
-      };
+        // Name the main OpenReel project after the imported storyboard
+        useProjectStore.getState().renameProject(result.title);
 
-      let trackBlocksSucceeded = 0;
-      let trackBlocksFailed = 0;
-      const failedBlocks: string[] = [];
+        // ── Each MetadataTrack → real metadata clips via addTimelineClip ──
+        const storeIface: TimelineClipStore = {
+          get project() { return useProjectStore.getState().project; },
+          addTrack,
+          renameTrack,
+          addGeneratedMedia,
+          addClip,
+        };
 
-      for (const track of result.metadataTracks) {
-        setProgress(`Creating track "${track.label}"…`);
-        const isSceneTrack = track.kind === "sections";
-        for (const block of track.blocks) {
-          const duration = blockDurationSeconds(block);
-          const clipResult = await addTimelineClip(storeIface, {
-            trackName: track.label,
-            kind: blockKindToMetadataKind(block.kind),
-            label: block.label,
-            color: block.color ?? "#94a3b8",
-            startTime: block.startSeconds,
-            duration,
-            metadata: metadataForBlock(block, result, raw),
-            trackType: isSceneTrack ? "video" : "metadata",
-          });
-          if (clipResult.success) {
-            trackBlocksSucceeded++;
-          } else {
-            trackBlocksFailed++;
-            failedBlocks.push(`${block.label} (${clipResult.error?.code ?? "unknown"})`);
+        let trackBlocksSucceeded = 0;
+        let trackBlocksFailed = 0;
+        const failedBlocks: string[] = [];
+
+        for (const track of result.metadataTracks) {
+          showProgress(`Creating track "${track.label}"…`);
+          const isSceneTrack = track.kind === "sections";
+          for (const block of track.blocks) {
+            const duration = blockDurationSeconds(block);
+            const clipResult = await addTimelineClip(storeIface, {
+              trackName: track.label,
+              kind: blockKindToMetadataKind(block.kind),
+              label: block.label,
+              color: block.color ?? "#94a3b8",
+              startTime: block.startSeconds,
+              duration,
+              metadata: metadataForBlock(block, result, raw),
+              trackType: isSceneTrack ? "video" : "metadata",
+            });
+            if (clipResult.success) {
+              trackBlocksSucceeded++;
+            } else {
+              trackBlocksFailed++;
+              failedBlocks.push(`${block.label} (${clipResult.error?.code ?? "unknown"})`);
+            }
           }
         }
-      }
 
-      if (trackBlocksFailed > 0 && trackBlocksSucceeded === 0) {
-        setStatus("error");
-        setMessage(`Failed to create any timeline tracks: ${failedBlocks.slice(0, 3).join(", ")}${failedBlocks.length > 3 ? ` and ${failedBlocks.length - 3} more` : ""}`);
-        return;
-      }
-
-      // ── Scene images → media library, flagged as generated ───────────────────
-      let imageCount = 0;
-      for (let i = 0; i < result.generatedAssets.length; i++) {
-        const asset = result.generatedAssets[i];
-
-        setProgress(`Adding image ${i + 1} / ${result.generatedAssets.length}…`);
-
-        const item = createGeneratedMediaItem(result, asset);
-        addPlaceholderMedia(item);
-
-        if (asset.outputPath) {
-          fetch(asset.outputPath)
-            .then((r) => r.blob())
-            .then((blob) => replacePlaceholderMedia(item.id, blob, item.name))
-            .catch((err) => console.warn(`[NF] image ${i + 1}:`, err));
+        if (trackBlocksFailed > 0 && trackBlocksSucceeded === 0) {
+          clearProgress();
+          toast.error("Import failed", `Failed to create any timeline tracks: ${failedBlocks.slice(0, 3).join(", ")}${failedBlocks.length > 3 ? ` and ${failedBlocks.length - 3} more` : ""}`);
+          return;
         }
 
-        imageCount++;
-      }
+        // ── Scene images → media library, flagged as generated ───────────────────
+        let imageCount = 0;
+        for (let i = 0; i < result.generatedAssets.length; i++) {
+          const asset = result.generatedAssets[i];
 
+          showProgress(`Adding image ${i + 1} / ${result.generatedAssets.length}…`);
 
+          const item = createGeneratedMediaItem(result, asset);
+          addPlaceholderMedia(item);
 
-      // ── Character & LoRA reference images → placeholder media ────────────────
-      const characters = Array.isArray(raw.storyboard_props?.characters) ? raw.storyboard_props.characters : [];
-      for (const character of characters) {
-        const imageJob = normalizeImageJob(character.image_job);
-        const urls = imageJob?.assets.map((asset) => asset.url) ?? [];
-        for (const url of urls) {
-          const refName = displayFileName(url);
-          const refId = uuidv4();
-          addPlaceholderMedia({
-            id: refId,
-            name: refName,
-            title: `Reference: ${character.name}`,
-            type: "image",
-            fileHandle: null,
-            blob: null,
-            metadata: { duration: 0, width: 0, height: 0, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 0 },
-            thumbnailUrl: url,
-            waveformData: null,
-            isPlaceholder: false,
-            tags: ["reference", "character", "neuralframes"],
-            group: "Reference Images",
-            generationMeta: { provider: "neuralframes", model: "nf", prompt: `Character reference: ${character.name}`, jobId: refId, status: "realized" },
-            sourceFile: { name: refName, size: 0, lastModified: 0 },
-          });
+          if (asset.outputPath) {
+            fetch(asset.outputPath)
+              .then((r) => r.blob())
+              .then((blob) => replacePlaceholderMedia(item.id, blob, item.name))
+              .catch((err) => console.warn(`[NF] image ${i + 1}:`, err));
+          }
+
           imageCount++;
         }
-      }
-      const loras = Array.isArray(raw.storyboard_props?.loras) ? raw.storyboard_props.loras : [];
-      for (const lora of loras) {
-        const urls = lora.training_image_urls ?? [];
-        for (const url of urls) {
-          const refName = displayFileName(url);
-          const refId = uuidv4();
-          addPlaceholderMedia({
-            id: refId,
-            name: refName,
-            title: `Training: ${lora.name}`,
-            type: "image",
-            fileHandle: null,
-            blob: null,
-            metadata: { duration: 0, width: 0, height: 0, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 0 },
-            thumbnailUrl: url,
-            waveformData: null,
-            isPlaceholder: false,
-            tags: ["training", "lora", "neuralframes"],
-            group: "Reference Images",
-            generationMeta: { provider: "neuralframes", model: "nf", prompt: `LoRA training: ${lora.name}`, jobId: refId, status: "realized" },
-            sourceFile: { name: refName, size: 0, lastModified: 0 },
-          });
-          imageCount++;
+
+        // ── Character & LoRA reference images → placeholder media ────────────────
+        const characters = Array.isArray(raw.storyboard_props?.characters) ? raw.storyboard_props.characters : [];
+        for (const character of characters) {
+          const imageJob = normalizeImageJob(character.image_job);
+          const urls = imageJob?.assets.map((asset) => asset.url) ?? [];
+          for (const url of urls) {
+            const refName = displayFileName(url);
+            const refId = uuidv4();
+            addPlaceholderMedia({
+              id: refId,
+              name: refName,
+              title: `Reference: ${character.name}`,
+              type: "image",
+              fileHandle: null,
+              blob: null,
+              metadata: { duration: 0, width: 0, height: 0, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 0 },
+              thumbnailUrl: url,
+              waveformData: null,
+              isPlaceholder: false,
+              tags: ["reference", "character", "neuralframes"],
+              group: "Reference Images",
+              generationMeta: { provider: "neuralframes", model: "nf", prompt: `Character reference: ${character.name}`, jobId: refId, status: "realized" },
+              sourceFile: { name: refName, size: 0, lastModified: 0 },
+            });
+            imageCount++;
+          }
         }
-      }
-      // ── Audio reference → relinkable placeholder clip ────────────────────────
-      let audioCount = 0;
-      const hasAudioMeta = raw.audio != null;
-      if (hasAudioMeta) {
-        const audioDuration = raw.audio?.duration ?? 0;
-        const audioName = getAudioFileName(raw);
-        const audioTitle = result.title || "audio";
-        const sourceName = audioName ? displayFileName(audioName) : `${audioTitle}.audio`;
-        const audioMediaId = `audio-${uuidv4()}`;
-        const audioItem: MediaItem = {
-          id: audioMediaId,
-          name: sourceName,
-          type: "audio",
-          fileHandle: null,
-          blob: null,
-          metadata: {
-            duration: audioDuration,
-            width: 0,
-            height: 0,
-            frameRate: 0,
-            codec: "",
-            sampleRate: 0,
-            channels: 0,
-            fileSize: pickNumber(raw.audio, ["size", "fileSize"]) ?? 0,
-          },
-          thumbnailUrl: null,
-          waveformData: null,
-          isPlaceholder: true,
-          title: audioTitle,
-          group: "Imported Audio",
-          tags: ["audio", "neuralframes"],
-          sourceFile: {
+        const loras = Array.isArray(raw.storyboard_props?.loras) ? raw.storyboard_props.loras : [];
+        for (const lora of loras) {
+          const urls = lora.training_image_urls ?? [];
+          for (const url of urls) {
+            const refName = displayFileName(url);
+            const refId = uuidv4();
+            addPlaceholderMedia({
+              id: refId,
+              name: refName,
+              title: `Training: ${lora.name}`,
+              type: "image",
+              fileHandle: null,
+              blob: null,
+              metadata: { duration: 0, width: 0, height: 0, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 0 },
+              thumbnailUrl: url,
+              waveformData: null,
+              isPlaceholder: false,
+              tags: ["training", "lora", "neuralframes"],
+              group: "Reference Images",
+              generationMeta: { provider: "neuralframes", model: "nf", prompt: `LoRA training: ${lora.name}`, jobId: refId, status: "realized" },
+              sourceFile: { name: refName, size: 0, lastModified: 0 },
+            });
+            imageCount++;
+          }
+        }
+        // ── Audio reference → relinkable placeholder clip ────────────────────────
+        let audioCount = 0;
+        const hasAudioMeta = raw.audio != null;
+        if (hasAudioMeta) {
+          const audioDuration = raw.audio?.duration ?? 0;
+          const audioName = getAudioFileName(raw);
+          const audioTitle = result.title || "audio";
+          const sourceName = audioName ? displayFileName(audioName) : `${audioTitle}.audio`;
+          const audioMediaId = `audio-${uuidv4()}`;
+          const audioItem: MediaItem = {
+            id: audioMediaId,
             name: sourceName,
-            size: pickNumber(raw.audio, ["size", "fileSize"]) ?? 0,
-            lastModified: pickNumber(raw.audio, ["lastModified"]) ?? 0,
-          },
-        };
-        addPlaceholderMedia(audioItem);
-        const audioTrackId = await findOrCreateTrack("audio", "Audio");
-        if (audioTrackId) {
-          const clipResult = await addClip(audioTrackId, audioMediaId, 0, {
-            duration: audioDuration,
+            type: "audio",
+            fileHandle: null,
+            blob: null,
             metadata: {
-              sourceFile: audioItem.sourceFile,
-              importSource: "neuralframes",
-              kind: "audio",
+              duration: audioDuration,
+              width: 0,
+              height: 0,
+              frameRate: 0,
+              codec: "",
+              sampleRate: 0,
+              channels: 0,
+              fileSize: pickNumber(raw.audio, ["size", "fileSize"]) ?? 0,
             },
-          });
-          if (clipResult.success) audioCount++;
+            thumbnailUrl: null,
+            waveformData: null,
+            isPlaceholder: true,
+            title: audioTitle,
+            group: "Imported Audio",
+            tags: ["audio", "neuralframes"],
+            sourceFile: {
+              name: sourceName,
+              size: pickNumber(raw.audio, ["size", "fileSize"]) ?? 0,
+              lastModified: pickNumber(raw.audio, ["lastModified"]) ?? 0,
+            },
+          };
+          addPlaceholderMedia(audioItem);
+          const audioTrackId = await findOrCreateTrack("audio", "Audio");
+          if (audioTrackId) {
+            const clipResult = await addClip(audioTrackId, audioMediaId, 0, {
+              duration: audioDuration,
+              metadata: {
+                sourceFile: audioItem.sourceFile,
+                importSource: "neuralframes",
+                kind: "audio",
+              },
+            });
+            if (clipResult.success) audioCount++;
+          }
         }
-      }
 
-      setStatus("done");
-      const trackCount = result.metadataTracks.length;
-      if (trackBlocksFailed > 0) {
-        const errors: ImportError[] = [];
-        for (const entry of failedBlocks) {
-          errors.push({
-            id: `nf-block-${uuidv4().slice(0, 8)}`,
-            kind: "block_failed",
-            message: entry,
-            label: entry.split(" (")[0] ?? entry,
-          });
+        clearProgress();
+        const trackCount = result.metadataTracks.length;
+        if (trackBlocksFailed > 0) {
+          const errors: ImportError[] = [];
+          for (const entry of failedBlocks) {
+            errors.push({
+              id: `nf-block-${uuidv4().slice(0, 8)}`,
+              kind: "block_failed",
+              message: entry,
+              label: entry.split(" (")[0] ?? entry,
+            });
+          }
+          useUIStore.getState().addImportErrors(errors);
         }
-        useUIStore.getState().addImportErrors(errors);
+        const warning = trackBlocksFailed > 0
+          ? ` (${trackBlocksFailed} block${trackBlocksFailed === 1 ? "" : "s"} failed)`
+          : "";
+        toast.success(
+          "Import complete",
+          `${trackBlocksSucceeded} blocks across ${trackCount} track${trackCount !== 1 ? "s" : ""} · ${imageCount} images · ${audioCount} audio in media library${warning}`,
+        );
+        setTimeout(() => onImported?.(), 600);
+      } catch (e) {
+        console.error("[NeuralFramesImport] Unexpected error during import:", e);
+        clearProgress();
+        toast.error("Import failed", e instanceof Error ? e.message : "Unexpected error");
       }
-      const warning = trackBlocksFailed > 0
-        ? ` (${trackBlocksFailed} block${trackBlocksFailed === 1 ? "" : "s"} failed)`
-        : "";
-      setMessage(
-        `${trackBlocksSucceeded} blocks across ${trackCount} track${trackCount !== 1 ? "s" : ""} · ${imageCount} images · ${audioCount} audio in media library${warning}`,
-      );
-      setTimeout(() => onImported?.(), 600);
-    } catch (e) {
-      console.error("[NeuralFramesImport] Unexpected error during import:", e);
-      setStatus("error");
-      setMessage(`Import failed: ${e instanceof Error ? e.message : "Unexpected error"}`);
-    }
-  };
+    }, [openreelProjectId, orchestratorUrl, onImported, showProgress, clearProgress, addTrack, addClip, addPlaceholderMedia, replacePlaceholderMedia, addGeneratedMedia, renameTrack]);
 
-  return (
-    <div className="p-4 space-y-4">
-      <p className="text-white/50 text-xs">
-        Import a Neural Frames storyboard. Each scene group becomes a metadata
-        track; scene images land in the media library.
-      </p>
-
-      <button
-        type="button"
-        onClick={() => inputRef.current?.click()}
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          const file = e.dataTransfer.files[0];
-          if (file) handleFile(file);
-        }}
-        disabled={status === "loading"}
-        className="w-full border border-dashed border-white/20 hover:border-blue-400/60 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg py-8 flex flex-col items-center gap-2 text-white/40 hover:text-white/70 transition-colors cursor-pointer"
-      >
-        <Upload size={20} />
-        <span className="text-xs">
-          {status === "loading"
-            ? progress
-            : fileName || "Click or drop a .storyboard.json file"}
-        </span>
-      </button>
-
+    return (
       <input
         ref={inputRef}
         type="file"
@@ -478,17 +466,8 @@ export const NeuralFramesImportTab: React.FC<Props> = ({
           e.target.value = "";
         }}
       />
+    );
+  },
+);
 
-      {status === "done" && (
-        <div className="rounded bg-green-500/10 border border-green-500/20 px-3 py-2 text-green-300 text-xs">
-          ✓ {message}
-        </div>
-      )}
-      {status === "error" && (
-        <div className="rounded bg-red-500/10 border border-red-500/20 px-3 py-2 text-red-300 text-xs">
-          ✕ {message}
-        </div>
-      )}
-    </div>
-  );
-};
+NeuralFramesImportTab.displayName = "NeuralFramesImportTab";

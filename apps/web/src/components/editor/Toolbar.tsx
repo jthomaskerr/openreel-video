@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect, useMemo } from "react";
+import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import {
   ChevronDown,
   FileVideo,
@@ -62,7 +62,7 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@openreel/ui";
-import { NeuralFramesImportTab } from "../../features/music-video";
+import { NeuralFramesImportTab, type NeuralFramesImportTabHandle } from "../../features/music-video";
 import { ORCHESTRATOR_URL } from "../../stores/music-video-store";
 
 type ExportType =
@@ -110,10 +110,10 @@ export const Toolbar: React.FC = () => {
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [isRecorderOpen, setIsRecorderOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [isNeuralFramesImportOpen, setIsNeuralFramesImportOpen] = useState(false);
   const { importMedia } = useProjectStore();
   const { track } = useAnalytics();
 
+  const neuralFramesImportRef = useRef<NeuralFramesImportTabHandle>(null);
   // Local editable project name (committed onBlur / Enter)
   const [projectNameDraft, setProjectNameDraft] = useState(project.name);
   useEffect(() => {
@@ -781,7 +781,7 @@ export const Toolbar: React.FC = () => {
         <Tooltip>
           <TooltipTrigger asChild>
             <button
-              onClick={() => setIsNeuralFramesImportOpen(true)}
+              onClick={() => neuralFramesImportRef.current?.openFilePicker()}
               className="w-[26px] h-[26px] grid place-items-center rounded-md text-fg-2 hover:bg-hover hover:text-fg transition-colors"
             >
               <Upload size={14} />
@@ -1024,33 +1024,12 @@ export const Toolbar: React.FC = () => {
         </>
       )}
 
-      {/* Neural Frames Import dialog */}
-      {isNeuralFramesImportOpen && (
-        <>
-          <div
-            className="fixed inset-0 bg-black/50 z-40"
-            onClick={() => setIsNeuralFramesImportOpen(false)}
-          />
-          <div className="fixed inset-4 md:inset-10 z-50 bg-bg-1 border border-border rounded-lg shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
-            <div className="flex items-center justify-between p-3 border-b border-border">
-              <span className="text-sm font-medium text-fg">Import Neural Frames</span>
-              <button
-                onClick={() => setIsNeuralFramesImportOpen(false)}
-                className="p-1.5 rounded hover:bg-hover text-fg-3 hover:text-fg transition-colors"
-              >
-                <X size={14} />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto">
-              <NeuralFramesImportTab
-                openreelProjectId={project.id}
-                orchestratorUrl={ORCHESTRATOR_URL}
-                onImported={() => setIsNeuralFramesImportOpen(false)}
-              />
-            </div>
-          </div>
-        </>
-      )}
+      {/* Neural Frames Import — hidden, triggered via ref from toolbar button */}
+      <NeuralFramesImportTab
+        ref={neuralFramesImportRef}
+        openreelProjectId={project.id}
+        orchestratorUrl={ORCHESTRATOR_URL}
+      />
     </header>
   );
 };
