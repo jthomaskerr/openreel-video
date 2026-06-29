@@ -51,6 +51,7 @@ import { getTransitionBridge } from "../bridges/transition-bridge";
 import {
   autoSaveManager,
   initializeAutoSave,
+  stopAutoSave,
   type AutoSaveMetadata,
 } from "../services/auto-save";
 import { useEngineStore } from "./engine-store";
@@ -118,6 +119,9 @@ export interface ProjectState {
   loadProject: (project: Project) => void;
   renameProject: (name: string) => Promise<ActionResult>;
   updateSettings: (settings: Partial<ProjectSettings>) => Promise<ActionResult>;
+  deleteCurrentProject: () => Promise<void>;
+  openProjectDialog: () => Promise<boolean>;
+  saveProjectAsDialog: () => Promise<boolean>;
 
   // Media library actions
   importMedia: (file: File) => Promise<ActionResult>;
@@ -1641,6 +1645,43 @@ export const useProjectStore = create<ProjectState>()(
           set({ project: { ...project } });
         }
         return result;
+      },
+
+      // Delete current project
+      deleteCurrentProject: async () => {
+        const { project } = get();
+        await projectManager.deleteProject(project.id);
+        await autoSaveManager.clearProjectSaves(project.id);
+        stopAutoSave();
+        // Reset to empty project
+        const nextProject = createEmptyProject();
+        const newHistory = new ActionHistory();
+        const newExecutor = new ActionExecutor(newHistory);
+        set({
+          project: nextProject,
+          actionHistory: newHistory,
+          actionExecutor: newExecutor,
+          clipUndoStack: [],
+          clipRedoStack: [],
+          templateUndoStack: [],
+          templateRedoStack: [],
+          error: null,
+        });
+      },
+
+      // Open project from file
+      openProjectDialog: async () => {
+        const opened = await projectManager.openProject();
+        if (!opened) return false;
+        const { loadProject } = get();
+        loadProject(opened);
+        return true;
+      },
+
+      // Save project as file
+      saveProjectAsDialog: async () => {
+        const { project } = get();
+        return projectManager.saveProjectAs(project);
       },
 
       // Media library actions
