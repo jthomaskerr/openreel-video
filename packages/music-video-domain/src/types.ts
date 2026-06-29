@@ -325,4 +325,6 @@ export interface NeuralFramesImportResult {
   shots: StoryboardShot[];
   generatedAssets: GeneratedAsset[];
   timingHints: Pick<TimingAnalysis, "bpm" | "sections">;
+  /** Map of original remote URL → backend-served local URL. Populated by the import route after downloading assets. */
+  remoteUrlMap?: Record<string, string>;
 }

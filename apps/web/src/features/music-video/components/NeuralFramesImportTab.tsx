@@ -62,6 +62,7 @@ function displayFileName(path: string | undefined): string {
 }
 
 function metadataForBlock(block: MetadataBlock, result: NeuralFramesImportResult, raw: NeuralFramesStoryboard) {
+  const resolveUrl = (url: string) => result.remoteUrlMap?.[url] ?? url;
   const base: Record<string, unknown> = {
     text: block.text,
     importSource: block.importSource,
@@ -86,7 +87,7 @@ function metadataForBlock(block: MetadataBlock, result: NeuralFramesImportResult
     const characters = raw.storyboard_props?.characters ?? [];
     const character = characters.find((candidate) => candidate.id === block.importId);
     const imageJob = normalizeImageJob(character?.image_job);
-    const urls = imageJob?.assets.map((asset) => asset.url) ?? [];
+    const urls = (imageJob?.assets.map((asset) => asset.url) ?? []).map(resolveUrl);
     return {
       ...base,
       name: character?.name ?? block.label,
@@ -102,7 +103,7 @@ function metadataForBlock(block: MetadataBlock, result: NeuralFramesImportResult
     return {
       ...base,
       name: lora?.name ?? block.label,
-      trainingImageUrls: lora?.training_image_urls ?? [],
+      trainingImageUrls: (lora?.training_image_urls ?? []).map(resolveUrl),
       loraId: lora?.id,
     };
   }
@@ -319,12 +320,14 @@ export const NeuralFramesImportTab = React.forwardRef<NeuralFramesImportTabHandl
         }
 
         // ── Character & LoRA reference images → placeholder media ────────────────
+        const resolveUrl = (url: string) => result.remoteUrlMap?.[url] ?? url;
         const characters = Array.isArray(raw.storyboard_props?.characters) ? raw.storyboard_props.characters : [];
         for (const character of characters) {
           const imageJob = normalizeImageJob(character.image_job);
           const urls = imageJob?.assets.map((asset) => asset.url) ?? [];
           for (const url of urls) {
-            const refName = displayFileName(url);
+            const localUrl = resolveUrl(url);
+            const refName = displayFileName(localUrl);
             const refId = uuidv4();
             addPlaceholderMedia({
               id: refId,
@@ -334,7 +337,7 @@ export const NeuralFramesImportTab = React.forwardRef<NeuralFramesImportTabHandl
               fileHandle: null,
               blob: null,
               metadata: { duration: 0, width: 0, height: 0, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 0 },
-              thumbnailUrl: url,
+              thumbnailUrl: localUrl,
               waveformData: null,
               isPlaceholder: false,
               tags: ["reference", "character", "neuralframes"],
@@ -349,7 +352,8 @@ export const NeuralFramesImportTab = React.forwardRef<NeuralFramesImportTabHandl
         for (const lora of loras) {
           const urls = lora.training_image_urls ?? [];
           for (const url of urls) {
-            const refName = displayFileName(url);
+            const localUrl = resolveUrl(url);
+            const refName = displayFileName(localUrl);
             const refId = uuidv4();
             addPlaceholderMedia({
               id: refId,
@@ -359,7 +363,7 @@ export const NeuralFramesImportTab = React.forwardRef<NeuralFramesImportTabHandl
               fileHandle: null,
               blob: null,
               metadata: { duration: 0, width: 0, height: 0, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 0 },
-              thumbnailUrl: url,
+              thumbnailUrl: localUrl,
               waveformData: null,
               isPlaceholder: false,
               tags: ["training", "lora", "neuralframes"],

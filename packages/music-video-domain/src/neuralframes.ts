@@ -31,14 +31,14 @@ export function normalizeImageJob(
   if (!imageJob) return undefined;
   // image_job itself can be a JSON string
   if (typeof imageJob === "string") {
-    try { imageJob = JSON.parse(imageJob); } catch { return undefined; }
+    try { imageJob = JSON.parse(imageJob); } catch (_e) { return undefined; }
   }
   if (typeof imageJob !== "object" || imageJob === null) return undefined;
   const job = imageJob as Record<string, unknown>;
   let assets = job.assets;
   // assets can also be a JSON string
   if (typeof assets === "string") {
-    try { assets = JSON.parse(assets); } catch { assets = undefined; }
+    try { assets = JSON.parse(assets); } catch (_e) { assets = undefined; }
   }
   if (!Array.isArray(assets)) return undefined;
   return { assets: assets as Array<{ url: string }> };

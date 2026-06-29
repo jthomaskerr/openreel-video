@@ -4,7 +4,8 @@ import { mkdirSync, createWriteStream } from "node:fs";
 import { join, extname } from "node:path";
 import { get as httpsGet } from "node:https";
 import { get as httpGet } from "node:http";
-import { importNeuralFrames } from "@openreel/music-video-domain";
+import { createHash } from "node:crypto";
+import { importNeuralFrames, normalizeImageJob } from "@openreel/music-video-domain";
 import type { NeuralFramesStoryboard } from "@openreel/music-video-domain";
 import { config } from "../env.js";
 
@@ -28,13 +29,20 @@ function downloadFile(url: string, destPath: string): Promise<void> {
   return promise;
 }
 
+/** Stable 16-char file ID derived from a URL, for consistent cache filenames. */
+function urlToFileId(url: string): string {
+  return createHash("sha256").update(url).digest("hex").slice(0, 16);
+}
+
 /**
  * POST /api/import/neuralframes
  * Body: NeuralFramesStoryboard JSON (the file contents, parsed by the client)
- * Returns: NeuralFramesImportResult with outputPath rewritten to orchestrator-served URLs.
+ * Returns: NeuralFramesImportResult with ALL remote asset URLs rewritten to
+ * orchestrator-served local URLs (scene images, character reference images,
+ * LoRA training images). remoteUrlMap contains original→local for the client.
  *
- * Scene images are downloaded into generatedAssetsDir/neuralframes/<storyboardId>/
- * and served back as http://localhost:<port>/assets/... so the browser can fetch them.
+ * Assets are cached at generatedAssetsDir/neuralframes/<storyboardId>/
+ * and served as http://localhost:<port>/assets/...
  */
 neuralframesRouter.post("/", async (req, res) => {
   const raw = req.body as NeuralFramesStoryboard;
@@ -50,17 +58,57 @@ neuralframesRouter.post("/", async (req, res) => {
     const cacheDir = join(config.generatedAssetsDir, "neuralframes", result.storyboardId);
     mkdirSync(cacheDir, { recursive: true });
 
+    // Collect every remote URL from the result and the raw storyboard.
+    // Using a Set so each URL is downloaded exactly once.
+    const remoteUrls = new Set<string>();
+
+    for (const asset of result.generatedAssets) {
+      if (asset.outputPath?.startsWith("http")) remoteUrls.add(asset.outputPath);
+    }
+    for (const track of result.metadataTracks) {
+      for (const block of track.blocks) {
+        if (block.thumbnailUrl?.startsWith("http")) remoteUrls.add(block.thumbnailUrl);
+      }
+    }
+    for (const char of raw.storyboard_props.characters ?? []) {
+      const imageJob = normalizeImageJob(char.image_job);
+      for (const imgAsset of imageJob?.assets ?? []) {
+        if (imgAsset.url?.startsWith("http")) remoteUrls.add(imgAsset.url);
+      }
+    }
+    for (const lora of raw.storyboard_props.loras ?? []) {
+      for (const url of lora.training_image_urls ?? []) {
+        if (url?.startsWith("http")) remoteUrls.add(url);
+      }
+    }
+
+    // Download all remote URLs and build the original→local rewrite map.
+    const remoteUrlMap: Record<string, string> = {};
     await Promise.all(
-      result.generatedAssets.map(async (asset) => {
-        if (!asset.outputPath?.startsWith("http")) return;
-        const ext = extname(new URL(asset.outputPath).pathname) || ".webp";
-        const localFile = join(cacheDir, `${asset.id}${ext}`);
-        await downloadFile(asset.outputPath, localFile);
+      Array.from(remoteUrls).map(async (url) => {
+        const ext = extname(new URL(url).pathname) || ".webp";
+        const localFile = join(cacheDir, `${urlToFileId(url)}${ext}`);
+        await downloadFile(url, localFile);
         const rel = localFile.slice(config.generatedAssetsDir.length);
-        asset.outputPath = `http://localhost:${config.port}/assets${rel}`;
+        remoteUrlMap[url] = `http://localhost:${config.port}/assets${rel}`;
       }),
     );
 
+    // Rewrite all URL references inside the result.
+    for (const asset of result.generatedAssets) {
+      if (asset.outputPath && remoteUrlMap[asset.outputPath]) {
+        asset.outputPath = remoteUrlMap[asset.outputPath];
+      }
+    }
+    for (const track of result.metadataTracks) {
+      for (const block of track.blocks) {
+        if (block.thumbnailUrl && remoteUrlMap[block.thumbnailUrl]) {
+          block.thumbnailUrl = remoteUrlMap[block.thumbnailUrl];
+        }
+      }
+    }
+
+    result.remoteUrlMap = remoteUrlMap;
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: `Import failed: ${(e as Error).message}` });
