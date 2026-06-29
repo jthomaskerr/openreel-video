@@ -60,12 +60,12 @@ export class ActionExecutor {
         },
       };
     }
-    const projectSnapshot = JSON.parse(JSON.stringify(project));
-    const inverseAction = this.inverseGenerator.generate(
-      action,
-      projectSnapshot,
-    );
     try {
+      const projectSnapshot = JSON.parse(JSON.stringify(project));
+      const inverseAction = this.inverseGenerator.generate(
+        action,
+        projectSnapshot,
+      );
       await this.applyAction(action as TimelineAction, project);
       this.history.push(action, inverseAction);
 
@@ -77,7 +77,7 @@ export class ActionExecutor {
       return {
         success: false,
         error: {
-          code: "INVALID_PARAMS",
+          code: "ACTION_FAILED",
           message:
             error instanceof Error ? error.message : "Unknown error occurred",
         },
@@ -355,6 +355,7 @@ export class ActionExecutor {
           image: "Image",
           text: "Text",
           graphics: "Graphics",
+          metadata: "Metadata",
         };
         const trackCount =
           timeline.tracks.filter(

@@ -60,6 +60,7 @@ export interface MediaItem {
     readonly negativePrompt?: string;
     readonly inputs?: Record<string, unknown>;
     readonly jobId?: string;
+    readonly status?: string;
   };
   /** User-editable title for the asset (distinct from filename-based name) */
   readonly title?: string;

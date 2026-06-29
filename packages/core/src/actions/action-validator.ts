@@ -233,14 +233,14 @@ export class ActionValidator {
     switch (action.type) {
       case "track/add":
         if (
-          !["video", "audio", "image", "text", "graphics"].includes(
+          !["video", "audio", "image", "text", "graphics", "metadata"].includes(
             action.params.trackType,
           )
         ) {
           errors.push({
             code: "INVALID_PARAMS",
             message:
-              "Track type must be 'video', 'audio', 'image', 'text', or 'graphics'",
+              "Track type must be 'video', 'audio', 'image', 'text', 'graphics', or 'metadata'",
             path: "params.trackType",
           });
         }

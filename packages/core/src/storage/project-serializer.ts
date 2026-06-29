@@ -1,4 +1,4 @@
-import type { Project, MediaItem } from "../types";
+import type { Clip, MediaItem, Project, Track } from "../types";
 import type { IStorageEngine, MediaRecord } from "./types";
 import type { ValidationResult, ProjectFileWithMetadata } from "./schema-types";
 
@@ -47,32 +47,15 @@ export class ProjectSerializer {
 
   importFromJson(json: string): Project {
     const projectFile = JSON.parse(json) as ProjectFile;
-
-    if (projectFile.version !== SCHEMA_VERSION) {
-      return this.migrateProject(projectFile);
+    if (!projectFile.project) {
+      throw new Error("Invalid project file: missing project field");
     }
 
-    const project = projectFile.project;
+    if (projectFile.version !== SCHEMA_VERSION) {
+      return this.normalizeImportedProject(this.migrateProject(projectFile));
+    }
 
-    const processedItems: MediaItem[] = project.mediaLibrary.items.map(
-      (item: MediaItem) => {
-        if (!item.blob) {
-          return {
-            ...item,
-            isPlaceholder: true,
-            originalUrl: item.thumbnailUrl || undefined,
-          };
-        }
-        return item;
-      },
-    );
-
-    return {
-      ...project,
-      mediaLibrary: {
-        items: processedItems,
-      },
-    };
+    return this.normalizeImportedProject(projectFile.project);
   }
 
   exportToJsonWithMetadata(project: Project, description?: string): string {
@@ -113,7 +96,7 @@ export class ProjectSerializer {
         return result;
       }
 
-      const project = projectFile.project;
+      const project = this.normalizeImportedProject(projectFile.project);
 
       if (!project.id) {
         result.errors.push("Missing project.id");
@@ -135,7 +118,6 @@ export class ProjectSerializer {
         result.errors.push("Missing project.mediaLibrary");
         result.valid = false;
       }
-
       if (!result.valid) {
         return result;
       }
@@ -154,15 +136,9 @@ export class ProjectSerializer {
         for (const track of project.timeline.tracks) {
           if (track.clips) {
             for (const clip of track.clips) {
-              const isVirtualClip =
-                clip.mediaId &&
-                (clip.mediaId.startsWith("text-") ||
-                  clip.mediaId.startsWith("shape-") ||
-                  clip.mediaId.startsWith("svg-") ||
-                  clip.mediaId.startsWith("sticker-"));
               if (
                 clip.mediaId &&
-                !isVirtualClip &&
+                !this.isVirtualMediaId(clip.mediaId) &&
                 !mediaIds.has(clip.mediaId)
               ) {
                 result.errors.push(
@@ -202,6 +178,136 @@ export class ProjectSerializer {
 
     const project = this.importFromJson(json);
     return { project, validation };
+  }
+
+  private normalizeImportedProject(project: Project): Project {
+    const itemsById = new Map(project.mediaLibrary.items.map((item) => [item.id, item]));
+    const processedItems: MediaItem[] = project.mediaLibrary.items.map((item) => {
+      if (!item.blob) {
+        return {
+          ...item,
+          isPlaceholder: true,
+          originalUrl: item.thumbnailUrl || undefined,
+        };
+      }
+      return item;
+    });
+
+    for (const track of project.timeline.tracks ?? []) {
+      for (const clip of track.clips ?? []) {
+        if (!clip.mediaId || this.isVirtualMediaId(clip.mediaId) || itemsById.has(clip.mediaId)) {
+          continue;
+        }
+        const placeholder = this.createMissingMediaPlaceholder(clip, track);
+        processedItems.push(placeholder);
+        itemsById.set(placeholder.id, placeholder);
+      }
+    }
+
+    return {
+      ...project,
+      mediaLibrary: {
+        ...project.mediaLibrary,
+        items: processedItems,
+      },
+    };
+  }
+
+  private createMissingMediaPlaceholder(clip: Clip, track: Track): MediaItem {
+    const sourceFile = this.extractSourceFile(clip);
+    const label = this.extractString(clip.metadata, ["label", "title", "name"]);
+    const mediaType = this.trackTypeToMediaType(track.type);
+    const name =
+      sourceFile?.name ??
+      label ??
+      `${track.name || track.type} ${clip.mediaId}`;
+
+    return {
+      id: clip.mediaId,
+      name,
+      type: mediaType,
+      fileHandle: null,
+      blob: null,
+      metadata: {
+        duration: clip.duration || 0,
+        width: 0,
+        height: 0,
+        frameRate: 0,
+        codec: "",
+        sampleRate: 0,
+        channels: 0,
+        fileSize: sourceFile?.size ?? 0,
+      },
+      thumbnailUrl: null,
+      waveformData: null,
+      isPlaceholder: true,
+      sourceFile,
+    };
+  }
+
+  private extractSourceFile(clip: Clip): MediaItem["sourceFile"] | undefined {
+    const raw = clip.metadata?.["sourceFile"];
+    if (raw && typeof raw === "object") {
+      const record = raw as Record<string, unknown>;
+      if (typeof record["name"] === "string" && record["name"].trim()) {
+        return {
+          name: record["name"],
+          size: typeof record["size"] === "number" ? record["size"] : 0,
+          lastModified: typeof record["lastModified"] === "number" ? record["lastModified"] : 0,
+          folder: typeof record["folder"] === "string" ? record["folder"] : undefined,
+        };
+      }
+    }
+
+    const name = this.extractString(clip.metadata, [
+      "sourceFileName",
+      "sourceFilename",
+      "fileName",
+      "filename",
+      "path",
+      "localPath",
+    ]);
+    if (!name) return undefined;
+
+    return {
+      name: name.split(/[\\/]/).pop() ?? name,
+      size: this.extractNumber(clip.metadata, ["fileSize", "sourceFileSize", "size"]) ?? 0,
+      lastModified: this.extractNumber(clip.metadata, ["lastModified", "sourceLastModified"]) ?? 0,
+    };
+  }
+
+  private extractString(source: Record<string, unknown> | undefined, keys: string[]): string | undefined {
+    if (!source) return undefined;
+    for (const key of keys) {
+      const value = source[key];
+      if (typeof value === "string" && value.trim()) return value;
+    }
+    return undefined;
+  }
+
+  private extractNumber(source: Record<string, unknown> | undefined, keys: string[]): number | undefined {
+    if (!source) return undefined;
+    for (const key of keys) {
+      const value = source[key];
+      if (typeof value === "number" && Number.isFinite(value)) return value;
+    }
+    return undefined;
+  }
+
+  private trackTypeToMediaType(trackType: Track["type"]): MediaItem["type"] {
+    if (trackType === "audio") return "audio";
+    if (trackType === "video") return "video";
+    return "image";
+  }
+
+  private isVirtualMediaId(mediaId: string): boolean {
+    return (
+      mediaId.startsWith("text-") ||
+      mediaId.startsWith("shape-") ||
+      mediaId.startsWith("svg-") ||
+      mediaId.startsWith("sticker-") ||
+      mediaId.startsWith("emoji-")
+    );
   }
 
   private async saveMediaBlobs(project: Project): Promise<void> {
@@ -262,6 +368,9 @@ export class ProjectSerializer {
   }
 
   private migrateProject(projectFile: ProjectFile): Project {
+    if (!projectFile.project) {
+      throw new Error("Invalid project file: missing project field");
+    }
     return projectFile.project;
   }
 

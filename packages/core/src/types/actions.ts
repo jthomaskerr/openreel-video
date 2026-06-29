@@ -24,6 +24,8 @@ export interface ActionResult {
 // Error codes for action validation and execution
 export type ActionErrorCode =
   | "INVALID_PARAMS" // Missing or malformed parameters
+  | "ACTION_FAILED" // Internal action execution failure
+  | "INTERNAL_ERROR" // Unexpected internal error
   | "CLIP_NOT_FOUND" // Referenced clip doesn't exist
   | "TRACK_NOT_FOUND" // Referenced track doesn't exist
   | "TRACK_LOCKED" // Attempting to modify locked track
