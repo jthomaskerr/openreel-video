@@ -97,6 +97,7 @@ export const Timeline: React.FC = () => {
     setTrackHeight,
     setTrackHeightById,
     getTrackHeight,
+    setViewportDimensions,
   } = useTimelineStore();
 
   const [showLayersPanel, setShowLayersPanel] = useState(false);

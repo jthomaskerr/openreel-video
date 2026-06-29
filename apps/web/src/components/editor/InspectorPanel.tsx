@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Captions, FileText, Upload, X as XIcon, Film, Music, ImageIcon, Download, Trash2, RefreshCw } from "lucide-react";
+import { Captions, FileText, Upload, X as XIcon, Film, Music, ImageIcon, Download, Trash2, RefreshCw, Info, Pencil, AlertTriangle, List } from "lucide-react";
 import { useProjectStore } from "../../stores/project-store";
 import { useTimelineStore } from "../../stores/timeline-store";
 import { useUIStore } from "../../stores/ui-store";
@@ -42,7 +42,6 @@ import {
 import {
   getTabsForClipType,
   getTabIdsForClipType,
-  TAB_DEFS,
   type InspectorClipType,
   type InspectorTabId,
 } from "./inspector/clip-tabs.config";
@@ -1134,595 +1133,395 @@ export const InspectorPanel: React.FC = () => {
     [clipType],
   );
 
-  // Always include Log and Problems tabs alongside clip-specific tabs
-  const tabs = useMemo(() => {
-    const base = [...clipTabs];
-    base.push(TAB_DEFS.problems);
-    base.push(TAB_DEFS.log);
-    return base;
-  }, [clipTabs]);
-  const tabIds = useMemo(() => {
-    const base = [...clipTabIds];
-    base.push("problems");
-    base.push("log");
-    return base;
-  }, [clipTabIds]);
-
   const inspectorActiveTab = useUIStore((s) => s.inspectorActiveTab);
   const setInspectorActiveTab = useUIStore((s) => s.setInspectorActiveTab);
+  const sidebarTab = useUIStore((s) => s.sidebarTab);
+  const setSidebarTab = useUIStore((s) => s.setSidebarTab);
 
   const activeTab: InspectorTabId =
-    (tabIds.includes(inspectorActiveTab as InspectorTabId)
+    (clipTabIds.includes(inspectorActiveTab as InspectorTabId)
       ? (inspectorActiveTab as InspectorTabId)
-      : tabIds[0]) ?? ("transform" as InspectorTabId);
-
-  const showingProblems = activeTab === "problems";
-  const showingLog = activeTab === "log";
+      : clipTabIds[0]) ?? ("transform" as InspectorTabId);
 
   useEffect(() => {
-    if (
-      tabIds.length > 0 &&
-      !tabIds.includes(inspectorActiveTab as InspectorTabId)
-    ) {
-      setInspectorActiveTab(tabIds[0]);
+    if (clipTabIds.length > 0 && !clipTabIds.includes(inspectorActiveTab as InspectorTabId)) {
+      setInspectorActiveTab(clipTabIds[0]);
     }
-  }, [tabIds, inspectorActiveTab, setInspectorActiveTab]);
+  }, [clipTabIds, inspectorActiveTab, setInspectorActiveTab]);
 
   return (
     <div
       data-tour="inspector"
       className="w-full min-w-0 bg-bg-1 flex flex-col h-full"
     >
-      {/* Show header + tabs — Log and Problems tabs are always available */}
-      {tabs.length > 0 && (
+      {/* ── Primary sidebar tab bar ────────────────────────── */}
+      <div
+        role="tablist"
+        aria-label="Sidebar tabs"
+        className="flex items-center border-b border-border shrink-0"
+      >
+        {(
+          [
+            { id: "inspector", label: "Inspector", Icon: Info },
+            { id: "edit",      label: "Edit",      Icon: Pencil },
+            { id: "problems",  label: "Problems",  Icon: AlertTriangle, badge: problemCount },
+            { id: "log",       label: "Log",       Icon: List },
+          ] as const
+        ).map(({ id, label, Icon, badge }) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={sidebarTab === id}
+            onClick={() => setSidebarTab(id)}
+            className={[
+              "flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium whitespace-nowrap transition-colors border-b-2 -mb-px",
+              sidebarTab === id
+                ? "text-accent border-accent"
+                : "text-fg-3 border-transparent hover:text-fg",
+            ].join(" ")}
+          >
+            <Icon size={12} />
+            <span>{label}</span>
+            {"badge" in { badge } && (badge as number) > 0 && (
+              <span className="ml-0.5 text-[9px] bg-yellow-500/20 text-yellow-400 px-1 py-0.5 rounded-full leading-none font-medium">
+                {badge}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Inspector pane ─────────────────────────────────── */}
+      {sidebarTab === "inspector" && (
+        <>
+          {inspectedAsset ? (
+            <>
+              <AssetInspectorHeader item={inspectedAsset} onClose={() => setInspectedAsset(null)} />
+              <AssetInspectorToolbar item={inspectedAsset} />
+              <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
+                <AssetInspectorBody item={inspectedAsset} />
+              </div>
+            </>
+          ) : (
+            <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
+              <EmptyState />
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── Edit pane ──────────────────────────────────────── */}
+      {sidebarTab === "edit" && (
         <>
           {selectedClip && (
             <InspectorClipHeader
-              name={`${selectedClip.id.substring(0, 20)}…`}
+              name={`${selectedClip.id.substring(0, 20)}\u2026`}
               durationSeconds={selectedClip.duration}
               typeLabel={clipType ?? "clip"}
             />
           )}
-          <InspectorTabs
-            tabs={tabs}
-            activeId={activeTab}
-            onSelect={(id) => setInspectorActiveTab(id)}
-            badges={{ problems: problemCount }}
-          />
-        </>
-      )}
-
-      {inspectedAsset && (
-        <>
-          <AssetInspectorHeader item={inspectedAsset} onClose={() => setInspectedAsset(null)} />
-          <AssetInspectorToolbar item={inspectedAsset} />
-        </>
-      )}
-
-      <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
-        {showingLog ? (
-          <LogPanel />
-        ) : showingProblems ? (
-          <ProblemsPanel />
-        ) : (
-          <>
+          {clipTabs.length > 0 && (
+            <InspectorTabs
+              tabs={clipTabs}
+              activeId={activeTab}
+              onSelect={(id) => setInspectorActiveTab(id)}
+            />
+          )}
+          <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
             <ImportErrorsPanel errors={importErrors} />
-        {inspectedAsset ? (
-          <AssetInspectorBody item={inspectedAsset} />
-        ) : isMetadataClip ? (
-          <MetadataClipInspector clip={selectedTimelineClip!} kind={metadataKind} />
-        ) : selectedClip ? (
-          <InspectorTabErrorBoundary key={activeTab}>
-            <InspectorTabPanel tab="effects" active={activeTab}>
-              <EffectsTab
-                clipId={clipId}
-                clipType={clipType}
-                selectedClip={selectedClip}
-                selectedTimelineClip={selectedTimelineClip}
-                showVideoControls={showVideoControls}
-                showVideoEffects={showVideoEffects}
-                showTextSection={showTextSection}
-                appliedEditingTemplates={appliedEditingTemplates}
-                getEditingTemplate={getEditingTemplate}
-                removeEditingTemplateApplication={removeEditingTemplateApplication}
-                expandedRecipeApplicationId={expandedRecipeApplicationId}
-                setExpandedRecipeApplicationId={setExpandedRecipeApplicationId}
-                recipeControlValues={recipeControlValues}
-                setRecipeControlValues={setRecipeControlValues}
-                handleRecipeControlChange={handleRecipeControlChange}
-                handleToggleRecipeControls={handleToggleRecipeControls}
-                handleResetRecipeControls={handleResetRecipeControls}
-                handleUpdateRecipeControls={handleUpdateRecipeControls}
-                chromaKeyEnabled={chromaKeyEnabled}
-                keyColor={keyColor}
-                tolerance={tolerance}
-                handleChromaKeyToggle={handleChromaKeyToggle}
-                handleKeyColorChange={handleKeyColorChange}
-                handleToleranceChange={handleToleranceChange}
-              />
-            </InspectorTabPanel>
-
-            <InspectorTabPanel tab="ai" active={activeTab}>
-              <AiTab
-                clipId={clipId}
-                clipType={clipType}
-                showVideoControls={showVideoControls}
-                showAudioEffects={showAudioEffects}
-                showVideoEffects={showVideoEffects}
-                transcriptionProgress={transcriptionProgress}
-                isTranscribing={isTranscribing}
-                targetLanguage={targetLanguage}
-                setTargetLanguage={setTargetLanguage}
-                defaultAnimationStyle={defaultAnimationStyle}
-                setDefaultAnimationStyle={setDefaultAnimationStyle}
-                handleGenerateSubtitles={handleGenerateSubtitles}
-                handleSRTImport={handleSRTImport}
-                srtInputRef={srtInputRef}
-                handleRemoveBackground={handleRemoveBackground}
-                handleEnhanceAudio={handleEnhanceAudio}
-                handleAutoColor={handleAutoColor}
-                isEnhancingAudio={isEnhancingAudio}
-                audioEnhanced={audioEnhanced}
-                isApplyingSelectedClipEffect={isApplyingSelectedClipEffect}
-              />
-            </InspectorTabPanel>
-
-            <InspectorTabPanel tab="audio" active={activeTab}>
-              <AudioTab
-                clipId={clipId}
-                clipType={clipType}
-                showAudioEffects={showAudioEffects}
-                noiseReductionSectionTitle={noiseReductionSectionTitle}
-                selectedNoiseReductionEffect={selectedNoiseReductionEffect}
-              />
-            </InspectorTabPanel>
-
-            <InspectorTabPanel tab="transform" active={activeTab}>
-              <TransformTab
-                clipId={clipId}
-                clipType={clipType}
-                selectedClip={selectedClip}
-                showTransformControls={showTransformControls}
-                showVideoControls={showVideoControls}
-                transform={transform}
-                handleTransformChange={handleTransformChange}
-              />
-            </InspectorTabPanel>
-
-            <InspectorTabPanel tab="speed" active={activeTab}>
-              <SpeedTab
-                showVideoControls={showVideoControls}
-                selectedClip={selectedClip}
-              />
-            </InspectorTabPanel>
-
-            <InspectorTabPanel tab="animate" active={activeTab}>
-              <AnimateTab
-                clipId={clipId}
-                clipType={clipType}
-                showTextSection={showTextSection}
-              />
-            </InspectorTabPanel>
-
-            <InspectorTabPanel tab="color" active={activeTab}>
-              <ColorTab clipId={clipId} showColorGrading={showColorGrading} />
-            </InspectorTabPanel>
-
-            <InspectorTabPanel tab="style" active={activeTab}>
-              <StyleTab
-                clipId={clipId}
-                showTextSection={showTextSection}
-                showShapeSection={showShapeSection}
-                showSVGSection={showSVGSection}
-              />
-            </InspectorTabPanel>
-
-          </InspectorTabErrorBoundary>
-        ) : selectedSubtitle ? (
-          <>
-            {/* Subtitle Info */}
-            <div className="mb-4 p-3 bg-primary/10 rounded-lg border border-primary/30">
-              <div className="flex items-center gap-2 mb-1">
-                <Captions size={14} className="text-primary" />
-                <span className="text-xs font-bold text-primary">Subtitle</span>
-              </div>
-              <p className="text-[10px] text-text-muted">
-                {selectedSubtitle.startTime.toFixed(2)}s -{" "}
-                {selectedSubtitle.endTime.toFixed(2)}s
-              </p>
-            </div>
-
-            {/* Subtitle Text Editor */}
-            <Section title="Text Content">
-              <div className="space-y-3">
-                <textarea
-                  value={selectedSubtitle.text}
-                  onChange={(e) =>
-                    updateSubtitle(selectedSubtitle.id, {
-                      text: e.target.value,
-                    })
-                  }
-                  className="w-full h-24 px-3 py-2 bg-background-tertiary border border-border rounded-lg text-xs text-text-primary resize-none focus:outline-none focus:border-primary"
-                  placeholder="Enter subtitle text..."
-                />
-              </div>
-            </Section>
-
-            {/* Subtitle Timing */}
-            <Section title="Timing">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-text-secondary">
-                    Start Time
-                  </span>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    value={selectedSubtitle.startTime.toFixed(2)}
-                    onChange={(e) =>
-                      updateSubtitle(selectedSubtitle.id, {
-                        startTime: parseFloat(e.target.value) || 0,
-                      })
-                    }
-                    className="w-20 h-7 text-[10px] bg-background-tertiary border-border text-text-primary text-right"
+            {isMetadataClip ? (
+              <MetadataClipInspector clip={selectedTimelineClip!} kind={metadataKind} />
+            ) : selectedClip ? (
+              <InspectorTabErrorBoundary key={activeTab}>
+                <InspectorTabPanel tab="effects" active={activeTab}>
+                  <EffectsTab
+                    clipId={clipId}
+                    clipType={clipType}
+                    selectedClip={selectedClip}
+                    selectedTimelineClip={selectedTimelineClip}
+                    showVideoControls={showVideoControls}
+                    showVideoEffects={showVideoEffects}
+                    showTextSection={showTextSection}
+                    appliedEditingTemplates={appliedEditingTemplates}
+                    getEditingTemplate={getEditingTemplate}
+                    removeEditingTemplateApplication={removeEditingTemplateApplication}
+                    expandedRecipeApplicationId={expandedRecipeApplicationId}
+                    setExpandedRecipeApplicationId={setExpandedRecipeApplicationId}
+                    recipeControlValues={recipeControlValues}
+                    setRecipeControlValues={setRecipeControlValues}
+                    handleRecipeControlChange={handleRecipeControlChange}
+                    handleToggleRecipeControls={handleToggleRecipeControls}
+                    handleResetRecipeControls={handleResetRecipeControls}
+                    handleUpdateRecipeControls={handleUpdateRecipeControls}
+                    chromaKeyEnabled={chromaKeyEnabled}
+                    keyColor={keyColor}
+                    tolerance={tolerance}
+                    handleChromaKeyToggle={handleChromaKeyToggle}
+                    handleKeyColorChange={handleKeyColorChange}
+                    handleToleranceChange={handleToleranceChange}
                   />
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-text-secondary">
-                    End Time
-                  </span>
-                  <Input
-                    type="number"
-                    step="0.1"
-                    value={selectedSubtitle.endTime.toFixed(2)}
-                    onChange={(e) =>
-                      updateSubtitle(selectedSubtitle.id, {
-                        endTime: parseFloat(e.target.value) || 0,
-                      })
-                    }
-                    className="w-20 h-7 text-[10px] bg-background-tertiary border-border text-text-primary text-right"
+                </InspectorTabPanel>
+                <InspectorTabPanel tab="ai" active={activeTab}>
+                  <AiTab
+                    clipId={clipId}
+                    clipType={clipType}
+                    showVideoControls={showVideoControls}
+                    showAudioEffects={showAudioEffects}
+                    showVideoEffects={showVideoEffects}
+                    transcriptionProgress={transcriptionProgress}
+                    isTranscribing={isTranscribing}
+                    targetLanguage={targetLanguage}
+                    setTargetLanguage={setTargetLanguage}
+                    defaultAnimationStyle={defaultAnimationStyle}
+                    setDefaultAnimationStyle={setDefaultAnimationStyle}
+                    handleGenerateSubtitles={handleGenerateSubtitles}
+                    handleSRTImport={handleSRTImport}
+                    srtInputRef={srtInputRef}
+                    handleRemoveBackground={handleRemoveBackground}
+                    handleEnhanceAudio={handleEnhanceAudio}
+                    handleAutoColor={handleAutoColor}
+                    isEnhancingAudio={isEnhancingAudio}
+                    audioEnhanced={audioEnhanced}
+                    isApplyingSelectedClipEffect={isApplyingSelectedClipEffect}
                   />
+                </InspectorTabPanel>
+                <InspectorTabPanel tab="audio" active={activeTab}>
+                  <AudioTab
+                    clipId={clipId}
+                    clipType={clipType}
+                    showAudioEffects={showAudioEffects}
+                    noiseReductionSectionTitle={noiseReductionSectionTitle}
+                    selectedNoiseReductionEffect={selectedNoiseReductionEffect}
+                  />
+                </InspectorTabPanel>
+                <InspectorTabPanel tab="transform" active={activeTab}>
+                  <TransformTab
+                    clipId={clipId}
+                    clipType={clipType}
+                    selectedClip={selectedClip}
+                    showTransformControls={showTransformControls}
+                    showVideoControls={showVideoControls}
+                    transform={transform}
+                    handleTransformChange={handleTransformChange}
+                  />
+                </InspectorTabPanel>
+                <InspectorTabPanel tab="speed" active={activeTab}>
+                  <SpeedTab showVideoControls={showVideoControls} selectedClip={selectedClip} />
+                </InspectorTabPanel>
+                <InspectorTabPanel tab="animate" active={activeTab}>
+                  <AnimateTab clipId={clipId} clipType={clipType} showTextSection={showTextSection} />
+                </InspectorTabPanel>
+                <InspectorTabPanel tab="color" active={activeTab}>
+                  <ColorTab clipId={clipId} showColorGrading={showColorGrading} />
+                </InspectorTabPanel>
+                <InspectorTabPanel tab="style" active={activeTab}>
+                  <StyleTab
+                    clipId={clipId}
+                    showTextSection={showTextSection}
+                    showShapeSection={showShapeSection}
+                    showSVGSection={showSVGSection}
+                  />
+                </InspectorTabPanel>
+              </InspectorTabErrorBoundary>
+            ) : selectedSubtitle ? (
+              <>
+                <div className="mb-4 p-3 bg-primary/10 rounded-lg border border-primary/30">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Captions size={14} className="text-primary" />
+                    <span className="text-xs font-bold text-primary">Subtitle</span>
+                  </div>
+                  <p className="text-[10px] text-text-muted">
+                    {selectedSubtitle.startTime.toFixed(2)}s -{" "}
+                    {selectedSubtitle.endTime.toFixed(2)}s
+                  </p>
                 </div>
-              </div>
-            </Section>
-
-            {/* Subtitle Position */}
-            <Section title="Position">
-              <div className="grid grid-cols-3 gap-2">
-                {(["top", "center", "bottom"] as const).map((pos) => (
-                  <button
-                    key={pos}
-                    onClick={() =>
-                      updateSubtitle(selectedSubtitle.id, {
-                        style: {
-                          ...(selectedSubtitle.style || {}),
-                          position: pos,
-                        } as typeof selectedSubtitle.style,
-                      })
-                    }
-                    className={`py-1.5 rounded text-[10px] capitalize transition-colors ${
-                      (selectedSubtitle.style?.position || "bottom") === pos
-                        ? "bg-primary text-white"
-                        : "bg-background-tertiary border border-border text-text-secondary hover:text-text-primary"
-                    }`}
-                  >
-                    {pos}
-                  </button>
-                ))}
-              </div>
-            </Section>
-
-            {/* Subtitle Animation Style */}
-            <Section title="Animation">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-text-secondary">Style</span>
-                  <Select
-                    value={selectedSubtitle.animationStyle || "none"}
-                    onValueChange={(v) =>
-                      updateSubtitle(selectedSubtitle.id, {
-                        animationStyle: v as CaptionAnimationStyle,
-                      })
-                    }
-                  >
-                    <SelectTrigger className="w-auto min-w-[100px] bg-background-tertiary border-border text-text-primary text-[10px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-background-secondary border-border">
-                      {CAPTION_ANIMATION_STYLES.map((style) => (
-                        <SelectItem key={style} value={style}>
-                          {getAnimationStyleDisplayName(style)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <p className="text-[9px] text-text-muted">
-                  {selectedSubtitle.animationStyle === "karaoke" &&
-                    "Words fill with color as they're spoken"}
-                  {selectedSubtitle.animationStyle === "word-highlight" &&
-                    "Current word is highlighted and scaled"}
-                  {selectedSubtitle.animationStyle === "word-by-word" &&
-                    "Shows one word at a time"}
-                  {selectedSubtitle.animationStyle === "bounce" &&
-                    "Words bounce in as they appear"}
-                  {selectedSubtitle.animationStyle === "typewriter" &&
-                    "Words appear progressively like typing"}
-                  {(!selectedSubtitle.animationStyle ||
-                    selectedSubtitle.animationStyle === "none") &&
-                    "Static text, no animation"}
-                </p>
-                {selectedSubtitle.animationStyle &&
-                  selectedSubtitle.animationStyle !== "none" &&
-                  !selectedSubtitle.words?.length && (
-                    <p className="text-[9px] text-amber-400 bg-amber-400/10 p-2 rounded">
-                      ⚠️ No word-level timing data. Re-generate captions to
-                      enable animation.
+                <Section title="Text Content">
+                  <div className="space-y-3">
+                    <textarea value={selectedSubtitle.text}
+                      onChange={(e) => updateSubtitle(selectedSubtitle.id, { text: e.target.value })}
+                      className="w-full h-24 px-3 py-2 bg-background-tertiary border border-border rounded-lg text-xs text-text-primary resize-none focus:outline-none focus:border-primary"
+                      placeholder="Enter subtitle text..." />
+                  </div>
+                </Section>
+                <Section title="Timing">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-text-secondary">Start Time</span>
+                      <Input type="number" step="0.1" value={selectedSubtitle.startTime.toFixed(2)}
+                        onChange={(e) => updateSubtitle(selectedSubtitle.id, { startTime: parseFloat(e.target.value) || 0 })}
+                        className="w-20 h-7 text-[10px] bg-background-tertiary border-border text-text-primary text-right" />
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-text-secondary">End Time</span>
+                      <Input type="number" step="0.1" value={selectedSubtitle.endTime.toFixed(2)}
+                        onChange={(e) => updateSubtitle(selectedSubtitle.id, { endTime: parseFloat(e.target.value) || 0 })}
+                        className="w-20 h-7 text-[10px] bg-background-tertiary border-border text-text-primary text-right" />
+                    </div>
+                  </div>
+                </Section>
+                <Section title="Position">
+                  <div className="grid grid-cols-3 gap-2">
+                    {(["top", "center", "bottom"] as const).map((pos) => (
+                      <button key={pos}
+                        onClick={() => updateSubtitle(selectedSubtitle.id, { style: { ...(selectedSubtitle.style || {}), position: pos } as typeof selectedSubtitle.style })}
+                        className={`py-1.5 rounded text-[10px] capitalize transition-colors ${(selectedSubtitle.style?.position || "bottom") === pos ? "bg-primary text-white" : "bg-background-tertiary border border-border text-text-secondary hover:text-text-primary"}`}
+                      >{pos}</button>
+                    ))}
+                  </div>
+                </Section>
+                <Section title="Animation">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-text-secondary">Style</span>
+                      <Select value={selectedSubtitle.animationStyle || "none"}
+                        onValueChange={(v) => updateSubtitle(selectedSubtitle.id, { animationStyle: v as CaptionAnimationStyle })}>
+                        <SelectTrigger className="w-auto min-w-[100px] bg-background-tertiary border-border text-text-primary text-[10px]"><SelectValue /></SelectTrigger>
+                        <SelectContent className="bg-background-secondary border-border">
+                          {CAPTION_ANIMATION_STYLES.map((style) => (
+                            <SelectItem key={style} value={style}>{getAnimationStyleDisplayName(style)}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <p className="text-[9px] text-text-muted">
+                      {selectedSubtitle.animationStyle === "karaoke" && "Words fill with color as they\u2019re spoken"}
+                      {selectedSubtitle.animationStyle === "word-highlight" && "Current word is highlighted and scaled"}
+                      {selectedSubtitle.animationStyle === "word-by-word" && "Shows one word at a time"}
+                      {selectedSubtitle.animationStyle === "bounce" && "Words bounce in as they appear"}
+                      {selectedSubtitle.animationStyle === "typewriter" && "Words appear progressively like typing"}
+                      {(!selectedSubtitle.animationStyle || selectedSubtitle.animationStyle === "none") && "Static text, no animation"}
                     </p>
-                  )}
-                {selectedSubtitle.animationStyle &&
-                  selectedSubtitle.animationStyle !== "none" &&
-                  selectedSubtitle.animationStyle !== "typewriter" &&
-                  selectedSubtitle.animationStyle !== "word-by-word" && (
-                    <div className="pt-2 border-t border-border space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-text-secondary">
-                          Highlight Color
-                        </span>
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="color"
-                            value={
-                              selectedSubtitle.style?.highlightColor ||
-                              "#ffff00"
-                            }
-                            onChange={(e) =>
-                              updateSubtitle(selectedSubtitle.id, {
-                                style: {
-                                  ...(selectedSubtitle.style || {}),
-                                  highlightColor: e.target.value,
-                                } as typeof selectedSubtitle.style,
-                              })
-                            }
-                            className="w-6 h-6 rounded border border-border cursor-pointer"
-                          />
-                          <span className="text-[9px] font-mono text-text-muted uppercase">
-                            {selectedSubtitle.style?.highlightColor ||
-                              "#ffff00"}
-                          </span>
+                    {selectedSubtitle.animationStyle && selectedSubtitle.animationStyle !== "none" && !selectedSubtitle.words?.length && (
+                      <p className="text-[9px] text-amber-400 bg-amber-400/10 p-2 rounded">
+                        \u26a0\ufe0f No word-level timing data. Re-generate captions to enable animation.
+                      </p>
+                    )}
+                    {selectedSubtitle.animationStyle && selectedSubtitle.animationStyle !== "none" &&
+                      selectedSubtitle.animationStyle !== "typewriter" && selectedSubtitle.animationStyle !== "word-by-word" && (
+                      <div className="pt-2 border-t border-border space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-text-secondary">Highlight Color</span>
+                          <div className="flex items-center gap-2">
+                            <input type="color" value={selectedSubtitle.style?.highlightColor || "#ffff00"}
+                              onChange={(e) => updateSubtitle(selectedSubtitle.id, { style: { ...(selectedSubtitle.style || {}), highlightColor: e.target.value } as typeof selectedSubtitle.style })}
+                              className="w-6 h-6 rounded border border-border cursor-pointer" />
+                            <span className="text-[9px] font-mono text-text-muted uppercase">{selectedSubtitle.style?.highlightColor || "#ffff00"}</span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-6 gap-1">
+                          {["#ffff00","#00ff00","#ff6b6b","#4ecdc4","#ff9f43","#a55eea"].map((color) => (
+                            <button key={color}
+                              onClick={() => updateSubtitle(selectedSubtitle.id, { style: { ...(selectedSubtitle.style || {}), highlightColor: color } as typeof selectedSubtitle.style })}
+                              className={`w-6 h-6 rounded border-2 transition-transform hover:scale-110 ${(selectedSubtitle.style?.highlightColor || "#ffff00") === color ? "border-white" : "border-transparent"}`}
+                              style={{ backgroundColor: color }} />
+                          ))}
                         </div>
                       </div>
-                      <div className="grid grid-cols-6 gap-1">
-                        {[
-                          "#ffff00",
-                          "#00ff00",
-                          "#ff6b6b",
-                          "#4ecdc4",
-                          "#ff9f43",
-                          "#a55eea",
-                        ].map((color) => (
-                          <button
-                            key={color}
-                            onClick={() =>
-                              updateSubtitle(selectedSubtitle.id, {
-                                style: {
-                                  ...(selectedSubtitle.style || {}),
-                                  highlightColor: color,
-                                } as typeof selectedSubtitle.style,
-                              })
-                            }
-                            className={`w-6 h-6 rounded border-2 transition-transform hover:scale-110 ${
-                              (selectedSubtitle.style?.highlightColor ||
-                                "#ffff00") === color
-                                ? "border-white"
-                                : "border-transparent"
-                            }`}
-                            style={{ backgroundColor: color }}
-                          />
-                        ))}
+                    )}
+                  </div>
+                </Section>
+                <Section title="Font">
+                  <div className="space-y-3">
+                    <input ref={subtitleFontInputRef} type="file" accept={FONT_FILE_ACCEPT} onChange={handleSubtitleFontUpload} className="hidden" />
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-text-secondary">Font Family</span>
+                      <Select value={selectedSubtitle.style?.fontFamily || "Inter"}
+                        onValueChange={(v) => updateSubtitle(selectedSubtitle.id, { style: { ...(selectedSubtitle.style || {}), fontFamily: v } as typeof selectedSubtitle.style })}>
+                        <SelectTrigger className="max-w-[120px] bg-background-tertiary border-border text-text-primary text-[10px]"><SelectValue /></SelectTrigger>
+                        <SelectContent className="bg-background-secondary border-border max-h-60">
+                          {Object.entries(FONT_CATEGORIES).map(([category, fonts]) => (
+                            <SelectGroup key={category}>
+                              <SelectLabel className="text-text-muted text-[10px] font-medium">{category}</SelectLabel>
+                              {fonts.map((font) => (<SelectItem key={font} value={font} style={{ fontFamily: font }}>{font}</SelectItem>))}
+                            </SelectGroup>
+                          ))}
+                          {customFonts.length > 0 && (
+                            <SelectGroup>
+                              <SelectLabel className="text-text-muted text-[10px] font-medium">Custom Uploads</SelectLabel>
+                              {customFonts.map((font) => (<SelectItem key={font} value={font} style={{ fontFamily: font }}>{font}</SelectItem>))}
+                            </SelectGroup>
+                          )}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <button onClick={() => subtitleFontInputRef.current?.click()}
+                      className="w-full py-1.5 px-2 bg-background-secondary border border-border rounded text-[10px] text-text-secondary hover:text-text-primary transition-colors flex items-center justify-center gap-1.5">
+                      <Upload size={11} /> Upload Custom Font
+                    </button>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-text-secondary">Font Size</span>
+                      <Input type="number" min={12} max={72} value={selectedSubtitle.style?.fontSize || 24}
+                        onChange={(e) => updateSubtitle(selectedSubtitle.id, { style: { ...(selectedSubtitle.style || {}), fontSize: parseInt(e.target.value) || 24 } as typeof selectedSubtitle.style })}
+                        className="w-16 h-7 text-[10px] bg-background-tertiary border-border text-text-primary text-right" />
+                    </div>
+                  </div>
+                </Section>
+                <Section title="Colors">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-text-secondary">Text Color</span>
+                      <div className="flex items-center gap-2">
+                        <input type="color" value={selectedSubtitle.style?.color || "#ffffff"}
+                          onChange={(e) => updateSubtitle(selectedSubtitle.id, { style: { ...(selectedSubtitle.style || {}), color: e.target.value } as typeof selectedSubtitle.style })}
+                          className="w-6 h-6 rounded border border-border cursor-pointer" />
+                        <span className="text-[10px] font-mono text-text-muted uppercase">{selectedSubtitle.style?.color || "#ffffff"}</span>
                       </div>
                     </div>
-                  )}
-              </div>
-            </Section>
-
-            {/* Subtitle Font Settings */}
-            <Section title="Font">
-              <div className="space-y-3">
-                <input
-                  ref={subtitleFontInputRef}
-                  type="file"
-                  accept={FONT_FILE_ACCEPT}
-                  onChange={handleSubtitleFontUpload}
-                  className="hidden"
-                />
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-text-secondary">
-                    Font Family
-                  </span>
-                  <Select
-                    value={selectedSubtitle.style?.fontFamily || "Inter"}
-                    onValueChange={(v) =>
-                      updateSubtitle(selectedSubtitle.id, {
-                        style: {
-                          ...(selectedSubtitle.style || {}),
-                          fontFamily: v,
-                        } as typeof selectedSubtitle.style,
-                      })
-                    }
-                  >
-                    <SelectTrigger className="max-w-[120px] bg-background-tertiary border-border text-text-primary text-[10px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-background-secondary border-border max-h-60">
-                      {Object.entries(FONT_CATEGORIES).map(([category, fonts]) => (
-                        <SelectGroup key={category}>
-                          <SelectLabel className="text-text-muted text-[10px] font-medium">
-                            {category}
-                          </SelectLabel>
-                          {fonts.map((font) => (
-                            <SelectItem key={font} value={font} style={{ fontFamily: font }}>
-                              {font}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      ))}
-                      {customFonts.length > 0 && (
-                        <SelectGroup>
-                          <SelectLabel className="text-text-muted text-[10px] font-medium">
-                            Custom Uploads
-                          </SelectLabel>
-                          {customFonts.map((font) => (
-                            <SelectItem key={font} value={font} style={{ fontFamily: font }}>
-                              {font}
-                            </SelectItem>
-                          ))}
-                        </SelectGroup>
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <button
-                  onClick={() => subtitleFontInputRef.current?.click()}
-                  className="w-full py-1.5 px-2 bg-background-secondary border border-border rounded text-[10px] text-text-secondary hover:text-text-primary transition-colors flex items-center justify-center gap-1.5"
-                >
-                  <Upload size={11} />
-                  Upload Custom Font
-                </button>
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-text-secondary">
-                    Font Size
-                  </span>
-                  <Input
-                    type="number"
-                    min={12}
-                    max={72}
-                    value={selectedSubtitle.style?.fontSize || 24}
-                    onChange={(e) =>
-                      updateSubtitle(selectedSubtitle.id, {
-                        style: {
-                          ...(selectedSubtitle.style || {}),
-                          fontSize: parseInt(e.target.value) || 24,
-                        } as typeof selectedSubtitle.style,
-                      })
-                    }
-                    className="w-16 h-7 text-[10px] bg-background-tertiary border-border text-text-primary text-right"
-                  />
-                </div>
-              </div>
-            </Section>
-
-            {/* Subtitle Colors */}
-            <Section title="Colors">
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-text-secondary">
-                    Text Color
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={selectedSubtitle.style?.color || "#ffffff"}
-                      onChange={(e) =>
-                        updateSubtitle(selectedSubtitle.id, {
-                          style: {
-                            ...(selectedSubtitle.style || {}),
-                            color: e.target.value,
-                          } as typeof selectedSubtitle.style,
-                        })
-                      }
-                      className="w-6 h-6 rounded border border-border cursor-pointer"
-                    />
-                    <span className="text-[10px] font-mono text-text-muted uppercase">
-                      {selectedSubtitle.style?.color || "#ffffff"}
-                    </span>
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-text-secondary">Background</span>
+                      <div className="flex items-center gap-2">
+                        <input type="color"
+                          value={selectedSubtitle.style?.backgroundColor?.replace(/rgba?\([^)]+\)/, "#000000") || "#000000"}
+                          onChange={(e) => {
+                            const hex = e.target.value;
+                            updateSubtitle(selectedSubtitle.id, { style: { ...(selectedSubtitle.style || {}), backgroundColor: `rgba(${parseInt(hex.slice(1,3),16)}, ${parseInt(hex.slice(3,5),16)}, ${parseInt(hex.slice(5,7),16)}, 0.7)` } as typeof selectedSubtitle.style });
+                          }}
+                          className="w-6 h-6 rounded border border-border cursor-pointer" />
+                        <Select
+                          value={selectedSubtitle.style?.backgroundColor?.includes("0.7") ? "0.7" : selectedSubtitle.style?.backgroundColor?.includes("0.5") ? "0.5" : "1"}
+                          onValueChange={(v) => {
+                            const newBg = (selectedSubtitle.style?.backgroundColor || "rgba(0, 0, 0, 0.7)").replace(/[\d.]+\)$/, `${v})`);
+                            updateSubtitle(selectedSubtitle.id, { style: { ...(selectedSubtitle.style || {}), backgroundColor: newBg } as typeof selectedSubtitle.style });
+                          }}>
+                          <SelectTrigger className="w-auto min-w-[50px] bg-background-tertiary border-border text-text-primary text-[9px] h-6"><SelectValue /></SelectTrigger>
+                          <SelectContent className="bg-background-secondary border-border">
+                            <SelectItem value="0">None</SelectItem>
+                            <SelectItem value="0.5">50%</SelectItem>
+                            <SelectItem value="0.7">70%</SelectItem>
+                            <SelectItem value="1">100%</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
                   </div>
+                </Section>
+                <div className="pt-4 border-t border-border">
+                  <button
+                    onClick={() => { const { removeSubtitle } = useProjectStore.getState(); removeSubtitle(selectedSubtitle.id); }}
+                    className="w-full py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 rounded-lg text-[10px] transition-all"
+                  >Delete Subtitle</button>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-text-secondary">
-                    Background
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="color"
-                      value={
-                        selectedSubtitle.style?.backgroundColor?.replace(
-                          /rgba?\([^)]+\)/,
-                          "#000000",
-                        ) || "#000000"
-                      }
-                      onChange={(e) => {
-                        const hex = e.target.value;
-                        const r = parseInt(hex.slice(1, 3), 16);
-                        const g = parseInt(hex.slice(3, 5), 16);
-                        const b = parseInt(hex.slice(5, 7), 16);
-                        updateSubtitle(selectedSubtitle.id, {
-                          style: {
-                            ...(selectedSubtitle.style || {}),
-                            backgroundColor: `rgba(${r}, ${g}, ${b}, 0.7)`,
-                          } as typeof selectedSubtitle.style,
-                        });
-                      }}
-                      className="w-6 h-6 rounded border border-border cursor-pointer"
-                    />
-                    <Select
-                      value={
-                        selectedSubtitle.style?.backgroundColor?.includes("0.7")
-                          ? "0.7"
-                          : selectedSubtitle.style?.backgroundColor?.includes("0.5")
-                            ? "0.5"
-                            : "1"
-                      }
-                      onValueChange={(v) => {
-                        const currentBg =
-                          selectedSubtitle.style?.backgroundColor ||
-                          "rgba(0, 0, 0, 0.7)";
-                        const newBg = currentBg.replace(
-                          /[\d.]+\)$/,
-                          `${v})`,
-                        );
-                        updateSubtitle(selectedSubtitle.id, {
-                          style: {
-                            ...(selectedSubtitle.style || {}),
-                            backgroundColor: newBg,
-                          } as typeof selectedSubtitle.style,
-                        });
-                      }}
-                    >
-                      <SelectTrigger className="w-auto min-w-[50px] bg-background-tertiary border-border text-text-primary text-[9px] h-6">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent className="bg-background-secondary border-border">
-                        <SelectItem value="0">None</SelectItem>
-                        <SelectItem value="0.5">50%</SelectItem>
-                        <SelectItem value="0.7">70%</SelectItem>
-                        <SelectItem value="1">100%</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-            </Section>
+              </>
+            ) : (
+              <EmptyState />
+            )}
+          </div>
+        </>
+      )}
 
-            {/* Delete Subtitle */}
-            <div className="pt-4 border-t border-border">
-              <button
-                onClick={() => {
-                  const { removeSubtitle } = useProjectStore.getState();
-                  removeSubtitle(selectedSubtitle.id);
-                }}
-                className="w-full py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 border border-red-500/30 rounded-lg text-[10px] transition-all"
-              >
-                Delete Subtitle
-              </button>
-            </div>
-          </>
-        ) : (
-          <EmptyState />
-        )}
-          </>
-        )}
-      </div>
+      {/* ── Problems pane ─────────────────────────────────── */}
+      {sidebarTab === "problems" && (
+        <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
+          <ProblemsPanel />
+        </div>
+      )}
+
+      {/* ── Log pane ──────────────────────────────────────── */}
+      {sidebarTab === "log" && (
+        <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
+          <LogPanel />
+        </div>
+      )}
     </div>
   );
 };

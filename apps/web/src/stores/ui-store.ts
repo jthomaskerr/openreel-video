@@ -101,6 +101,7 @@ export interface UIState {
   motionPathClipId: string | null;
   keyframeEditorOpen: boolean;
   inspectorActiveTab: string;
+  sidebarTab: "inspector" | "edit" | "problems" | "log";
   importErrors: ImportError[];
   projectManagerOpen: boolean;
   setProjectManagerOpen: (open: boolean) => void;
@@ -148,6 +149,7 @@ export interface UIState {
   setKeyframeEditorOpen: (open: boolean) => void;
   toggleKeyframeEditor: () => void;
   setInspectorActiveTab: (tabId: string) => void;
+  setSidebarTab: (tab: "inspector" | "edit" | "problems" | "log") => void;
   addImportErrors: (errors: ImportError[]) => void;
   clearImportErrors: () => void;
   exportState: {
@@ -250,6 +252,7 @@ export const useUIStore = create<UIState>()(
         motionPathClipId: null,
 
         keyframeEditorOpen: false,
+        sidebarTab: "inspector" as const,
 
         inspectorActiveTab: "transform",
 
@@ -281,27 +284,26 @@ export const useUIStore = create<UIState>()(
         },
 
         setInspectedAsset: (asset) => {
-          set({ inspectedAsset: asset });
+          set({ inspectedAsset: asset, ...(asset ? { sidebarTab: "inspector" as const } : {}) });
         },
 
         select: (item: SelectionItem, addToSelection = false) => {
           const { selectedItems } = get();
+          const isClip = (item.type === "clip" || item.type === "text-clip" || item.type === "shape-clip");
           if (addToSelection) {
-            // Multi-select mode: only add item if not already selected to prevent duplicates
-            const isAlreadySelected = selectedItems.some(
-              (s) => s.id === item.id,
-            );
+            const isAlreadySelected = selectedItems.some((s) => s.id === item.id);
             if (!isAlreadySelected) {
               set({
                 selectedItems: [...selectedItems, item],
-                lastSelectedItem: item, // Track most recent selection for extended selections
+                lastSelectedItem: item,
+                ...(isClip ? { sidebarTab: "edit" as const } : {}),
               });
             }
           } else {
-            // Single-select mode: clear previous selection and select only this item
             set({
               selectedItems: [item],
               lastSelectedItem: item,
+              ...(isClip ? { sidebarTab: "edit" as const } : {}),
             });
           }
         },
@@ -621,6 +623,10 @@ export const useUIStore = create<UIState>()(
         setInspectorActiveTab: (tabId: string) => {
           set({ inspectorActiveTab: tabId });
         },
+        setSidebarTab: (tab) => {
+          set({ sidebarTab: tab });
+        },
+
 
         setProjectManagerOpen: (open: boolean) => {
           set({ projectManagerOpen: open });
