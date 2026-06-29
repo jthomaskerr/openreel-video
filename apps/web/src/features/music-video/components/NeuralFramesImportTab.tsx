@@ -88,6 +88,7 @@ function metadataForBlock(block: MetadataBlock, result: NeuralFramesImportResult
       ...base,
       name: character?.name ?? block.label,
       description: block.text,
+      thumbnailUrl: block.thumbnailUrl ?? urls[0],
       referenceImageUrls: urls,
     };
   }

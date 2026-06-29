@@ -57,6 +57,11 @@ export function importNeuralFrames(
   // Build shots and generated assets together so IDs stay consistent
   const generatedAssets: GeneratedAsset[] = [];
 
+  const sbFps = props.fps;
+  const sbAspectRatio = props.aspect_ratio ?? "16:9";
+  const sbStyle = props.style;
+  const sbRenderMode = props.render_mode;
+
   const shots: StoryboardShot[] = props.scenes.map((scene, i) => {
     const shotId = uuid();
     const assetIds: string[] = [];
@@ -66,7 +71,7 @@ export function importNeuralFrames(
       generatedAssets.push({
         id: assetId,
         label: `Scene ${i + 1} keyframe`,
-        mediaType: "image",
+        mediaType: "video",
         status: "realized",
         provider: "neuralframes",
         model: "neuralframes",
@@ -84,7 +89,7 @@ export function importNeuralFrames(
     const block = sceneBlocks[i];
     if (block) block.linkedShotIds.push(shotId);
 
-    return {
+    const shot: StoryboardShot = {
       id: shotId,
       index: i,
       label: `Scene ${i + 1}`,
@@ -93,7 +98,7 @@ export function importNeuralFrames(
       prompt: scene.scene_prompt,
       model: "veo3_fast",
       resolution: "720p",
-      aspectRatio: "16:9",
+      aspectRatio: sbAspectRatio,
       includeMainAudio: true,
       referenceAssetIds: [],
       generatedAssetIds: assetIds,
@@ -101,6 +106,10 @@ export function importNeuralFrames(
       outputs: [],
       selected: false,
     };
+    if (sbFps !== undefined) shot.fps = sbFps;
+    if (sbStyle !== undefined) shot.style = sbStyle;
+    if (sbRenderMode !== undefined) shot.renderMode = sbRenderMode;
+    return shot;
   });
 
   const sceneTrack: MetadataTrack = {
@@ -129,6 +138,7 @@ export function importNeuralFrames(
     source: "llm" as const,
     importSource: "neuralframes" as const,
     importId: char.id,
+    thumbnailUrl: char.image_job?.assets?.[0]?.url,
   }));
 
   const charTrack: MetadataTrack = {

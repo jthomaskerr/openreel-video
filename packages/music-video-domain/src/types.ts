@@ -146,6 +146,8 @@ export interface MetadataBlock {
   source: "user" | "timing-analysis" | "llm";
   importSource?: "neuralframes" | "manual" | "llm" | "audio-analysis";
   importId?: string;
+  /** Thumbnail URL from external import sources (e.g. Neural Frames image_job.assets). */
+  thumbnailUrl?: string;
 }
 
 export interface MetadataTrack {
@@ -241,6 +243,9 @@ export interface StoryboardShot {
   model: string;
   resolution: string;
   aspectRatio: string;
+  fps?: number;
+  style?: string;
+  renderMode?: string;
   seed?: number;
   includeMainAudio: boolean;
   referenceAssetIds: string[];
@@ -275,6 +280,10 @@ export interface MusicVideoProject {
 export interface NeuralFramesStoryboard {
   storyboard_props: {
     storyboard_prompt: string;
+    fps?: number;
+    aspect_ratio?: string;
+    style?: string;
+    render_mode?: string;
     scenes: Array<{
       id: string;
       scene_prompt: string;
