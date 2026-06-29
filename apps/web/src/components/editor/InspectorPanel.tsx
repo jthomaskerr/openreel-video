@@ -1137,14 +1137,14 @@ export const InspectorPanel: React.FC = () => {
   // Always include Log and Problems tabs alongside clip-specific tabs
   const tabs = useMemo(() => {
     const base = [...clipTabs];
-    base.unshift(TAB_DEFS.problems);
-    base.unshift(TAB_DEFS.log);
+    base.push(TAB_DEFS.problems);
+    base.push(TAB_DEFS.log);
     return base;
   }, [clipTabs]);
   const tabIds = useMemo(() => {
     const base = [...clipTabIds];
-    base.unshift("problems");
-    base.unshift("log");
+    base.push("problems");
+    base.push("log");
     return base;
   }, [clipTabIds]);
 
