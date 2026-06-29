@@ -11,7 +11,24 @@ const storeState = vi.hoisted(() => ({
   addClip: vi.fn(),
   addPlaceholderMedia: vi.fn(),
   replacePlaceholderMedia: vi.fn(),
+  renameProject: vi.fn(),
 }));
+const musicVideoStoreState = vi.hoisted(() => ({
+  applyNeuralFramesImport: vi.fn(),
+  createProject: vi.fn(),
+  getProject: vi.fn(() => ({ id: "mv-1" })),
+}));
+
+vi.mock("../../../stores/music-video-store", () => ({
+  useMusicVideoStore: {
+    getState: () => ({
+      applyNeuralFramesImport: musicVideoStoreState.applyNeuralFramesImport,
+      createProject: musicVideoStoreState.createProject,
+      getProject: musicVideoStoreState.getProject,
+    }),
+  },
+}));
+
 
 vi.mock("../../../stores/project-store", () => {
   const useProjectStore = vi.fn(() => ({
@@ -25,6 +42,11 @@ vi.mock("../../../stores/project-store", () => {
   Object.assign(useProjectStore, {
     getState: () => ({
       project: storeState.project,
+      addTrack: storeState.addTrack,
+      renameTrack: storeState.renameTrack,
+      addClip: storeState.addClip,
+      getTimelineDuration: () => storeState.project?.timeline.duration ?? 0,
+      renameProject: storeState.renameProject,
     }),
   });
   return { useProjectStore };
@@ -94,6 +116,13 @@ function installMutableStore() {
     };
     return { success: true, actionId: "media-action" };
   });
+  storeState.addPlaceholderMedia.mockImplementation((item: MediaItem) => {
+    const project = storeState.project!;
+    storeState.project = {
+      ...project,
+      mediaLibrary: { items: [...project.mediaLibrary.items, item] },
+    };
+  });
   storeState.addClip.mockImplementation(
     async (
       trackId: string,
@@ -152,6 +181,10 @@ describe("NeuralFramesImportTab metadata import", () => {
     storeState.addClip.mockReset();
     storeState.addPlaceholderMedia.mockReset();
     storeState.replacePlaceholderMedia.mockReset();
+    musicVideoStoreState.applyNeuralFramesImport.mockReset();
+    musicVideoStoreState.createProject.mockReset();
+    musicVideoStoreState.getProject.mockReset();
+    musicVideoStoreState.getProject.mockReturnValue({ id: "mv-1" });
     installMutableStore();
   });
 
@@ -253,7 +286,8 @@ describe("NeuralFramesImportTab metadata import", () => {
 
     fireEvent.change(input, { target: { files: [file] } });
 
-    await waitFor(() => expect(screen.getByText(/3 tracks · 2 blocks · 0 images/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/3 blocks across 3 tracks · 0 images/)).toBeInTheDocument());
+    expect(storeState.renameProject).toHaveBeenCalledWith("Imported Storyboard");
 
     expect(storeState.addGeneratedMedia).toHaveBeenCalledTimes(3);
     expect(storeState.addClip).toHaveBeenCalledTimes(3);
@@ -268,5 +302,226 @@ describe("NeuralFramesImportTab metadata import", () => {
       track.clips.map((clip) => clip.metadata?.kind),
     );
     expect(metadataKinds).toEqual(expect.arrayContaining(["scene", "character", "style"]));
+  });
+
+  it("keeps non-scene metadata blocks importable when storyboard duration is missing", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          title: "Imported Storyboard",
+          shots: [],
+          generatedAssets: [],
+          metadataTracks: [
+            {
+              id: "track-characters",
+              label: "Characters",
+              kind: "characters",
+              visible: true,
+              locked: false,
+              blocks: [
+                {
+                  id: "block-2",
+                  trackId: "track-characters",
+                  label: "Lead",
+                  kind: "continuity_note",
+                  startSeconds: 0,
+                  endSeconds: 0,
+                  text: "Lead character",
+                  linkedShotIds: [],
+                  linkedGeneratedAssetIds: [],
+                  source: "llm",
+                  importSource: "neuralframes",
+                  importId: "nf-char-1",
+                },
+              ],
+            },
+          ],
+        }),
+      })),
+    );
+
+    const { container } = render(
+      <NeuralFramesImportTab openreelProjectId="project-1" orchestratorUrl="http://localhost:4041" />,
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File([JSON.stringify({ title: "raw" })], "storyboard.json", {
+      type: "application/json",
+    });
+    Object.defineProperty(file, "text", {
+      value: vi.fn().mockResolvedValue(JSON.stringify({ title: "raw" })),
+    });
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(screen.getByText(/1 blocks across 1 track · 0 images/)).toBeInTheDocument());
+    expect(storeState.renameProject).toHaveBeenCalledWith("Imported Storyboard");
+
+    expect(storeState.addClip).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      0,
+      expect.objectContaining({ duration: 0, metadata: expect.objectContaining({ kind: "character" }) }),
+    );
+  });
+
+  it("keeps per-generated-asset prompts, titles, status, and missing placeholders", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === "http://localhost:4041/api/import/neuralframes") {
+          return {
+            ok: true,
+            json: async () => ({
+              title: "Storyboard Title",
+              shots: [],
+              metadataTracks: [],
+              timingHints: { bpm: 120, sections: [] },
+              generatedAssets: [
+                {
+                  id: "asset-1",
+                  label: "Desert keyframe",
+                  mediaType: "image",
+                  status: "realized",
+                  provider: "neuralframes",
+                  model: "nf",
+                  prompt: "Wide desert at sunrise",
+                  outputPath: "http://localhost/assets/desert.png",
+                  sourceAssets: [],
+                  sourceMetadataBlockIds: [],
+                  validation: { valid: true, warnings: [], errors: [] },
+                  attempts: [],
+                },
+                {
+                  id: "asset-2",
+                  label: "Ocean keyframe",
+                  mediaType: "image",
+                  status: "failed",
+                  provider: "neuralframes",
+                  model: "nf",
+                  prompt: "Stormy ocean at night",
+                  sourceAssets: [],
+                  sourceMetadataBlockIds: [],
+                  validation: { valid: false, warnings: [], errors: [] },
+                  attempts: [],
+                },
+              ],
+            }),
+          };
+        }
+        return {
+          blob: async () => new Blob([String(url)], { type: "image/png" }),
+        };
+      }),
+    );
+
+    const { container } = render(
+      <NeuralFramesImportTab openreelProjectId="project-1" orchestratorUrl="http://localhost:4041" />,
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File([JSON.stringify({ title: "raw" })], "storyboard.json", {
+      type: "application/json",
+    });
+    Object.defineProperty(file, "text", {
+      value: vi.fn().mockResolvedValue(JSON.stringify({ title: "raw" })),
+    });
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(screen.getByText(/0 blocks across 0 tracks · 2 images/)).toBeInTheDocument());
+
+    expect(musicVideoStoreState.applyNeuralFramesImport).toHaveBeenCalledWith(
+      "project-1",
+      expect.objectContaining({ title: "Storyboard Title" }),
+    );
+    expect(storeState.renameProject).toHaveBeenCalledWith("Storyboard Title");
+    expect(storeState.addPlaceholderMedia).toHaveBeenCalledTimes(2);
+    expect(storeState.addPlaceholderMedia).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        id: "asset-1",
+        name: "Desert keyframe.png",
+        title: "Desert keyframe",
+        description: "Wide desert at sunrise",
+        isPlaceholder: false,
+        generationMeta: expect.objectContaining({
+          provider: "neuralframes",
+          model: "nf",
+          prompt: "Wide desert at sunrise",
+          status: "realized",
+          jobId: "asset-1",
+        }),
+      }),
+    );
+    expect(storeState.addPlaceholderMedia).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        id: "asset-2",
+        name: "Ocean keyframe.png",
+        title: "Ocean keyframe",
+        description: "Stormy ocean at night",
+        isPlaceholder: true,
+        kieaiError: true,
+        generationMeta: expect.objectContaining({ status: "failed" }),
+      }),
+    );
+  });
+
+  it("imports storyboard audio as a relinkable placeholder clip when the file is not present", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          title: "Audio Storyboard",
+          shots: [],
+          generatedAssets: [],
+          metadataTracks: [],
+          timingHints: { bpm: 88, sections: [] },
+        }),
+      })),
+    );
+
+    const raw = {
+      storyboard_props: { storyboard_prompt: "brief", scenes: [], characters: [], loras: [] },
+      audio: {
+        duration: 42,
+        file_name: "main-song.wav",
+        audio_analysis: { bpm: 88 },
+      },
+    };
+    const { container } = render(
+      <NeuralFramesImportTab openreelProjectId="project-1" orchestratorUrl="http://localhost:4041" />,
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File([JSON.stringify(raw)], "storyboard.json", {
+      type: "application/json",
+    });
+    Object.defineProperty(file, "text", {
+      value: vi.fn().mockResolvedValue(JSON.stringify(raw)),
+    });
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(screen.getByText(/0 blocks across 0 tracks · 0 images · 1 audio/)).toBeInTheDocument());
+    expect(storeState.renameProject).toHaveBeenCalledWith("Audio Storyboard");
+
+    expect(storeState.addPlaceholderMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: expect.stringMatching(/^audio-[0-9a-f-]{36}$/),
+        name: "main-song.wav",
+        type: "audio",
+        isPlaceholder: true,
+        sourceFile: expect.objectContaining({ name: "main-song.wav" }),
+        metadata: expect.objectContaining({ duration: 42 }),
+      }),
+    );
+    expect(storeState.addClip).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.stringMatching(/^audio-[0-9a-f-]{36}$/),
+      0,
+      expect.objectContaining({ duration: 42 }),
+    );
   });
 });

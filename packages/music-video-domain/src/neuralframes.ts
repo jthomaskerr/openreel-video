@@ -31,7 +31,7 @@ export function importNeuralFrames(
   raw: NeuralFramesStoryboard,
   sourcePath: string,
 ): NeuralFramesImportResult {
-  const props = raw.storyboard_props;
+  const props = raw.storyboard_props ?? { storyboard_prompt: "", scenes: [], characters: [], loras: [] } as NeuralFramesStoryboard["storyboard_props"];
   const audioMeta = raw.audio?.audio_analysis ?? {};
   const bpm: number = audioMeta.bpm ?? 120;
   const duration: number = raw.audio?.duration ?? 0;
@@ -115,7 +115,8 @@ export function importNeuralFrames(
 
   // ── Characters → metadata track ────────────────────────────────────────────
   const charTrackId = uuid();
-  const charBlocks: MetadataBlock[] = props.characters.map((char) => ({
+  const rawCharacters: typeof props.characters = Array.isArray(props.characters) ? props.characters : [];
+  const charBlocks: MetadataBlock[] = rawCharacters.map((char) => ({
     id: uuid(),
     trackId: charTrackId,
     label: char.name,
@@ -141,14 +142,15 @@ export function importNeuralFrames(
 
   // ── LoRAs → metadata track ─────────────────────────────────────────────────
   const loraTrackId = uuid();
-  const loraBlocks: MetadataBlock[] = props.loras.map((lora) => ({
+  const rawLoras: typeof props.loras = Array.isArray(props.loras) ? props.loras : [];
+  const loraBlocks: MetadataBlock[] = rawLoras.map((lora) => ({
     id: uuid(),
     trackId: loraTrackId,
     label: lora.name,
     kind: "visual_motif" as const,
     startSeconds: 0,
     endSeconds: duration,
-    text: `Style LoRA: ${lora.name} (${lora.training_image_urls.length} training images)`,
+    text: `Style LoRA: ${lora.name} (${(lora.training_image_urls ?? []).length} training images)`,
     linkedShotIds: [],
     linkedGeneratedAssetIds: [],
     source: "llm" as const,
@@ -221,9 +223,9 @@ export function importNeuralFrames(
     sourcePath,
     storyboardId: uuid(),
     title: audioMeta.video_idea?.slice(0, 60) ?? sourcePath.split("/").pop() ?? "Neural Frames Import",
-    scenesImported: props.scenes.length,
-    charactersImported: props.characters.length,
-    lorasImported: props.loras.length,
+    scenesImported: (Array.isArray(props.scenes) ? props.scenes : []).length,
+    charactersImported: rawCharacters.length,
+    lorasImported: rawLoras.length,
     metadataTracks: [sceneTrack, charTrack, loraTrack, notesTrack].filter(
       (t) => t.blocks.length > 0,
     ),
