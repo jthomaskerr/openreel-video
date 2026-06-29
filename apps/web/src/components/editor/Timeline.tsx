@@ -25,6 +25,7 @@ import {
   Magnet,
   Rows3,
   Rows2,
+  Eye,
 } from "lucide-react";
 import { useProjectStore } from "../../stores/project-store";
 import { useTimelineStore } from "../../stores/timeline-store";
@@ -89,9 +90,9 @@ export const Timeline: React.FC = () => {
     viewportWidth,
     setScrollX,
     setScrollY,
-    setViewportDimensions,
     zoomIn,
     zoomOut,
+    zoomToFit,
     trackHeight,
     setTrackHeight,
     setTrackHeightById,
@@ -941,6 +942,10 @@ export const Timeline: React.FC = () => {
               <span className="text-[15px] font-medium leading-none">+</span>
             </TLTool>
           </div>
+
+          <TLTool onClick={() => zoomToFit(timelineDuration)} title="Zoom to fit (Shift+Z)">
+            <Eye size={14} />
+          </TLTool>
 
           <TLTool
             onClick={toggleTimelineMaximized}
