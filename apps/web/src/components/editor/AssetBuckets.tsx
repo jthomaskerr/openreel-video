@@ -37,6 +37,50 @@ interface AssetBucketsProps {
   }>;
 }
 
+type AssetCategory =
+  | { type: "media"; mediaType: MediaItem["type"]; label: string }
+  | { type: "metadata"; kind: string; label: string };
+
+const METADATA_LABELS: Record<string, string> = {
+  character: "Characters",
+  continuity_note: "Characters",
+  note: "Notes",
+  scene: "Scenes",
+  section: "Scenes",
+  style: "Styles",
+  visual_motif: "Styles",
+  "music-video": "Music Video",
+};
+
+export function getAssetCategory(item: MediaItem): AssetCategory {
+  const metadataKind = getMetadataKind(item);
+  if (metadataKind) {
+    return {
+      type: "metadata",
+      kind: metadataKind,
+      label: METADATA_LABELS[metadataKind] ?? `${metadataKind.slice(0, 1).toUpperCase()}${metadataKind.slice(1)}`,
+    };
+  }
+
+  const labels: Record<MediaItem["type"], string> = {
+    video: "Videos",
+    audio: "Audio",
+    image: "Images",
+  };
+  return { type: "media", mediaType: item.type, label: labels[item.type] };
+}
+
+function getMetadataKind(item: MediaItem): string | null {
+  const folder = item.sourceFile?.folder;
+  if (!folder || !folder.trim().startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(folder) as { kind?: unknown };
+    return typeof parsed.kind === "string" && parsed.kind.trim() ? parsed.kind : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Computes buckets from items — "All", by type, by tag, by group.
  */
@@ -61,14 +105,32 @@ function computeBuckets(items: MediaItem[], searchQuery: string): BucketDef[] {
   // All
   buckets.push({ id: "all", label: "All Assets", items: filtered });
 
-  // By type
+  // By semantic category. Metadata clips are backed by image MediaItems; keep
+  // them out of the real Images bucket.
   for (const type of ["video", "audio", "image"] as const) {
-    const typeItems = filtered.filter((i) => i.type === type);
+    const typeItems = filtered.filter((item) => {
+      const category = getAssetCategory(item);
+      return category.type === "media" && category.mediaType === type;
+    });
     if (typeItems.length > 0) {
       const labels: Record<string, string> = { video: "Videos", audio: "Audio", image: "Images" };
       buckets.push({ id: `type-${type}`, label: labels[type], items: typeItems });
     }
   }
+
+  const metadataBuckets = new Map<string, BucketDef>();
+  for (const item of filtered) {
+    const category = getAssetCategory(item);
+    if (category.type !== "metadata") continue;
+    const id = `metadata-${category.kind}`;
+    const existing = metadataBuckets.get(id);
+    if (existing) {
+      existing.items.push(item);
+    } else {
+      metadataBuckets.set(id, { id, label: category.label, items: [item] });
+    }
+  }
+  buckets.push(...[...metadataBuckets.values()].sort((a, b) => a.label.localeCompare(b.label)));
 
   // By tag
   const tagSet = new Set<string>();
