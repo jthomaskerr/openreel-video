@@ -4,6 +4,7 @@ import { useProjectStore } from "../../stores/project-store";
 import { useTimelineStore } from "../../stores/timeline-store";
 import { useUIStore } from "../../stores/ui-store";
 import { useEngineStore } from "../../stores/engine-store";
+import { useProblemCount } from "../../stores/problem-store";
 import type { Transform, EditingTemplatePrimitive } from "@openreel/core";
 import {
   ChromaKeyEngine,
@@ -1122,6 +1123,7 @@ export const InspectorPanel: React.FC = () => {
     clipType === "svg" ||
     clipType === "sticker";
 
+  const problemCount = useProblemCount();
 
   const clipTabs = useMemo(
     () => getTabsForClipType(clipType as InspectorClipType | null),
@@ -1185,6 +1187,7 @@ export const InspectorPanel: React.FC = () => {
             tabs={tabs}
             activeId={activeTab}
             onSelect={(id) => setInspectorActiveTab(id)}
+            badges={{ problems: problemCount }}
           />
         </>
       )}

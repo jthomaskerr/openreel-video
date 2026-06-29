@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { subscribeWithSelector, persist } from "zustand/middleware";
 import { problemBus } from "./problem-store";
+import { logBus } from "./log-store";
 
 export type PanelId =
   | "mediaLibrary"
@@ -436,14 +437,32 @@ export const useUIStore = create<UIState>()(
           set((state) => ({
             importErrors: [...state.importErrors, ...errors],
           }));
-          // Also pipe to the unified problem store
-          for (const err of errors) {
-            problemBus.report({
-              kind: err.kind,
-              message: err.message,
-              label: err.label,
-            });
-          }
+          // Pipe to log and problem stores. Use dynamic import for project context
+          // to avoid circular deps with project-store.
+          void import("./project-store").then(({ useProjectStore }) => {
+            const project = useProjectStore.getState().project;
+            const projectId = project?.id;
+            const projectName = project?.name;
+            for (const err of errors) {
+              logBus.entry({
+                kind: err.kind,
+                message: err.message,
+                label: err.label,
+                source: "import",
+                projectId,
+                projectName,
+                trackName: err.trackName,
+              });
+              problemBus.report({
+                kind: err.kind,
+                message: err.message,
+                label: err.label,
+                trackName: err.trackName,
+                projectId,
+                clipId: err.label,
+              });
+            }
+          });
         },
         clearImportErrors: () => {
           set({ importErrors: [] });

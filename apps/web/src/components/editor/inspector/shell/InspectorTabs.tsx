@@ -6,9 +6,9 @@ export interface InspectorTabsProps {
   tabs: InspectorTabDef[];
   activeId: InspectorTabId;
   onSelect: (id: InspectorTabId) => void;
+  badges?: Partial<Record<InspectorTabId, number>>;
 }
-
-export const InspectorTabs: React.FC<InspectorTabsProps> = ({ tabs, activeId, onSelect }) => {
+export const InspectorTabs: React.FC<InspectorTabsProps> = ({ tabs, activeId, onSelect, badges }) => {
   const handleKeyDown = (event: React.KeyboardEvent, index: number) => {
     if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
     event.preventDefault();
@@ -43,6 +43,11 @@ export const InspectorTabs: React.FC<InspectorTabsProps> = ({ tabs, activeId, on
           >
             <Icon size={13} />
             <span>{tab.label}</span>
+            {badges?.[tab.id] != null && badges[tab.id]! > 0 && (
+              <span className="ml-0.5 text-[9px] bg-yellow-500/20 text-yellow-400 px-1 py-0.5 rounded-full leading-none font-medium">
+                {badges[tab.id]}
+              </span>
+            )}
           </button>
         );
       })}
