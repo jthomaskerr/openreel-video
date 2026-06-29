@@ -5,6 +5,7 @@ import { useTimelineStore } from "../../stores/timeline-store";
 import { useUIStore } from "../../stores/ui-store";
 import { useEngineStore } from "../../stores/engine-store";
 import type { Transform, EditingTemplatePrimitive } from "@openreel/core";
+import { useProblemCount } from "../../stores/problem-store";
 import {
   ChromaKeyEngine,
   initializeTranscriptionService,
@@ -41,6 +42,7 @@ import {
 import {
   getTabsForClipType,
   getTabIdsForClipType,
+  TAB_DEFS,
   type InspectorClipType,
   type InspectorTabId,
 } from "./inspector/clip-tabs.config";
@@ -59,6 +61,7 @@ import { EffectsTab } from "./inspector/tabs/EffectsTab";
 import { AiTab } from "./inspector/tabs/AiTab";
 import { MetadataClipInspector } from "./inspector/MetadataClipInspector";
 import { MetadataEditor, FileInfoGrid, TypeSection, TypeDetailRow, GenerationInfo, VersionList, formatSize, formatDuration, type InfoRow } from "./asset-manager/AssetDetailShared";
+import { ProblemsPanel } from "./inspector/ProblemsPanel";
 import { ImportErrorsPanel } from "./inspector/ImportErrorsPanel";
 import { resolveAssetCategory } from "./asset-category";
 
@@ -1119,14 +1122,34 @@ export const InspectorPanel: React.FC = () => {
     clipType === "svg" ||
     clipType === "sticker";
 
-  const tabs = useMemo(
+  const problemCount = useProblemCount();
+  const hasProblems = problemCount > 0;
+
+  const clipTabs = useMemo(
     () => getTabsForClipType(clipType as InspectorClipType | null),
     [clipType],
   );
-  const tabIds = useMemo(
+  const clipTabIds = useMemo(
     () => getTabIdsForClipType(clipType as InspectorClipType | null),
     [clipType],
   );
+
+  // Add Problems tab when problems exist
+  const tabs = useMemo(() => {
+    const base = [...clipTabs];
+    if (hasProblems) {
+      base.unshift(TAB_DEFS.problems);
+    }
+    return base;
+  }, [clipTabs, hasProblems]);
+  const tabIds = useMemo(() => {
+    const base = [...clipTabIds];
+    if (hasProblems) {
+      base.unshift("problems");
+    }
+    return base;
+  }, [clipTabIds, hasProblems]);
+
   const inspectorActiveTab = useUIStore((s) => s.inspectorActiveTab);
   const setInspectorActiveTab = useUIStore((s) => s.setInspectorActiveTab);
 
@@ -1134,6 +1157,8 @@ export const InspectorPanel: React.FC = () => {
     (tabIds.includes(inspectorActiveTab as InspectorTabId)
       ? (inspectorActiveTab as InspectorTabId)
       : tabIds[0]) ?? ("transform" as InspectorTabId);
+
+  const showingProblems = activeTab === "problems";
 
   useEffect(() => {
     if (
@@ -1149,13 +1174,16 @@ export const InspectorPanel: React.FC = () => {
       data-tour="inspector"
       className="w-full min-w-0 bg-bg-1 flex flex-col h-full"
     >
-      {!isMetadataClip && selectedClip && tabs.length > 0 && (
+      {/* Show header + tabs when there's a selected clip OR when problems exist */}
+      {((!isMetadataClip && selectedClip) || hasProblems) && tabs.length > 0 && (
         <>
-          <InspectorClipHeader
-            name={`${selectedClip.id.substring(0, 20)}…`}
-            durationSeconds={selectedClip.duration}
-            typeLabel={clipType ?? "clip"}
-          />
+          {selectedClip && (
+            <InspectorClipHeader
+              name={`${selectedClip.id.substring(0, 20)}…`}
+              durationSeconds={selectedClip.duration}
+              typeLabel={clipType ?? "clip"}
+            />
+          )}
           <InspectorTabs
             tabs={tabs}
             activeId={activeTab}
@@ -1172,7 +1200,11 @@ export const InspectorPanel: React.FC = () => {
       )}
 
       <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
-        <ImportErrorsPanel errors={importErrors} />
+        {showingProblems ? (
+          <ProblemsPanel />
+        ) : (
+          <>
+            <ImportErrorsPanel errors={importErrors} />
         {inspectedAsset ? (
           <AssetInspectorBody item={inspectedAsset} />
         ) : isMetadataClip ? (
@@ -1685,6 +1717,8 @@ export const InspectorPanel: React.FC = () => {
           </>
         ) : (
           <EmptyState />
+        )}
+          </>
         )}
       </div>
     </div>

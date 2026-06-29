@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { subscribeWithSelector, persist } from "zustand/middleware";
+import { problemBus } from "./problem-store";
 
 export type PanelId =
   | "mediaLibrary"
@@ -58,11 +59,20 @@ export interface KeyboardShortcuts {
   zoomFit: string;
 }
 
+export interface ImportError {
+  id: string;
+  kind: "block_failed" | "missing_media" | "image_failed";
+  message: string;
+  label: string;
+  trackName?: string;
+}
+
 export interface UIState {
   selectedItems: SelectionItem[];
   lastSelectedItem: SelectionItem | null;
   effectApplicationClipId: string | null;
   effectApplicationLabel: string | null;
+  inspectedAsset: import("@openreel/core").MediaItem | null;
   snapSettings: SnapSettings;
   panels: Record<PanelId, PanelState>;
   shortcuts: KeyboardShortcuts;
@@ -91,6 +101,7 @@ export interface UIState {
   motionPathClipId: string | null;
   keyframeEditorOpen: boolean;
   inspectorActiveTab: string;
+  importErrors: ImportError[];
   select: (item: SelectionItem, addToSelection?: boolean) => void;
   selectMultiple: (items: SelectionItem[]) => void;
   deselect: (itemId: string) => void;
@@ -135,6 +146,8 @@ export interface UIState {
   setKeyframeEditorOpen: (open: boolean) => void;
   toggleKeyframeEditor: () => void;
   setInspectorActiveTab: (tabId: string) => void;
+  addImportErrors: (errors: ImportError[]) => void;
+  clearImportErrors: () => void;
   exportState: {
     isExporting: boolean;
     progress: number;
@@ -147,6 +160,7 @@ export interface UIState {
   }) => void;
   startEffectApplication: (clipId: string, label?: string) => void;
   finishEffectApplication: () => void;
+  setInspectedAsset: (asset: import("@openreel/core").MediaItem | null) => void;
 }
 
 export interface ContextMenuItem {
@@ -203,6 +217,7 @@ export const useUIStore = create<UIState>()(
         lastSelectedItem: null,
         effectApplicationClipId: null,
         effectApplicationLabel: null,
+        inspectedAsset: null,
 
         snapSettings: DEFAULT_SNAP_SETTINGS,
 
@@ -216,6 +231,7 @@ export const useUIStore = create<UIState>()(
         showKeyframes: true,
         autoScroll: true,
         timelineMaximized: false,
+        importErrors: [],
 
         activeModal: null,
         modalData: null,
@@ -259,6 +275,10 @@ export const useUIStore = create<UIState>()(
             effectApplicationClipId: null,
             effectApplicationLabel: null,
           });
+        },
+
+        setInspectedAsset: (asset) => {
+          set({ inspectedAsset: asset });
         },
 
         select: (item: SelectionItem, addToSelection = false) => {
@@ -408,6 +428,26 @@ export const useUIStore = create<UIState>()(
               },
             },
           }));
+        },
+
+        addImportErrors: (errors: ImportError[]) => {
+          set((state) => ({
+            importErrors: [...state.importErrors, ...errors],
+          }));
+          // Also pipe to the unified problem store
+          for (const err of errors) {
+            problemBus.report({
+              kind: err.kind,
+              message: err.message,
+              label: err.label,
+            });
+          }
+        },
+        clearImportErrors: () => {
+          set({ importErrors: [] });
+          problemBus.resolveByKind("missing_media");
+          problemBus.resolveByKind("block_failed");
+          problemBus.resolveByKind("image_failed");
         },
 
         setPanelVisible: (panelId: PanelId, visible: boolean) => {

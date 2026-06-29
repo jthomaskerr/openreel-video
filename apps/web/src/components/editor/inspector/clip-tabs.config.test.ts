@@ -37,6 +37,6 @@ describe("clip-tabs.config", () => {
     const defs = getTabsForClipType("video");
     expect(defs[0]).toMatchObject({ id: "transform", label: "Transform" });
     expect(typeof defs[0].icon).toBe("object");
-    expect(Object.keys(TAB_DEFS)).toHaveLength(8);
+    expect(Object.keys(TAB_DEFS)).toHaveLength(9);
   });
 });
