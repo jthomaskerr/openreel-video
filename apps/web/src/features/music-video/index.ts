@@ -1,1 +1,1 @@
-export { MusicVideoPanel } from "./components/MusicVideoPanel";
+export { NeuralFramesImportTab } from "./components/NeuralFramesImportTab";

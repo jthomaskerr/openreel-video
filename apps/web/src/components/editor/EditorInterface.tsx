@@ -9,7 +9,6 @@ import { KeyframeEditorPanel } from "./KeyframeEditorPanel";
 import { AudioMixer } from "../audio-mixer";
 import { KeyboardShortcutsOverlay } from "./KeyboardShortcutsOverlay";
 import { PanelErrorBoundary } from "../ErrorBoundary";
-import { MusicVideoPanel } from "../../features/music-video";
 import { SpotlightTour, MoGraphTour } from "./tour";
 import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
@@ -465,13 +464,6 @@ export const EditorInterface: React.FC = () => {
           <PanelErrorBoundary name="Inspector">
             <InspectorPanel />
           </PanelErrorBoundary>
-          {panels.musicVideo?.visible && (
-            <div className="absolute inset-0 z-10 overflow-hidden">
-              <PanelErrorBoundary name="Music Video">
-                <MusicVideoPanel onClose={() => setPanelVisible("musicVideo", false)} />
-              </PanelErrorBoundary>
-            </div>
-          )}
         </div>
 
         <div
