@@ -5,8 +5,9 @@
     "moduleResolution": "bundler",
     "outDir": "dist",
     "paths": {
-      "@openreel/music-video-domain": ["../../packages/music-video-domain/src/index.ts"]
+      "@openreel/music-video-domain": ["../../packages/music-video-domain/src/index.ts"],
+      "@openreel/core": ["../../packages/core/src/index.ts"]
     }
   },
-  "include": ["src", "../../packages/music-video-domain/src"]
+  "include": ["src", "../../packages/music-video-domain/src", "../../packages/core/src"]
 }

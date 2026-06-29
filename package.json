@@ -5,7 +5,7 @@
   "description": "Professional video, audio, and photo editing in your browser",
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @openreel/web dev",
+    "dev": "pnpm --parallel --filter @openreel/orchestrator --filter @openreel/web dev",
     "build:wasm": "pnpm --filter @openreel/core build:wasm",
     "build": "pnpm build:wasm && pnpm --filter @openreel/web build",
     "preview": "pnpm --filter @openreel/web preview",
@@ -18,7 +18,8 @@
     "clean": "pnpm -r clean",
     "claude:help": "cat scripts/claude-review.md",
     "issues": "gh issue list --label needs-claude-review",
-    "prs": "gh pr list --label needs-claude-review"
+    "prs": "gh pr list --label needs-claude-review",
+    "project": "tsx scripts/project.ts"
   },
   "keywords": [
     "video-editor",
