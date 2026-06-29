@@ -195,7 +195,10 @@ export class SilenceCutBridge {
           absoluteEnd,
         );
         if (silentClip) {
-          await store.rippleDeleteClip(silentClip.id);
+          const deleteResult = await store.rippleDeleteClip(silentClip.id);
+          if (!deleteResult.success) {
+            console.warn(`[silence-cut] Failed to delete silent clip ${silentClip.id}: ${deleteResult.error}`);
+          }
         }
       }
 

@@ -63,6 +63,48 @@ export async function loadDirectoryHandle(projectId: string): Promise<{ handle: 
   return storage.loadDirectoryHandle(projectId);
 }
 
+/** A file found during recursive directory scanning. */
+export interface FoundFileEntry {
+  file: File;
+  handle: FileSystemFileHandle;
+}
+
+/**
+ * Recursively scan a directory handle, collecting all files with their handles.
+ * Directories are traversed breadth-first; file name collisions are resolved
+ * by keeping the first file found (shallower nesting wins).
+ */
+export async function scanDirectoryRecursive(
+  dirHandle: FileSystemDirectoryHandle,
+): Promise<Map<string, FoundFileEntry>> {
+  const fileMap = new Map<string, FoundFileEntry>();
+  const pending: FileSystemDirectoryHandle[] = [dirHandle];
+
+  while (pending.length > 0) {
+    const current = pending.shift()!;
+    try {
+      for await (const [, handle] of current as unknown as AsyncIterable<[string, FileSystemHandle]>) {
+        if (handle.kind === "file") {
+          const fh = handle as FileSystemFileHandle;
+          const file = await fh.getFile();
+          const key = `${file.name.toLowerCase()}:${file.size}`;
+          // First file found wins (shallower nesting)
+          if (!fileMap.has(key)) {
+            fileMap.set(key, { file, handle: fh });
+          }
+        } else if (handle.kind === "directory") {
+          pending.push(handle as FileSystemDirectoryHandle);
+        }
+      }
+    } catch {
+      // Permission denied on a subdirectory — skip it
+      continue;
+    }
+  }
+
+  return fileMap;
+}
+
 export async function getStorageStats(): Promise<{
   used: number;
   quota: number;

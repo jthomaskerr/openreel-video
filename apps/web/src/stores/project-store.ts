@@ -69,6 +69,7 @@ import {
   loadProjectMedia,
   loadFileHandle,
   loadDirectoryHandle,
+  scanDirectoryRecursive,
 } from "../services/media-storage";
 import { restoreMediaItem } from "../utils/media-recovery";
 import { projectManager } from "../services/project-manager";
@@ -212,6 +213,7 @@ export interface ProjectState {
     clipId: string,
     transform: Partial<Transform>,
   ) => boolean;
+  updateClipMetadata: (clipId: string, patch: Record<string, unknown>) => boolean;
   updateClipBlendMode: (
     clipId: string,
     blendMode: import("@openreel/core").BlendMode,
@@ -1582,13 +1584,11 @@ export const useProjectStore = create<ProjectState>()(
               try {
                 const dirInfo = await loadDirectoryHandle(fixedProject.id);
                 if (dirInfo) {
+                  const scanned = await scanDirectoryRecursive(dirInfo.handle);
+                  // Map to { file, folder } shape expected by the relink loop
                   const fileMap = new Map<string, { file: File; folder: string }>();
-                  const entries = (dirInfo.handle as unknown as { entries: () => AsyncIterableIterator<[string, FileSystemHandle]> }).entries();
-                  for await (const [, fh] of entries) {
-                    if ((fh as FileSystemHandle).kind === "file") {
-                      const f = await (fh as FileSystemFileHandle).getFile();
-                      fileMap.set(`${f.name.toLowerCase()}:${f.size}`, { file: f, folder: dirInfo.folderName });
-                    }
+                  for (const [key, entry] of scanned) {
+                    fileMap.set(key, { file: entry.file, folder: dirInfo.folderName });
                   }
                   for (const item of stillMissing) {
                     if (!item.sourceFile) continue;
@@ -1958,7 +1958,9 @@ export const useProjectStore = create<ProjectState>()(
             }
           }
 
+          const previousItem = project.mediaLibrary.items.find((item) => item.id === mediaId);
           const updatedItem: MediaItem = {
+            ...previousItem,
             id: mediaId,
             name: file.name,
             type: mediaType,
@@ -1978,7 +1980,14 @@ export const useProjectStore = create<ProjectState>()(
             waveformData: processedMedia.waveformData?.peaks || null,
             filmstripThumbnails:
               filmstripThumbnails.length > 0 ? filmstripThumbnails : undefined,
+            // Preserve user-editable metadata — replace only the file, not the asset identity
+            title: previousItem?.title,
+            description: previousItem?.description,
+            tags: previousItem?.tags,
+            group: previousItem?.group,
             isPlaceholder: false,
+            isPending: false,
+            kieaiError: false,
             sourceFile: { name: file.name, size: file.size, lastModified: file.lastModified, folder: sourceFolder },
           };
 
@@ -2233,12 +2242,26 @@ export const useProjectStore = create<ProjectState>()(
         });
         return true;
       },
-
-
       setKieAIItemState: (mediaId: string, isPending: boolean, kieaiError: boolean) => {
         const { project } = get();
         const updatedItems = project.mediaLibrary.items.map((item) =>
-          item.id === mediaId ? { ...item, isPending, kieaiError } : item,
+          item.id === mediaId
+            ? {
+                ...item,
+                isPending,
+                kieaiError,
+                generationMeta: item.generationMeta
+                  ? {
+                      ...item.generationMeta,
+                      status: kieaiError
+                        ? "failed"
+                        : isPending
+                          ? "processing"
+                          : item.generationMeta.status,
+                    }
+                  : undefined,
+              }
+            : item,
         );
         set({
           project: {
@@ -2287,27 +2310,38 @@ export const useProjectStore = create<ProjectState>()(
         }
 
         const file = new File([blob], name, { type: blob.type || "image/png" });
+        const previousItem = project.mediaLibrary.items.find((item) => item.id === mediaId);
 
         const updatedItem: MediaItem = {
+          ...previousItem,
           id: mediaId,
           name,
-          type: "image",
+          type: previousItem?.type ?? "image",
           fileHandle: null,
           blob: file,
           metadata: {
-            duration: 0,
+            duration: previousItem?.metadata.duration ?? 0,
             width,
             height,
-            frameRate: 0,
-            codec: "",
-            sampleRate: 0,
-            channels: 0,
+            frameRate: previousItem?.metadata.frameRate ?? 0,
+            codec: previousItem?.metadata.codec ?? "",
+            sampleRate: previousItem?.metadata.sampleRate ?? 0,
+            channels: previousItem?.metadata.channels ?? 0,
             fileSize: file.size,
           },
-          thumbnailUrl,
-          waveformData: null,
+          thumbnailUrl: thumbnailUrl ?? previousItem?.thumbnailUrl ?? null,
+          waveformData: previousItem?.waveformData ?? null,
+          // Preserve user-editable metadata — replace only the file, not the asset identity
+          title: previousItem?.title,
+          description: previousItem?.description,
+          tags: previousItem?.tags,
+          group: previousItem?.group,
           isPlaceholder: false,
           isPending: false,
+          kieaiError: false,
+          generationMeta: previousItem?.generationMeta
+            ? { ...previousItem.generationMeta, status: "realized" }
+            : undefined,
         };
 
         const updatedItems = project.mediaLibrary.items.map((item) =>
@@ -6247,6 +6281,21 @@ export const useProjectStore = create<ProjectState>()(
         }
 
         set({ project: updatedProject });
+        return true;
+      },
+
+      /**
+       * Update a clip's metadata with a shallow merge.
+       * Used by metadata inspectors (character, scene, style) for inline editing.
+       */
+      updateClipMetadata: (clipId: string, patch: Record<string, unknown>) => {
+        const { project } = get();
+        const updatedProject = updateProjectClip(project, clipId, (clip) => ({
+          ...clip,
+          metadata: { ...(clip.metadata ?? {}), ...patch },
+        }));
+        if (!updatedProject) return false;
+        set({ project: { ...updatedProject, modifiedAt: Date.now() } });
         return true;
       },
 

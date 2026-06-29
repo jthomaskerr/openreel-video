@@ -179,6 +179,8 @@ export interface ProjectState {
     clipId: string,
     transform: Partial<Transform>,
   ) => boolean;
+  /** Update a clip's metadata with a shallow-merged patch */
+  updateClipMetadata: (clipId: string, patch: Record<string, unknown>) => boolean;
 
   copyClips: (clipIds: string[]) => void;
   pasteClips: (trackId: string, startTime: number) => Promise<ActionResult[]>;
