@@ -1,7 +1,7 @@
 import type { ActionResult, MediaItem, Project, Track } from "@openreel/core";
 import { createMetadataMedia, type MetadataKind } from "./metadata-media";
 
-export interface MetadataClipStore {
+export interface TimelineClipStore {
   readonly project: Project;
   addTrack: (trackType: Track["type"], position?: number) => Promise<ActionResult>;
   renameTrack: (trackId: string, name: string) => void;
@@ -13,8 +13,7 @@ export interface MetadataClipStore {
     options?: { duration?: number; metadata?: Record<string, unknown> },
   ) => Promise<ActionResult>;
 }
-
-export interface AddTimelineMetadataClipInput {
+export interface AddTimelineClipInput {
   trackName: string;
   kind: MetadataKind;
   label: string;
@@ -26,7 +25,7 @@ export interface AddTimelineMetadataClipInput {
   trackType?: Track["type"];
 }
 
-export interface AddTimelineMetadataClipResult {
+export interface AddTimelineClipResult {
   success: boolean;
   trackId: string;
   mediaId: string;
@@ -34,12 +33,12 @@ export interface AddTimelineMetadataClipResult {
   error?: ActionResult["error"];
 }
 
-export async function addTimelineMetadataClip(
-  store: MetadataClipStore,
-  input: AddTimelineMetadataClipInput,
-): Promise<AddTimelineMetadataClipResult> {
+export async function addTimelineClip(
+  store: TimelineClipStore,
+  input: AddTimelineClipInput,
+): Promise<AddTimelineClipResult> {
   try {
-    const trackResult = await findOrCreateMetadataTrack(store, input.trackName, input.trackType);
+    const trackResult = await findOrCreateTrack(store, input.trackName, input.trackType);
     if (!trackResult.success) {
       return { success: false, trackId: "", mediaId: "", clipId: "", error: trackResult.error };
     }
@@ -94,7 +93,7 @@ export async function addTimelineMetadataClip(
         clipId: "",
         error: {
           code: "CLIP_NOT_FOUND",
-          message: "Metadata clip was added but could not be located",
+          message: "Clip was added but could not be located",
         },
       };
     }
@@ -113,14 +112,14 @@ export async function addTimelineMetadataClip(
       clipId: "",
       error: {
         code: "INTERNAL_ERROR",
-        message: error instanceof Error ? error.message : "Unexpected error creating metadata clip",
+        message: error instanceof Error ? error.message : "Unexpected error creating clip",
       },
     };
   }
 }
 
-async function findOrCreateMetadataTrack(
-  store: MetadataClipStore,
+async function findOrCreateTrack(
+  store: TimelineClipStore,
   trackName: string,
   trackType: Track["type"] = "metadata",
 ): Promise<{ success: true; trackId: string } | { success: false; error: ActionResult["error"] }> {
@@ -145,7 +144,7 @@ async function findOrCreateMetadataTrack(
       success: false,
       error: {
         code: "TRACK_NOT_FOUND",
-        message: "Metadata track was added but could not be located",
+        message: "Track was added but could not be located",
       },
     };
   }

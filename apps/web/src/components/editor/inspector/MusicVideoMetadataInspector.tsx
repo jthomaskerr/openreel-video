@@ -3,7 +3,7 @@ import type { Clip } from "@openreel/core";
 import { Button } from "@openreel/ui";
 import { Plus } from "lucide-react";
 import { useProjectStore } from "../../../stores/project-store";
-import { addTimelineMetadataClip, type MetadataClipStore } from "../../../features/music-video/timeline/metadata-clips";
+import { addTimelineClip, type TimelineClipStore } from "../../../features/music-video/timeline/timeline-clips";
 
 interface Props {
   clip: Clip;
@@ -71,7 +71,7 @@ function NewMetadataButton({ kind }: { kind: "character" | "scene" | "style" }) 
   const handleCreate = useCallback(async () => {
     setCreating(true);
     try {
-      const storeIface: MetadataClipStore = {
+      const storeIface: TimelineClipStore = {
         get project() {
           return useProjectStore.getState().project;
         },
@@ -81,7 +81,7 @@ function NewMetadataButton({ kind }: { kind: "character" | "scene" | "style" }) 
         addClip,
       };
 
-      const result = await addTimelineMetadataClip(storeIface, {
+      const result = await addTimelineClip(storeIface, {
         trackName: config.trackName,
         kind,
         label: `New ${config.label}`,

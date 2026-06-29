@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ActionResult, MediaItem, Project, Track } from "@openreel/core";
-import { addTimelineMetadataClip, type MetadataClipStore } from "./metadata-clips";
+import { addTimelineClip, type TimelineClipStore } from "./timeline-clips";
 
 function makeProject(): Project {
   return {
@@ -27,7 +27,7 @@ function makeProject(): Project {
 
 function makeStore(initialProject = makeProject()) {
   let project = initialProject;
-  const store: MetadataClipStore = {
+  const store: TimelineClipStore = {
     get project() {
       return project;
     },
@@ -136,11 +136,11 @@ function makeStore(initialProject = makeProject()) {
   return store;
 }
 
-describe("addTimelineMetadataClip", () => {
+describe("addTimelineClip", () => {
   it("creates a named metadata track when absent", async () => {
     const store = makeStore();
 
-    const result = await addTimelineMetadataClip(store, {
+    const result = await addTimelineClip(store, {
       trackName: "Music Video",
       kind: "music-video",
       label: "Music Video",
@@ -177,7 +177,7 @@ describe("addTimelineMetadataClip", () => {
       timeline: { ...makeProject().timeline, tracks: [existingTrack] },
     });
 
-    const result = await addTimelineMetadataClip(store, {
+    const result = await addTimelineClip(store, {
       trackName: "Storyboard",
       kind: "scene",
       label: "Scene 1",
@@ -195,7 +195,7 @@ describe("addTimelineMetadataClip", () => {
   it("adds generated metadata media before adding the clip", async () => {
     const store = makeStore();
 
-    const result = await addTimelineMetadataClip(store, {
+    const result = await addTimelineClip(store, {
       trackName: "Characters",
       kind: "character",
       label: "Hero",
@@ -219,7 +219,7 @@ describe("addTimelineMetadataClip", () => {
   it("adds clip metadata with kind label color and payload", async () => {
     const store = makeStore();
 
-    const result = await addTimelineMetadataClip(store, {
+    const result = await addTimelineClip(store, {
       trackName: "Styles",
       kind: "style",
       label: "Noir",

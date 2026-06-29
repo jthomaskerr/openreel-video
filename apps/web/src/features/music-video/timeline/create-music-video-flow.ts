@@ -1,5 +1,5 @@
 import type { ActionResult } from "@openreel/core";
-import { addTimelineMetadataClip, type MetadataClipStore } from "./metadata-clips";
+import { addTimelineClip, type TimelineClipStore } from "./timeline-clips";
 
 /** Track name used for the music-video metadata track on the timeline. */
 export const MUSIC_VIDEO_TRACK_NAME = "Music Video";
@@ -9,10 +9,10 @@ export const MUSIC_VIDEO_CLIP_COLOR = "#38bdf8";
 
 /**
  * Minimum store surface the flow needs.
- * Extends MetadataClipStore (which provides project, addTrack, renameTrack,
+ * Extends TimelineClipStore (which provides project, addTrack, renameTrack,
  * addGeneratedMedia, addClip) with the two extra methods required for audio import.
  */
-export interface MusicVideoFlowStore extends MetadataClipStore {
+export interface MusicVideoFlowStore extends TimelineClipStore {
   /** Import a File into the project media library; returns actionId = new media ID. */
   importMedia: (file: File) => Promise<ActionResult>;
   /** Current total duration of the timeline (seconds). Used as fallback when audio duration is unavailable. */
@@ -42,7 +42,7 @@ export interface CreateMusicVideoFlowResult {
  *     duration when the audio container reports 0 (e.g. live-recorded files).
  *     The clip remains adjustable by the user afterward.
  *  3. Find or create an audio track and place the clip at t=0.
- *  4. Create the full-duration music-video metadata clip via addTimelineMetadataClip.
+ *  4. Create the full-duration music-video metadata clip via addTimelineClip.
  *
  * Returns all four created/found IDs so UI callers can immediately select the
  * metadata clip: useUIStore.select({ type: "clip", id: metadataClipId, trackId: metadataTrackId }).
@@ -141,7 +141,7 @@ export async function createMusicVideoFlow(
   }
 
   // 5. Create full-duration music-video metadata clip
-  const metadataResult = await addTimelineMetadataClip(store, {
+  const metadataResult = await addTimelineClip(store, {
     trackName: MUSIC_VIDEO_TRACK_NAME,
     kind: "music-video",
     label: "Music Video",

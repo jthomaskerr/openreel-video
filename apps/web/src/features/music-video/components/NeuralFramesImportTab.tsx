@@ -2,7 +2,7 @@ import React, { useRef, useState } from "react";
 import { Upload } from "lucide-react";
 import { v4 as uuidv4 } from "uuid";
 import { useProjectStore } from "../../../stores/project-store";
-import { addTimelineMetadataClip, type MetadataClipStore } from "../timeline/metadata-clips";
+import { addTimelineClip, type TimelineClipStore } from "../timeline/timeline-clips";
 import type { GeneratedAsset, MetadataBlock, NeuralFramesImportResult, NeuralFramesStoryboard } from "@openreel/music-video-domain";
 import type { MediaItem, Track } from "@openreel/core";
 import { useMusicVideoStore } from "../../../stores/music-video-store";
@@ -236,8 +236,8 @@ export const NeuralFramesImportTab: React.FC<Props> = ({
       // Name the main OpenReel project after the imported storyboard
       useProjectStore.getState().renameProject(result.title);
 
-      // ── Each MetadataTrack → real metadata clips via addTimelineMetadataClip ──
-      const storeIface: MetadataClipStore = {
+      // ── Each MetadataTrack → real metadata clips via addTimelineClip ──
+      const storeIface: TimelineClipStore = {
         get project() { return useProjectStore.getState().project; },
         addTrack,
         renameTrack,
@@ -254,7 +254,7 @@ export const NeuralFramesImportTab: React.FC<Props> = ({
         const isSceneTrack = track.kind === "sections";
         for (const block of track.blocks) {
           const duration = blockDurationSeconds(block);
-          const clipResult = await addTimelineMetadataClip(storeIface, {
+          const clipResult = await addTimelineClip(storeIface, {
             trackName: track.label,
             kind: blockKindToMetadataKind(block.kind),
             label: block.label,

@@ -185,7 +185,7 @@ describe("createMusicVideoFlow", () => {
 
     expect(result.success).toBe(true);
     expect(store.importMedia).toHaveBeenCalledWith(file);
-    // imported audio + metadata media (image placeholder used by addTimelineMetadataClip)
+    // imported audio + metadata media (image placeholder used by addTimelineClip)
     expect(store.project.mediaLibrary.items.length).toBeGreaterThanOrEqual(2);
     // Verify the audio item is present
     const audioItems = store.project.mediaLibrary.items.filter(
