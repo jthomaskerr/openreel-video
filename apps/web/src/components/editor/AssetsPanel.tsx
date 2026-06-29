@@ -12,6 +12,7 @@ import {
 } from "../../services/background-generator";
 import type { ShapeType } from "@openreel/core";
 import { useProjectStore } from "../../stores/project-store";
+import { shallow } from "zustand/shallow";
 import { useUIStore } from "../../stores/ui-store";
 import type { MediaItem } from "@openreel/core";
 import { AspectRatioMatchDialog } from "./dialogs/AspectRatioMatchDialog";
@@ -24,7 +25,7 @@ import {
 } from "./panels/EffectsTransitionsPanel";
 import { useTtsAudioStore } from "../../stores/tts-store";
 import { toast } from "../../stores/notification-store";
-import { saveFileHandle, saveDirectoryHandle } from "../../services/media-storage";
+import { saveFileHandle, saveDirectoryHandle, scanDirectoryRecursive } from "../../services/media-storage";
 import {
   Input,
   ScrollArea,
@@ -41,7 +42,6 @@ import type { GenerateAssetDialogProps } from "./generate/GenerateAssetDialog";
 import { loadMediaBlob } from "../../services/media-storage";
 import { useKieAIStore } from "../../stores/kieai-store";
 import { useMusicVideoStore } from "../../stores/music-video-store";
-import { AssetManagerDialog } from "./AssetManagerDialog";
 import { AssetBuckets } from "./AssetBuckets";
 
 const formatDuration = (seconds: number): string => {
@@ -143,7 +143,7 @@ const MediaThumbnail: React.FC<{
   onRetryKieAI?: () => void;
   onManage?: () => void;
   onRename?: () => void;
-}> = React.memo(function MediaThumbnail({
+}> = function MediaThumbnail({
   item,
   isSelected,
   viewMode,
@@ -479,6 +479,14 @@ const MediaThumbnail: React.FC<{
           </div>
         )}
 
+        {item.generationMeta && (
+          <div className="absolute top-1 right-1 px-1.5 py-0.5 bg-rose-500/90 rounded text-[8px] text-white font-bold flex items-center gap-1">
+            <Sparkles size={8} />
+            {item.generationMeta.status ? `Generated · ${item.generationMeta.status}` : "Generated"}
+          </div>
+        )}
+
+
         {/* Missing Asset Badge */}
         {!item.kieaiError && !item.isPending && item.isPlaceholder && !item.thumbnailUrl && (
           <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-yellow-500 rounded text-[8px] text-black font-bold flex items-center gap-1">
@@ -574,7 +582,7 @@ const MediaThumbnail: React.FC<{
       </ContextMenuContent>
     </ContextMenu>
   );
-});
+};
 
 MediaThumbnail.displayName = "MediaThumbnail";
 
@@ -615,7 +623,11 @@ function useStableMediaItems(items: MediaItem[]): MediaItem[] {
       a.metadata?.duration !== b.metadata?.duration ||
       a.metadata?.width !== b.metadata?.width ||
       a.metadata?.height !== b.metadata?.height ||
-      a.metadata?.fileSize !== b.metadata?.fileSize
+      a.metadata?.fileSize !== b.metadata?.fileSize ||
+      a.tags?.length !== b.tags?.length ||
+      (a.tags && b.tags && !a.tags.every((t, i) => t === b.tags?.[i])) ||
+      a.group !== b.group ||
+      a.description !== b.description
     ) {
       ref.current = items;
       return items;
@@ -636,7 +648,8 @@ const MediaThumbnailRow = React.memo(
   }) => {
     const handleSelect = useCallback(() => {
       useUIStore.getState().select({ type: "clip", id: item.id });
-    }, [item.id]);
+      onManageRef?.current?.(item);
+    }, [item.id, onManageRef]);
 
     const handleDelete = useCallback(async () => {
       await useProjectStore.getState().deleteMedia(item.id);
@@ -705,6 +718,9 @@ const MediaThumbnailRow = React.memo(
     prev.item.id === next.item.id &&
     prev.item.name === next.item.name &&
     prev.item.title === next.item.title &&
+    prev.item.tags === next.item.tags &&
+    prev.item.group === next.item.group &&
+    prev.item.description === next.item.description &&
     prev.item.type === next.item.type &&
     prev.item.isPlaceholder === next.item.isPlaceholder &&
     prev.item.isPending === next.item.isPending &&
@@ -783,8 +799,7 @@ export const AssetsPanel: React.FC = () => {
 
   // Generate asset dialog
   const [generateDialog, setGenerateDialog] = useState<Omit<GenerateAssetDialogProps, "open" | "onClose"> | null>(null);
-  // Asset management dialog
-  const [managedItem, setManagedItem] = useState<MediaItem | null>(null);
+  const setInspectedAsset = useUIStore((s) => s.setInspectedAsset);
 
   // Project store — narrow subscriptions. mediaItems stabilized since structuredClone
   // creates new refs for unchanged items on every timeline edit.
@@ -796,7 +811,7 @@ export const AssetsPanel: React.FC = () => {
   const setKieAIItemState = useProjectStore((s) => s.setKieAIItemState);
 
   // Selection tracking — stable Set derived from selectedItems array
-  const selectedItems = useUIStore((s) => s.selectedItems);
+  const selectedItems = useUIStore((s) => s.selectedItems, shallow);
   const selectedItemIds = useMemo(() => {
     const ids = new Set<string>();
     for (const si of selectedItems) {
@@ -906,49 +921,101 @@ export const AssetsPanel: React.FC = () => {
 
 
   const handleRelinkFromFolder = useCallback(async () => {
-    if (!("showDirectoryPicker" in window)) {
-      toast.error("Folder picker not supported", "Please relink assets individually using the refresh button on each missing asset.");
-      return;
-    }
-    let dirHandle: FileSystemDirectoryHandle;
-    try {
-      dirHandle = await (window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker();
-    } catch {
-      return; // user cancelled
-    }
-
     const { project } = useProjectStore.getState();
     const placeholders = project.mediaLibrary.items.filter((item) => item.isPlaceholder);
     if (placeholders.length === 0) return;
 
-    // Persist the directory handle for future auto-restore
-    try { await saveDirectoryHandle(useProjectStore.getState().project.id, dirHandle); } catch { /* best-effort */ }
+    // ── Path A: File System Access API (Chrome, secure context) ──────────
+    if ("showDirectoryPicker" in window) {
+      let dirHandle: FileSystemDirectoryHandle;
+      try {
+        dirHandle = await (window as unknown as { showDirectoryPicker: () => Promise<FileSystemDirectoryHandle> }).showDirectoryPicker();
+      } catch {
+        return; // user cancelled
+      }
 
-    // Build a name:size → {File, handle} map for reliable matching
-    const fileMap = new Map<string, { file: File; handle: FileSystemFileHandle }>();
-    const entries = (dirHandle as unknown as { entries: () => AsyncIterableIterator<[string, FileSystemHandle]> }).entries();
-    for await (const [, fh] of entries) {
-      if ((fh as FileSystemHandle).kind === "file") {
-        const fileHandle = fh as FileSystemFileHandle;
-        const file = await fileHandle.getFile();
-        fileMap.set(`${file.name.toLowerCase()}:${file.size}`, { file, handle: fileHandle });
+      try { await saveDirectoryHandle(useProjectStore.getState().project.id, dirHandle); } catch { /* best-effort */ }
+      const fileMap = await scanDirectoryRecursive(dirHandle);
+
+      setIsImporting(true);
+      let linked = 0;
+      for (const item of placeholders) {
+        const key = item.sourceFile
+          ? `${item.sourceFile.name.toLowerCase()}:${item.sourceFile.size}`
+          : null;
+        const entry = key ? fileMap.get(key) : null;
+        if (entry) {
+          setImportProgress(`Relinking ${item.name}…`);
+          try {
+            try { await saveFileHandle(entry.file.name, entry.file.size, entry.handle); } catch { /* best-effort */ }
+            await useProjectStore.getState().replaceMediaAsset(item.id, entry.file, dirHandle.name);
+            linked++;
+          } catch (err) {
+            console.error(`[AssetsPanel] Failed to relink ${item.name}:`, err);
+          }
+        }
+      }
+      setIsImporting(false);
+      setImportProgress("");
+
+      if (linked > 0) {
+        toast.success(`Relinked ${linked} of ${placeholders.length} asset${placeholders.length !== 1 ? "s" : ""}`);
+      } else {
+        toast.error("No matches found", "None of the files in the selected folder matched the missing assets by filename.");
+      }
+      return;
+    }
+
+    // ── Path B: <input webkitdirectory> fallback (Safari, Firefox, HTTP) ──
+    const pickFolder = (): Promise<File[]> =>
+      new Promise((resolve) => {
+        const input = document.createElement("input");
+        input.type = "file";
+        input.webkitdirectory = true;
+        input.multiple = true;
+        input.onchange = () => {
+          resolve(Array.from(input.files ?? []));
+          input.remove();
+        };
+        // User cancelled → resolve empty
+        input.oncancel = () => { resolve([]); input.remove(); };
+        // Fallback for browsers that don't fire oncancel
+        const focusHandler = () => {
+          window.removeEventListener("focus", focusHandler);
+          setTimeout(() => {
+            if (input.files?.length === 0 || !input.files) {
+              resolve([]);
+              input.remove();
+            }
+          }, 300);
+        };
+        window.addEventListener("focus", focusHandler);
+        input.click();
+      });
+
+    const files = await pickFolder();
+    if (files.length === 0) return;
+
+    // Build name:size map from flat file list (webkitdirectory is flat)
+    const fileMap = new Map<string, File>();
+    for (const file of files) {
+      const key = `${file.name.toLowerCase()}:${file.size}`;
+      if (!fileMap.has(key)) {
+        fileMap.set(key, file);
       }
     }
 
     setIsImporting(true);
     let linked = 0;
     for (const item of placeholders) {
-      // Match on original source file name + size (same strategy as auto-restore)
       const key = item.sourceFile
         ? `${item.sourceFile.name.toLowerCase()}:${item.sourceFile.size}`
         : null;
-      const entry = key ? fileMap.get(key) : null;
-      if (entry) {
+      const file = key ? fileMap.get(key) : undefined;
+      if (file) {
         setImportProgress(`Relinking ${item.name}…`);
         try {
-          // Save individual file handle for future auto-restore
-          try { await saveFileHandle(entry.file.name, entry.file.size, entry.handle); } catch { /* best-effort */ }
-          await useProjectStore.getState().replaceMediaAsset(item.id, entry.file, dirHandle.name);
+          await useProjectStore.getState().replaceMediaAsset(item.id, file);
           linked++;
         } catch (err) {
           console.error(`[AssetsPanel] Failed to relink ${item.name}:`, err);
@@ -1072,7 +1139,7 @@ export const AssetsPanel: React.FC = () => {
   onGenerateRef.current = handleOpenGenerate;
   const onRetryKieAIRef = useRef(handleRetryKieAI);
   onRetryKieAIRef.current = handleRetryKieAI;
-  const onManageRef = useRef((item: MediaItem) => setManagedItem(item));
+  const onManageRef = useRef((item: MediaItem) => setInspectedAsset(item));
   const onRenameRef = useRef((item: MediaItem) => {
     const newName = window.prompt("Rename asset:", item.name);
     if (newName && newName.trim() && newName.trim() !== item.name) {
@@ -1271,7 +1338,8 @@ export const AssetsPanel: React.FC = () => {
                           const state = useProjectStore.getState();
                           const { createShapeClip, addTrack } = state;
                           const tracksBefore = state.project.timeline.tracks;
-                          await addTrack("graphics", 0);
+                          const addResult = await addTrack("graphics", 0);
+                          if (!addResult.success) return;
                           const tracksAfter =
                             useProjectStore.getState().project.timeline.tracks;
                           const newGraphicsTrack = tracksAfter.find(
@@ -1317,7 +1385,8 @@ export const AssetsPanel: React.FC = () => {
                           const state = useProjectStore.getState();
                           const { createShapeClip, addTrack, updateClipRotate3D } = state;
                           const tracksBefore = state.project.timeline.tracks;
-                          await addTrack("graphics", 0);
+                          const addResult = await addTrack("graphics", 0);
+                          if (!addResult.success) return;
                           const tracksAfter =
                             useProjectStore.getState().project.timeline.tracks;
                           const newGraphicsTrack = tracksAfter.find(
@@ -1373,7 +1442,8 @@ export const AssetsPanel: React.FC = () => {
                           const state = useProjectStore.getState();
                           const { importSVG, addTrack } = state;
                           const tracksBefore = state.project.timeline.tracks;
-                          await addTrack("graphics", 0);
+                          const addResult = await addTrack("graphics", 0);
+                          if (!addResult.success) return;
                           const tracksAfter =
                             useProjectStore.getState().project.timeline.tracks;
                           const newGraphicsTrack = tracksAfter.find(
@@ -1415,7 +1485,8 @@ export const AssetsPanel: React.FC = () => {
                             const { stickerLibrary } = await import("@openreel/core");
 
                             const tracksBefore = state.project.timeline.tracks;
-                            await addTrack("graphics", 0);
+                            const addResult = await addTrack("graphics", 0);
+                            if (!addResult.success) return;
                             const tracksAfter =
                               useProjectStore.getState().project.timeline.tracks;
                             const newGraphicsTrack = tracksAfter.find(
@@ -1462,7 +1533,8 @@ export const AssetsPanel: React.FC = () => {
                     const state = useProjectStore.getState();
                     const { createTextClip, addTrack } = state;
                     const tracksBefore = state.project.timeline.tracks;
-                    await addTrack("text", 0);
+                    const addResult = await addTrack("text", 0);
+                    if (!addResult.success) return;
                     const tracksAfter =
                       useProjectStore.getState().project.timeline.tracks;
                     const newTextTrack = tracksAfter.find(
@@ -1537,7 +1609,8 @@ export const AssetsPanel: React.FC = () => {
                         const state = useProjectStore.getState();
                         const { createTextClip, addTrack } = state;
                         const tracksBefore = state.project.timeline.tracks;
-                        await addTrack("text", 0);
+                        const addResult = await addTrack("text", 0);
+                        if (!addResult.success) return;
                         const tracksAfter =
                           useProjectStore.getState().project.timeline.tracks;
                         const newTextTrack = tracksAfter.find(
@@ -1694,13 +1767,6 @@ export const AssetsPanel: React.FC = () => {
         />
       )}
 
-      {managedItem && (
-        <AssetManagerDialog
-          open={true}
-          item={managedItem}
-          onClose={() => setManagedItem(null)}
-        />
-      )}
     </div>
   );
 };
