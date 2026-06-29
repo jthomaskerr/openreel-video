@@ -296,14 +296,14 @@ export const useUIStore = create<UIState>()(
               set({
                 selectedItems: [...selectedItems, item],
                 lastSelectedItem: item,
-                ...(isClip ? { sidebarTab: "edit" as const } : {}),
+                ...(isClip ? { sidebarTab: "inspector" as const } : {}),
               });
             }
           } else {
             set({
               selectedItems: [item],
               lastSelectedItem: item,
-              ...(isClip ? { sidebarTab: "edit" as const } : {}),
+              ...(isClip ? { sidebarTab: "inspector" as const } : {}),
             });
           }
         },

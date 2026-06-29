@@ -61,6 +61,12 @@ function seedClip(opts: {
   return seeded;
 }
 
+/** Switch to the "Edit" pane so clip-level tabs are visible. */
+function switchToEditPane() {
+  const editTab = screen.getByRole("tab", { name: /Edit/ });
+  fireEvent.click(editTab);
+}
+
 describe("InspectorPanel real tabs", () => {
   beforeEach(() => {
     useUIStore.setState({ inspectorActiveTab: "transform" });
@@ -73,17 +79,20 @@ describe("InspectorPanel real tabs", () => {
     useProjectStore.setState({ project: createEmptyProject("Reset") });
   });
 
-  it("shows the video tab set", () => {
+  it("shows the video tab set after switching to Edit pane", () => {
     render(<InspectorPanel />);
-    expect(screen.getByRole("tablist")).toBeInTheDocument();
+    switchToEditPane();
+    const inspectorTabs = screen.getByRole("tablist", { name: /Inspector tabs/ });
+    expect(inspectorTabs).toBeInTheDocument();
     expect(
       screen.getByRole("tab", { name: /Transform/ }),
     ).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Audio/ })).toBeInTheDocument();
   });
 
-  it("switching tabs swaps the visible panel (real isolation)", () => {
+  it("switching clip tabs swaps the visible panel (real isolation)", () => {
     const { container } = render(<InspectorPanel />);
+    switchToEditPane();
 
     const transformSection = container.querySelector<HTMLDivElement>(
       '[data-section-id="transform"]',
@@ -115,6 +124,7 @@ describe("InspectorPanel tab sets per clip type", () => {
   it("audio clip shows Audio + AI, no Speed or Transform", () => {
     seedClip({ mediaId: "media-audio", trackType: "audio" });
     render(<InspectorPanel />);
+    switchToEditPane();
     expect(screen.getByRole("tab", { name: /Audio/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /AI/ })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /Speed/ })).toBeNull();
@@ -124,6 +134,7 @@ describe("InspectorPanel tab sets per clip type", () => {
   it("image clip shows Speed + Color, no Audio", () => {
     seedClip({ mediaId: "media-img", trackType: "image" });
     render(<InspectorPanel />);
+    switchToEditPane();
     expect(screen.getByRole("tab", { name: /Speed/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Color/ })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /Audio/ })).toBeNull();
@@ -132,6 +143,7 @@ describe("InspectorPanel tab sets per clip type", () => {
   it("text clip shows Effects + Style, no AI", () => {
     seedClip({ mediaId: "text-1", trackType: "video" });
     render(<InspectorPanel />);
+    switchToEditPane();
     expect(screen.getByRole("tab", { name: /Effects/ })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Style/ })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: /AI/ })).toBeNull();

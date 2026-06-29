@@ -556,11 +556,12 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
       </DialogContent>
     </Dialog>
 
-    {/* Secondary dialog for generating reference images */}
-    <GenerateAssetDialog
-      open={generateRefOpen}
-      onClose={() => setGenerateRefOpen(false)}
-    />
+    {generateRefOpen && (
+      <GenerateAssetDialog
+        open={generateRefOpen}
+        onClose={() => setGenerateRefOpen(false)}
+      />
+    )}
     </>
   );
 }

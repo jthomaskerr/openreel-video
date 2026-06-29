@@ -9,6 +9,11 @@
 
 export type GenerationProvider = "wavespeed" | "kie-ai" | "veo" | "kling" | "runway" | string;
 
+export const DEFAULT_SHOT_MODEL = "veo3_fast";
+export const DEFAULT_IMAGE_MODEL = "flux-kontext-pro";
+export const DEFAULT_RESOLUTION = "720p";
+export const DEFAULT_ASPECT_RATIO = "16:9";
+
 export interface GenerationDefaults {
   provider: GenerationProvider;
   shotModel: string;
@@ -276,10 +281,26 @@ export interface MusicVideoProject {
 
 // ── Neural Frames import ──────────────────────────────────────────────────────
 
+export interface NeuralFramesAudio {
+  duration: number;
+  bpm?: number;
+  key?: string;
+  scale?: string;
+  hasLyrics?: boolean;
+  videoIdea?: string;
+  /** URL of the trimmed audio file (from trimmed_audio_path). */
+  audioUrl?: string;
+  /** URL of the album artwork (from primary_audio_artwork_image_url). */
+  artworkUrl?: string;
+}
+
 /** Raw Neural Frames storyboard JSON shape (only fields we use) */
 export interface NeuralFramesStoryboard {
   storyboard_props: {
     storyboard_prompt: string;
+    title?: string;
+    model?: string;
+    resolution?: string;
     fps?: number;
     aspect_ratio?: string;
     style?: string;
@@ -303,13 +324,16 @@ export interface NeuralFramesStoryboard {
       training_image_urls: string[];
     }>;
   };
-  audio: {
+  audio?: {
     duration: number;
+    trimmed_audio_path?: string;
+    primary_audio_artwork_image_url?: string;
     audio_analysis: {
-      bpm: number;
+      bpm?: number;
       key?: string;
       scale?: string;
       video_idea?: string;
+      has_lyrics?: boolean;
     };
   };
 }
@@ -324,7 +348,7 @@ export interface NeuralFramesImportResult {
   metadataTracks: MetadataTrack[];
   shots: StoryboardShot[];
   generatedAssets: GeneratedAsset[];
-  timingHints: Pick<TimingAnalysis, "bpm" | "sections">;
+  audio: NeuralFramesAudio;
   /** Map of original remote URL → backend-served local URL. Populated by the import route after downloading assets. */
   remoteUrlMap?: Record<string, string>;
 }

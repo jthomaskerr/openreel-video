@@ -9,17 +9,21 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type {
-  MusicVideoProject,
-  StoryboardShot,
-  GeneratedAsset,
-  MetadataTrack,
-  MetadataBlock,
-  TimingAnalysis,
-  AudioAsset,
-  CreativeBrief,
-  GenerationJob,
-  NeuralFramesImportResult,
+import {
+  DEFAULT_ASPECT_RATIO,
+  DEFAULT_IMAGE_MODEL,
+  DEFAULT_RESOLUTION,
+  DEFAULT_SHOT_MODEL,
+  type AudioAsset,
+  type CreativeBrief,
+  type GeneratedAsset,
+  type GenerationJob,
+  type MetadataBlock,
+  type MetadataTrack,
+  type MusicVideoProject,
+  type NeuralFramesImportResult,
+  type StoryboardShot,
+  type TimingAnalysis,
 } from "@openreel/music-video-domain";
 
 // ── Orchestrator base URL (Vite env var or localhost fallback) ─────────────────
@@ -83,10 +87,10 @@ const DEFAULT_BRIEF: CreativeBrief = {
   customPrompt: "",
   defaults: {
     provider: "kie-ai",
-    shotModel: "veo3_fast",
-    referenceModel: "flux-kontext-pro",
-    resolution: "720p",
-    aspectRatio: "16:9",
+    shotModel: DEFAULT_SHOT_MODEL,
+    referenceModel: DEFAULT_IMAGE_MODEL,
+    resolution: DEFAULT_RESOLUTION,
+    aspectRatio: DEFAULT_ASPECT_RATIO,
   },
 };
 
@@ -232,7 +236,7 @@ export const useMusicVideoStore = create<MusicVideoState>()(
         set((s) => {
           const p = s.projects[id];
           if (!p) return s;
-          // Merge: append new metadata tracks, replace shots, set timing hints
+          // Merge: append new metadata tracks, replace shots, set timing from audio
           const merged: Partial<MusicVideoProject> = {
             metadataTracks: [...p.metadataTracks, ...result.metadataTracks],
             shots: result.shots,
@@ -240,14 +244,15 @@ export const useMusicVideoStore = create<MusicVideoState>()(
             neuralFramesImportId: result.storyboardId,
             updatedAt: now(),
           };
-          if (result.timingHints.bpm && p.timing) {
-            merged.timing = { ...p.timing, bpm: result.timingHints.bpm };
-          } else if (result.timingHints.bpm) {
+          const bpm = result.audio?.bpm;
+          if (bpm != null && p.timing) {
+            merged.timing = { ...p.timing, bpm };
+          } else if (bpm != null) {
             merged.timing = {
-              bpm: result.timingHints.bpm,
+              bpm,
               beats: [],
               bars: [],
-              sections: result.timingHints.sections,
+              sections: [],
               energy: [],
               lyrics: [],
               source: "neuralframes",

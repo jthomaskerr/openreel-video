@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Captions, FileText, Upload, X as XIcon, Film, Music, ImageIcon, Download, Trash2, RefreshCw, Info, Pencil, AlertTriangle, List } from "lucide-react";
+import { Captions, Upload, Info, Pencil, AlertTriangle, List } from "lucide-react";
 import { useProjectStore } from "../../stores/project-store";
 import { useTimelineStore } from "../../stores/timeline-store";
 import { useUIStore } from "../../stores/ui-store";
@@ -59,11 +59,10 @@ import { StyleTab } from "./inspector/tabs/StyleTab";
 import { EffectsTab } from "./inspector/tabs/EffectsTab";
 import { AiTab } from "./inspector/tabs/AiTab";
 import { MetadataClipInspector } from "./inspector/MetadataClipInspector";
-import { MetadataEditor, FileInfoGrid, TypeSection, TypeDetailRow, GenerationInfo, VersionList, formatSize, formatDuration, type InfoRow } from "./asset-manager/AssetDetailShared";
 import { ProblemsPanel } from "./inspector/ProblemsPanel";
 import { ImportErrorsPanel } from "./inspector/ImportErrorsPanel";
 import { LogPanel } from "./inspector/LogPanel";
-import { resolveAssetCategory } from "./asset-category";
+import { AssetInspectorWithTabs } from "./inspector/AssetInspectorWithTabs";
 
 // Initialize engines as singletons
 const chromaKeyEngine = new ChromaKeyEngine({ width: 1920, height: 1080 });
@@ -79,314 +78,6 @@ const EmptyState: React.FC = () => (
   </div>
 );
 
-// ── Asset Inspector Header ──────────────────────────────────────────
-
-const ASSET_TYPE_ICON: Record<string, React.ElementType> = {
-  video: Film,
-  audio: Music,
-  image: ImageIcon,
-  metadata: FileText,
-};
-
-function AssetInspectorHeader({ item, onClose }: { item: import("@openreel/core").MediaItem; onClose: () => void }) {
-  const category = resolveAssetCategory(item);
-  const typeKey = category.isMetadata ? "metadata" : item.type;
-  const Icon = ASSET_TYPE_ICON[typeKey] ?? FileText;
-
-  return (
-    <div className="flex items-center gap-2 px-3 py-2 border-b border-border shrink-0">
-      <Icon size={14} className="text-text-muted shrink-0" />
-      <span className="text-xs font-medium truncate flex-1">
-        {item.title || item.name}
-      </span>
-      <span className="text-[10px] text-text-muted uppercase tracking-wider shrink-0">
-        {category.label}
-      </span>
-      <button
-        onClick={onClose}
-        className="p-1 rounded hover:bg-hover text-fg-2 hover:text-fg transition-colors"
-      >
-        <XIcon size={14} />
-      </button>
-    </div>
-  );
-}
-
-// ── Asset Inspector Toolbar ─────────────────────────────────────────
-
-function AssetInspectorToolbar({ item }: { item: import("@openreel/core").MediaItem }) {
-  const replaceMediaAsset = useProjectStore((s) => s.replaceMediaAsset);
-  const deleteMediaFn = useProjectStore((s) => s.deleteMedia);
-  const setInspectedAsset = useUIStore((s) => s.setInspectedAsset);
-
-  const handleReplace = useCallback(() => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = item.type === "video" ? "video/*" : item.type === "audio" ? "audio/*" : "image/*";
-    input.style.display = "none";
-    input.onchange = async (event) => {
-      try {
-        const file = (event.target as HTMLInputElement).files?.[0];
-        if (file) await replaceMediaAsset(item.id, file);
-      } finally {
-        input.remove();
-      }
-    };
-    document.body.appendChild(input);
-    input.click();
-  }, [item.id, item.type, replaceMediaAsset]);
-
-  const handleDelete = useCallback(async () => {
-    await deleteMediaFn(item.id);
-    setInspectedAsset(null);
-  }, [item.id, deleteMediaFn, setInspectedAsset]);
-
-  const handleDownload = useCallback(() => {
-    if (!item.blob) return;
-    const url = URL.createObjectURL(item.blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = item.name;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [item.blob, item.name]);
-
-  return (
-    <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border shrink-0 bg-background-secondary/50">
-      <button
-        onClick={handleReplace}
-        className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-text-secondary hover:text-text hover:bg-hover transition-colors"
-        title="Replace file"
-      >
-        <RefreshCw size={11} />
-        Replace
-      </button>
-      {item.blob && (
-        <button
-          onClick={handleDownload}
-          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-text-secondary hover:text-text hover:bg-hover transition-colors"
-          title="Download original"
-        >
-          <Download size={11} />
-          Download
-        </button>
-      )}
-      <div className="flex-1" />
-      <button
-        onClick={handleDelete}
-        className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
-        title="Delete asset"
-      >
-        <Trash2 size={11} />
-        Delete
-      </button>
-    </div>
-  );
-}
-
-// ── Video Inspector Body ────────────────────────────────────────────
-
-const VideoInspectorBody: React.FC<{ item: import("@openreel/core").MediaItem }> = ({ item }) => {
-  const fileInfoRows: InfoRow[] = [
-    { label: "Filename", value: item.name },
-    { label: "Type", value: "Video" },
-    { label: "Resolution", value: item.metadata.width && item.metadata.height ? `${item.metadata.width}×${item.metadata.height}` : "—" },
-    { label: "Duration", value: item.metadata.duration ? formatDuration(item.metadata.duration) : "—" },
-    { label: "Size", value: item.metadata.fileSize ? formatSize(item.metadata.fileSize) : "—" },
-  ];
-
-  return (
-    <div className="space-y-3 px-4 pt-3 pb-4">
-      {/* Preview */}
-      <div className="rounded-lg border border-border bg-background-secondary overflow-hidden">
-        {item.thumbnailUrl ? (
-          <img src={item.thumbnailUrl} alt={item.title ?? item.name} className="w-full aspect-video object-cover" />
-        ) : (
-          <div className="w-full aspect-video flex items-center justify-center bg-background-tertiary">
-            <Film size={36} className="text-text-muted/30" />
-          </div>
-        )}
-        {item.isPlaceholder && (
-          <div className="px-3 py-1.5 bg-yellow-500/10 border-t border-yellow-500/20">
-            <span className="text-[10px] text-yellow-400 font-medium">⚠ Missing file — placeholder</span>
-          </div>
-        )}
-      </div>
-
-      <MetadataEditor item={item} onSaved={() => {}} />
-
-      <TypeSection title="Video Details">
-        <TypeDetailRow label="Frame Rate" value={item.metadata.frameRate ? `${item.metadata.frameRate} fps` : "—"} />
-        <TypeDetailRow label="Codec" value={item.metadata.codec || "—"} />
-        <TypeDetailRow label="Audio Channels" value={item.metadata.channels ? String(item.metadata.channels) : "—"} />
-        <TypeDetailRow label="Audio Track Count" value={item.metadata.audioTrackCount ? String(item.metadata.audioTrackCount) : "—"} />
-        <TypeDetailRow label="Sample Rate" value={item.metadata.sampleRate ? `${item.metadata.sampleRate} Hz` : "—"} />
-      </TypeSection>
-
-      {item.filmstripThumbnails && item.filmstripThumbnails.length > 0 && (
-        <TypeSection title="Filmstrip">
-          <div className="flex gap-1 overflow-x-auto">
-            {item.filmstripThumbnails.map((thumb, i) => (
-              <img key={i} src={thumb.url} alt={`Frame at ${thumb.timestamp}s`} className="h-10 rounded flex-shrink-0" title={`${thumb.timestamp.toFixed(1)}s`} />
-            ))}
-          </div>
-        </TypeSection>
-      )}
-
-      <FileInfoGrid rows={fileInfoRows} />
-      <GenerationInfo item={item} />
-      <VersionList item={item} />
-    </div>
-  );
-};
-
-// ── Audio Inspector Body ────────────────────────────────────────────
-
-const AudioInspectorBody: React.FC<{ item: import("@openreel/core").MediaItem }> = ({ item }) => {
-  const fileInfoRows: InfoRow[] = [
-    { label: "Filename", value: item.name },
-    { label: "Type", value: "Audio" },
-    { label: "Duration", value: item.metadata.duration ? formatDuration(item.metadata.duration) : "—" },
-    { label: "Size", value: item.metadata.fileSize ? formatSize(item.metadata.fileSize) : "—" },
-  ];
-
-  return (
-    <div className="space-y-3 px-4 pt-3 pb-4">
-      <div className="rounded-lg border border-border bg-background-secondary overflow-hidden">
-        <div className="w-full h-24 flex flex-col items-center justify-center bg-background-tertiary gap-2">
-          <Music size={36} className="text-green-400/40" />
-          <span className="text-[11px] text-text-muted">
-            {item.metadata.duration ? formatDuration(item.metadata.duration) : "—"}
-          </span>
-        </div>
-        {item.isPlaceholder && (
-          <div className="px-3 py-1.5 bg-yellow-500/10 border-t border-yellow-500/20">
-            <span className="text-[10px] text-yellow-400 font-medium">⚠ Missing file — placeholder</span>
-          </div>
-        )}
-      </div>
-
-      <MetadataEditor item={item} onSaved={() => {}} />
-
-      <TypeSection title="Audio Details">
-        <TypeDetailRow label="Sample Rate" value={item.metadata.sampleRate ? `${item.metadata.sampleRate} Hz` : "—"} />
-        <TypeDetailRow label="Channels" value={item.metadata.channels ? String(item.metadata.channels) : "—"} />
-        <TypeDetailRow label="Codec" value={item.metadata.codec || "—"} />
-        <TypeDetailRow label="Audio Track Count" value={item.metadata.audioTrackCount ? String(item.metadata.audioTrackCount) : "—"} />
-        <TypeDetailRow label="Waveform" value={item.waveformData ? "Generated" : "Not generated"} />
-      </TypeSection>
-
-      <FileInfoGrid rows={fileInfoRows} />
-      <GenerationInfo item={item} />
-      <VersionList item={item} />
-    </div>
-  );
-};
-
-// ── Image Inspector Body ────────────────────────────────────────────
-
-const ImageInspectorBody: React.FC<{ item: import("@openreel/core").MediaItem }> = ({ item }) => {
-  const fileInfoRows: InfoRow[] = [
-    { label: "Filename", value: item.name },
-    { label: "Type", value: "Image" },
-    { label: "Dimensions", value: item.metadata.width && item.metadata.height ? `${item.metadata.width}×${item.metadata.height}` : "—" },
-    { label: "Size", value: item.metadata.fileSize ? formatSize(item.metadata.fileSize) : "—" },
-    { label: "Codec", value: item.metadata.codec || "—" },
-  ];
-
-  return (
-    <div className="space-y-3 px-4 pt-3 pb-4">
-      <div className="rounded-lg border border-border bg-background-secondary overflow-hidden">
-        {item.thumbnailUrl ? (
-          <img src={item.thumbnailUrl} alt={item.title ?? item.name} className="w-full max-h-48 object-contain bg-background-tertiary" />
-        ) : (
-          <div className="w-full h-32 flex items-center justify-center bg-background-tertiary">
-            <ImageIcon size={36} className="text-text-muted/30" />
-          </div>
-        )}
-        {item.isPlaceholder && (
-          <div className="px-3 py-1.5 bg-yellow-500/10 border-t border-yellow-500/20">
-            <span className="text-[10px] text-yellow-400 font-medium">⚠ Missing file — placeholder</span>
-          </div>
-        )}
-      </div>
-
-      <MetadataEditor item={item} onSaved={() => {}} />
-
-      <TypeSection title="Image Details">
-        <TypeDetailRow label="Dimensions" value={item.metadata.width && item.metadata.height ? `${item.metadata.width}×${item.metadata.height}` : "—"} />
-        <TypeDetailRow label="Codec" value={item.metadata.codec || "—"} />
-        <TypeDetailRow label="Thumbnail" value={item.thumbnailUrl ? "Available" : "Not generated"} />
-      </TypeSection>
-
-      <FileInfoGrid rows={fileInfoRows} />
-      <GenerationInfo item={item} />
-      <VersionList item={item} />
-    </div>
-  );
-};
-
-// ── Metadata Inspector Body ─────────────────────────────────────────
-
-const MetadataInspectorBody: React.FC<{ item: import("@openreel/core").MediaItem }> = ({ item }) => {
-  const category = resolveAssetCategory(item);
-  const fileInfoRows: InfoRow[] = [
-    { label: "Filename", value: item.name },
-    { label: "Category", value: category.label },
-    { label: "Kind", value: category.metadataKind ?? "metadata" },
-    { label: "Storage", value: "Timeline metadata placeholder" },
-  ];
-
-  return (
-    <div className="space-y-3 px-4 pt-3 pb-4">
-      <div className="rounded-lg border border-border bg-background-secondary overflow-hidden">
-        <div className="w-full h-24 flex flex-col items-center justify-center bg-background-tertiary gap-2">
-          <FileText size={36} className="text-purple-400/40" />
-          <span className="text-[11px] text-text-muted">{category.label} Metadata</span>
-        </div>
-        {item.isPlaceholder && (
-          <div className="px-3 py-1.5 bg-yellow-500/10 border-t border-yellow-500/20">
-            <span className="text-[10px] text-yellow-400 font-medium">⚠ Missing file — placeholder</span>
-          </div>
-        )}
-      </div>
-
-      <MetadataEditor item={item} onSaved={() => {}} />
-
-      <TypeSection title={`${category.label} Metadata`}>
-        <TypeDetailRow label="Kind" value={category.metadataKind ?? "metadata"} />
-        <TypeDetailRow label="Label" value={item.title ?? item.name} />
-        <TypeDetailRow label="Storage" value="Timeline metadata placeholder" />
-      </TypeSection>
-
-      <FileInfoGrid rows={fileInfoRows} />
-
-      <GenerationInfo item={item} />
-      <VersionList item={item} />
-    </div>
-  );
-};
-
-// ── Asset Inspector Body (dispatcher) ───────────────────────────────
-
-const AssetInspectorBody: React.FC<{ item: import("@openreel/core").MediaItem }> = ({ item }) => {
-  const category = resolveAssetCategory(item);
-
-  if (category.isMetadata) {
-    return <MetadataInspectorBody item={item} />;
-  }
-
-  switch (item.type) {
-    case "video":
-      return <VideoInspectorBody item={item} />;
-    case "audio":
-      return <AudioInspectorBody item={item} />;
-    case "image":
-      return <ImageInspectorBody item={item} />;
-    default:
-      return <ImageInspectorBody item={item} />;
-  }
-};
 
 export const InspectorPanel: React.FC = () => {
   // Stores
@@ -414,7 +105,15 @@ export const InspectorPanel: React.FC = () => {
     (state) => state.finishEffectApplication,
   );
   const inspectedAsset = useUIStore((state) => state.inspectedAsset);
-  const setInspectedAsset = useUIStore((state) => state.setInspectedAsset);
+  // When a clip is selected and no explicit asset is pinned, show the clip's media item.
+  const selectedClipMediaItem = useMemo(() => {
+    const clipIds = getSelectedClipIds();
+    if (clipIds.length !== 1) return null;
+    const clip = getClip(clipIds[0]);
+    if (!clip) return null;
+    return getMediaItem(clip.mediaId) ?? null;
+  }, [getClip, getMediaItem, getSelectedClipIds, project.modifiedAt]);
+  const effectiveInspectedAsset = inspectedAsset ?? selectedClipMediaItem;
   const importErrors = useUIStore((state) => state.importErrors);
   const selectedClipIds = getSelectedClipIds();
   const pausePlayback = useTimelineStore((state) => state.pause);
@@ -1158,50 +857,47 @@ export const InspectorPanel: React.FC = () => {
       <div
         role="tablist"
         aria-label="Sidebar tabs"
-        className="flex items-center border-b border-border shrink-0"
+        className="flex items-center border-b border-border shrink-0 overflow-x-auto scrollbar-none"
       >
         {(
           [
-            { id: "inspector", label: "Inspector", Icon: Info },
-            { id: "edit",      label: "Edit",      Icon: Pencil },
-            { id: "problems",  label: "Problems",  Icon: AlertTriangle, badge: problemCount },
-            { id: "log",       label: "Log",       Icon: List },
-          ] as const
-        ).map(({ id, label, Icon, badge }) => (
-          <button
-            key={id}
-            role="tab"
-            aria-selected={sidebarTab === id}
-            onClick={() => setSidebarTab(id)}
-            className={[
-              "flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium whitespace-nowrap transition-colors border-b-2 -mb-px",
-              sidebarTab === id
-                ? "text-accent border-accent"
-                : "text-fg-3 border-transparent hover:text-fg",
-            ].join(" ")}
-          >
-            <Icon size={12} />
-            <span>{label}</span>
-            {"badge" in { badge } && (badge as number) > 0 && (
-              <span className="ml-0.5 text-[9px] bg-yellow-500/20 text-yellow-400 px-1 py-0.5 rounded-full leading-none font-medium">
-                {badge}
-              </span>
-            )}
-          </button>
-        ))}
+            { id: "inspector" as const, label: "Inspector", Icon: Info },
+            { id: "edit"      as const, label: "Edit",      Icon: Pencil },
+            { id: "problems"  as const, label: "Problems",  Icon: AlertTriangle, badge: problemCount },
+            { id: "log"       as const, label: "Log",       Icon: List },
+          ]
+        ).map(({ id, label, Icon, ...rest }) => {
+          const badge = "badge" in rest ? rest.badge : undefined;
+          return (
+            <button
+              key={id}
+              role="tab"
+              aria-selected={sidebarTab === id}
+              onClick={() => setSidebarTab(id)}
+              className={[
+                "flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium whitespace-nowrap transition-colors border-b-2 -mb-px",
+                sidebarTab === id
+                  ? "text-accent border-accent"
+                  : "text-fg-3 border-transparent hover:text-fg",
+              ].join(" ")}
+            >
+              <Icon size={12} />
+              <span>{label}</span>
+              {badge != null && badge > 0 && (
+                <span className="ml-0.5 text-[9px] bg-yellow-500/20 text-yellow-400 px-1 py-0.5 rounded-full leading-none font-medium">
+                  {badge}
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* ── Inspector pane ─────────────────────────────────── */}
       {sidebarTab === "inspector" && (
         <>
-          {inspectedAsset ? (
-            <>
-              <AssetInspectorHeader item={inspectedAsset} onClose={() => setInspectedAsset(null)} />
-              <AssetInspectorToolbar item={inspectedAsset} />
-              <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
-                <AssetInspectorBody item={inspectedAsset} />
-              </div>
-            </>
+          {effectiveInspectedAsset ? (
+            <AssetInspectorWithTabs item={effectiveInspectedAsset} />
           ) : (
             <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
               <EmptyState />

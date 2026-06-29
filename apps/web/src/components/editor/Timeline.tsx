@@ -252,6 +252,27 @@ export const Timeline: React.FC = () => {
     }
   }, [playheadPosition, playbackState, pixelsPerSecond, scrollX, viewportWidth]);
 
+  // ── Scroll to clip on inspector usages row click ───────────────
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const el = tracksRef.current;
+      if (!el) return;
+      if (!(e instanceof CustomEvent)) return;
+      const detail = e.detail;
+      if (!detail || typeof detail !== "object") return;
+      if (!("startTime" in detail) || typeof detail.startTime !== "number") return;
+      const pps = typeof detail.pixelsPerSecond === "number"
+        ? detail.pixelsPerSecond
+        : pixelsPerSecond;
+      // Centre the clip in the viewport with a small left margin.
+      const clipPixels = detail.startTime * pps;
+      const margin = Math.min(Math.max(viewportWidth * 0.12, 60), 220);
+      el.scrollLeft = Math.max(0, clipPixels - margin);
+    };
+    window.addEventListener("openreel:timeline-scroll-to", handler);
+    return () => window.removeEventListener("openreel:timeline-scroll-to", handler);
+  }, [pixelsPerSecond, viewportWidth]);
+
   const handleSelectClip = useCallback(
     (clipId: string, addToSelection: boolean) => {
       const isTextClip = allTextClips.some((tc) => tc.id === clipId);

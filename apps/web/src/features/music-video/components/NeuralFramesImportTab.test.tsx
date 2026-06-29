@@ -45,7 +45,10 @@ vi.mock("../../../stores/project-store", () => {
       project: storeState.project,
       addTrack: storeState.addTrack,
       renameTrack: storeState.renameTrack,
+      addGeneratedMedia: storeState.addGeneratedMedia,
       addClip: storeState.addClip,
+      addPlaceholderMedia: storeState.addPlaceholderMedia,
+      replacePlaceholderMedia: storeState.replacePlaceholderMedia,
       getTimelineDuration: () => storeState.project?.timeline.duration ?? 0,
       renameProject: storeState.renameProject,
     }),
@@ -396,7 +399,6 @@ describe("NeuralFramesImportTab metadata import", () => {
               title: "Storyboard Title",
               shots: [],
               metadataTracks: [],
-              timingHints: { bpm: 120, sections: [] },
               generatedAssets: [
                 {
                   id: "asset-1",
@@ -498,16 +500,15 @@ describe("NeuralFramesImportTab metadata import", () => {
           shots: [],
           generatedAssets: [],
           metadataTracks: [],
-          timingHints: { bpm: 88, sections: [] },
+          audio: { duration: 42, bpm: 88, audioUrl: "main-song.wav" },
         }),
       })),
     );
-
     const raw = {
       storyboard_props: { storyboard_prompt: "brief", scenes: [], characters: [], loras: [] },
       audio: {
         duration: 42,
-        file_name: "main-song.wav",
+        trimmed_audio_path: "main-song.wav",
         audio_analysis: { bpm: 88 },
       },
     };

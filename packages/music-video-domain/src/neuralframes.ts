@@ -2,22 +2,28 @@
  * Neural Frames storyboard import mapper.
  *
  * Maps a NeuralFramesStoryboard JSON file into MusicVideoProject fragments:
- *   - metadataTracks: scenes, characters, LoRAs, audio analysis, storyboard prompt
+ *   - metadataTracks: characters, LoRAs, notes
  *   - shots: one StoryboardShot per scene, with scene_image_url as a realized GeneratedAsset
- *   - timingHints: BPM and a single song section covering the full duration
+ *   - audio: trimmed audio metadata and artwork references
  *
  * Strips all account/user identity fields (email, credits, subscription, owner, referral).
  */
 
+import {
+  DEFAULT_ASPECT_RATIO,
+  DEFAULT_IMAGE_MODEL,
+  DEFAULT_RESOLUTION,
+  DEFAULT_SHOT_MODEL,
+} from "./types.js";
 import type {
-  NeuralFramesStoryboard,
-  NeuralFramesImportResult,
-  MetadataTrack,
-  MetadataBlock,
-  StoryboardShot,
   GeneratedAsset,
+  MetadataBlock,
+  MetadataTrack,
+  NeuralFramesAudio,
+  NeuralFramesImportResult,
+  NeuralFramesStoryboard,
+  StoryboardShot,
   ValidationState,
-  SongSection,
 } from "./types.js";
 
 /**
@@ -29,23 +35,28 @@ export function normalizeImageJob(
   imageJob: unknown,
 ): { assets: Array<{ url: string }> } | undefined {
   if (!imageJob) return undefined;
-  // image_job itself can be a JSON string
   if (typeof imageJob === "string") {
-    try { imageJob = JSON.parse(imageJob); } catch (_e) { return undefined; }
+    try {
+      imageJob = JSON.parse(imageJob);
+    } catch {
+      return undefined;
+    }
   }
   if (typeof imageJob !== "object" || imageJob === null) return undefined;
   const job = imageJob as Record<string, unknown>;
   let assets = job.assets;
-  // assets can also be a JSON string
   if (typeof assets === "string") {
-    try { assets = JSON.parse(assets); } catch (_e) { assets = undefined; }
+    try {
+      assets = JSON.parse(assets);
+    } catch {
+      assets = undefined;
+    }
   }
   if (!Array.isArray(assets)) return undefined;
   return { assets: assets as Array<{ url: string }> };
 }
 
 function uuid(): string {
-  // crypto.randomUUID is available in Node 18+ and modern browsers
   return crypto.randomUUID();
 }
 
@@ -55,14 +66,22 @@ export function importNeuralFrames(
   raw: NeuralFramesStoryboard,
   sourcePath: string,
 ): NeuralFramesImportResult {
-  const props = raw.storyboard_props ?? { storyboard_prompt: "", scenes: [], characters: [], loras: [] } as NeuralFramesStoryboard["storyboard_props"];
-  const audioMeta = raw.audio?.audio_analysis ?? {};
-  const bpm: number = audioMeta.bpm ?? 120;
-  const duration: number = raw.audio?.duration ?? 0;
+  const props = raw.storyboard_props ?? ({
+    storyboard_prompt: "",
+    scenes: [],
+    characters: [],
+    loras: [],
+  } as NeuralFramesStoryboard["storyboard_props"]);
+  const duration = raw.audio?.duration ?? 0;
+  const audioMeta = raw.audio?.audio_analysis;
+
+  const scenes = Array.isArray(props.scenes) ? props.scenes : [];
+  const rawCharacters = Array.isArray(props.characters) ? props.characters : [];
+  const rawLoras = Array.isArray(props.loras) ? props.loras : [];
 
   // ── Scenes → metadata track + shots ───────────────────────────────────────
   const sceneTrackId = uuid();
-  const sceneBlocks: MetadataBlock[] = props.scenes.map((scene) => ({
+  const sceneBlocks: MetadataBlock[] = scenes.map((scene) => ({
     id: uuid(),
     trackId: sceneTrackId,
     label: `Scene ${scene.id}`,
@@ -77,16 +96,29 @@ export function importNeuralFrames(
     importSource: "neuralframes" as const,
     importId: scene.id,
   }));
+  const sceneTrack: MetadataTrack = {
+    id: sceneTrackId,
+    label: "Neural Frames Scenes",
+    kind: "sections",
+    visible: true,
+    locked: false,
+    color: "#4da8ff",
+    blocks: sceneBlocks,
+  };
+  void sceneTrack;
 
-  // Build shots and generated assets together so IDs stay consistent
+  // Build shots and generated assets together so IDs stay consistent.
   const generatedAssets: GeneratedAsset[] = [];
 
   const sbFps = props.fps;
-  const sbAspectRatio = props.aspect_ratio ?? "16:9";
+  const sbAspectRatio = props.aspect_ratio ?? DEFAULT_ASPECT_RATIO;
+  const sbResolution = props.resolution;
   const sbStyle = props.style;
   const sbRenderMode = props.render_mode;
+  const shotModel = props.model ?? DEFAULT_SHOT_MODEL;
+  const imageModel = props.model ?? DEFAULT_IMAGE_MODEL;
 
-  const shots: StoryboardShot[] = props.scenes.map((scene, i) => {
+  const shots: StoryboardShot[] = scenes.map((scene, i) => {
     const shotId = uuid();
     const assetIds: string[] = [];
 
@@ -95,10 +127,10 @@ export function importNeuralFrames(
       generatedAssets.push({
         id: assetId,
         label: `Scene ${i + 1} keyframe`,
-        mediaType: "video",
+        mediaType: "image",
         status: "realized",
         provider: "neuralframes",
-        model: "neuralframes",
+        model: imageModel,
         prompt: scene.scene_prompt,
         sourceAssets: [],
         sourceMetadataBlockIds: [],
@@ -109,7 +141,6 @@ export function importNeuralFrames(
       assetIds.push(assetId);
     }
 
-    // Back-link the sceneBlock to this shot
     const block = sceneBlocks[i];
     if (block) block.linkedShotIds.push(shotId);
 
@@ -120,8 +151,8 @@ export function importNeuralFrames(
       startSeconds: scene.start_time,
       endSeconds: scene.end_time,
       prompt: scene.scene_prompt,
-      model: "veo3_fast",
-      resolution: "720p",
+      model: shotModel,
+      resolution: sbResolution ?? DEFAULT_RESOLUTION,
       aspectRatio: sbAspectRatio,
       includeMainAudio: true,
       referenceAssetIds: [],
@@ -136,19 +167,8 @@ export function importNeuralFrames(
     return shot;
   });
 
-  const sceneTrack: MetadataTrack = {
-    id: sceneTrackId,
-    label: "Neural Frames Scenes",
-    kind: "sections",
-    visible: true,
-    locked: false,
-    color: "#4da8ff",
-    blocks: sceneBlocks,
-  };
-
   // ── Characters → metadata track ────────────────────────────────────────────
   const charTrackId = uuid();
-  const rawCharacters: typeof props.characters = Array.isArray(props.characters) ? props.characters : [];
   const charBlocks: MetadataBlock[] = rawCharacters.map((char) => {
     const imageJob = normalizeImageJob(char.image_job);
     return {
@@ -164,10 +184,9 @@ export function importNeuralFrames(
       source: "llm" as const,
       importSource: "neuralframes" as const,
       importId: char.id,
-      thumbnailUrl: imageJob?.assets?.[0]?.url,
+      thumbnailUrl: imageJob?.assets[0]?.url,
     };
   });
-
   const charTrack: MetadataTrack = {
     id: charTrackId,
     label: "Characters",
@@ -179,7 +198,6 @@ export function importNeuralFrames(
 
   // ── LoRAs → metadata track ─────────────────────────────────────────────────
   const loraTrackId = uuid();
-  const rawLoras: typeof props.loras = Array.isArray(props.loras) ? props.loras : [];
   const loraBlocks: MetadataBlock[] = rawLoras.map((lora) => ({
     id: uuid(),
     trackId: loraTrackId,
@@ -194,7 +212,6 @@ export function importNeuralFrames(
     importSource: "neuralframes" as const,
     importId: lora.id,
   }));
-
   const loraTrack: MetadataTrack = {
     id: loraTrackId,
     label: "Style / LoRAs",
@@ -217,16 +234,16 @@ export function importNeuralFrames(
         id: uuid(),
         trackId: notesTrackId,
         label: "Storyboard brief",
-        kind: "note",
+        kind: "note" as const,
         startSeconds: 0,
         endSeconds: duration,
         text: props.storyboard_prompt,
         linkedShotIds: [],
         linkedGeneratedAssetIds: [],
-        source: "llm",
-        importSource: "neuralframes",
+        source: "llm" as const,
+        importSource: "neuralframes" as const,
       },
-      ...(audioMeta.video_idea
+      ...(audioMeta?.video_idea
         ? [
             {
               id: uuid(),
@@ -246,28 +263,28 @@ export function importNeuralFrames(
     ],
   };
 
-  // ── Timing hints ───────────────────────────────────────────────────────────
-  const section: SongSection = {
-    id: uuid(),
-    label: "Full song",
-    type: "custom",
-    startSeconds: 0,
-    endSeconds: duration,
-    confidence: 0.5,
+  // ── Audio ─────────────────────────────────────────────────────────────────
+  const audio: NeuralFramesAudio = {
+    duration,
+    bpm: audioMeta?.bpm,
+    key: audioMeta?.key,
+    scale: audioMeta?.scale,
+    hasLyrics: audioMeta?.has_lyrics,
+    videoIdea: audioMeta?.video_idea,
+    audioUrl: raw.audio?.trimmed_audio_path,
+    artworkUrl: raw.audio?.primary_audio_artwork_image_url,
   };
 
   return {
     sourcePath,
     storyboardId: uuid(),
-    title: audioMeta.video_idea?.slice(0, 60) ?? sourcePath.split("/").pop() ?? "Neural Frames Import",
-    scenesImported: (Array.isArray(props.scenes) ? props.scenes : []).length,
+    title: props.title ?? audioMeta?.video_idea?.slice(0, 60) ?? sourcePath.split("/").pop() ?? "Neural Frames Import",
+    scenesImported: scenes.length,
     charactersImported: rawCharacters.length,
     lorasImported: rawLoras.length,
-    metadataTracks: [sceneTrack, charTrack, loraTrack, notesTrack].filter(
-      (t) => t.blocks.length > 0,
-    ),
+    metadataTracks: [charTrack, loraTrack, notesTrack].filter((t) => t.blocks.length > 0),
     shots,
     generatedAssets,
-    timingHints: { bpm, sections: [section] },
+    audio,
   };
 }

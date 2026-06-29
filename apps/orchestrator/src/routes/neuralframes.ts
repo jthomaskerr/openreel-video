@@ -81,6 +81,10 @@ neuralframesRouter.post("/", async (req, res) => {
         if (url?.startsWith("http")) remoteUrls.add(url);
       }
     }
+    if (raw.audio?.trimmed_audio_path?.startsWith("http"))
+      remoteUrls.add(raw.audio.trimmed_audio_path);
+    if (raw.audio?.primary_audio_artwork_image_url?.startsWith("http"))
+      remoteUrls.add(raw.audio.primary_audio_artwork_image_url);
 
     // Download all remote URLs and build the original→local rewrite map.
     const remoteUrlMap: Record<string, string> = {};
@@ -106,6 +110,12 @@ neuralframesRouter.post("/", async (req, res) => {
           block.thumbnailUrl = remoteUrlMap[block.thumbnailUrl];
         }
       }
+    }
+    if (result.audio?.audioUrl && remoteUrlMap[result.audio.audioUrl]) {
+      result.audio.audioUrl = remoteUrlMap[result.audio.audioUrl];
+    }
+    if (result.audio?.artworkUrl && remoteUrlMap[result.audio.artworkUrl]) {
+      result.audio.artworkUrl = remoteUrlMap[result.audio.artworkUrl];
     }
 
     result.remoteUrlMap = remoteUrlMap;
