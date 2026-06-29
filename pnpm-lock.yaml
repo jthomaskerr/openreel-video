@@ -159,6 +159,9 @@ importers:
       express:
         specifier: ^4.19.2
         version: 4.22.2
+      wavespeed:
+        specifier: ^0.2.4
+        version: 0.2.4
     devDependencies:
       '@types/cors':
         specifier: ^2.8.17
@@ -263,21 +266,12 @@ importers:
       '@eslint/js':
         specifier: ^9.39.2
         version: 9.39.2
-      '@openreel/orchestrator':
-        specifier: workspace:*
-        version: link:../orchestrator
       '@testing-library/jest-dom':
         specifier: ^6.4.6
         version: 6.9.1
       '@testing-library/react':
         specifier: ^16.0.0
         version: 16.3.0(@testing-library/dom@10.4.1)(@types/react-dom@18.3.7(@types/react@18.3.27))(@types/react@18.3.27)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      '@types/cors':
-        specifier: ^2.8.17
-        version: 2.8.19
-      '@types/express':
-        specifier: ^4.17.21
-        version: 4.17.25
       '@types/react':
         specifier: ^18.3.3
         version: 18.3.27
@@ -4052,6 +4046,9 @@ packages:
     resolution: {integrity: sha512-o8qghlI8NZHU1lLPrpi2+Uq7abh4GGPpYANlalzWxyWteJOCsr/P+oPBA49TOLu5FTZO4d3F9MnWJfiMo4BkmA==}
     engines: {node: '>=18'}
 
+  wavespeed@0.2.4:
+    resolution: {integrity: sha512-JfWudgSZ5u2Z8JsrnYUkDX2gsxVeb+PsFRc1F8tyX947Yfo9w2yfMLMMxaJE4zj+yt12xWXeTXTvYPn0FV5Fig==}
+
   web-vitals@5.1.0:
     resolution: {integrity: sha512-ArI3kx5jI0atlTtmV0fWU3fjpLmq/nD3Zr1iFFlJLaqa5wLBkUSzINwBPySCX/8jRyjlmy1Volw1kz1g9XE4Jg==}
 
@@ -7654,6 +7651,8 @@ snapshots:
   w3c-xmlserializer@5.0.0:
     dependencies:
       xml-name-validator: 5.0.0
+
+  wavespeed@0.2.4: {}
 
   web-vitals@5.1.0: {}
 
