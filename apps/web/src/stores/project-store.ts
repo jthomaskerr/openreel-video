@@ -111,6 +111,7 @@ export interface ProjectState {
   // Loading state
   isLoading: boolean;
   error: string | null;
+  explicitlyCreated: boolean;
 
   createNewProject: (
     name?: string,
@@ -1488,6 +1489,7 @@ export const useProjectStore = create<ProjectState>()(
       templateUndoStack: [] as EditingTemplateHistoryEntry[],
       templateRedoStack: [] as EditingTemplateHistoryEntry[],
       isLoading: false,
+      explicitlyCreated: false,
       error: null,
       clipboard: [] as Clip[],
       copiedEffects: [] as Effect[],
@@ -1513,6 +1515,7 @@ export const useProjectStore = create<ProjectState>()(
           templateUndoStack: [],
           templateRedoStack: [],
           error: null,
+          explicitlyCreated: true,
         });
       },
 
@@ -1558,6 +1561,7 @@ export const useProjectStore = create<ProjectState>()(
           templateUndoStack: [],
           templateRedoStack: [],
           error: null,
+          explicitlyCreated: true,
         });
 
         // Auto-restore placeholder assets from saved FileSystemFileHandles (same machine)
@@ -4342,7 +4346,9 @@ export const useProjectStore = create<ProjectState>()(
         useProjectStore.subscribe(
           (state) => state.project,
           () => {
-            autoSaveManager.markDirty();
+            if (get().explicitlyCreated) {
+              autoSaveManager.markDirty();
+            }
           },
         );
       },

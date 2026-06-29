@@ -422,8 +422,11 @@ export const ProjectManagerDialog: React.FC = () => {
             size="sm"
             variant="outline"
             onClick={() => {
-              createNewProject();
-              setProjectManagerOpen?.(false);
+              const name = window.prompt("Project name:", "Untitled Project");
+              if (name !== null && name.trim().length > 0) {
+                createNewProject(name.trim());
+                setProjectManagerOpen?.(false);
+              }
             }}
             className="h-8 text-xs gap-1.5"
           >
