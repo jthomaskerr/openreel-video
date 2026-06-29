@@ -56,7 +56,8 @@ function extensionFromPath(path: string | undefined, fallback: string): string {
   }
 }
 
-function displayFileName(path: string): string {
+function displayFileName(path: string | undefined): string {
+  if (!path) return "";
   return path.split(/[\\/]/).pop() ?? path;
 }
 
