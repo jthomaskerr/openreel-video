@@ -24,9 +24,6 @@ import {
   MessageSquare,
   Star,
   Upload,
-  Download,
-  Plus,
-  Trash2,
   MoreHorizontal,
   Command,
   Search,
@@ -95,10 +92,6 @@ export const Toolbar: React.FC = () => {
     undo,
     redo,
     renameProject,
-    createNewProject,
-    openProjectDialog,
-    saveProjectAsDialog,
-    deleteCurrentProject,
   } = useProjectStore();
   const {
     openModal,
@@ -108,6 +101,7 @@ export const Toolbar: React.FC = () => {
     toggleKeyframeEditor,
     panels,
     togglePanel,
+    setProjectManagerOpen,
   } = useUIStore();
   const { mode: themeMode, toggleTheme } = useThemeStore();
   const { navigate } = useRouter();
@@ -810,36 +804,19 @@ export const Toolbar: React.FC = () => {
         </Tooltip>
 
 
-        {/* Project management dropdown */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+        {/* Project manager button */}
+        <Tooltip>
+          <TooltipTrigger asChild>
             <button
+              onClick={handleOpenProjectManager}
               className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-medium text-fg-2 hover:bg-hover hover:text-fg transition-colors"
             >
               <FileVideo size={14} />
-              <span className="hidden xl:inline">Project</span>
+              <span className="hidden xl:inline">Projects</span>
             </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuItem onClick={handleNewProject} className="gap-2">
-              <Plus size={14} />
-              <span>New Project</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleOpenProject} className="gap-2">
-              <Upload size={14} />
-              <span>Open Project…</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleSaveProjectAs} className="gap-2">
-              <Download size={14} />
-              <span>Save As…</span>
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={handleDeleteProject} className="gap-2 text-error">
-              <Trash2 size={14} />
-              <span>Delete Project</span>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </TooltipTrigger>
+          <TooltipContent>Manage projects</TooltipContent>
+        </Tooltip>
 
         <div className="w-px h-4 bg-border mx-1" />
 
@@ -1021,6 +998,8 @@ export const Toolbar: React.FC = () => {
       />
 
       <SettingsDialog />
+
+      <ProjectManagerDialog />
 
       {isHistoryOpen && (
         <>

@@ -9,5 +9,6 @@
       "@openreel/core": ["../../packages/core/src/index.ts"]
     }
   },
-  "include": ["src", "../../packages/music-video-domain/src", "../../packages/core/src"]
+  "include": ["src", "../../packages/music-video-domain/src", "../../packages/core/src"],
+  "exclude": ["../../packages/core/src/wasm/**/assembly"]
 }

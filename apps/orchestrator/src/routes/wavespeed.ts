@@ -75,7 +75,8 @@ const jobs = new Map<string, Job>();
 // ── Download helper ────────────────────────────────────────────────────────────
 
 function downloadFile(url: string, destPath: string): Promise<void> {
-  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  let resolve!: () => void, reject!: (err: Error) => void;
+  const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
   httpsGet(url, (res) => {
     if (res.statusCode !== 200) {
       reject(new Error(`HTTP ${res.statusCode} downloading ${url}`));
@@ -119,7 +120,7 @@ wavespeedRouter.post("/", async (req, res) => {
   }
   try {
     const client = getClient();
-    const [wavespeedId] = await client._submit(model, inputs);
+    const [wavespeedId] = await (client as any)._submit(model, inputs);
     if (!wavespeedId) throw new Error("No prediction ID returned from WaveSpeed");
 
     const jobId = crypto.randomUUID();
@@ -143,7 +144,7 @@ wavespeedRouter.get("/:jobId", async (req, res) => {
   }
   try {
     const client = getClient();
-    const result = await client._getResult(job.wavespeedId) as {
+    const result = await (client as any)._getResult(job.wavespeedId) as {
       data: { status: string; outputs: string[]; error: string };
     };
     const { status, outputs, error } = result.data;

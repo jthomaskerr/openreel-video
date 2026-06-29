@@ -7,15 +7,10 @@ import {
   Check,
   Pencil,
   FileVideo,
-  Upload,
-  Download,
-  Trash2,
 } from "lucide-react";
 import { Input } from "@openreel/ui";
-import { useRouter } from "../../hooks/use-router";
 import { useProjectStore } from "../../stores/project-store";
 import { autoSaveManager, type AutoSaveMetadata } from "../../services/auto-save";
-
 function formatTimeAgo(timestamp: number): string {
   const seconds = Math.floor((Date.now() - timestamp) / 1000);
   if (seconds < 60) return "just now";
@@ -32,16 +27,7 @@ function formatTimeAgo(timestamp: number): string {
 }
 
 export const ProjectSwitcher: React.FC = () => {
-  const {
-    project,
-    createNewProject,
-    recoverFromAutoSave,
-    renameProject,
-    openProjectDialog,
-    saveProjectAsDialog,
-    deleteCurrentProject,
-  } = useProjectStore();
-  const { navigate } = useRouter();
+  const { project, createNewProject, recoverFromAutoSave, renameProject } = useProjectStore();
   const [isOpen, setIsOpen] = useState(false);
   const [savedProjects, setSavedProjects] = useState<AutoSaveMetadata[]>([]);
   const [isEditing, setIsEditing] = useState(false);
@@ -139,26 +125,6 @@ export const ProjectSwitcher: React.FC = () => {
     [recoverFromAutoSave]
   );
 
-  const handleOpenProject = useCallback(async () => {
-    setIsOpen(false);
-    const success = await openProjectDialog();
-    if (!success) {
-      // User cancelled the file picker — silently ignore
-    }
-  }, [openProjectDialog]);
-
-  const handleSaveProjectAs = useCallback(async () => {
-    setIsOpen(false);
-    await saveProjectAsDialog();
-  }, [saveProjectAsDialog]);
-
-  const handleDeleteProject = useCallback(async () => {
-    if (!confirm(`Delete project "${project.name}"? This cannot be undone.`)) return;
-    setIsOpen(false);
-    await deleteCurrentProject();
-    navigate("welcome");
-  }, [project.name, deleteCurrentProject, navigate]);
-
   const otherProjects = savedProjects.filter((s) => s.projectId !== project.id);
 
   return (
@@ -234,29 +200,6 @@ export const ProjectSwitcher: React.FC = () => {
             </button>
           </div>
 
-          <div className="border-t border-border p-2 space-y-0.5">
-            <button
-              onClick={handleOpenProject}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-background-secondary transition-colors text-left"
-            >
-              <Upload className="w-4 h-4 text-text-muted" />
-              <span className="text-sm text-text-primary">Open Project…</span>
-            </button>
-            <button
-              onClick={handleSaveProjectAs}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-background-secondary transition-colors text-left"
-            >
-              <Download className="w-4 h-4 text-text-muted" />
-              <span className="text-sm text-text-primary">Save As…</span>
-            </button>
-            <button
-              onClick={handleDeleteProject}
-              className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-error/10 transition-colors text-left"
-            >
-              <Trash2 className="w-4 h-4 text-error" />
-              <span className="text-sm text-error">Delete Project</span>
-            </button>
-          </div>
 
           {otherProjects.length > 0 && (
             <>

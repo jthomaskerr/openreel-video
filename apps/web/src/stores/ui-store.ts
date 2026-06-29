@@ -101,6 +101,8 @@ export interface UIState {
   keyframeEditorOpen: boolean;
   inspectorActiveTab: string;
   importErrors: ImportError[];
+  projectManagerOpen: boolean;
+  setProjectManagerOpen: (open: boolean) => void;
   select: (item: SelectionItem, addToSelection?: boolean) => void;
   selectMultiple: (items: SelectionItem[]) => void;
   deselect: (itemId: string) => void;
@@ -249,6 +251,8 @@ export const useUIStore = create<UIState>()(
         keyframeEditorOpen: false,
 
         inspectorActiveTab: "transform",
+
+        projectManagerOpen: false,
 
         showWelcomeScreen: true,
         skipWelcomeScreen: false,
@@ -597,6 +601,10 @@ export const useUIStore = create<UIState>()(
 
         setInspectorActiveTab: (tabId: string) => {
           set({ inspectorActiveTab: tabId });
+        },
+
+        setProjectManagerOpen: (open: boolean) => {
+          set({ projectManagerOpen: open });
         },
 
         setShowWelcomeScreen: (show: boolean) => {

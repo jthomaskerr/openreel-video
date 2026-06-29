@@ -11,7 +11,8 @@ import { config } from "../env.js";
 export const neuralframesRouter: ExpressRouter = Router();
 
 function downloadFile(url: string, destPath: string): Promise<void> {
-  const { promise, resolve, reject } = Promise.withResolvers<void>();
+  let resolve!: () => void, reject!: (err: Error) => void;
+  const promise = new Promise<void>((res, rej) => { resolve = res; reject = rej; });
   const get = url.startsWith("https") ? httpsGet : httpGet;
   get(url, (res) => {
     if (res.statusCode !== 200) {
