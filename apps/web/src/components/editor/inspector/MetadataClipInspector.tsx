@@ -3,8 +3,9 @@ import { MusicVideoMetadataInspector } from "./MusicVideoMetadataInspector";
 import { SceneMetadataInspector } from "./SceneMetadataInspector";
 import { CharacterMetadataInspector } from "./CharacterMetadataInspector";
 import { StyleMetadataInspector } from "./StyleMetadataInspector";
+import { NoteMetadataInspector } from "./NoteMetadataInspector";
 
-export type MetadataKind = "music-video" | "scene" | "character" | "style";
+export type MetadataKind = "music-video" | "scene" | "character" | "style" | "note";
 
 interface Props {
   clip: Clip;
@@ -33,6 +34,8 @@ export function MetadataClipInspector({ clip, kind }: Props) {
       return <CharacterMetadataInspector clip={clip} />;
     case "style":
       return <StyleMetadataInspector clip={clip} />;
+    case "note":
+      return <NoteMetadataInspector clip={clip} />;
     default:
       return <UnknownKindFallback kind={kind} />;
   }

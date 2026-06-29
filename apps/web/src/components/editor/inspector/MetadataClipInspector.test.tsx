@@ -50,7 +50,7 @@ describe("MetadataClipInspector routing", () => {
   it("renders character inspector for kind character", () => {
     render(<MetadataClipInspector clip={makeClip("character")} kind="character" />);
     expect(screen.getByTestId("character-metadata-inspector")).toBeInTheDocument();
-    expect(screen.getByText("Reference Images")).toBeInTheDocument();
+    expect(screen.getByText("Reference Image IDs")).toBeInTheDocument();
   });
 
   it("renders style inspector for kind style", () => {
@@ -58,6 +58,12 @@ describe("MetadataClipInspector routing", () => {
     expect(screen.getByTestId("style-metadata-inspector")).toBeInTheDocument();
     expect(screen.getByText("LoRA / Style Inputs")).toBeInTheDocument();
   });
+  it("renders note inspector for kind note", () => {
+    render(<MetadataClipInspector clip={makeClip("note")} kind="note" />);
+    expect(screen.getByTestId("note-metadata-inspector")).toBeInTheDocument();
+    expect(screen.getByText("Note")).toBeInTheDocument();
+  });
+
 
   it("renders fallback for unknown kind without crash", () => {
     render(<MetadataClipInspector clip={makeClip("unknown-kind")} kind="unknown-kind" />);
