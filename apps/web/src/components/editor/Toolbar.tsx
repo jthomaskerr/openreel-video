@@ -24,6 +24,9 @@ import {
   MessageSquare,
   Star,
   Upload,
+  Download,
+  Plus,
+  Trash2,
   MoreHorizontal,
   Command,
   Search,
@@ -61,6 +64,8 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "@openreel/ui";
+import { NeuralFramesImportTab } from "../../features/music-video";
+import { ORCHESTRATOR_URL } from "../../stores/music-video-store";
 
 type ExportType =
   | "mp4"
@@ -84,7 +89,16 @@ interface ExportState {
 }
 
 export const Toolbar: React.FC = () => {
-  const { project, undo, redo, renameProject } = useProjectStore();
+  const {
+    project,
+    undo,
+    redo,
+    renameProject,
+    createNewProject,
+    openProjectDialog,
+    saveProjectAsDialog,
+    deleteCurrentProject,
+  } = useProjectStore();
   const {
     openModal,
     selectedItems,
@@ -101,6 +115,7 @@ export const Toolbar: React.FC = () => {
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [isRecorderOpen, setIsRecorderOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isNeuralFramesImportOpen, setIsNeuralFramesImportOpen] = useState(false);
   const { importMedia } = useProjectStore();
   const { track } = useAnalytics();
 
@@ -147,6 +162,24 @@ export const Toolbar: React.FC = () => {
     localStorage.removeItem(MOGRAPH_TOUR_KEY);
     startMoGraphTour();
   }, []);
+
+  const handleNewProject = useCallback(() => {
+    createNewProject();
+  }, [createNewProject]);
+
+  const handleOpenProject = useCallback(async () => {
+    await openProjectDialog();
+  }, [openProjectDialog]);
+
+  const handleSaveProjectAs = useCallback(async () => {
+    await saveProjectAsDialog();
+  }, [saveProjectAsDialog]);
+
+  const handleDeleteProject = useCallback(async () => {
+    if (!confirm(`Delete project "${project.name}"? This cannot be undone.`)) return;
+    await deleteCurrentProject();
+    navigate("welcome");
+  }, [project.name, deleteCurrentProject, navigate]);
 
   // selectedItems drives related UX in the editor (e.g. inspector context).
   // Kept on the destructure list so future tweaks don't have to rewire it.
@@ -763,21 +796,17 @@ export const Toolbar: React.FC = () => {
           <TooltipContent>Audio mixer</TooltipContent>
         </Tooltip>
 
-        {/* Music Video panel */}
+        {/* Neural Frames Import */}
         <Tooltip>
           <TooltipTrigger asChild>
             <button
-              onClick={() => togglePanel("musicVideo")}
-              className={`w-[26px] h-[26px] grid place-items-center rounded-md transition-colors ${
-                panels.musicVideo?.visible
-                  ? "bg-accent-soft text-accent"
-                  : "text-fg-2 hover:bg-hover hover:text-fg"
-              }`}
+              onClick={() => setIsNeuralFramesImportOpen(true)}
+              className="w-[26px] h-[26px] grid place-items-center rounded-md text-fg-2 hover:bg-hover hover:text-fg transition-colors"
             >
-              <Film size={14} />
+              <Upload size={14} />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Music Video</TooltipContent>
+          <TooltipContent>Import Neural Frames</TooltipContent>
         </Tooltip>
 
         {/* Comments placeholder (matches mockup) */}
@@ -792,6 +821,38 @@ export const Toolbar: React.FC = () => {
           </TooltipTrigger>
           <TooltipContent>Project JSON / Comments</TooltipContent>
         </Tooltip>
+
+
+        {/* Project management dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-medium text-fg-2 hover:bg-hover hover:text-fg transition-colors"
+            >
+              <FileVideo size={14} />
+              <span className="hidden xl:inline">Project</span>
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem onClick={handleNewProject} className="gap-2">
+              <Plus size={14} />
+              <span>New Project</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleOpenProject} className="gap-2">
+              <Upload size={14} />
+              <span>Open Project…</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleSaveProjectAs} className="gap-2">
+              <Download size={14} />
+              <span>Save As…</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleDeleteProject} className="gap-2 text-error">
+              <Trash2 size={14} />
+              <span>Delete Project</span>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <div className="w-px h-4 bg-border mx-1" />
 
@@ -992,6 +1053,34 @@ export const Toolbar: React.FC = () => {
             </div>
             <div className="h-[calc(100%-49px)]">
               <HistoryPanel />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Neural Frames Import dialog */}
+      {isNeuralFramesImportOpen && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/50 z-40"
+            onClick={() => setIsNeuralFramesImportOpen(false)}
+          />
+          <div className="fixed inset-4 md:inset-10 z-50 bg-bg-1 border border-border rounded-lg shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between p-3 border-b border-border">
+              <span className="text-sm font-medium text-fg">Import Neural Frames</span>
+              <button
+                onClick={() => setIsNeuralFramesImportOpen(false)}
+                className="p-1.5 rounded hover:bg-hover text-fg-3 hover:text-fg transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <NeuralFramesImportTab
+                openreelProjectId={project.id}
+                orchestratorUrl={ORCHESTRATOR_URL}
+                onImported={() => setIsNeuralFramesImportOpen(false)}
+              />
             </div>
           </div>
         </>

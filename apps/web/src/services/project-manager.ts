@@ -577,6 +577,23 @@ class ProjectManager {
     });
   }
 
+  /** Delete a project from IndexedDB and recent list */
+  async deleteProject(id: string): Promise<boolean> {
+    await this.removeFromRecent(id);
+    if (!this.db) return false;
+
+    return new Promise((resolve) => {
+      const tx = this.db!.transaction(PROJECTS_STORE, "readwrite");
+      const store = tx.objectStore(PROJECTS_STORE);
+      store.delete(id);
+      tx.oncomplete = () => {
+        this.emit("projectSaved");
+        resolve(true);
+      };
+      tx.onerror = () => resolve(false);
+    });
+  }
+
   getTemplates(): ProjectTemplate[] {
     return [...DEFAULT_TEMPLATES];
   }
