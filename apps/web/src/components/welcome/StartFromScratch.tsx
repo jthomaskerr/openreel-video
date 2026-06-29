@@ -19,6 +19,7 @@ import {
 
 interface StartFromScratchProps {
   onProjectCreated?: () => void;
+  initialPreset?: SocialMediaCategory;
 }
 
 interface PresetGroup {
@@ -56,15 +57,15 @@ const PRESET_ICONS: Record<string, React.ElementType> = {
   "Horizontal (16:9)": Monitor,
   Other: Square,
 };
-
 export const StartFromScratch: React.FC<StartFromScratchProps> = ({
   onProjectCreated,
+  initialPreset,
 }) => {
   const createNewProject = useProjectStore((state) => state.createNewProject);
   const updateSettings = useProjectStore((state) => state.updateSettings);
   const { track } = useAnalytics();
   const [selectedPreset, setSelectedPreset] =
-    useState<SocialMediaCategory>("youtube-video");
+    useState<SocialMediaCategory>(initialPreset ?? "youtube-video");
   const [projectName, setProjectName] = useState("");
   const [isCreating, setIsCreating] = useState(false);
 

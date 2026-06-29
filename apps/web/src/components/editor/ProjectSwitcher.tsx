@@ -117,7 +117,10 @@ export const ProjectSwitcher: React.FC = () => {
   );
 
   const handleNewProject = useCallback(() => {
-    createNewProject();
+    const name = window.prompt("Project name:", "");
+    if (name !== null && name.trim().length > 0) {
+      createNewProject(name.trim());
+    }
     setIsOpen(false);
   }, [createNewProject]);
 

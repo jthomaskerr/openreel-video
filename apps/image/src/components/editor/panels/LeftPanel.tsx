@@ -650,8 +650,11 @@ function TemplatesPanel() {
     : getAllTemplates();
 
   const handleApplyTemplate = (template: Template) => {
-    createProject(template.name, template.size, template.background);
-    setCurrentView('editor');
+    const entered = window.prompt("Project name:", template.name);
+    if (entered !== null && entered.trim().length > 0) {
+      createProject(entered.trim(), template.size, template.background);
+      setCurrentView('editor');
+    }
   };
 
   const getGradientBackground = (template: Template): string => {

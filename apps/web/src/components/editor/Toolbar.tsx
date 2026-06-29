@@ -50,6 +50,7 @@ import { ScreenRecorder } from "./ScreenRecorder";
 import { HistoryPanel } from "./inspector/HistoryPanel";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { SettingsDialog } from "./settings/SettingsDialog";
+import { ProjectManagerDialog } from "./ProjectManagerDialog";
 import { toast } from "../../stores/notification-store";
 import { useSettingsStore } from "../../stores/settings-store";
 import { useAnalytics, AnalyticsEvents } from "../../hooks/useAnalytics";
@@ -163,26 +164,9 @@ export const Toolbar: React.FC = () => {
     startMoGraphTour();
   }, []);
 
-  const handleNewProject = useCallback(() => {
-    const name = window.prompt("Project name:", "");
-    if (name !== null && name.trim().length > 0) {
-      createNewProject(name.trim());
-    }
-  }, [createNewProject]);
-
-  const handleOpenProject = useCallback(async () => {
-    await openProjectDialog();
-  }, [openProjectDialog]);
-
-  const handleSaveProjectAs = useCallback(async () => {
-    await saveProjectAsDialog();
-  }, [saveProjectAsDialog]);
-
-  const handleDeleteProject = useCallback(async () => {
-    if (!confirm(`Delete project "${project.name}"? This cannot be undone.`)) return;
-    await deleteCurrentProject();
-    navigate("welcome");
-  }, [project.name, deleteCurrentProject, navigate]);
+  const handleOpenProjectManager = useCallback(() => {
+    setProjectManagerOpen(true);
+  }, []);
 
   // selectedItems drives related UX in the editor (e.g. inspector context).
   // Kept on the destructure list so future tweaks don't have to rewire it.

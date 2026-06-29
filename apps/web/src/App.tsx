@@ -7,12 +7,10 @@ import { WelcomeScreen } from "./components/welcome";
 import { RecoveryDialog } from "./components/welcome/RecoveryDialog";
 import { SharePage } from "./pages/SharePage";
 import { useUIStore } from "./stores/ui-store";
-import { useProjectStore } from "./stores/project-store";
 import { useRouter } from "./hooks/use-router";
 import { useProjectRecovery } from "./hooks/useProjectRecovery";
 import { useKieAIPoller } from "./hooks/useKieAIPoller";
 import { useGenerationJobPoller } from "./hooks/useGenerationJobPoller";
-import { SOCIAL_MEDIA_PRESETS, type SocialMediaCategory } from "@openreel/core";
 import { TooltipProvider } from "@openreel/ui";
 
 const EditorInterface = lazy(() =>
@@ -28,21 +26,12 @@ const LoadingSpinner: React.FC<{ message: string }> = ({ message }) => (
   </div>
 );
 
-const PRESET_DIMENSIONS: Record<string, SocialMediaCategory> = {
-  "1080x1920": "tiktok",
-  "1920x1080": "youtube-video",
-  "1080x1080": "instagram-post",
-  "720x1280": "instagram-stories",
-  "1280x720": "youtube-video",
-};
-
 function App() {
   const { activeModal, closeModal, skipWelcomeScreen } = useUIStore();
   const { openModal: openSearchModal } = useUIStore();
-  const createNewProject = useProjectStore((state) => state.createNewProject);
   const { showDialog, availableSaves, recover, dismiss, clearAll } = useProjectRecovery();
 
-  const { route, params, navigate, parsedDimensions, fps } = useRouter();
+  const { route, params, navigate } = useRouter();
   const hasHandledInitialRoute = useRef(false);
 
   useKieAIPoller();
@@ -53,58 +42,13 @@ function App() {
 
     if (route === "new") {
       hasHandledInitialRoute.current = true;
-
-      let projectName = "New Project";
-      let width = 1920;
-      let height = 1080;
-      let frameRate = fps;
-
-      if (params.preset) {
-        const presetKey = params.preset as SocialMediaCategory;
-        const preset = SOCIAL_MEDIA_PRESETS[presetKey];
-        if (preset) {
-          width = preset.width;
-          height = preset.height;
-          frameRate = preset.frameRate || fps;
-          projectName = `New ${presetKey.charAt(0).toUpperCase() + presetKey.slice(1).replace(/-/g, " ")} Project`;
-        }
-      } else if (parsedDimensions) {
-        width = parsedDimensions.width;
-        height = parsedDimensions.height;
-
-        const dimensionKey = `${width}x${height}`;
-        const matchingPreset = PRESET_DIMENSIONS[dimensionKey];
-        if (matchingPreset) {
-          const preset = SOCIAL_MEDIA_PRESETS[matchingPreset];
-          frameRate = preset.frameRate || fps;
-        }
-
-        const aspectRatio = width / height;
-        if (aspectRatio < 1) {
-          projectName = "New Vertical Video";
-        } else if (aspectRatio > 1) {
-          projectName = "New Horizontal Video";
-        } else {
-          projectName = "New Square Video";
-        }
-      }
-
-      createNewProject(projectName, { width, height, frameRate });
       navigate("editor");
     } else if (route === "editor" && skipWelcomeScreen) {
       hasHandledInitialRoute.current = true;
     } else if (["welcome", "templates", "recent"].includes(route)) {
       hasHandledInitialRoute.current = true;
     }
-  }, [
-    route,
-    params,
-    parsedDimensions,
-    fps,
-    createNewProject,
-    navigate,
-    skipWelcomeScreen,
-  ]);
+  }, [route, navigate, skipWelcomeScreen]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {

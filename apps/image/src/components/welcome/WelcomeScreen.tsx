@@ -107,13 +107,19 @@ export function WelcomeScreen() {
     : CANVAS_PRESETS.filter((p) => p.category === selectedCategory);
 
   const handleCreateProject = (width: number, height: number, name: string) => {
-    createProject(name, { width, height });
-    setCurrentView('editor');
+    const entered = window.prompt("Project name:", name);
+    if (entered !== null && entered.trim().length > 0) {
+      createProject(entered.trim(), { width, height });
+      setCurrentView('editor');
+    }
   };
 
   const handleCreateCustom = () => {
-    createProject('Untitled Design', { width: customWidth, height: customHeight });
-    setCurrentView('editor');
+    const entered = window.prompt("Project name:", "Untitled Design");
+    if (entered !== null && entered.trim().length > 0) {
+      createProject(entered.trim(), { width: customWidth, height: customHeight });
+      setCurrentView('editor');
+    }
   };
 
   return (

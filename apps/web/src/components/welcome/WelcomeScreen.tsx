@@ -9,14 +9,14 @@ import {
   FolderOpen,
 } from "lucide-react";
 import { Button, Switch, Label } from "@openreel/ui";
-import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
-import { SOCIAL_MEDIA_PRESETS, type SocialMediaCategory } from "@openreel/core";
+import type { SocialMediaCategory } from "@openreel/core";
 import { TemplateGallery } from "./TemplateGallery";
 import { RecentProjects } from "./RecentProjects";
+import { StartFromScratch } from "./StartFromScratch";
 import { useRouter } from "../../hooks/use-router";
 import { useEditorPreload } from "../../hooks/useEditorPreload";
-import { useAnalytics, AnalyticsEvents } from "../../hooks/useAnalytics";
+
 
 interface FormatOption {
   id: string;
@@ -126,8 +126,7 @@ const OpenReelLogo: React.FC<{ className?: string }> = ({ className = "" }) => (
     />
   </svg>
 );
-
-type ViewMode = "home" | "templates" | "recent";
+type ViewMode = "home" | "templates" | "recent" | "start-from-scratch";
 
 interface WelcomeScreenProps {
   initialTab?: "templates" | "recent";
@@ -138,34 +137,26 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ initialTab }) => {
     (state) => state.setSkipWelcomeScreen,
   );
   const skipWelcomeScreen = useUIStore((state) => state.skipWelcomeScreen);
-  const createNewProject = useProjectStore((state) => state.createNewProject);
   const { navigate } = useRouter();
-  const { track } = useAnalytics();
 
   const [viewMode, setViewMode] = useState<ViewMode>(initialTab ?? "home");
   const [hoveredFormat, setHoveredFormat] = useState<string | null>(null);
+  const [quickStartPreset, setQuickStartPreset] =
+    useState<SocialMediaCategory | undefined>(undefined);
 
   useEditorPreload(true);
 
   const handleCreateProject = useCallback(
     (option: FormatOption) => {
-      const preset = SOCIAL_MEDIA_PRESETS[option.preset];
-      createNewProject(`New ${option.label} Video`, {
-        width: preset.width,
-        height: preset.height,
-        frameRate: preset.frameRate,
-      });
-      track(AnalyticsEvents.PROJECT_CREATED, {
-        preset: option.preset,
-        width: preset.width,
-        height: preset.height,
-        frameRate: preset.frameRate ?? 30,
-        source: "quick_start",
-      });
-      navigate("editor");
+      setQuickStartPreset(option.preset);
+      setViewMode("start-from-scratch");
     },
-    [createNewProject, navigate, track],
+    [],
   );
+
+  const handleStartFromScratchCreated = useCallback(() => {
+    navigate("editor");
+  }, [navigate]);
 
   const handleTemplateApplied = useCallback(() => {
     navigate("editor");
@@ -236,6 +227,36 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ initialTab }) => {
         </header>
         <div className="flex-1 overflow-y-auto p-6">
           <RecentProjects onProjectSelected={handleProjectSelected} />
+        </div>
+      </div>
+    );
+  }
+
+  if (viewMode === "start-from-scratch") {
+    return (
+      <div className="fixed inset-0 z-50 bg-background flex flex-col">
+        <header className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              setQuickStartPreset(undefined);
+              setViewMode("home");
+            }}
+          >
+            <ArrowRight className="rotate-180" size={16} />
+            Back
+          </Button>
+          <h2 className="text-sm font-medium text-text-primary">New Project</h2>
+          <div className="w-16" />
+        </header>
+        <div className="flex-1 overflow-y-auto p-6">
+          <div className="max-w-3xl mx-auto">
+            <StartFromScratch
+              initialPreset={quickStartPreset}
+              onProjectCreated={handleStartFromScratchCreated}
+            />
+          </div>
         </div>
       </div>
     );
