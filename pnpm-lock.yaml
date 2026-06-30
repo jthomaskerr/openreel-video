@@ -259,6 +259,9 @@ importers:
       uuid:
         specifier: ^13.0.0
         version: 13.0.0
+      wavesurfer.js:
+        specifier: ^7.12.8
+        version: 7.12.8
       zustand:
         specifier: ^4.5.2
         version: 4.5.7(@types/react@18.3.27)(immer@11.0.1)(react@18.3.1)
@@ -4049,6 +4052,9 @@ packages:
   wavespeed@0.2.4:
     resolution: {integrity: sha512-JfWudgSZ5u2Z8JsrnYUkDX2gsxVeb+PsFRc1F8tyX947Yfo9w2yfMLMMxaJE4zj+yt12xWXeTXTvYPn0FV5Fig==}
 
+  wavesurfer.js@7.12.8:
+    resolution: {integrity: sha512-G3nxzcC4X+ZWrLtcIV17kCWHVq3ysJCS4dS0YkGKILrQ2esAb8cScw965zKNKYxUvpiZsPK93KLWgWTYdIBQiw==}
+
   web-vitals@5.1.0:
     resolution: {integrity: sha512-ArI3kx5jI0atlTtmV0fWU3fjpLmq/nD3Zr1iFFlJLaqa5wLBkUSzINwBPySCX/8jRyjlmy1Volw1kz1g9XE4Jg==}
 
@@ -7653,6 +7659,8 @@ snapshots:
       xml-name-validator: 5.0.0
 
   wavespeed@0.2.4: {}
+
+  wavesurfer.js@7.12.8: {}
 
   web-vitals@5.1.0: {}
 

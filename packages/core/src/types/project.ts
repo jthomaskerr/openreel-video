@@ -87,6 +87,14 @@ export interface MediaMetadata {
   readonly sampleRate: number; // For audio
   readonly channels: number; // For audio
   readonly fileSize: number;
+  /** Detected or imported tempo for audio assets */
+  readonly bpm?: number;
+  /** Detected or imported musical key for audio assets */
+  readonly key?: string;
+  /** Detected or imported scale/mode for audio assets */
+  readonly scale?: string;
+  /** Whether lyrics are present in the audio metadata/import payload */
+  readonly has_lyrics?: boolean;
   /** Number of audio tracks in the file (may be > 1 for multi-track video/audio files) */
   readonly audioTrackCount?: number;
 }

@@ -1,5 +1,6 @@
-import React, { useCallback, useMemo, useState } from "react";
-import { Film, Music, ImageIcon, FileText, Layers, Sparkles, GitBranch, Link2, RefreshCw, Trash2, Download, X as XIcon } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import WaveSurfer from "wavesurfer.js";
+import { Film, Music, ImageIcon, FileText, Layers, Sparkles, GitBranch, Link2, RefreshCw, Trash2, Download, X as XIcon, Play, Pause } from "lucide-react";
 import type { MediaItem } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
@@ -18,7 +19,7 @@ import {
 
 // ── Secondary tab bar ──────────────────────────────────────────────
 
-type AssetTabId = "clip" | "file" | "generation" | "versions" | "usages";
+type AssetTabId = "clip" | "file" | "audio" | "generation" | "versions" | "usages";
 
 interface AssetTabDef {
   id: AssetTabId;
@@ -29,6 +30,7 @@ interface AssetTabDef {
 const TAB_DEFS: Record<AssetTabId, AssetTabDef> = {
   clip:       { id: "clip",       label: "Clip",       icon: Film },
   file:       { id: "file",       label: "File",       icon: FileText },
+  audio:      { id: "audio",      label: "Audio",      icon: Music },
   generation: { id: "generation", label: "Generation", icon: Sparkles },
   versions:   { id: "versions",   label: "Versions",   icon: GitBranch },
   usages:     { id: "usages",     label: "Usages",     icon: Link2 },
@@ -213,17 +215,6 @@ function FileTab({ item }: { item: MediaItem }) {
           <TypeDetailRow label="Sample Rate" value={item.metadata.sampleRate ? `${item.metadata.sampleRate} Hz` : "—"} />
         </TypeSection>
       )}
-      {item.type === "audio" && (
-        <TypeSection title="Audio">
-          <TypeDetailRow label="Sample Rate" value={item.metadata.sampleRate ? `${item.metadata.sampleRate} Hz` : "—"} />
-          <TypeDetailRow label="Channels" value={item.metadata.channels ? String(item.metadata.channels) : "—"} />
-          <TypeDetailRow label="Codec" value={item.metadata.codec || "—"} />
-          {item.metadata.audioTrackCount != null && (
-            <TypeDetailRow label="Audio Tracks" value={String(item.metadata.audioTrackCount)} />
-          )}
-          <TypeDetailRow label="Waveform" value={item.waveformData ? "Generated" : "Not generated"} />
-        </TypeSection>
-      )}
       {item.type === "image" && (
         <TypeSection title="Image">
           <TypeDetailRow label="Codec" value={item.metadata.codec || "—"} />
@@ -247,6 +238,132 @@ function FileTab({ item }: { item: MediaItem }) {
           </div>
         </TypeSection>
       )}
+    </div>
+  );
+}
+
+type WaveSurferInstance = ReturnType<typeof WaveSurfer.create>;
+
+function formatBpm(value: number | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) ? `${Math.round(value)} BPM` : "—";
+}
+
+function formatOptionalText(value: string | undefined): string {
+  return value && value.trim() ? value : "—";
+}
+
+function formatBooleanMetadata(value: boolean | undefined): string {
+  if (value == null) return "—";
+  return value ? "Yes" : "No";
+}
+
+function AudioTab({ item }: { item: MediaItem }) {
+  const waveformRef = useRef<HTMLDivElement | null>(null);
+  const wavesurferRef = useRef<WaveSurferInstance | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+
+  useEffect(() => {
+    const container = waveformRef.current;
+    if (!container) return;
+
+    let objectUrl: string | null = null;
+    let url = item.originalUrl ?? null;
+    if (item.blob && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+      objectUrl = URL.createObjectURL(item.blob);
+      url = objectUrl;
+    }
+
+    if (!url) return;
+
+    const wavesurfer = WaveSurfer.create({
+      container,
+      url,
+      peaks: item.waveformData ? [item.waveformData] : undefined,
+      duration: item.metadata.duration || undefined,
+      waveColor: "rgba(148, 163, 184, 0.45)",
+      progressColor: "rgb(34, 197, 94)",
+      cursorColor: "rgb(34, 197, 94)",
+      cursorWidth: 2,
+      height: 72,
+      barWidth: 2,
+      barGap: 1,
+      barRadius: 2,
+      dragToSeek: true,
+      normalize: true,
+    });
+
+    wavesurferRef.current = wavesurfer;
+    wavesurfer.on("timeupdate", (time: number) => setCurrentTime(time));
+    wavesurfer.on("play", () => setIsPlaying(true));
+    wavesurfer.on("pause", () => setIsPlaying(false));
+    wavesurfer.on("finish", () => {
+      setIsPlaying(false);
+      setCurrentTime(item.metadata.duration || 0);
+    });
+
+    return () => {
+      wavesurferRef.current = null;
+      wavesurfer.destroy();
+      if (objectUrl && typeof URL !== "undefined") URL.revokeObjectURL(objectUrl);
+    };
+  }, [item.blob, item.id, item.metadata.duration, item.originalUrl, item.waveformData]);
+
+  const handlePlayPause = useCallback(() => {
+    void wavesurferRef.current?.playPause();
+  }, []);
+
+  const metadataRows: InfoRow[] = [
+    { label: "Filename", value: item.name },
+    { label: "Type", value: item.type },
+  ];
+  if (item.metadata.fileSize) metadataRows.push({ label: "Size", value: formatSize(item.metadata.fileSize) });
+  if (item.metadata.duration) metadataRows.push({ label: "Duration", value: formatDuration(item.metadata.duration) });
+
+  return (
+    <div className="space-y-3 px-4 pt-3 pb-4">
+      <TypeSection title="Waveform">
+        <div className="space-y-2">
+          <div
+            ref={waveformRef}
+            data-testid="audio-waveform"
+            className="min-h-[72px] overflow-hidden rounded-md border border-border bg-background-tertiary"
+          />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handlePlayPause}
+              aria-label={isPlaying ? "Pause audio preview" : "Play audio preview"}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-accent text-white hover:bg-accent/90 transition-colors"
+              disabled={!item.blob && !item.originalUrl}
+            >
+              {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+            </button>
+            <span className="font-mono text-[10px] text-text-secondary">
+              {formatDuration(currentTime)} / {item.metadata.duration ? formatDuration(item.metadata.duration) : "—"}
+            </span>
+          </div>
+        </div>
+      </TypeSection>
+
+      <TypeSection title="Audio Analysis">
+        <TypeDetailRow label="BPM" value={formatBpm(item.metadata.bpm)} />
+        <TypeDetailRow label="Key" value={formatOptionalText(item.metadata.key)} />
+        <TypeDetailRow label="Scale" value={formatOptionalText(item.metadata.scale)} />
+        <TypeDetailRow label="Has Lyrics" value={formatBooleanMetadata(item.metadata.has_lyrics)} />
+      </TypeSection>
+
+      <TypeSection title="Audio">
+        <TypeDetailRow label="Sample Rate" value={item.metadata.sampleRate ? `${item.metadata.sampleRate} Hz` : "—"} />
+        <TypeDetailRow label="Channels" value={item.metadata.channels ? String(item.metadata.channels) : "—"} />
+        <TypeDetailRow label="Codec" value={item.metadata.codec || "—"} />
+        {item.metadata.audioTrackCount != null && (
+          <TypeDetailRow label="Audio Tracks" value={String(item.metadata.audioTrackCount)} />
+        )}
+        <TypeDetailRow label="Waveform" value={item.waveformData ? "Generated" : "Not generated"} />
+      </TypeSection>
+
+      <FileInfoGrid rows={metadataRows} />
     </div>
   );
 }
@@ -583,11 +700,11 @@ export function AssetInspectorWithTabs({ item }: { item: MediaItem }) {
 
   const availableTabs = useMemo<AssetTabDef[]>(() => {
     const tabs: AssetTabId[] = ["clip"];
-    if (!category.isMetadata) tabs.push("file");
+    if (!category.isMetadata) tabs.push(item.type === "audio" ? "audio" : "file");
     if (item.generationMeta) tabs.push("generation");
     tabs.push("versions", "usages");
     return tabs.map((id) => TAB_DEFS[id]);
-  }, [category.isMetadata, item.generationMeta]);
+  }, [category.isMetadata, item.generationMeta, item.type]);
 
   const [activeTab, setActiveTab] = useState<AssetTabId>("clip");
 
@@ -604,6 +721,7 @@ export function AssetInspectorWithTabs({ item }: { item: MediaItem }) {
       <div className="overflow-y-auto flex-1 min-h-0 custom-scrollbar">
         {resolvedTab === "clip" && <ClipTab item={item} />}
         {resolvedTab === "file" && <FileTab item={item} />}
+        {resolvedTab === "audio" && <AudioTab item={item} />}
         {resolvedTab === "generation" && <GenerationTab item={item} />}
         {resolvedTab === "versions" && <VersionsTab item={item} />}
         {resolvedTab === "usages" && <UsagesTab item={item} />}
