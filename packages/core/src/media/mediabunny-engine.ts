@@ -25,10 +25,14 @@ export const SUPPORTED_AUDIO_FORMATS = [
   "audio/mpeg",
   "audio/mp3",
   "audio/wav",
+  "audio/x-wav",
+  "audio/wave",
   "audio/ogg",
   "audio/aac",
   "audio/flac",
   "audio/webm",
+  "audio/x-m4a",
+  "audio/mp4",
 ];
 
 export const SUPPORTED_IMAGE_FORMATS = [
@@ -38,22 +42,73 @@ export const SUPPORTED_IMAGE_FORMATS = [
   "image/gif",
 ];
 
-export function isSupportedFormat(mimeType: string): boolean {
+const EXTENSION_MIME_MAP: Record<string, string> = {
+  ".mp4": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+  ".mkv": "video/x-matroska",
+  ".mp3": "audio/mpeg",
+  ".wav": "audio/wav",
+  ".wave": "audio/wav",
+  ".ogg": "audio/ogg",
+  ".oga": "audio/ogg",
+  ".aac": "audio/aac",
+  ".flac": "audio/flac",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".gif": "image/gif",
+};
+
+/** Derive MIME type from filename extension as a fallback when browser reports empty/unknown. */
+function mimeFromExtension(filename: string): string | null {
+  const dot = filename.lastIndexOf(".");
+  if (dot === -1) return null;
+  const ext = filename.slice(dot).toLowerCase();
+  return EXTENSION_MIME_MAP[ext] || null;
+}
+
+export function isSupportedFormat(mimeType: string, fileName?: string): boolean {
   const baseMimeType = mimeType.split(";")[0].trim();
-  return (
+  if (
     SUPPORTED_VIDEO_FORMATS.includes(baseMimeType) ||
     SUPPORTED_AUDIO_FORMATS.includes(baseMimeType) ||
     SUPPORTED_IMAGE_FORMATS.includes(baseMimeType)
-  );
+  ) {
+    return true;
+  }
+  // Fallback: browser may report empty or non-standard MIME for some containers (e.g. WAV)
+  if (fileName) {
+    const extMime = mimeFromExtension(fileName);
+    if (extMime) {
+      return (
+        SUPPORTED_VIDEO_FORMATS.includes(extMime) ||
+        SUPPORTED_AUDIO_FORMATS.includes(extMime) ||
+        SUPPORTED_IMAGE_FORMATS.includes(extMime)
+      );
+    }
+  }
+  return false;
 }
 
 export function inferMediaType(
   mimeType: string,
+  fileName?: string,
 ): "video" | "audio" | "image" | null {
   const baseMimeType = mimeType.split(";")[0].trim();
   if (SUPPORTED_VIDEO_FORMATS.includes(baseMimeType)) return "video";
   if (SUPPORTED_AUDIO_FORMATS.includes(baseMimeType)) return "audio";
   if (SUPPORTED_IMAGE_FORMATS.includes(baseMimeType)) return "image";
+  // Fallback to extension
+  if (fileName) {
+    const extMime = mimeFromExtension(fileName);
+    if (extMime) {
+      if (SUPPORTED_VIDEO_FORMATS.includes(extMime)) return "video";
+      if (SUPPORTED_AUDIO_FORMATS.includes(extMime)) return "audio";
+      if (SUPPORTED_IMAGE_FORMATS.includes(extMime)) return "image";
+    }
+  }
   return null;
 }
 type MediaBunnyInput = {
@@ -245,7 +300,8 @@ export class MediaBunnyEngine {
     error?: string;
   }> {
     const mimeType = file.type;
-    if (!isSupportedFormat(mimeType)) {
+    const fileName = "name" in file ? (file as File).name : undefined;
+    if (!isSupportedFormat(mimeType, fileName)) {
       return {
         supported: false,
         format: null,

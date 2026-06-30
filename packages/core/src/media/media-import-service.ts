@@ -98,7 +98,7 @@ export class MediaImportService {
 
     try {
       const metadata = await this.mediaEngine.extractMetadata(file);
-      const mediaType = inferMediaType(file.type);
+      const mediaType = inferMediaType(file.type, "name" in file ? (file as File).name : undefined);
 
       if (!mediaType) {
         return {
@@ -378,7 +378,8 @@ export class MediaImportService {
     format: string | null;
     error?: string;
   }> {
-    if (!isSupportedFormat(file.type)) {
+    const fileName = "name" in file ? (file as File).name : undefined;
+    if (!isSupportedFormat(file.type, fileName)) {
       return {
         supported: false,
         format: null,
