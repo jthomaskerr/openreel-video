@@ -59,10 +59,17 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 }));
 
 export const toast = {
-  success: (title: string, message?: string, duration?: number) =>
-    useNotificationStore
+  success: (title: string, message?: string, duration?: number) => {
+    logBus.entry({
+      kind: "unknown_error",
+      message: message ?? title,
+      label: title,
+      source: "toast.success",
+    });
+    return useNotificationStore
       .getState()
-      .addNotification({ type: "success", title, message, duration }),
+      .addNotification({ type: "success", title, message, duration });
+  },
   error: (title: string, message?: string) => {
     logBus.entry({
       kind: "unknown_error",
@@ -79,12 +86,26 @@ export const toast = {
       .getState()
       .addNotification({ type: "error", title, message, duration: 6000 });
   },
-  warning: (title: string, message?: string) =>
-    useNotificationStore
+  warning: (title: string, message?: string) => {
+    logBus.entry({
+      kind: "unknown_error",
+      message: message ?? title,
+      label: title,
+      source: "toast.warning",
+    });
+    return useNotificationStore
       .getState()
-      .addNotification({ type: "warning", title, message }),
-  info: (title: string, message?: string) =>
-    useNotificationStore
+      .addNotification({ type: "warning", title, message });
+  },
+  info: (title: string, message?: string) => {
+    logBus.entry({
+      kind: "unknown_error",
+      message: message ?? title,
+      label: title,
+      source: "toast.info",
+    });
+    return useNotificationStore
       .getState()
-      .addNotification({ type: "info", title, message }),
+      .addNotification({ type: "info", title, message });
+  },
 };

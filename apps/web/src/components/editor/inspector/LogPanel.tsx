@@ -173,7 +173,7 @@ export function LogPanel() {
       if (!isNaN(ts)) filter.until = ts;
     }
     return getFiltered(filter);
-  }, [kindFilter, searchQuery, currentProjectOnly, projectId, sinceDate, untilDate, getFiltered]);
+  }, [kindFilter, searchQuery, currentProjectOnly, projectId, sinceDate, untilDate, getFiltered, entries]);
 
   const clearFilters = useCallback(() => {
     setKindFilter("all");

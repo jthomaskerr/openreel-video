@@ -7,10 +7,11 @@ import "./index.css";
 import { registerServiceWorker } from "./services/service-worker";
 import { initCustomFonts } from "./components/editor/inspector/font-options";
 
-// ── Global console.error → immutable error log ──────────────────────
-// Intercept every console.error so errors are captured in the Log pane.
-// Only explicit problemBus.report() calls create actionable Problems.
+// ── Global console.error → log + problems stores ────────────────────
+// Intercept every console.error so errors are captured in both the
+// immutable Log pane and the actionable Problems pane.
 import { logBus } from "./stores/log-store";
+import { problemBus } from "./stores/problem-store";
 const _origConsoleError = console.error.bind(console);
 console.error = (...args: unknown[]) => {
   _origConsoleError(...args);
@@ -38,6 +39,11 @@ console.error = (...args: unknown[]) => {
       message: msg.slice(0, 300),
       label: msg.slice(0, 80),
       source,
+    });
+    problemBus.report({
+      kind,
+      message: msg.slice(0, 300),
+      label: msg.slice(0, 80),
     });
   }
 };
