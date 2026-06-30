@@ -4,6 +4,7 @@ import {
   Square, Circle, Triangle, Star, ArrowRight, Hexagon, FileCode, AlertTriangle,
   RefreshCw, Palette, LayoutGrid, Grid2x2, List, Sparkles, Video,
   Type, Shapes, Wand2, LayoutTemplate, Zap, Shuffle, Pencil, Settings,
+  ChevronsUpDown, Check,
 } from "lucide-react";
 import {
   BACKGROUND_PRESETS,
@@ -25,7 +26,6 @@ import {
 } from "./panels/EffectsTransitionsPanel";
 import { useTtsAudioStore } from "../../stores/tts-store";
 import { toast } from "../../stores/notification-store";
-import { saveFileHandle, saveDirectoryHandle, scanDirectoryRecursive } from "../../services/media-storage";
 import {
   Input,
   ScrollArea,
@@ -33,17 +33,17 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuTrigger,
-  
-  
-  
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
 } from "@openreel/ui";
 import { GenerateAssetDialog } from "./generate/GenerateAssetDialog";
 import type { GenerateAssetDialogProps } from "./generate/GenerateAssetDialog";
 import { loadMediaBlob } from "../../services/media-storage";
 import { useKieAIStore } from "../../stores/kieai-store";
-import { useMusicVideoStore } from "../../stores/music-video-store";
-import { AssetBuckets } from "./AssetBuckets";
-
+import { AssetBuckets, type AssetBucketsHandle, type GroupBy } from "./AssetBuckets";
 const formatDuration = (seconds: number): string => {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
@@ -660,8 +660,20 @@ const MediaThumbnailRow = React.memo(
       input.type = "file";
       input.accept = "video/*,audio/*,image/*";
       input.onchange = async (e) => {
-        const file = (e.target as HTMLInputElement).files?.[0];
-        if (file) await useProjectStore.getState().replaceMediaAsset(item.id, file);
+        try {
+          const file = (e.target as HTMLInputElement).files?.[0];
+          if (!file) return;
+          const result = await useProjectStore.getState().replaceMediaAsset(item.id, file);
+          if (result.success) {
+            toast.success("File replaced", `Replaced with ${file.name}`);
+          } else {
+            toast.error("Replace failed", result.error?.message || "Could not replace file");
+          }
+        } catch (err) {
+          toast.error("Replace failed", err instanceof Error ? err.message : "Unknown error");
+        } finally {
+          input.remove();
+        }
       };
       input.click();
     }, [item.id]);
@@ -790,6 +802,8 @@ export const AssetsPanel: React.FC = () => {
     itemToAdd: MediaItem;
   } | null>(null);
   const [mediaViewMode, setMediaViewMode] = useState<MediaViewMode>("large");
+  const [groupBy, setGroupBy] = useState<GroupBy>("type");
+  const assetBucketsRef = useRef<AssetBucketsHandle>(null);
   const [generatingBackground, setGeneratingBackground] = useState<
     string | null
   >(null);
@@ -1185,6 +1199,40 @@ export const AssetsPanel: React.FC = () => {
               </div>
             </div>
 
+            <div className="px-4 pb-2 flex items-center gap-2">
+              <button
+                onClick={() => assetBucketsRef.current?.collapseAll()}
+                title="Collapse all"
+                className="p-1.5 rounded bg-background-tertiary border border-border text-text-muted hover:text-text-secondary transition-colors"
+              >
+                <ChevronsUpDown size={13} className="rotate-180" />
+              </button>
+              <button
+                onClick={() => assetBucketsRef.current?.expandAll()}
+                title="Expand all"
+                className="p-1.5 rounded bg-background-tertiary border border-border text-text-muted hover:text-text-secondary transition-colors"
+              >
+                <ChevronsUpDown size={13} />
+              </button>
+              <Select value={groupBy} onValueChange={(v) => setGroupBy(v as GroupBy)}>
+                <SelectTrigger className="h-8 text-xs bg-background-tertiary border-border text-text-primary w-[105px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent className="bg-background-secondary border-border">
+                  {([
+                    { value: "none", label: "Ungrouped" },
+                    { value: "tag", label: "By Tag" },
+                    { value: "type", label: "By Type" },
+                    { value: "status", label: "By Status" },
+                  ] as const).map(({ value, label }) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             {missingAssetsCount > 0 && (
               <div className="px-4 pb-3 space-y-2">
                 <button
@@ -1224,15 +1272,16 @@ export const AssetsPanel: React.FC = () => {
                   <EmptyState onImport={triggerFileInput} />
                 ) : (
                   <AssetBuckets
+                    ref={assetBucketsRef}
                     items={filteredItems}
                     viewMode={mediaViewMode}
                     searchQuery={searchQuery}
+                    groupBy={groupBy}
                     selectedItemIds={selectedItemIds}
                     onGenerateRef={onGenerateRef}
                     onRetryKieAIRef={onRetryKieAIRef}
                     onManageRef={onManageRef}
                     onRenameRef={onRenameRef}
-                    onAddMedia={triggerFileInput}
                     MediaRow={MediaThumbnailRow}
                   />
                 )}
