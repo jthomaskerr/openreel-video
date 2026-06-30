@@ -1,4 +1,4 @@
-import { Film, Volume2, Image, Type, Shapes, Layers, Tag } from "lucide-react";
+import { Film, Volume2, Image, Type, Shapes, Layers, Tag, FileText, Music2, Palette, User } from "lucide-react";
 import type { Track } from "@openreel/core";
 import type {
   SnapPoint,
@@ -112,25 +112,53 @@ export const calculateSnap = (
   return { time: rawTime, snapped: false };
 };
 
+export const METADATA_KIND_BADGE: Record<string, { label: string; Icon: typeof FileText; className: string }> = {
+  character: { label: "CH", Icon: User, className: "bg-purple-500/25 text-purple-100 border-purple-300/40" },
+  continuity_note: { label: "CH", Icon: User, className: "bg-purple-500/25 text-purple-100 border-purple-300/40" },
+  note: { label: "NT", Icon: FileText, className: "bg-slate-500/25 text-slate-100 border-slate-300/40" },
+  scene: { label: "SC", Icon: Film, className: "bg-orange-500/25 text-orange-100 border-orange-300/40" },
+  section: { label: "SC", Icon: Film, className: "bg-orange-500/25 text-orange-100 border-orange-300/40" },
+  style: { label: "ST", Icon: Palette, className: "bg-pink-500/25 text-pink-100 border-pink-300/40" },
+  "music-video": { label: "MV", Icon: Music2, className: "bg-sky-500/25 text-sky-100 border-sky-300/40" },
+  visual_motif: { label: "ST", Icon: Palette, className: "bg-pink-500/25 text-pink-100 border-pink-300/40" },
+};
+
+export function getMetadataBadge(kind: string | undefined) {
+  if (!kind) return { label: "--", Icon: FileText, className: "bg-slate-500/25 text-slate-100 border-slate-300/40" };
+  return METADATA_KIND_BADGE[kind] ?? {
+    label: kind.slice(0, 2).toUpperCase(),
+    Icon: FileText,
+    className: "bg-slate-500/25 text-slate-100 border-slate-300/40",
+  };
+}
+
+/**
+ * Generate an SVG path for a waveform, selecting only the samples that
+ * correspond to [inPoint, inPoint + duration] in the source media.
+ * waveformData is stored at `samplesPerSecond` (default 100).
+ */
 export const generateWaveformPath = (
   waveformData: Float32Array | number[],
-  width: number,
+  svgWidth: number,
+  inPoint: number = 0,
+  duration: number = -1,
+  samplesPerSecond: number = 100,
 ): string => {
-  if (!waveformData || waveformData.length === 0) {
-    return "M0,20 L100,20";
-  }
+  if (!waveformData || waveformData.length === 0) return "M0,20 L100,20";
 
-  const samples = Array.from(waveformData);
-  const step = Math.max(1, Math.floor(samples.length / width));
+  const startIdx = Math.max(0, Math.round(inPoint * samplesPerSecond));
+  const endIdx = duration > 0
+    ? Math.min(waveformData.length, Math.round((inPoint + duration) * samplesPerSecond))
+    : waveformData.length;
+  const sliceLen = Math.max(1, endIdx - startIdx);
+
   const points: string[] = [];
-
-  for (let i = 0; i < width; i++) {
-    const sampleIndex = Math.min(i * step, samples.length - 1);
-    const value = Math.abs(samples[sampleIndex] || 0);
+  for (let x = 0; x < svgWidth; x++) {
+    const sampleIdx = startIdx + Math.min(Math.floor((x / svgWidth) * sliceLen), sliceLen - 1);
+    const value = Math.abs((waveformData[sampleIdx] as number) || 0);
     const y = 20 - value * 18;
-    points.push(`${i === 0 ? "M" : "L"}${i},${y}`);
+    points.push(`${x === 0 ? "M" : "L"}${x},${y}`);
   }
-
   return points.join(" ");
 };
 

@@ -1,10 +1,9 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
-import { AlertTriangle, Film, Image, Music } from "lucide-react";
 import type { Clip, Track, TransitionType } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
-import { calculateSnap, generateWaveformPath, getClipStyle } from "./utils";
+import { calculateSnap, generateWaveformPath, getClipStyle, getMetadataBadge } from "./utils";
 import { ClipContextMenu } from "./ClipContextMenu";
 import { ContextMenu, ContextMenuTrigger } from "@openreel/ui";
 import { toast } from "../../../stores/notification-store";
@@ -62,7 +61,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const effectApplicationLabel = useUIStore(
     (state) => state.effectApplicationLabel,
   );
-  const { playheadPosition, scrollX, viewportWidth } = useTimelineStore();
+  const { playheadPosition } = useTimelineStore();
   const mediaItem = getMediaItem(clip.mediaId);
   const [isDragging, setIsDragging] = useState(false);
   const [isPendingDrag, setIsPendingDrag] = useState(false);
@@ -128,19 +127,12 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const left = clip.startTime * pixelsPerSecond;
   const width = clip.duration * pixelsPerSecond;
 
-  // How many pixels of the clip are scrolled off-screen on each side.
-  // Used to keep labels/badges/thumbnails anchored to the visible clip area.
-  const stickyLeft = isDragging
-    ? 0
-    : Math.max(0, Math.min(scrollX - left, width - 8));
-  const stickyRight = isDragging
-    ? 0
-    : Math.max(0, Math.min(left + width - (scrollX + viewportWidth), width - 8));
-
   const isVideo = track.type === "video";
   const isAudio = track.type === "audio";
   const isImage = track.type === "image";
-  const mediaType = mediaItem?.type ?? (isAudio ? "audio" : isImage ? "image" : "video");
+  const isMetadata = track.type === "metadata";
+  // metadata tracks without real media don't render any media UI
+  const mediaType = mediaItem?.type ?? (isAudio ? "audio" : isImage ? "image" : isMetadata ? "none" : "video");
   const clipStyle = getClipStyle(track.type);
   const isMissingMedia = !!mediaItem?.isPlaceholder;
 
@@ -647,13 +639,26 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
     };
   }, [isTrimming, trimEdge, clip.id, pixelsPerSecond, onTrimClip]);
 
-  const thumbnailCount = Math.max(1, Math.floor(width / 60));
-  const clipName = mediaItem?.name || clip.mediaId.slice(0, 8);
+  // Number of filmstrip tiles that fit across the clip width
+  const tileCount = Math.max(1, Math.ceil(width / 60));
+
+  // Clip name: prefer media name, then metadata label/kind fallback
+  const metadataKind = isMetadata ? (clip.metadata?.["kind"] as string | undefined) : undefined;
+  const clipName =
+    mediaItem?.name ??
+    (isMetadata
+      ? ((clip.metadata?.["label"] as string | undefined) ?? metadataKind ?? "Metadata")
+      : clip.mediaId.slice(0, 8));
+
   const generatedStatus = mediaItem?.generationMeta?.status ?? (clip.metadata?.["generatedStatus"] as string | undefined);
   const isGenerated = !!mediaItem?.generationMeta || !!clip.metadata?.["isGenerated"] || !!generatedStatus;
 
   const isInteracting = isDragging || isTrimming;
   const isApplyingEffect = effectApplicationClipId === clip.id;
+
+  // Metadata kind badge (shown on metadata track clips)
+  const metadataBadge = isMetadata && metadataKind ? getMetadataBadge(metadataKind) : null;
+  const MetadataBadgeIcon = metadataBadge?.Icon;
 
   return (
     <ContextMenu>
@@ -665,7 +670,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          className={`clip-component group absolute top-1 bottom-1 rounded-lg overflow-hidden shadow-sm ${
+          className={`clip-component group absolute top-1 bottom-1 rounded-lg shadow-sm ${
             isDragging
               ? `cursor-grabbing z-50 ${isInvalidDrop ? "opacity-50 ring-2 ring-red-500 border-red-500" : "opacity-90 shadow-xl"}`
               : "cursor-grab"
@@ -683,242 +688,214 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
               ? `translate(${left}px, ${dragYOffset}px)`
               : `translateX(${left}px)`,
             width: `${width}px`,
-            willChange: isInteracting ? 'transform, width' : 'auto',
-            transition: isInteracting ? 'none' : 'opacity 150ms, box-shadow 150ms',
-            pointerEvents: isDragging ? 'none' : 'auto',
+            willChange: isInteracting ? "transform, width" : "auto",
+            transition: isInteracting ? "none" : "opacity 150ms, box-shadow 150ms",
+            pointerEvents: isDragging ? "none" : "auto",
           }}
         >
-      {isApplyingEffect && (
-        <>
-          <div className="absolute -inset-px rounded-lg border border-amber-300/80 shadow-[0_0_18px_rgba(251,191,36,0.55)] pointer-events-none animate-pulse" />
-          <div className="absolute inset-0 bg-[linear-gradient(110deg,transparent_0%,rgba(255,255,255,0.08)_28%,rgba(251,191,36,0.28)_50%,rgba(255,255,255,0.08)_72%,transparent_100%)] pointer-events-none animate-pulse" />
-          <div className="absolute top-1 rounded-full bg-black/70 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-amber-200 pointer-events-none" style={{ right: `${4 + stickyRight}px` }}>
-            {effectApplicationLabel ?? "Applying effect"}
-          </div>
-        </>
-      )}
+          {/* ── Background layer: all visuals clipped to clip shape ── */}
+          <div className="absolute inset-0 rounded-[inherit] overflow-hidden pointer-events-none">
 
-      {/* Drag-drop hover indicators for effects/transitions */}
-      {dragHover === "effect" && (
-        <div className="absolute inset-0 ring-2 ring-accent ring-inset rounded-lg bg-accent/15 pointer-events-none z-20" />
-      )}
-      {dragHover === "transition-left" && (
-        <div className="absolute inset-y-0 left-0 w-1/3 pointer-events-none z-20 bg-gradient-to-r from-accent/60 to-transparent">
-          <div className="absolute left-0 top-0 bottom-0 w-1 bg-accent" />
-        </div>
-      )}
-      {dragHover === "transition-right" && (
-        <div className="absolute inset-y-0 right-0 w-1/3 pointer-events-none z-20 bg-gradient-to-l from-accent/60 to-transparent">
-          <div className="absolute right-0 top-0 bottom-0 w-1 bg-accent" />
-        </div>
-      )}
+            {/* Effect applying: shimmer gradient */}
+            {isApplyingEffect && (
+              <div className="absolute inset-0 bg-[linear-gradient(110deg,transparent_0%,rgba(255,255,255,0.08)_28%,rgba(251,191,36,0.28)_50%,rgba(255,255,255,0.08)_72%,transparent_100%)] animate-pulse" />
+            )}
 
-      {mediaType === "video" &&
-        (mediaItem?.filmstripThumbnails?.length || mediaItem?.thumbnailUrl) && (
-          <div className="absolute inset-0 flex pointer-events-none">
-            {mediaItem?.filmstripThumbnails &&
-            mediaItem.filmstripThumbnails.length > 0
-              ? Array.from({ length: thumbnailCount }).map((_, i) => {
-                  const clipProgress = i / Math.max(1, thumbnailCount - 1);
-                  const thumbIndex = Math.min(
-                    Math.floor(
-                      clipProgress * mediaItem.filmstripThumbnails!.length,
-                    ),
-                    mediaItem.filmstripThumbnails!.length - 1,
-                  );
-                  const thumb = mediaItem.filmstripThumbnails![thumbIndex];
+            {/* Drag-drop highlights */}
+            {dragHover === "effect" && (
+              <div className="absolute inset-0 ring-2 ring-accent ring-inset bg-accent/15" />
+            )}
+            {dragHover === "transition-left" && (
+              <div className="absolute inset-y-0 left-0 w-1/3 bg-gradient-to-r from-accent/60 to-transparent">
+                <div className="absolute left-0 top-0 bottom-0 w-1 bg-accent" />
+              </div>
+            )}
+            {dragHover === "transition-right" && (
+              <div className="absolute inset-y-0 right-0 w-1/3 bg-gradient-to-l from-accent/60 to-transparent">
+                <div className="absolute right-0 top-0 bottom-0 w-1 bg-accent" />
+              </div>
+            )}
+
+            {/* Video: time-accurate filmstrip (frames selected by inPoint + tile position) */}
+            {mediaType === "video" && mediaItem?.filmstripThumbnails && mediaItem.filmstripThumbnails.length > 0 && (
+              <div className="absolute inset-0 flex opacity-70">
+                {Array.from({ length: tileCount }).map((_, i) => {
+                  const sourceTime = clip.inPoint + ((i + 0.5) / tileCount) * clip.duration;
+                  const thumbs = mediaItem.filmstripThumbnails!;
+                  let best = 0;
+                  let bestDist = Math.abs(thumbs[0].timestamp - sourceTime);
+                  for (let j = 1; j < thumbs.length; j++) {
+                    const d = Math.abs(thumbs[j].timestamp - sourceTime);
+                    if (d < bestDist) { bestDist = d; best = j; }
+                  }
                   return (
                     <div
                       key={i}
-                      className="flex-1 h-full bg-cover bg-center opacity-70"
-                      style={{
-                        backgroundImage: `url(${thumb.url})`,
-                        borderRight:
-                          i < thumbnailCount - 1
-                            ? "1px solid rgba(0,0,0,0.2)"
-                            : "none",
-                      }}
+                      className="flex-1 h-full bg-cover bg-center"
+                      style={{ backgroundImage: `url(${thumbs[best].url})` }}
                     />
                   );
-                })
-              : Array.from({ length: thumbnailCount }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="flex-1 h-full bg-cover bg-center opacity-60"
-                    style={{
-                      backgroundImage: `url(${mediaItem.thumbnailUrl})`,
-                      borderRight:
-                        i < thumbnailCount - 1
-                          ? "1px solid rgba(0,0,0,0.2)"
-                          : "none",
-                    }}
-                  />
-                ))}
-          </div>
-        )}
+                })}
+              </div>
+            )}
 
-      {mediaType === "video" && !mediaItem?.thumbnailUrl && (
-        <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-primary/10 flex items-center pointer-events-none" style={{ paddingLeft: `${stickyLeft}px` }}>
-          {isMissingMedia ? (
-            <AlertTriangle size={24} className="text-yellow-400/70" />
-          ) : (
-            <Film size={24} className="text-primary/50" />
-          )}
-        </div>
-      )}
-
-      {mediaType === "image" && (
-        <div className="absolute inset-0 bg-gradient-to-r from-purple-500/20 to-purple-500/10 pointer-events-none overflow-hidden">
-          {mediaItem?.thumbnailUrl ? (
-            <div
-              className="absolute inset-y-0 flex items-center"
-              style={{ left: `${stickyLeft}px`, right: `${stickyRight}px` }}
-            >
-              <img
-                src={mediaItem.thumbnailUrl}
-                alt={clipName}
-                className="h-full object-contain opacity-60"
+            {/* Video: single thumbnail fallback — repeat-fill */}
+            {mediaType === "video" && !mediaItem?.filmstripThumbnails?.length && mediaItem?.thumbnailUrl && (
+              <div
+                className="absolute inset-0 opacity-60"
+                style={{ backgroundImage: `url(${mediaItem.thumbnailUrl})`, backgroundRepeat: "repeat-x", backgroundSize: "auto 100%" }}
               />
-            </div>
-          ) : isMissingMedia ? (
-            <div className="absolute inset-0 flex items-center" style={{ paddingLeft: `${stickyLeft}px` }}>
-              <AlertTriangle size={24} className="text-yellow-400/70" />
-            </div>
-          ) : (
-            <div className="absolute inset-0 flex items-center" style={{ paddingLeft: `${stickyLeft}px` }}>
-              <Image size={24} className="text-purple-400/50" />
-            </div>
+            )}
+
+            {/* Image / character / style: repeat thumbnail across full clip width */}
+            {mediaType === "image" && mediaItem?.thumbnailUrl && (
+              <div
+                className="absolute inset-0 opacity-65"
+                style={{ backgroundImage: `url(${mediaItem.thumbnailUrl})`, backgroundRepeat: "repeat-x", backgroundSize: "auto 100%" }}
+              />
+            )}
+
+            {/* Waveform — time-accurate: sliced to clip.inPoint … inPoint+duration */}
+            {(mediaType === "audio" || mediaType === "video") && mediaItem?.waveformData && (
+              <div className={`absolute inset-x-0 px-1 ${
+                mediaType === "audio"
+                  ? "inset-y-0 flex items-center opacity-50"
+                  : "bottom-0 h-1/3 flex items-end opacity-30"
+              }`}>
+                <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 40">
+                  <path
+                    d={generateWaveformPath(mediaItem.waveformData, 100, clip.inPoint, clip.duration)}
+                    stroke="currentColor"
+                    className={mediaType === "audio" ? "text-blue-400" : "text-green-300"}
+                    fill="none"
+                    strokeWidth="1"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                </svg>
+              </div>
+            )}
+
+            {/* Audio: placeholder waveform when no data yet */}
+            {mediaType === "audio" && !mediaItem?.waveformData && (
+              <div className="absolute inset-x-0 inset-y-0 px-1 flex items-center opacity-30">
+                <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 40">
+                  <path d="M0,20 Q10,10 20,20 T40,20 T60,20 T80,20 T100,20" stroke="currentColor" className="text-blue-400" fill="none" vectorEffect="non-scaling-stroke" />
+                </svg>
+              </div>
+            )}
+
+            {/* Keyframe diamonds */}
+            {clip.keyframes && clip.keyframes.length > 0 && (
+              <div className="absolute bottom-0 left-0 right-0 h-3 flex items-center">
+                {clip.keyframes.map((kf) => {
+                  const rel = kf.time - clip.startTime;
+                  if (rel < 0 || rel > clip.duration) return null;
+                  return (
+                    <div
+                      key={kf.id}
+                      className="absolute w-2 h-2 bg-yellow-400 rotate-45 border border-yellow-600"
+                      style={{ left: `${(rel / clip.duration) * 100}%`, marginLeft: "-4px" }}
+                      title={`${kf.property} @ ${kf.time.toFixed(2)}s`}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>{/* /background layer */}
+
+          {/* Effect amber glow border — outside bg layer so it bleeds past rounded corners */}
+          {isApplyingEffect && (
+            <div className="absolute -inset-px rounded-[inherit] border border-amber-300/80 shadow-[0_0_18px_rgba(251,191,36,0.55)] pointer-events-none animate-pulse" />
           )}
-        </div>
-      )}
 
-      {mediaType === "audio" && (
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-blue-500/10 flex items-center pointer-events-none" style={{ paddingLeft: `${stickyLeft}px` }}>
-          {isMissingMedia ? (
-            <AlertTriangle size={24} className="text-yellow-400/70" />
-          ) : (
-            <Music size={24} className="text-blue-400/45" />
+          {/* Selection border */}
+          {isSelected && (
+            <div className="absolute inset-0 border-2 border-primary rounded-[inherit] pointer-events-none z-10" />
           )}
-        </div>
-      )}
 
-      {isMissingMedia && (
-        <div className="absolute top-1 rounded bg-yellow-500 px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none text-black pointer-events-none" style={{ left: `${4 + stickyLeft}px` }}>
-          Link file
-        </div>
-      )}
+          {/* ── Sticky badges — overflow:clip lets sticky pass through to the timeline scroll container ── */}
 
-
-
-      {isGenerated && (
-        <div className="absolute top-1 z-20 rounded bg-black/70 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-rose-200 pointer-events-none" style={{ right: `${4 + stickyRight}px` }}>
-          {`Generated${generatedStatus ? ` · ${generatedStatus}` : ""}`}
-        </div>
-      )}
-
-      <div className="w-full h-full flex flex-col justify-end px-2 pb-1 relative z-10 pointer-events-none" style={stickyLeft > 0 ? { transform: `translateX(${stickyLeft}px)` } : undefined}>
-        <span
-          className={`text-[10px] font-medium truncate drop-shadow-md ${
-            isSelected ? clipStyle.selectedText : clipStyle.text
-          }`}
-        >
-          {clipName}
-        </span>
-      </div>
-
-      {(mediaType === "audio" || mediaType === "video") && (
-        <>
-          <div className={`absolute inset-x-0 px-1 pointer-events-none ${mediaType === "audio" ? "inset-y-0 flex items-center opacity-50" : "bottom-0 h-1/3 flex items-end opacity-30"}`}>
-            {mediaItem?.waveformData ? (
-              <svg
-                className="w-full h-full"
-                preserveAspectRatio="none"
-                viewBox="0 0 100 40"
-              >
-                <path
-                  d={generateWaveformPath(mediaItem.waveformData, 100)}
-                  stroke="currentColor"
-                  className={mediaType === "audio" ? "text-blue-400" : "text-green-300"}
-                  fill="none"
-                  strokeWidth="1"
-                  vectorEffect="non-scaling-stroke"
-                />
-              </svg>
-            ) : mediaType === "audio" ? (
-              <svg className="w-full h-full" preserveAspectRatio="none">
-                <path
-                  d="M0,20 Q10,5 20,20 T40,20 T60,20 T80,20 T100,20"
-                  stroke="currentColor"
-                  className="text-blue-400"
-                  fill="none"
-                  vectorEffect="non-scaling-stroke"
-                />
-              </svg>
-            ) : null}
-          </div>
-          {mediaType === "audio" && (
-            <div className="absolute inset-x-0 top-1 flex justify-center opacity-0 group-hover:opacity-60 transition-opacity pointer-events-none">
-              <div className="flex gap-0.5">
-                <div className="w-1 h-1 rounded-full bg-blue-300" />
-                <div className="w-1 h-1 rounded-full bg-blue-300" />
-                <div className="w-1 h-1 rounded-full bg-blue-300" />
+          {/* Right: effect label */}
+          {isApplyingEffect && (
+            <div className="absolute inset-x-0 top-1 z-20 pointer-events-none flex justify-end" style={{ overflow: "clip" }}>
+              <div className="sticky right-1 w-fit">
+                <div className="rounded-full bg-black/70 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-amber-200">
+                  {effectApplicationLabel ?? "Applying effect"}
+                </div>
               </div>
             </div>
           )}
-        </>
-      )}
 
-      {clip.keyframes && clip.keyframes.length > 0 && (
-        <div className="absolute bottom-0 left-0 right-0 h-3 flex items-center pointer-events-none">
-          {clip.keyframes.map((kf) => {
-            const relativeTime = kf.time - clip.startTime;
-            if (relativeTime < 0 || relativeTime > clip.duration) return null;
-            const posPercent = (relativeTime / clip.duration) * 100;
-            return (
+          {/* Right: generated badge */}
+          {isGenerated && (
+            <div className="absolute inset-x-0 top-1 z-20 pointer-events-none flex justify-end" style={{ overflow: "clip" }}>
+              <div className="sticky right-1 w-fit">
+                <div className="rounded bg-black/70 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-rose-200">
+                  {`Generated${generatedStatus ? ` · ${generatedStatus}` : ""}`}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Left: link-file warning */}
+          {isMissingMedia && (
+            <div className="absolute inset-x-0 top-1 z-20 pointer-events-none" style={{ overflow: "clip" }}>
+              <div className="sticky left-1 w-fit">
+                <div className="rounded bg-yellow-500 px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none text-black">
+                  Link file
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Left: metadata kind badge */}
+          {metadataBadge && MetadataBadgeIcon && (
+            <div className="absolute inset-x-0 top-1 z-20 pointer-events-none" style={{ overflow: "clip" }}>
+              <div className="sticky left-1 w-fit">
+                <div className={`inline-flex items-center gap-0.5 rounded border px-1 py-0.5 text-[8px] font-bold leading-none ${metadataBadge.className}`}>
+                  <MetadataBadgeIcon size={9} />
+                  <span>{metadataBadge.label}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Clip name — sticky to visible left edge of the clip */}
+          <div className="absolute inset-x-0 bottom-0 pb-1 z-10 pointer-events-none" style={{ overflow: "clip" }}>
+            <div className="sticky left-2" style={{ width: "fit-content", maxWidth: "calc(100% - 16px)" }}>
+              <span className={`block text-[10px] font-medium whitespace-nowrap drop-shadow-md ${
+                isSelected ? clipStyle.selectedText : clipStyle.text
+              }`}>
+                {clipName}
+              </span>
+            </div>
+          </div>
+
+          {/* ── Trim handles ── */}
+          {(isVideo || isImage || isAudio) && onTrimClip && (
+            <>
               <div
-                key={kf.id}
-                className="absolute w-2 h-2 bg-yellow-400 rotate-45 border border-yellow-600"
-                style={{ left: `${posPercent}%`, marginLeft: "-4px" }}
-                title={`${kf.property} @ ${kf.time.toFixed(2)}s`}
-              />
-            );
-          })}
-        </div>
-      )}
-
-      {isSelected && (
-        <div className="absolute inset-0 border-2 border-primary rounded-lg pointer-events-none" />
-      )}
-
-      {(isVideo || isImage || isAudio) && onTrimClip && (
-        <>
-          <div
-            onMouseDown={handleTrimMouseDown("left")}
-            className={`absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize z-20 flex items-center justify-center transition-opacity ${
-              isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-            } ${isSelected ? "bg-primary" : isAudio ? "hover:bg-blue-400/50" : isVideo ? "hover:bg-green-400/50" : "hover:bg-purple-400/50"}`}
-            style={{ borderRadius: "6px 0 0 6px" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {isSelected && (
-              <div className="w-0.5 h-3 bg-primary-foreground/80 rounded-full" />
-            )}
-          </div>
-          <div
-            onMouseDown={handleTrimMouseDown("right")}
-            className={`absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize z-20 flex items-center justify-center transition-opacity ${
-              isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-            } ${isSelected ? "bg-primary" : isAudio ? "hover:bg-blue-400/50" : isVideo ? "hover:bg-green-400/50" : "hover:bg-purple-400/50"}`}
-            style={{ borderRadius: "0 6px 6px 0" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {isSelected && (
-              <div className="w-0.5 h-3 bg-primary-foreground/80 rounded-full" />
-            )}
-          </div>
-        </>
-      )}
-
+                onMouseDown={handleTrimMouseDown("left")}
+                className={`absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize z-20 flex items-center justify-center transition-opacity ${
+                  isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                } ${isSelected ? "bg-primary" : isAudio ? "hover:bg-blue-400/50" : isVideo ? "hover:bg-green-400/50" : "hover:bg-purple-400/50"}`}
+                style={{ borderRadius: "6px 0 0 6px" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {isSelected && <div className="w-0.5 h-3 bg-primary-foreground/80 rounded-full" />}
+              </div>
+              <div
+                onMouseDown={handleTrimMouseDown("right")}
+                className={`absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize z-20 flex items-center justify-center transition-opacity ${
+                  isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                } ${isSelected ? "bg-primary" : isAudio ? "hover:bg-blue-400/50" : isVideo ? "hover:bg-green-400/50" : "hover:bg-purple-400/50"}`}
+                style={{ borderRadius: "0 6px 6px 0" }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {isSelected && <div className="w-0.5 h-3 bg-primary-foreground/80 rounded-full" />}
+              </div>
+            </>
+          )}
         </div>
       </ContextMenuTrigger>
       <ClipContextMenu clip={clip} track={track} />
