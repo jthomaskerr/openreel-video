@@ -55,20 +55,22 @@ describe("AssetInspectorWithTabs audio tab", () => {
     vi.clearAllMocks();
   });
 
-  it("uses an Audio tab instead of File for audio assets", () => {
+  it("shows both Audio and File tabs for audio assets", () => {
     render(<AssetInspectorWithTabs item={makeAudioItem()} />);
 
     expect(screen.getByRole("tab", { name: /Audio/ })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: /File/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /File/ })).toBeInTheDocument();
   });
 
-  it("shows waveform playback controls and audio analysis fields", () => {
+  it("shows waveform playback in preview and audio analysis in Audio tab", () => {
     render(<AssetInspectorWithTabs item={makeAudioItem()} />);
 
-    fireEvent.click(screen.getByRole("tab", { name: /Audio/ }));
-
+    // Waveform and play controls are in the preview area (always visible)
     expect(screen.getByRole("button", { name: /Play audio preview/ })).toBeInTheDocument();
     expect(screen.getByTestId("audio-waveform")).toBeInTheDocument();
+
+    // Audio analysis fields require Audio tab
+    fireEvent.click(screen.getByRole("tab", { name: /Audio/ }));
     expect(screen.getByText("128 BPM")).toBeInTheDocument();
     expect(screen.getByText("C")).toBeInTheDocument();
     expect(screen.getByText("minor")).toBeInTheDocument();
@@ -78,7 +80,6 @@ describe("AssetInspectorWithTabs audio tab", () => {
   it("configures click seeking, progress highlighting, and play control", () => {
     render(<AssetInspectorWithTabs item={makeAudioItem({ blob: null, originalUrl: "https://cdn.example.test/song.wav" })} />);
 
-    fireEvent.click(screen.getByRole("tab", { name: /Audio/ }));
     fireEvent.click(screen.getByRole("button", { name: /Play audio preview/ }));
 
     expect(wavesurferMock.create).toHaveBeenCalledWith(

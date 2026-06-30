@@ -126,21 +126,26 @@ function AssetPreview({ item }: { item: MediaItem }) {
   if (category.isMetadata) {
     return (
       <div className="mx-4 mt-3 rounded-lg border border-border bg-background-secondary overflow-hidden">
-        <div className="w-full h-20 flex flex-col items-center justify-center bg-background-tertiary gap-1.5">
-          <FileText size={28} className="text-purple-400/40" />
-          <span className="text-[10px] text-text-muted">{category.label}</span>
-        </div>
+        {item.thumbnailUrl ? (
+          <img
+            src={item.thumbnailUrl}
+            alt={item.title ?? item.name}
+            className="w-full aspect-square object-cover"
+          />
+        ) : (
+          <div className="w-full h-20 flex flex-col items-center justify-center bg-background-tertiary gap-1.5">
+            <FileText size={28} className="text-purple-400/40" />
+            <span className="text-[10px] text-text-muted">{category.label}</span>
+          </div>
+        )}
       </div>
     );
   }
   if (item.type === "audio") {
     return (
       <div className="mx-4 mt-3 rounded-lg border border-border bg-background-secondary overflow-hidden">
-        <div className="w-full h-20 flex flex-col items-center justify-center bg-background-tertiary gap-1.5">
-          <Music size={28} className="text-green-400/40" />
-          <span className="text-[10px] text-text-muted">
-            {item.metadata.duration ? formatDuration(item.metadata.duration) : "Audio"}
-          </span>
+        <div className="p-3">
+          <WaveformPreview item={item} />
         </div>
         {item.isPlaceholder && (
           <div className="px-3 py-1 bg-yellow-500/10 border-t border-yellow-500/20">
@@ -176,6 +181,89 @@ function AssetPreview({ item }: { item: MediaItem }) {
           <span className="text-[10px] text-blue-400 font-medium">⏳ Generating…</span>
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Waveform Preview ────────────────────────────────────────────────
+
+function WaveformPreview({ item }: { item: MediaItem }) {
+  const waveformRef = useRef<HTMLDivElement | null>(null);
+  const wavesurferRef = useRef<WaveSurferInstance | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+
+  useEffect(() => {
+    const container = waveformRef.current;
+    if (!container) return;
+
+    let objectUrl: string | null = null;
+    let url = item.originalUrl ?? null;
+    if (item.blob && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+      objectUrl = URL.createObjectURL(item.blob);
+      url = objectUrl;
+    }
+
+    if (!url) return;
+
+    const wavesurfer = WaveSurfer.create({
+      container,
+      url,
+      peaks: item.waveformData ? [item.waveformData] : undefined,
+      duration: item.metadata.duration || undefined,
+      waveColor: "rgba(148, 163, 184, 0.45)",
+      progressColor: "rgb(34, 197, 94)",
+      cursorColor: "rgb(34, 197, 94)",
+      cursorWidth: 2,
+      height: 72,
+      barWidth: 2,
+      barGap: 1,
+      barRadius: 2,
+      dragToSeek: true,
+      normalize: true,
+    });
+
+    wavesurferRef.current = wavesurfer;
+    wavesurfer.on("timeupdate", (time: number) => setCurrentTime(time));
+    wavesurfer.on("play", () => setIsPlaying(true));
+    wavesurfer.on("pause", () => setIsPlaying(false));
+    wavesurfer.on("finish", () => {
+      setIsPlaying(false);
+      setCurrentTime(item.metadata.duration || 0);
+    });
+
+    return () => {
+      wavesurferRef.current = null;
+      wavesurfer.destroy();
+      if (objectUrl && typeof URL !== "undefined") URL.revokeObjectURL(objectUrl);
+    };
+  }, [item.blob, item.id, item.metadata.duration, item.originalUrl, item.waveformData]);
+
+  const handlePlayPause = useCallback(() => {
+    void wavesurferRef.current?.playPause();
+  }, []);
+
+  return (
+    <div className="space-y-2">
+      <div
+        ref={waveformRef}
+        data-testid="audio-waveform"
+        className="min-h-[72px] overflow-hidden rounded-md border border-border bg-background-tertiary"
+      />
+      <div className="flex items-center gap-2 px-1">
+        <button
+          type="button"
+          onClick={handlePlayPause}
+          aria-label={isPlaying ? "Pause audio preview" : "Play audio preview"}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-accent text-white hover:bg-accent/90 transition-colors"
+          disabled={!item.blob && !item.originalUrl}
+        >
+          {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+        </button>
+        <span className="font-mono text-[10px] text-text-secondary">
+          {formatDuration(currentTime)} / {item.metadata.duration ? formatDuration(item.metadata.duration) : "—"}
+        </span>
+      </div>
     </div>
   );
 }
@@ -258,94 +346,8 @@ function formatBooleanMetadata(value: boolean | undefined): string {
 }
 
 function AudioTab({ item }: { item: MediaItem }) {
-  const waveformRef = useRef<HTMLDivElement | null>(null);
-  const wavesurferRef = useRef<WaveSurferInstance | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-
-  useEffect(() => {
-    const container = waveformRef.current;
-    if (!container) return;
-
-    let objectUrl: string | null = null;
-    let url = item.originalUrl ?? null;
-    if (item.blob && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
-      objectUrl = URL.createObjectURL(item.blob);
-      url = objectUrl;
-    }
-
-    if (!url) return;
-
-    const wavesurfer = WaveSurfer.create({
-      container,
-      url,
-      peaks: item.waveformData ? [item.waveformData] : undefined,
-      duration: item.metadata.duration || undefined,
-      waveColor: "rgba(148, 163, 184, 0.45)",
-      progressColor: "rgb(34, 197, 94)",
-      cursorColor: "rgb(34, 197, 94)",
-      cursorWidth: 2,
-      height: 72,
-      barWidth: 2,
-      barGap: 1,
-      barRadius: 2,
-      dragToSeek: true,
-      normalize: true,
-    });
-
-    wavesurferRef.current = wavesurfer;
-    wavesurfer.on("timeupdate", (time: number) => setCurrentTime(time));
-    wavesurfer.on("play", () => setIsPlaying(true));
-    wavesurfer.on("pause", () => setIsPlaying(false));
-    wavesurfer.on("finish", () => {
-      setIsPlaying(false);
-      setCurrentTime(item.metadata.duration || 0);
-    });
-
-    return () => {
-      wavesurferRef.current = null;
-      wavesurfer.destroy();
-      if (objectUrl && typeof URL !== "undefined") URL.revokeObjectURL(objectUrl);
-    };
-  }, [item.blob, item.id, item.metadata.duration, item.originalUrl, item.waveformData]);
-
-  const handlePlayPause = useCallback(() => {
-    void wavesurferRef.current?.playPause();
-  }, []);
-
-  const metadataRows: InfoRow[] = [
-    { label: "Filename", value: item.name },
-    { label: "Type", value: item.type },
-  ];
-  if (item.metadata.fileSize) metadataRows.push({ label: "Size", value: formatSize(item.metadata.fileSize) });
-  if (item.metadata.duration) metadataRows.push({ label: "Duration", value: formatDuration(item.metadata.duration) });
-
   return (
     <div className="space-y-3 px-4 pt-3 pb-4">
-      <TypeSection title="Waveform">
-        <div className="space-y-2">
-          <div
-            ref={waveformRef}
-            data-testid="audio-waveform"
-            className="min-h-[72px] overflow-hidden rounded-md border border-border bg-background-tertiary"
-          />
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handlePlayPause}
-              aria-label={isPlaying ? "Pause audio preview" : "Play audio preview"}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-accent text-white hover:bg-accent/90 transition-colors"
-              disabled={!item.blob && !item.originalUrl}
-            >
-              {isPlaying ? <Pause size={14} /> : <Play size={14} />}
-            </button>
-            <span className="font-mono text-[10px] text-text-secondary">
-              {formatDuration(currentTime)} / {item.metadata.duration ? formatDuration(item.metadata.duration) : "—"}
-            </span>
-          </div>
-        </div>
-      </TypeSection>
-
       <TypeSection title="Audio Analysis">
         <TypeDetailRow label="BPM" value={formatBpm(item.metadata.bpm)} />
         <TypeDetailRow label="Key" value={formatOptionalText(item.metadata.key)} />
@@ -360,15 +362,25 @@ function AudioTab({ item }: { item: MediaItem }) {
         {item.metadata.audioTrackCount != null && (
           <TypeDetailRow label="Audio Tracks" value={String(item.metadata.audioTrackCount)} />
         )}
-        <TypeDetailRow label="Waveform" value={item.waveformData ? "Generated" : "Not generated"} />
       </TypeSection>
-
-      <FileInfoGrid rows={metadataRows} />
     </div>
   );
 }
 
 // ── Tab: Generation ────────────────────────────────────────────────
+
+function formatGenerationInputLabel(key: string): string {
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatGenerationInputValue(value: unknown): string {
+  if (Array.isArray(value)) return value.join(", ");
+  if (typeof value === "object" && value !== null) return JSON.stringify(value);
+  if (value === undefined || value === null) return "—";
+  return String(value);
+}
 
 function GenerationTab({ item }: { item: MediaItem }) {
   const gen = item.generationMeta;
@@ -384,7 +396,6 @@ function GenerationTab({ item }: { item: MediaItem }) {
     [sourceIds, mediaItems],
   );
 
-  // Collect source metadata block IDs
   const sourceBlockIds = useMemo<string[]>(() => {
     const inputs = gen.inputs;
     if (!inputs || typeof inputs !== "object") return [];
@@ -392,6 +403,18 @@ function GenerationTab({ item }: { item: MediaItem }) {
     const val = inputs.sourceMetadataBlockIds;
     if (!Array.isArray(val)) return [];
     return val.filter((v): v is string => typeof v === "string");
+  }, [gen.inputs]);
+
+  const inputRows = useMemo<InfoRow[]>(() => {
+    const inputs = gen.inputs;
+    if (!inputs || typeof inputs !== "object") return [];
+    const hiddenKeys = new Set(["sourceAssets", "sourceMetadataBlockIds"]);
+    return Object.entries(inputs)
+      .filter(([key]) => !hiddenKeys.has(key))
+      .map(([key, value]) => ({
+        label: formatGenerationInputLabel(key),
+        value: formatGenerationInputValue(value),
+      }));
   }, [gen.inputs]);
 
   return (
@@ -417,6 +440,14 @@ function GenerationTab({ item }: { item: MediaItem }) {
       {gen.negativePrompt && (
         <TypeSection title="Negative Prompt">
           <p className="text-[10px] text-text-muted leading-relaxed">{gen.negativePrompt}</p>
+        </TypeSection>
+      )}
+
+      {inputRows.length > 0 && (
+        <TypeSection title="Generation Metadata">
+          {inputRows.map((row) => (
+            <TypeDetailRow key={row.label} label={row.label} value={row.value} />
+          ))}
         </TypeSection>
       )}
 
@@ -700,7 +731,10 @@ export function AssetInspectorWithTabs({ item }: { item: MediaItem }) {
 
   const availableTabs = useMemo<AssetTabDef[]>(() => {
     const tabs: AssetTabId[] = ["clip"];
-    if (!category.isMetadata) tabs.push(item.type === "audio" ? "audio" : "file");
+    if (!category.isMetadata) {
+      tabs.push("file");
+      if (item.type === "audio") tabs.push("audio");
+    }
     if (item.generationMeta) tabs.push("generation");
     tabs.push("versions", "usages");
     return tabs.map((id) => TAB_DEFS[id]);

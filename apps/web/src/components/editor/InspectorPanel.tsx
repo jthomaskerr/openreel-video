@@ -105,17 +105,16 @@ export const InspectorPanel: React.FC = () => {
     (state) => state.finishEffectApplication,
   );
   const inspectedAsset = useUIStore((state) => state.inspectedAsset);
+  const selectedClipIds = getSelectedClipIds();
   // When a clip is selected and no explicit asset is pinned, show the clip's media item.
   const selectedClipMediaItem = useMemo(() => {
-    const clipIds = getSelectedClipIds();
-    if (clipIds.length !== 1) return null;
-    const clip = getClip(clipIds[0]);
+    if (selectedClipIds.length !== 1) return null;
+    const clip = getClip(selectedClipIds[0]);
     if (!clip) return null;
     return getMediaItem(clip.mediaId) ?? null;
-  }, [getClip, getMediaItem, getSelectedClipIds, project.modifiedAt]);
+  }, [getClip, getMediaItem, selectedClipIds, project.modifiedAt]);
   const effectiveInspectedAsset = inspectedAsset ?? selectedClipMediaItem;
   const importErrors = useUIStore((state) => state.importErrors);
-  const selectedClipIds = getSelectedClipIds();
   const pausePlayback = useTimelineStore((state) => state.pause);
   const lockPlayback = useTimelineStore((state) => state.lockPlayback);
   const unlockPlayback = useTimelineStore((state) => state.unlockPlayback);
