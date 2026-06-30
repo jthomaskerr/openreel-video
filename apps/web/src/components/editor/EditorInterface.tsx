@@ -263,7 +263,6 @@ export const EditorInterface: React.FC = () => {
           break;
       }
     });
-  }, []);
 
   const {
     keyframeEditorOpen,
