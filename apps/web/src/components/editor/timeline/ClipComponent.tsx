@@ -62,7 +62,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const effectApplicationLabel = useUIStore(
     (state) => state.effectApplicationLabel,
   );
-  const { playheadPosition } = useTimelineStore();
+  const { playheadPosition, scrollX, viewportWidth } = useTimelineStore();
   const mediaItem = getMediaItem(clip.mediaId);
   const [isDragging, setIsDragging] = useState(false);
   const [isPendingDrag, setIsPendingDrag] = useState(false);
@@ -127,6 +127,15 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
 
   const left = clip.startTime * pixelsPerSecond;
   const width = clip.duration * pixelsPerSecond;
+
+  // How many pixels of the clip are scrolled off-screen on each side.
+  // Used to keep labels/badges/thumbnails anchored to the visible clip area.
+  const stickyLeft = isDragging
+    ? 0
+    : Math.max(0, Math.min(scrollX - left, width - 8));
+  const stickyRight = isDragging
+    ? 0
+    : Math.max(0, Math.min(left + width - (scrollX + viewportWidth), width - 8));
 
   const isVideo = track.type === "video";
   const isAudio = track.type === "audio";
@@ -683,7 +692,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
         <>
           <div className="absolute -inset-px rounded-lg border border-amber-300/80 shadow-[0_0_18px_rgba(251,191,36,0.55)] pointer-events-none animate-pulse" />
           <div className="absolute inset-0 bg-[linear-gradient(110deg,transparent_0%,rgba(255,255,255,0.08)_28%,rgba(251,191,36,0.28)_50%,rgba(255,255,255,0.08)_72%,transparent_100%)] pointer-events-none animate-pulse" />
-          <div className="absolute top-1 right-1 rounded-full bg-black/70 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-amber-200 pointer-events-none">
+          <div className="absolute top-1 rounded-full bg-black/70 px-2 py-0.5 text-[9px] font-medium uppercase tracking-[0.12em] text-amber-200 pointer-events-none" style={{ right: `${4 + stickyRight}px` }}>
             {effectApplicationLabel ?? "Applying effect"}
           </div>
         </>
@@ -749,7 +758,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
         )}
 
       {mediaType === "video" && !mediaItem?.thumbnailUrl && (
-        <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-primary/10 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-0 bg-gradient-to-r from-primary/20 to-primary/10 flex items-center pointer-events-none" style={{ paddingLeft: `${stickyLeft}px` }}>
           {isMissingMedia ? (
             <AlertTriangle size={24} className="text-yellow-400/70" />
           ) : (
@@ -759,23 +768,32 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       )}
 
       {mediaType === "image" && (
-        <div className="absolute inset-0 bg-gradient-to-r from-purple-500/20 to-purple-500/10 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-0 bg-gradient-to-r from-purple-500/20 to-purple-500/10 pointer-events-none overflow-hidden">
           {mediaItem?.thumbnailUrl ? (
-            <img
-              src={mediaItem.thumbnailUrl}
-              alt={clipName}
-              className="h-full object-cover opacity-60"
-            />
+            <div
+              className="absolute inset-y-0 flex items-center"
+              style={{ left: `${stickyLeft}px`, right: `${stickyRight}px` }}
+            >
+              <img
+                src={mediaItem.thumbnailUrl}
+                alt={clipName}
+                className="h-full object-contain opacity-60"
+              />
+            </div>
           ) : isMissingMedia ? (
-            <AlertTriangle size={24} className="text-yellow-400/70" />
+            <div className="absolute inset-0 flex items-center" style={{ paddingLeft: `${stickyLeft}px` }}>
+              <AlertTriangle size={24} className="text-yellow-400/70" />
+            </div>
           ) : (
-            <Image size={24} className="text-purple-400/50" />
+            <div className="absolute inset-0 flex items-center" style={{ paddingLeft: `${stickyLeft}px` }}>
+              <Image size={24} className="text-purple-400/50" />
+            </div>
           )}
         </div>
       )}
 
       {mediaType === "audio" && (
-        <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-blue-500/10 flex items-center justify-center pointer-events-none">
+        <div className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-blue-500/10 flex items-center pointer-events-none" style={{ paddingLeft: `${stickyLeft}px` }}>
           {isMissingMedia ? (
             <AlertTriangle size={24} className="text-yellow-400/70" />
           ) : (
@@ -785,7 +803,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       )}
 
       {isMissingMedia && (
-        <div className="absolute top-1 left-1 rounded bg-yellow-500 px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none text-black pointer-events-none">
+        <div className="absolute top-1 rounded bg-yellow-500 px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none text-black pointer-events-none" style={{ left: `${4 + stickyLeft}px` }}>
           Link file
         </div>
       )}
@@ -793,12 +811,12 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
 
 
       {isGenerated && (
-        <div className="absolute right-1 top-1 z-20 rounded bg-black/70 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-rose-200 pointer-events-none">
+        <div className="absolute top-1 z-20 rounded bg-black/70 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-rose-200 pointer-events-none" style={{ right: `${4 + stickyRight}px` }}>
           {`Generated${generatedStatus ? ` · ${generatedStatus}` : ""}`}
         </div>
       )}
 
-      <div className="w-full h-full flex flex-col justify-end px-2 pb-1 relative z-10 pointer-events-none">
+      <div className="w-full h-full flex flex-col justify-end px-2 pb-1 relative z-10 pointer-events-none" style={stickyLeft > 0 ? { transform: `translateX(${stickyLeft}px)` } : undefined}>
         <span
           className={`text-[10px] font-medium truncate drop-shadow-md ${
             isSelected ? clipStyle.selectedText : clipStyle.text
