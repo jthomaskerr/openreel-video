@@ -7,10 +7,9 @@ export type MetadataKind = string;
 export interface MetadataMediaOptions {
   kind: MetadataKind;
   label: string;
-  /** CSS-compatible color string used to tint the clip in the timeline. */
   color: string;
-  /** Intended clip length in seconds, stored in metadata.duration. */
   duration: number;
+  thumbnailUrl?: string;
 }
 
 export interface MetadataMediaResult {
@@ -89,7 +88,7 @@ export function createMetadataMedia(
     fileHandle: null,
     blob,
     metadata,
-    thumbnailUrl: null,
+    thumbnailUrl: options.thumbnailUrl ?? null,
     waveformData: null,
     sourceFile: {
       name: `${kind}: ${label}`,

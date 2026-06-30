@@ -463,7 +463,7 @@ describe("NeuralFramesImportTab metadata import", () => {
       1,
       expect.objectContaining({
         id: "asset-1",
-        name: "Desert keyframe.png",
+        name: "Desert keyframe",
         title: "Desert keyframe",
         description: "Wide desert at sunrise",
         isPlaceholder: false,
@@ -480,7 +480,7 @@ describe("NeuralFramesImportTab metadata import", () => {
       2,
       expect.objectContaining({
         id: "asset-2",
-        name: "Ocean keyframe.png",
+        name: "Ocean keyframe",
         title: "Ocean keyframe",
         description: "Stormy ocean at night",
         isPlaceholder: true,

@@ -101,6 +101,7 @@ async function placeMetadataClip(
     duration: spec.duration,
     metadata: spec.metadata,
     trackType: spec.trackType,
+    thumbnailUrl: spec.thumbnailUrl,
   });
   if (!clipResult.success) {
     return { success: false, failure: `${spec.label} (${clipResult.error?.code ?? "unknown"})` };

@@ -81,10 +81,10 @@ export function importNeuralFrames(
 
   // ── Scenes → metadata track + shots ───────────────────────────────────────
   const sceneTrackId = uuid();
-  const sceneBlocks: MetadataBlock[] = scenes.map((scene) => ({
+  const sceneBlocks: MetadataBlock[] = scenes.map((scene, i) => ({
     id: uuid(),
     trackId: sceneTrackId,
-    label: `Scene ${scene.id}`,
+    label: `Scene ${i + 1}`,
     kind: "section" as const,
     startSeconds: scene.start_time,
     endSeconds: scene.end_time,
@@ -92,7 +92,7 @@ export function importNeuralFrames(
     color: "#4da8ff",
     linkedShotIds: [],
     linkedGeneratedAssetIds: [],
-    source: "llm" as const,
+    source: "neuralframes" as const,
     importSource: "neuralframes" as const,
     importId: scene.id,
   }));
@@ -126,7 +126,7 @@ export function importNeuralFrames(
       const assetId = uuid();
       generatedAssets.push({
         id: assetId,
-        label: `Scene ${i + 1} keyframe`,
+        label: `Scene ${i + 1}`,
         mediaType: "image",
         status: "realized",
         provider: "neuralframes",
@@ -181,7 +181,7 @@ export function importNeuralFrames(
       text: `Character: ${char.name}`,
       linkedShotIds: [],
       linkedGeneratedAssetIds: [],
-      source: "llm" as const,
+      source: "neuralframes" as const,
       importSource: "neuralframes" as const,
       importId: char.id,
       thumbnailUrl: imageJob?.assets[0]?.url,
@@ -208,9 +208,10 @@ export function importNeuralFrames(
     text: `Style LoRA: ${lora.name} (${(lora.training_image_urls ?? []).length} training images)`,
     linkedShotIds: [],
     linkedGeneratedAssetIds: [],
-    source: "llm" as const,
+    source: "neuralframes" as const,
     importSource: "neuralframes" as const,
     importId: lora.id,
+    thumbnailUrl: lora.training_image_urls?.[0],
   }));
   const loraTrack: MetadataTrack = {
     id: loraTrackId,
@@ -237,29 +238,14 @@ export function importNeuralFrames(
         kind: "note" as const,
         startSeconds: 0,
         endSeconds: duration,
-        text: props.storyboard_prompt,
+        text: [props.storyboard_prompt, audioMeta?.video_idea]
+          .filter(Boolean)
+          .join("\n\nVideo concept: "),
         linkedShotIds: [],
         linkedGeneratedAssetIds: [],
-        source: "llm" as const,
+        source: "neuralframes" as const,
         importSource: "neuralframes" as const,
       },
-      ...(audioMeta?.video_idea
-        ? [
-            {
-              id: uuid(),
-              trackId: notesTrackId,
-              label: "Video concept",
-              kind: "note" as const,
-              startSeconds: 0,
-              endSeconds: duration,
-              text: audioMeta.video_idea,
-              linkedShotIds: [],
-              linkedGeneratedAssetIds: [],
-              source: "llm" as const,
-              importSource: "neuralframes" as const,
-            },
-          ]
-        : []),
     ],
   };
 

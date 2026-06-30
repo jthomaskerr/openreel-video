@@ -21,6 +21,7 @@ export interface AddTimelineClipInput {
   startTime: number;
   duration: number;
   metadata?: Record<string, unknown>;
+  thumbnailUrl?: string;
   /** Track type to create/find. Defaults to "metadata". Scenes should use "video". */
   trackType?: Track["type"];
 }
@@ -48,6 +49,7 @@ export async function addTimelineClip(
       label: input.label,
       color: input.color,
       duration: input.duration,
+      thumbnailUrl: input.thumbnailUrl,
     });
 
     const mediaResult = await store.addGeneratedMedia(metadataMedia.item, metadataMedia.blob);

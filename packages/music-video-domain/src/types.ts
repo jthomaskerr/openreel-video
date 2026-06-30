@@ -148,7 +148,7 @@ export interface MetadataBlock {
   color?: string;
   linkedShotIds: string[];
   linkedGeneratedAssetIds: string[];
-  source: "user" | "timing-analysis" | "llm";
+  source: "user" | "timing-analysis" | "llm" | "neuralframes";
   importSource?: "neuralframes" | "manual" | "llm" | "audio-analysis";
   importId?: string;
   /** Thumbnail URL from external import sources (e.g. Neural Frames image_job.assets). */

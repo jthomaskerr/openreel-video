@@ -27,6 +27,7 @@ export interface NeuralFramesMediaSpec {
     fileSize: number;
   };
   thumbnailUrl: string | null;
+  originalUrl?: string;
   waveformData: null;
   isPlaceholder: boolean;
   isPending?: boolean;
@@ -63,6 +64,7 @@ export interface MetadataClipSpec {
   startSeconds: number;
   duration: number;
   trackType: "video" | "metadata";
+  thumbnailUrl?: string;
   metadata: Record<string, unknown>;
 }
 
@@ -126,6 +128,7 @@ export function buildImportPlan(
         startSeconds: block.startSeconds,
         duration: clampDuration(block.startSeconds, block.endSeconds),
         trackType: track.kind === "sections" ? "video" : "metadata",
+        thumbnailUrl: block.thumbnailUrl ? resolveUrl(block.thumbnailUrl) : undefined,
         metadata: buildBlockMetadata(block, result, raw),
       });
     }
@@ -191,7 +194,14 @@ export function buildImportPlan(
     const localAudioUrl = result.audio.audioUrl ? resolveUrl(result.audio.audioUrl) : undefined;
     const name = displayFileName(localAudioUrl) || `${result.title || "audio"}.audio`;
     audioClip = {
-      mediaSpec: buildAudioMediaSpec(result.title, result.audio.duration, name, `audio-${uuid()}`),
+      mediaSpec: buildAudioMediaSpec(
+        result.title,
+        result.audio.duration,
+        name,
+        `audio-${uuid()}`,
+        localAudioUrl,
+        result.audio.artworkUrl ? resolveUrl(result.audio.artworkUrl) : undefined,
+      ),
       duration: result.audio.duration,
       clipMetadata: {
         sourceFile: { name, size: 0, lastModified: 0 },
@@ -205,17 +215,14 @@ export function buildImportPlan(
 }
 
 function buildGeneratedMediaSpec(result: NeuralFramesImportResult, asset: GeneratedAsset): NeuralFramesMediaSpec {
-  const ext = extensionFromPath(asset.outputPath, asset.mediaType === "video" ? ".mp4" : ".png");
   const title = asset.label || asset.prompt.slice(0, 60) || result.title;
-  const fileName = title.toLowerCase().endsWith(ext.toLowerCase()) ? title : `${title}${ext}`;
   const hasOutput = !!asset.outputPath;
   const isResolved = asset.status === "realized" && hasOutput;
   const effectiveStatus = isResolved ? "realized" : asset.status === "realized" ? "unrealized" : asset.status;
-  const sourceFileName = asset.outputPath ? displayFileName(asset.outputPath) || fileName : fileName;
-
+  const sourceFileName = asset.outputPath ? displayFileName(asset.outputPath) || title : title;
   return {
     id: asset.id,
-    name: fileName,
+    name: title,
     title,
     description: asset.prompt || undefined,
     type: asset.mediaType,
@@ -287,6 +294,8 @@ function buildAudioMediaSpec(
   duration: number,
   name: string,
   id: string,
+  originalUrl?: string,
+  thumbnailUrl?: string,
 ): NeuralFramesMediaSpec {
   return {
     id,
@@ -296,7 +305,8 @@ function buildAudioMediaSpec(
     fileHandle: null,
     blob: null,
     metadata: mediaMetadata(duration),
-    thumbnailUrl: null,
+    thumbnailUrl: thumbnailUrl ?? null,
+    originalUrl,
     waveformData: null,
     isPlaceholder: true,
     group: "Imported Audio",
@@ -417,13 +427,6 @@ function mediaMetadata(duration = 0): NeuralFramesMediaSpec["metadata"] {
 
 function uuid(): string {
   return crypto.randomUUID();
-}
-
-function extensionFromPath(path: string | undefined, fallback: string): string {
-  if (!path) return fallback;
-  const pathname = pathName(path);
-  const ext = pathname.match(/\.[a-z0-9]+$/i)?.[0];
-  return ext ?? fallback;
 }
 
 function displayFileName(path: string | undefined): string {
