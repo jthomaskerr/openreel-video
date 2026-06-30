@@ -24,7 +24,7 @@ export function useKeyboardShortcuts() {
     addMarker,
   } = useProjectStore();
 
-  const { getSelectedClipIds, clearSelection, toggleSnap, select } =
+  const { getSelectedClipIds, clearSelection, toggleSnap, select, togglePanel } =
     useUIStore();
   const {
     togglePlayback,
@@ -243,6 +243,10 @@ export function useKeyboardShortcuts() {
     setShowShortcutsOverlay(true);
   }, []);
 
+  const handleToggleChatPanel = useCallback(() => {
+    togglePanel("chat");
+  }, [togglePanel]);
+
   const handleSave = useCallback(() => {}, []);
 
   const handleExport = useCallback(() => {}, []);
@@ -286,6 +290,7 @@ export function useKeyboardShortcuts() {
       ["timeline.zoomOut", handleZoomOut],
       ["timeline.fitTimeline", handleFitTimeline],
       ["view.showShortcuts", handleShowShortcuts],
+      ["view.toggleChatPanel", handleToggleChatPanel],
       ["file.save", handleSave],
       ["file.export", handleExport],
       ["tools.addText", handleAddText],
@@ -332,6 +337,7 @@ export function useKeyboardShortcuts() {
     handleZoomOut,
     handleFitTimeline,
     handleShowShortcuts,
+    handleToggleChatPanel,
     handleSave,
     handleExport,
     handleAddText,

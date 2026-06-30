@@ -9,7 +9,8 @@ export type PanelId =
   | "effects"
   | "audioMixer"
   | "colorGrading"
-  | "subtitles";
+  | "subtitles"
+  | "chat";
 
 export type SelectionType =
   | "clip"
@@ -210,6 +211,7 @@ const DEFAULT_PANELS: Record<PanelId, PanelState> = {
   audioMixer: { visible: false, width: 300 },
   colorGrading: { visible: false, width: 400 },
   subtitles: { visible: false, width: 300 },
+  chat: { visible: false, width: 360 },
 };
 
 export const useUIStore = create<UIState>()(
@@ -423,16 +425,19 @@ export const useUIStore = create<UIState>()(
         },
 
         togglePanel: (panelId: PanelId) => {
-          set((state) => ({
-            // Use spread operator to create new panels object (immutability for Zustand reactivity)
-            panels: {
-              ...state.panels,
-              [panelId]: {
-                ...state.panels[panelId], // Shallow copy existing panel state
-                visible: !state.panels[panelId].visible, // Toggle visibility
+          set((state) => {
+            const panel = state.panels[panelId] ?? DEFAULT_PANELS[panelId];
+            return {
+              // Use spread operator to create new panels object (immutability for Zustand reactivity)
+              panels: {
+                ...state.panels,
+                [panelId]: {
+                  ...panel,
+                  visible: !panel.visible,
+                },
               },
-            },
-          }));
+            };
+          });
         },
 
         addImportErrors: (errors: ImportError[]) => {
@@ -474,41 +479,50 @@ export const useUIStore = create<UIState>()(
         },
 
         setPanelVisible: (panelId: PanelId, visible: boolean) => {
-          set((state) => ({
-            // Create new panels object to trigger subscribers
-            panels: {
-              ...state.panels,
-              [panelId]: {
-                ...state.panels[panelId],
-                visible,
+          set((state) => {
+            const panel = state.panels[panelId] ?? DEFAULT_PANELS[panelId];
+            return {
+              // Create new panels object to trigger subscribers
+              panels: {
+                ...state.panels,
+                [panelId]: {
+                  ...panel,
+                  visible,
+                },
               },
-            },
-          }));
+            };
+          });
         },
 
         setPanelWidth: (panelId: PanelId, width: number) => {
-          set((state) => ({
-            panels: {
-              ...state.panels,
-              [panelId]: {
-                ...state.panels[panelId],
-                // Clamp width between min (200px) and max (800px) for usability
-                width: Math.max(200, Math.min(800, width)),
+          set((state) => {
+            const panel = state.panels[panelId] ?? DEFAULT_PANELS[panelId];
+            return {
+              panels: {
+                ...state.panels,
+                [panelId]: {
+                  ...panel,
+                  // Clamp width between min (200px) and max (800px) for usability
+                  width: Math.max(200, Math.min(800, width)),
+                },
               },
-            },
-          }));
+            };
+          });
         },
 
         setPanelCollapsed: (panelId: PanelId, collapsed: boolean) => {
-          set((state) => ({
-            panels: {
-              ...state.panels,
-              [panelId]: {
-                ...state.panels[panelId],
-                collapsed,
+          set((state) => {
+            const panel = state.panels[panelId] ?? DEFAULT_PANELS[panelId];
+            return {
+              panels: {
+                ...state.panels,
+                [panelId]: {
+                  ...panel,
+                  collapsed,
+                },
               },
-            },
-          }));
+            };
+          });
         },
 
         setShortcut: (action: keyof KeyboardShortcuts, shortcut: string) => {

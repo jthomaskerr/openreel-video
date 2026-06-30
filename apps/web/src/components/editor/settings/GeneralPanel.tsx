@@ -1,7 +1,7 @@
 import React, { useCallback } from "react";
 import { Switch } from "@openreel/ui";
 import { Label } from "@openreel/ui";
-import { useSettingsStore, SERVICE_REGISTRY, type TtsProvider, type LlmProvider, type AggregatorProvider } from "../../../stores/settings-store";
+import { useSettingsStore, type TtsProvider } from "../../../stores/settings-store";
 import { useProjectStore } from "../../../stores/project-store";
 import { ORCHESTRATOR_URL } from "../../../stores/music-video-store";
 
@@ -20,14 +20,10 @@ export const GeneralPanel: React.FC = () => {
     autoSave,
     autoSaveInterval,
     defaultTtsProvider,
-    defaultLlmProvider,
-    defaultAggregator,
     configuredServices,
     setAutoSave,
     setAutoSaveInterval,
     setDefaultTtsProvider,
-    setDefaultLlmProvider,
-    setDefaultAggregator,
   } = useSettingsStore();
 
   const projectWidth = useProjectStore((s) => s.project.settings.width);
@@ -95,24 +91,10 @@ export const GeneralPanel: React.FC = () => {
 
   const ttsProviders = [
     { id: "piper", label: "Piper (Free / Built-in)" },
-    ...SERVICE_REGISTRY.filter(
-      (s) => s.id === "elevenlabs" || configuredServices.includes(s.id),
-    ),
+    ...(configuredServices.includes("elevenlabs")
+      ? [{ id: "elevenlabs", label: "ElevenLabs" }]
+      : []),
   ];
-
-  const llmProviders = SERVICE_REGISTRY.filter(
-    (s) =>
-      s.id === "openai" ||
-      s.id === "anthropic" ||
-      configuredServices.includes(s.id),
-  );
-
-  const aggregatorProviders = SERVICE_REGISTRY.filter(
-    (s) =>
-      s.id === "kie-ai" ||
-      s.id === "freepik" ||
-      configuredServices.includes(s.id),
-  );
 
   return (
     <div className="space-y-6 pb-4">
@@ -265,13 +247,13 @@ export const GeneralPanel: React.FC = () => {
 
       <div className="h-px bg-border" />
 
-      {/* Default providers */}
+      {/* Default TTS Provider */}
       <div className="space-y-4">
         <h3 className="text-sm font-medium text-text-primary">
-          Default AI Providers
+          Default TTS Provider
         </h3>
         <p className="text-xs text-text-muted">
-          Choose which service to use by default for AI features.
+          Choose which service to use by default for text-to-speech.
           Configure API keys in the &quot;API Keys&quot; tab first.
         </p>
 
@@ -286,45 +268,6 @@ export const GeneralPanel: React.FC = () => {
               className="h-9 rounded-md border border-input bg-background px-3 text-sm min-w-[140px]"
             >
               {ttsProviders.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <Label className="text-sm text-text-secondary">
-              AI Assistant (LLM)
-            </Label>
-            <select
-              value={defaultLlmProvider}
-              onChange={(e) => setDefaultLlmProvider(e.target.value as LlmProvider)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm min-w-[140px]"
-            >
-              {llmProviders.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <div>
-              <Label className="text-sm text-text-secondary">
-                AI Aggregator
-              </Label>
-              <p className="text-xs text-text-muted mt-0.5">
-                Video/image generation, upscaling, and creative AI tools
-              </p>
-            </div>
-            <select
-              value={defaultAggregator}
-              onChange={(e) => setDefaultAggregator(e.target.value as AggregatorProvider)}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm min-w-[140px]"
-            >
-              {aggregatorProviders.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.label}
                 </option>

@@ -5,18 +5,19 @@
  * provides a typed fetch wrapper used by every KieAI service module.
  *
  * The session must be unlocked (master password entered) before any call.
- * API key is stored under the id "kieai-api-key".
+ * API key is stored under the shared KIEAI_SECRET_ID value ("kie-ai").
  */
 
 import { getSecret } from "../secure-storage";
+import { KIEAI_SECRET_ID } from "../service-instances";
 import { KieAIError } from "./types";
 import type { KieAIResponse } from "./types";
 
+export { KIEAI_SECRET_ID };
 /** File upload API base (kieai.redpandaai.co) */
 export const KIEAI_BASE_URL = "https://kieai.redpandaai.co";
 /** Generation API base (api.kie.ai) */
 export const KIEAI_API_BASE_URL = "https://api.kie.ai";
-export const KIEAI_SECRET_ID = "kie-ai";
 
 async function getApiKey(): Promise<string> {
   const key = await getSecret(KIEAI_SECRET_ID);

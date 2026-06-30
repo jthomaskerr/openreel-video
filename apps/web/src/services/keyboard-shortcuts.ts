@@ -370,6 +370,16 @@ const DEFAULT_SHORTCUTS: ShortcutDefinition[] = [
     enabled: true,
   },
   {
+    id: "view.toggleChatPanel",
+    name: "Toggle Chat Panel",
+    description: "Show or hide the chat panel",
+    category: "view",
+    defaultKey: "cmd+shift+c",
+    currentKey: "cmd+shift+c",
+    action: "view.toggleChatPanel",
+    enabled: true,
+  },
+  {
     id: "file.save",
     name: "Save",
     description: "Save project",

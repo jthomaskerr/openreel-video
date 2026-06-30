@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { subscribeWithSelector, persist } from "zustand/middleware";
-import { onSessionLock } from "../services/secure-storage";
+import { deleteSecret, onSessionLock } from "../services/secure-storage";
+import type { LlmInstance } from "../services/service-instances";
 
 export interface ServiceConfig {
   readonly id: string;
@@ -21,16 +22,10 @@ export const SERVICE_REGISTRY: readonly ServiceConfig[] = [
     docsUrl: "https://elevenlabs.io/docs/api-reference",
   },
   {
-    id: "openai",
-    label: "OpenAI",
-    description: "GPT models for script generation and AI features",
-    docsUrl: "https://platform.openai.com/docs/api-reference",
-  },
-  {
-    id: "anthropic",
-    label: "Anthropic",
-    description: "Claude models for AI-assisted editing",
-    docsUrl: "https://docs.anthropic.com/en/docs",
+    id: "wavespeed",
+    label: "WaveSpeed",
+    description: "AI video and image generation models",
+    docsUrl: "https://wavespeed.ai",
   },
   {
     id: "kie-ai",
@@ -47,9 +42,10 @@ export const SERVICE_REGISTRY: readonly ServiceConfig[] = [
 ] as const;
 
 export type TtsProvider = "piper" | "elevenlabs";
-export type LlmProvider = "openai" | "anthropic";
-export type AggregatorProvider = "kie-ai" | "freepik";
 export type SettingsTab = "general" | "api-keys";
+
+type LlmInstanceInput = Omit<LlmInstance, "id" | "apiKeySecretId">;
+type LlmInstancePatch = Partial<Omit<LlmInstance, "id" | "apiKeySecretId">>;
 
 export interface SettingsState {
   // General preferences
@@ -59,8 +55,11 @@ export interface SettingsState {
 
   // AI/Service preferences
   defaultTtsProvider: TtsProvider;
-  defaultLlmProvider: LlmProvider;
-  defaultAggregator: AggregatorProvider;
+  llmInstances: LlmInstance[];
+  defaultLlmInstanceId: string | null;
+  chatApiProxyUrl: string | null;
+  wavespeedHasApiKey: boolean;
+  kieaiHasApiKey: boolean;
   elevenLabsModel: string;
   favoriteVoices: Array<{ voiceId: string; name: string; previewUrl?: string }>;
   favoriteModels: Array<{ modelId: string; name: string }>;
@@ -79,8 +78,13 @@ export interface SettingsState {
   setAutoSaveInterval: (minutes: number) => void;
   setLanguage: (lang: string) => void;
   setDefaultTtsProvider: (provider: TtsProvider) => void;
-  setDefaultLlmProvider: (provider: LlmProvider) => void;
-  setDefaultAggregator: (provider: AggregatorProvider) => void;
+  addLlmInstance: (partial: LlmInstanceInput) => string;
+  updateLlmInstance: (id: string, patch: LlmInstancePatch) => void;
+  removeLlmInstance: (id: string) => void;
+  setDefaultLlmInstanceId: (id: string | null) => void;
+  setChatApiProxyUrl: (url: string | null) => void;
+  setWavespeedHasApiKey: (flag: boolean) => void;
+  setKieaiHasApiKey: (flag: boolean) => void;
   setElevenLabsModel: (model: string) => void;
   addFavoriteVoice: (voice: { voiceId: string; name: string; previewUrl?: string }) => void;
   removeFavoriteVoice: (voiceId: string) => void;
@@ -104,8 +108,11 @@ export const useSettingsStore = create<SettingsState>()(
         language: "en",
 
         defaultTtsProvider: "elevenlabs" as TtsProvider,
-        defaultLlmProvider: "openai" as LlmProvider,
-        defaultAggregator: "kie-ai" as AggregatorProvider,
+        llmInstances: [],
+        defaultLlmInstanceId: null,
+        chatApiProxyUrl: null,
+        wavespeedHasApiKey: false,
+        kieaiHasApiKey: false,
         elevenLabsModel: "eleven_v3",
         favoriteVoices: [],
         favoriteModels: [],
@@ -127,11 +134,55 @@ export const useSettingsStore = create<SettingsState>()(
         setDefaultTtsProvider: (provider: TtsProvider) =>
           set({ defaultTtsProvider: provider }),
 
-        setDefaultLlmProvider: (provider: LlmProvider) =>
-          set({ defaultLlmProvider: provider }),
+        addLlmInstance: (partial) => {
+          const id = crypto.randomUUID();
+          const instance: LlmInstance = {
+            ...partial,
+            id,
+            apiKeySecretId: `llm-${id}`,
+          };
+          const { defaultLlmInstanceId, llmInstances } = get();
+          set({
+            llmInstances: [...llmInstances, instance],
+            defaultLlmInstanceId: defaultLlmInstanceId ?? id,
+          });
+          return id;
+        },
 
-        setDefaultAggregator: (provider: AggregatorProvider) =>
-          set({ defaultAggregator: provider }),
+        updateLlmInstance: (id, patch) =>
+          set((state) => ({
+            llmInstances: state.llmInstances.map((instance) =>
+              instance.id === id ? { ...instance, ...patch } : instance,
+            ),
+          })),
+
+        removeLlmInstance: (id) => {
+          const { llmInstances, defaultLlmInstanceId } = get();
+          const removed = llmInstances.find((instance) => instance.id === id);
+          if (removed) {
+            void deleteSecret(removed.apiKeySecretId);
+          }
+          const remaining = llmInstances.filter((instance) => instance.id !== id);
+          set({
+            llmInstances: remaining,
+            defaultLlmInstanceId:
+              defaultLlmInstanceId === id ? remaining[0]?.id ?? null : defaultLlmInstanceId,
+          });
+        },
+
+        setDefaultLlmInstanceId: (id) => {
+          if (id === null) {
+            set({ defaultLlmInstanceId: null });
+            return;
+          }
+          if (get().llmInstances.some((instance) => instance.id === id)) {
+            set({ defaultLlmInstanceId: id });
+          }
+        },
+
+        setChatApiProxyUrl: (url) => set({ chatApiProxyUrl: url?.trim() || null }),
+        setWavespeedHasApiKey: (flag) => set({ wavespeedHasApiKey: flag }),
+        setKieaiHasApiKey: (flag) => set({ kieaiHasApiKey: flag }),
 
         setElevenLabsModel: (model: string) =>
           set({ elevenLabsModel: model }),
@@ -193,19 +244,39 @@ export const useSettingsStore = create<SettingsState>()(
       }),
       {
         name: "openreel-settings",
-        version: 1,
+        version: 2,
         partialize: (state) => ({
           autoSave: state.autoSave,
           autoSaveInterval: state.autoSaveInterval,
           language: state.language,
           defaultTtsProvider: state.defaultTtsProvider,
-          defaultLlmProvider: state.defaultLlmProvider,
-          defaultAggregator: state.defaultAggregator,
+          llmInstances: state.llmInstances,
+          defaultLlmInstanceId: state.defaultLlmInstanceId,
+          chatApiProxyUrl: state.chatApiProxyUrl,
+          wavespeedHasApiKey: state.wavespeedHasApiKey,
+          kieaiHasApiKey: state.kieaiHasApiKey,
           elevenLabsModel: state.elevenLabsModel,
           favoriteVoices: state.favoriteVoices,
           favoriteModels: state.favoriteModels,
           configuredServices: state.configuredServices,
         }),
+        migrate: (persistedState) => {
+          if (!persistedState || typeof persistedState !== "object") {
+            return persistedState;
+          }
+          const state = persistedState as Partial<SettingsState> & Record<string, unknown>;
+          const next = { ...state };
+          delete next.defaultLlmProvider;
+          delete next.defaultAggregator;
+          return {
+            ...next,
+            llmInstances: state.llmInstances ?? [],
+            defaultLlmInstanceId: state.defaultLlmInstanceId ?? null,
+            chatApiProxyUrl: state.chatApiProxyUrl ?? null,
+            wavespeedHasApiKey: state.wavespeedHasApiKey ?? false,
+            kieaiHasApiKey: state.kieaiHasApiKey ?? false,
+          };
+        },
       },
     ),
   ),

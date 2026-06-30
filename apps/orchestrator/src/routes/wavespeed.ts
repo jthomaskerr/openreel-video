@@ -8,12 +8,24 @@ import { config } from "../env.js";
 
 export const wavespeedRouter: ExpressRouter = Router();
 
-// ── SDK client (lazy — only instantiated when key is present) ─────────────────
+// ── SDK client (per request — key comes from the request header or env fallback) ─────────────────
 
-function getClient(): Client {
-  if (!config.wavespeedApiKey) throw new Error("WaveSpeed API key not configured");
-  return new Client(config.wavespeedApiKey);
+type WaveSpeedHeaderRequest = {
+  header(name: string): string | undefined;
+};
+
+type WaveSpeedClient = {
+  _submit(model: string, inputs: Record<string, unknown>): Promise<[string]>;
+  _getResult(jobId: string): Promise<{
+    data: { status: string; outputs: string[]; error: string };
+  }>;
+};
+
+function getWaveSpeedApiKey(req: WaveSpeedHeaderRequest): string | null {
+  const key = req.header("x-wavespeed-api-key") ?? config.wavespeedApiKey;
+  return key ?? null;
 }
+
 
 // ── Model cache ────────────────────────────────────────────────────────────────
 
@@ -45,11 +57,11 @@ let modelCache: WavespeedModel[] | null = null;
 let modelCacheAt = 0;
 const MODEL_TTL_MS = 60 * 60 * 1000;
 
-async function fetchModels(): Promise<WavespeedModel[]> {
+async function fetchModels(apiKey: string): Promise<WavespeedModel[]> {
   if (modelCache && Date.now() - modelCacheAt < MODEL_TTL_MS) return modelCache;
 
   const res = await fetch("https://api.wavespeed.ai/api/v3/models", {
-    headers: { Authorization: `Bearer ${config.wavespeedApiKey}` },
+    headers: { Authorization: `Bearer ${apiKey}` },
   });
   if (!res.ok) throw new Error(`WaveSpeed models fetch failed: HTTP ${res.status}`);
   const json = await res.json() as { code: number; data: WavespeedModel[] };
@@ -94,13 +106,14 @@ function downloadFile(url: string, destPath: string): Promise<void> {
 // ── Routes ─────────────────────────────────────────────────────────────────────
 
 /** GET /api/generate/wavespeed/models — cached model list with full schemas */
-wavespeedRouter.get("/models", async (_req, res) => {
-  if (!config.wavespeedApiKey) {
+wavespeedRouter.get("/models", async (req, res) => {
+  const key = getWaveSpeedApiKey(req);
+  if (!key) {
     res.status(503).json({ error: "WaveSpeed API key not configured" });
     return;
   }
   try {
-    const models = await fetchModels();
+    const models = await fetchModels(key);
     res.json({ models });
   } catch (e) {
     res.status(502).json({ error: `Failed to fetch models: ${(e as Error).message}` });
@@ -109,7 +122,8 @@ wavespeedRouter.get("/models", async (_req, res) => {
 
 /** POST /api/generate/wavespeed — submit generation, returns jobId immediately */
 wavespeedRouter.post("/", async (req, res) => {
-  if (!config.wavespeedApiKey) {
+  const key = getWaveSpeedApiKey(req);
+  if (!key) {
     res.status(503).json({ error: "WaveSpeed API key not configured" });
     return;
   }
@@ -119,8 +133,8 @@ wavespeedRouter.post("/", async (req, res) => {
     return;
   }
   try {
-    const client = getClient();
-    const [wavespeedId] = await (client as any)._submit(model, inputs);
+    const client = new Client(key) as unknown as WaveSpeedClient;
+    const [wavespeedId] = await client._submit(model, inputs);
     if (!wavespeedId) throw new Error("No prediction ID returned from WaveSpeed");
 
     const jobId = crypto.randomUUID();
@@ -138,15 +152,14 @@ wavespeedRouter.get("/:jobId", async (req, res) => {
     res.status(404).json({ error: "Job not found" });
     return;
   }
-  if (job.status === "completed" || job.status === "failed") {
-    res.json({ status: job.status, outputUrl: job.outputUrl, error: job.error });
+  const key = getWaveSpeedApiKey(req);
+  if (!key) {
+    res.status(503).json({ error: "WaveSpeed API key not configured" });
     return;
   }
   try {
-    const client = getClient();
-    const result = await (client as any)._getResult(job.wavespeedId) as {
-      data: { status: string; outputs: string[]; error: string };
-    };
+    const client = new Client(key) as unknown as WaveSpeedClient;
+    const result = await client._getResult(job.wavespeedId);
     const { status, outputs, error } = result.data;
 
     if (status === "completed" && outputs?.length > 0) {

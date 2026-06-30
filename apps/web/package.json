@@ -16,6 +16,9 @@
     "clean": "rm -rf dist node_modules/.vite && find src -name '*.js' -o -name '*.js.map' -o -name '*.d.ts' -o -name '*.d.ts.map' | xargs rm -f 2>/dev/null || true"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.3",
+    "@ai-sdk/google": "^4.0.3",
+    "@ai-sdk/openai": "^4.0.4",
     "@gsap/react": "^2.1.2",
     "@openreel/core": "workspace:*",
     "@openreel/music-video-domain": "workspace:*",
@@ -30,6 +33,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/uuid": "^11.0.0",
+    "ai": "^7.0.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.23.24",
@@ -43,6 +47,7 @@
     "three": "^0.182.0",
     "uuid": "^13.0.0",
     "wavesurfer.js": "^7.12.8",
+    "zod": "^4.4.3",
     "zustand": "^4.5.2"
   },
   "devDependencies": {

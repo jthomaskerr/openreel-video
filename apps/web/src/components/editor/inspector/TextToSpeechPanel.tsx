@@ -21,12 +21,14 @@ import { TTS_PROVIDERS } from "./tts-constants";
 export const TextToSpeechPanel: React.FC = () => {
   const {
     defaultTtsProvider,
-    defaultLlmProvider,
     openSettings,
     settingsOpen,
     configuredServices,
     elevenLabsModel,
     favoriteVoices,
+    defaultLlmInstanceId,
+    llmInstances,
+    chatApiProxyUrl,
   } = useSettingsStore();
 
   const hasElevenLabsKey = configuredServices.includes("elevenlabs");
@@ -61,7 +63,9 @@ export const TextToSpeechPanel: React.FC = () => {
     hasElevenLabsKey,
     settingsOpen,
     elevenLabsModel,
-    defaultLlmProvider,
+    defaultLlmInstanceId,
+    llmInstances,
+    chatApiProxyUrl,
   });
 
   const {

@@ -4,8 +4,8 @@
  * Usage:
  *   import { uploadFile, uploadFileStream, KieAIError } from "@/services/kieai";
  *
- * Requires the KieAI API key to be stored in secure-storage under the id
- * "kieai-api-key" and the session to be unlocked.
+ * Requires the KieAI API key to be stored in secure-storage under the shared
+ * KIEAI_SECRET_ID value and the session to be unlocked.
  */
 
 export { KIEAI_BASE_URL, KIEAI_SECRET_ID } from "./client";

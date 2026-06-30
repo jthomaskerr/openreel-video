@@ -4,6 +4,7 @@ import { Toolbar } from "./Toolbar";
 import { AssetsPanel } from "./AssetsPanel";
 import { Preview } from "./Preview";
 import { InspectorPanel } from "./InspectorPanel";
+import { ChatPanel } from "./ChatPanel";
 import { Timeline } from "./Timeline";
 import { KeyframeEditorPanel } from "./KeyframeEditorPanel";
 import { AudioMixer } from "../audio-mixer";
@@ -56,10 +57,14 @@ const DEFAULT_INSPECTOR_W = 360;
 const MIN_INSPECTOR_W = 280;
 const MAX_INSPECTOR_W = 560;
 
+const DEFAULT_CHAT_W = 360;
+const MIN_CHAT_W = 320;
+const MAX_CHAT_W = 560;
+
 const MIN_STAGE_W = 380;
 const RESIZE_HANDLE = 4;
 
-type ResizeTarget = "timeline" | "media" | "inspector";
+type ResizeTarget = "timeline" | "media" | "inspector" | "chat";
 
 const clamp = (value: number, min: number, max: number): number => {
   return Math.min(Math.max(value, min), max);
@@ -264,15 +269,17 @@ export const EditorInterface: React.FC = () => {
       }
     });
 
+  }, []);
+
   const {
     keyframeEditorOpen,
     setKeyframeEditorOpen,
     getSelectedClipIds,
     panels,
     setPanelVisible,
+    setPanelWidth,
     timelineMaximized,
   } = useUIStore();
-  const { project, updateClipKeyframes } = useProjectStore();
   const tracks = project.timeline.tracks;
 
   const [selectedKeyframeIds, setSelectedKeyframeIds] = React.useState<string[]>([]);
@@ -378,6 +385,19 @@ export const EditorInterface: React.FC = () => {
     inspectorRef.current = inspectorWidth;
   }, [inspectorWidth]);
 
+  const chatVisible = panels.chat?.visible ?? false;
+  const chatWidth = panels.chat?.width ?? DEFAULT_CHAT_W;
+  const chatVisibleRef = useRef(chatVisible);
+  const chatWidthRef = useRef(chatWidth);
+
+  useEffect(() => {
+    chatVisibleRef.current = chatVisible;
+  }, [chatVisible]);
+
+  useEffect(() => {
+    chatWidthRef.current = chatWidth;
+  }, [chatWidth]);
+
   const beginResize = useCallback(
     (target: ResizeTarget) => (e: React.MouseEvent) => {
       e.preventDefault();
@@ -397,19 +417,44 @@ export const EditorInterface: React.FC = () => {
       const rect = root.getBoundingClientRect();
 
       if (target === "media") {
-        const maxByStage = rect.width - inspectorRef.current - MIN_STAGE_W;
+        const maxByStage =
+          rect.width -
+          inspectorRef.current -
+          (chatVisibleRef.current ? chatWidthRef.current : 0) -
+          MIN_STAGE_W;
         setMediaWidth(
-          clamp(e.clientX - rect.left, MIN_MEDIA_W, Math.min(MAX_MEDIA_W, maxByStage)),
+          clamp(
+            e.clientX - rect.left,
+            MIN_MEDIA_W,
+            Math.min(MAX_MEDIA_W, maxByStage),
+          ),
         );
         return;
       }
       if (target === "inspector") {
-        const maxByStage = rect.width - mediaRef.current - MIN_STAGE_W;
+        const maxByStage =
+          rect.width -
+          mediaRef.current -
+          (chatVisibleRef.current ? chatWidthRef.current : 0) -
+          MIN_STAGE_W;
         setInspectorWidth(
           clamp(
             rect.right - e.clientX,
             MIN_INSPECTOR_W,
             Math.min(MAX_INSPECTOR_W, maxByStage),
+          ),
+        );
+        return;
+      }
+      if (target === "chat") {
+        const maxByStage =
+          rect.width - mediaRef.current - inspectorRef.current - MIN_STAGE_W;
+        setPanelWidth(
+          "chat",
+          clamp(
+            rect.right - e.clientX,
+            MIN_CHAT_W,
+            Math.min(MAX_CHAT_W, maxByStage),
           ),
         );
         return;
@@ -431,7 +476,7 @@ export const EditorInterface: React.FC = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
-  }, []);
+  }, [setPanelWidth]);
 
   // Reflect resized panel sizes back into CSS variables so child styles
   // (timeline header padding, etc.) can react.
@@ -459,19 +504,25 @@ export const EditorInterface: React.FC = () => {
     );
   }
 
-  // ── Render ───────────────────────────────────────────────────────
   // Grid template uses inline CSS for the resizable columns. The CSS
   // variables `--media-w`, `--inspector-w`, `--tl-height` are kept in
   // sync via the effect above so other components can use them too.
   const effectiveTimelineVh = timelineMaximized
     ? COMPACT_TIMELINE_VH
     : timelineVh;
-  const gridStyle: React.CSSProperties = {
-    gridTemplateColumns: `${mediaWidth}px ${RESIZE_HANDLE}px 1fr ${RESIZE_HANDLE}px ${inspectorWidth}px`,
-    gridTemplateRows: `1fr ${RESIZE_HANDLE}px ${effectiveTimelineVh}vh`,
-    gridTemplateAreas:
-      "'media mh stage ih inspector' 'th th th th th' 'timeline timeline timeline timeline timeline'",
-  };
+  const gridStyle: React.CSSProperties = chatVisible
+    ? {
+        gridTemplateColumns: `${mediaWidth}px ${RESIZE_HANDLE}px 1fr ${RESIZE_HANDLE}px ${inspectorWidth}px ${RESIZE_HANDLE}px ${chatWidth}px`,
+        gridTemplateRows: `1fr ${RESIZE_HANDLE}px ${effectiveTimelineVh}vh`,
+        gridTemplateAreas:
+          "'media mh stage ih inspector ch chat' 'th th th th th th th' 'timeline timeline timeline timeline timeline timeline timeline'",
+      }
+    : {
+        gridTemplateColumns: `${mediaWidth}px ${RESIZE_HANDLE}px 1fr ${RESIZE_HANDLE}px ${inspectorWidth}px`,
+        gridTemplateRows: `1fr ${RESIZE_HANDLE}px ${effectiveTimelineVh}vh`,
+        gridTemplateAreas:
+          "'media mh stage ih inspector' 'th th th th th' 'timeline timeline timeline timeline timeline'",
+      };
 
   return (
     <div
@@ -523,12 +574,30 @@ export const EditorInterface: React.FC = () => {
           </PanelErrorBoundary>
         </div>
 
+        {chatVisible && (
+          <>
+            <div
+              className="bg-border hover:bg-accent/50 cursor-col-resize transition-colors"
+              style={{ gridArea: "ch" }}
+              onMouseDown={beginResize("chat")}
+            />
+
+            <div
+              className="bg-bg-1 min-w-0 min-h-0 overflow-hidden relative"
+              style={{ gridArea: "chat" }}
+            >
+              <PanelErrorBoundary name="Chat">
+                <ChatPanel />
+              </PanelErrorBoundary>
+            </div>
+          </>
+        )}
+
         <div
           className="bg-border hover:bg-accent/50 cursor-row-resize transition-colors"
           style={{ gridArea: "th" }}
           onMouseDown={beginResize("timeline")}
         />
-
         <div
           className="bg-tl-bg min-w-0 min-h-0 overflow-hidden flex flex-col"
           style={{ gridArea: "timeline" }}

@@ -26,12 +26,20 @@ import {
   listSecrets,
   changeMasterPassword,
 } from "../../../services/secure-storage";
+import { WAVESPEED_SECRET_ID, KIEAI_SECRET_ID } from "../../../services/service-instances";
+import { ChatProviderSettings } from "./ChatProviderSettings";
+import { SingleServiceSettings } from "./SingleServiceSettings";
 import { MasterPasswordDialog } from "./MasterPasswordDialog";
 import { toast } from "../../../stores/notification-store";
+const HIDDEN_SERVICE_IDS = new Set([WAVESPEED_SECRET_ID, KIEAI_SECRET_ID]);
 
 export const ApiKeysPanel: React.FC = () => {
-  const { addConfiguredService, removeConfiguredService } =
-    useSettingsStore();
+  const {
+    addConfiguredService,
+    removeConfiguredService,
+    setWavespeedHasApiKey,
+    setKieaiHasApiKey,
+  } = useSettingsStore();
 
   const [passwordSet, setPasswordSet] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
@@ -53,9 +61,11 @@ export const ApiKeysPanel: React.FC = () => {
 
     if (isSessionUnlocked()) {
       const keys = await listSecrets();
-      setStoredKeys(keys);
+      setStoredKeys(keys.filter((key) => !HIDDEN_SERVICE_IDS.has(key.id)));
+      setWavespeedHasApiKey(keys.some((key) => key.id === WAVESPEED_SECRET_ID));
+      setKieaiHasApiKey(keys.some((key) => key.id === KIEAI_SECRET_ID));
     }
-  }, []);
+  }, [setKieaiHasApiKey, setWavespeedHasApiKey]);
 
   useEffect(() => {
     refreshState();
@@ -163,7 +173,7 @@ export const ApiKeysPanel: React.FC = () => {
   }, []);
 
   const availableServices = SERVICE_REGISTRY.filter(
-    (s) => !storedKeys.some((k) => k.id === s.id),
+    (s) => !HIDDEN_SERVICE_IDS.has(s.id) && !storedKeys.some((k) => k.id === s.id),
   );
 
   // Not set up yet
@@ -253,6 +263,12 @@ export const ApiKeysPanel: React.FC = () => {
           </Button>
         </div>
       </div>
+      <div className="space-y-4">
+        <ChatProviderSettings />
+        <SingleServiceSettings />
+      </div>
+
+      <div className="h-px bg-border" />
 
       {/* Stored keys list */}
       <div className="space-y-3">

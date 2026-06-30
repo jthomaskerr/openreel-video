@@ -790,17 +790,21 @@ export const Toolbar: React.FC = () => {
           <TooltipContent>Import Neural Frames</TooltipContent>
         </Tooltip>
 
-        {/* Comments placeholder (matches mockup) */}
+        {/* Chat panel */}
         <Tooltip>
           <TooltipTrigger asChild>
             <button
-              onClick={() => useUIStore.getState().openModal("scriptView")}
-              className="w-[26px] h-[26px] grid place-items-center rounded-md text-fg-2 hover:bg-hover hover:text-fg transition-colors"
+              onClick={() => togglePanel("chat")}
+              className={`w-[26px] h-[26px] grid place-items-center rounded-md transition-colors ${
+                panels.chat?.visible
+                  ? "bg-accent-soft text-accent"
+                  : "text-fg-2 hover:bg-hover hover:text-fg"
+              }`}
             >
               <MessageSquare size={14} />
             </button>
           </TooltipTrigger>
-          <TooltipContent>Project JSON / Comments</TooltipContent>
+          <TooltipContent>Chat</TooltipContent>
         </Tooltip>
 
 

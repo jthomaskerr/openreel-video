@@ -1,18 +1,26 @@
+import { generateText } from "ai";
 import { useState, useCallback, useRef, useEffect } from "react";
 import type { TtsProvider } from "../../../../stores/settings-store";
 import { useSettingsStore } from "../../../../stores/settings-store";
 import { isSessionUnlocked, getSecret } from "../../../../services/secure-storage";
 import { apiFetch } from "../../../../services/api-proxy";
 import { OPENREEL_TTS_URL } from "../../../../config/api-endpoints";
+import { createModel } from "../../../../services/llm/provider-factory";
 import type { ElevenLabsVoice, ElevenLabsModel } from "../tts-types";
 import { FALLBACK_MODELS, ENHANCE_SYSTEM_PROMPT } from "../tts-constants";
+import {
+  DEFAULT_LLM_MODELS,
+  type LlmInstance,
+} from "../../../../services/service-instances";
 
 interface UseElevenLabsApiOptions {
   provider: TtsProvider;
   hasElevenLabsKey: boolean;
   settingsOpen: boolean;
   elevenLabsModel: string;
-  defaultLlmProvider: string;
+  defaultLlmInstanceId: string | null;
+  llmInstances: LlmInstance[];
+  chatApiProxyUrl: string | null;
 }
 
 interface UseElevenLabsApiReturn {
@@ -26,7 +34,17 @@ interface UseElevenLabsApiReturn {
 }
 
 export function useElevenLabsApi(options: UseElevenLabsApiOptions): UseElevenLabsApiReturn {
-  const { provider, hasElevenLabsKey, settingsOpen, elevenLabsModel, defaultLlmProvider } = options;
+  const {
+    provider,
+    hasElevenLabsKey,
+    settingsOpen,
+    elevenLabsModel,
+    defaultLlmInstanceId,
+    llmInstances,
+    chatApiProxyUrl,
+  } = options;
+
+  const defaultLlmInstance = llmInstances.find((instance) => instance.id === defaultLlmInstanceId) ?? null;
 
   const {
     cachedElevenLabsVoices,
@@ -208,66 +226,39 @@ export function useElevenLabsApi(options: UseElevenLabsApiOptions): UseElevenLab
   }, [elevenLabsModel]);
 
   const enhanceViaLlm = useCallback(async (inputText: string, signal?: AbortSignal): Promise<string> => {
-    const llmProvider = defaultLlmProvider;
+    if (!defaultLlmInstance) {
+      throw new Error("No LLM instance configured. Open Settings > API Keys and add a default chat provider.");
+    }
 
-    if (!isSessionUnlocked()) {
+    const proxyUrl = chatApiProxyUrl?.trim() || null;
+    if (!proxyUrl && !isSessionUnlocked()) {
       throw new Error("Session locked. Unlock in Settings > API Keys to use text enhancement.");
     }
 
-    const apiKey = await getSecret(llmProvider);
-    if (!apiKey) {
-      throw new Error(`${llmProvider === "openai" ? "OpenAI" : "Anthropic"} API key not found. Add it in Settings > API Keys.`);
-    }
+    const model = createModel(
+      {
+        ...defaultLlmInstance,
+        defaultModel:
+          defaultLlmInstance.defaultModel.trim()
+            || DEFAULT_LLM_MODELS[defaultLlmInstance.providerType],
+      },
+      {
+        apiKeyOverride: proxyUrl ? null : await getSecret(defaultLlmInstance.apiKeySecretId),
+        proxyUrl,
+      },
+    );
 
-    if (llmProvider === "anthropic") {
-      const response = await apiFetch("anthropic", "/messages", apiKey, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 2048,
-          system: ENHANCE_SYSTEM_PROMPT,
-          messages: [{ role: "user", content: inputText }],
-        }),
-        signal,
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error((err as Record<string, unknown>).error
-          ? String((err as Record<string, unknown>).error)
-          : `Anthropic error (${response.status})`);
-      }
-
-      const data = await response.json();
-      const content = (data as { content: Array<{ type: string; text: string }> }).content;
-      return content?.[0]?.text ?? inputText;
-    }
-
-    const response = await apiFetch("openai", "/chat/completions", apiKey, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          { role: "system", content: ENHANCE_SYSTEM_PROMPT },
-          { role: "user", content: inputText },
-        ],
-        max_tokens: 2048,
-      }),
-      signal,
+    const result = await generateText({
+      model,
+      system: ENHANCE_SYSTEM_PROMPT,
+      prompt: inputText,
+      maxOutputTokens: 2048,
+      temperature: 0.2,
+      abortSignal: signal,
     });
 
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      const msg = (err as Record<string, unknown>).error;
-      throw new Error(msg ? String((msg as Record<string, unknown>).message ?? msg) : `OpenAI error (${response.status})`);
-    }
-
-    const data = await response.json();
-    const choices = (data as { choices: Array<{ message: { content: string } }> }).choices;
-    return choices?.[0]?.message?.content ?? inputText;
-  }, [defaultLlmProvider]);
+    return result.text.trim() || inputText;
+  }, [chatApiProxyUrl, defaultLlmInstance]);
 
   return {
     allVoices,

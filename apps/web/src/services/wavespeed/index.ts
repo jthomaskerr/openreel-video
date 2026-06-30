@@ -1,10 +1,12 @@
 /**
- * WaveSpeed browser client — talks to the orchestrator (key stays server-side).
+ * WaveSpeed browser client — attaches the user's secure API key to orchestrator requests.
  */
 
 import { ORCHESTRATOR_URL } from "../../stores/music-video-store";
+import { getSecret } from "../secure-storage";
 import { staleWhileRevalidate, CACHE_KEYS } from "../cache";
 import type { CacheResult } from "../cache";
+import { WAVESPEED_SECRET_ID } from "../service-instances";
 
 export interface WavespeedModel {
   model_id: string;
@@ -56,9 +58,22 @@ export interface JobResult {
   outputUrl?: string;
   error?: string;
 }
+async function getWaveSpeedHeaders(extraHeaders: HeadersInit = {}): Promise<Headers> {
+  const apiKey = await getSecret(WAVESPEED_SECRET_ID);
+  if (!apiKey) {
+    throw new Error("WaveSpeed API key not configured. Open Settings → API Keys.");
+  }
+
+  const headers = new Headers(extraHeaders);
+  headers.set("X-WaveSpeed-Api-Key", apiKey);
+  return headers;
+}
 
 export async function fetchModels(): Promise<WavespeedModel[]> {
-  const res = await fetch(`${ORCHESTRATOR_URL}/api/generate/wavespeed/models`);
+  const headers = await getWaveSpeedHeaders();
+  const res = await fetch(`${ORCHESTRATOR_URL}/api/generate/wavespeed/models`, {
+    headers,
+  });
   if (!res.ok) throw new Error(`Failed to fetch WaveSpeed models: HTTP ${res.status}`);
   const json = await res.json() as { models: WavespeedModel[] };
   return json.models;
@@ -83,9 +98,12 @@ export async function submitGeneration(
   model: string,
   inputs: Record<string, unknown>,
 ): Promise<string> {
+  const headers = await getWaveSpeedHeaders({
+    "Content-Type": "application/json",
+  });
   const res = await fetch(`${ORCHESTRATOR_URL}/api/generate/wavespeed`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify({ model, inputs }),
   });
   if (!res.ok) throw new Error(`WaveSpeed submit failed: HTTP ${res.status}`);
@@ -95,7 +113,10 @@ export async function submitGeneration(
 }
 
 export async function pollJob(jobId: string): Promise<JobResult> {
-  const res = await fetch(`${ORCHESTRATOR_URL}/api/generate/wavespeed/${jobId}`);
+  const headers = await getWaveSpeedHeaders();
+  const res = await fetch(`${ORCHESTRATOR_URL}/api/generate/wavespeed/${jobId}`, {
+    headers,
+  });
   if (!res.ok) throw new Error(`WaveSpeed poll failed: HTTP ${res.status}`);
   return res.json() as Promise<JobResult>;
 }
