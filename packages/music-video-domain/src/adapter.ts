@@ -127,6 +127,7 @@ export function buildImportPlan(
 ): NeuralFramesImportPlan {
   const resolveUrl = (url: string) => result.remoteUrlMap?.[url] ?? url;
   const referenceModel = raw.storyboard_props?.model ?? DEFAULT_IMAGE_MODEL;
+  const timelineDuration = storyboardDuration(result, raw);
 
   // ── Scene clips (shots are unrealized — no generatedAssetIds) ────────────
   // referenceImageUrl is a preview only, NOT a generated output.
@@ -175,7 +176,7 @@ export function buildImportPlan(
         mediaSpec: buildCharacterMediaSpec(track.label, thumbUrl, generationMeta, character),
         clips: track.blocks.map((block) => ({
           startSeconds: block.startSeconds,
-          duration: clampDuration(block.startSeconds, block.endSeconds),
+          duration: clipDuration(block.startSeconds, block.endSeconds, timelineDuration),
           metadata: buildBlockMetadata(block, result, raw),
         })),
       });
@@ -190,7 +191,7 @@ export function buildImportPlan(
           label: block.label,
           color: block.color ?? "#94a3b8",
           startSeconds: block.startSeconds,
-          duration: clampDuration(block.startSeconds, block.endSeconds),
+          duration: clipDuration(block.startSeconds, block.endSeconds, timelineDuration),
           trackType: track.kind === "sections" ? "video" : "metadata",
           thumbnailUrl: block.thumbnailUrl ? resolveUrl(block.thumbnailUrl) : loraUrls[0],
           description: lora?.visual_style,
@@ -295,7 +296,8 @@ export function buildImportPlan(
 
   // ── Audio clip ────────────────────────────────────────────────────────────
   let audioClip: AudioClipSpec | null = null;
-  if (result.audio && (result.audio.duration > 0 || result.audio.audioUrl)) {
+  const audioDuration = result.audio ? result.audio.duration || timelineDuration : 0;
+  if (result.audio && (audioDuration > 0 || result.audio.audioUrl)) {
     const localAudioUrl = result.audio.audioUrl ? resolveUrl(result.audio.audioUrl) : undefined;
     const name = displayFileName(localAudioUrl) || `${result.title || "audio"}.audio`;
     audioClip = {
@@ -307,7 +309,7 @@ export function buildImportPlan(
         localAudioUrl,
         result.audio.artworkUrl ? resolveUrl(result.audio.artworkUrl) : undefined,
       ),
-      duration: result.audio.duration,
+      duration: audioDuration,
       clipMetadata: {
         sourceFile: { name, size: 0, lastModified: 0 },
         importSource: "neuralframes",
@@ -699,10 +701,28 @@ function blockKindToClipKind(kind: MetadataBlock["kind"]): string {
 }
 
 
+function clipDuration(startSeconds: number, endSeconds: number | undefined, fallbackEndSeconds: number): number {
+  const duration = clampDuration(startSeconds, endSeconds);
+  if (duration > 0) return duration;
+  const fallback = fallbackEndSeconds - startSeconds;
+  return Number.isFinite(fallback) ? Math.max(0, fallback) : 0;
+}
+
 function clampDuration(startSeconds: number, endSeconds: number | undefined): number {
   const end = endSeconds ?? startSeconds;
   const raw = end - startSeconds;
   return Number.isFinite(raw) ? Math.max(0, raw) : 0;
+}
+
+function storyboardDuration(result: NeuralFramesImportResult, raw: NeuralFramesStoryboard): number {
+  const candidates = [
+    result.audio?.duration,
+    ...result.shots.map((shot) => shot.endSeconds),
+    ...(raw.storyboard_props?.scenes ?? []).map((scene) => scene.end_time),
+  ];
+  return candidates.reduce((max, value) => {
+    return typeof value === "number" && Number.isFinite(value) ? Math.max(max, value) : max;
+  }, 0);
 }
 
 function mediaMetadata(duration = 0): NeuralFramesMediaSpec["metadata"] {

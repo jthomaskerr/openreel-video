@@ -1,0 +1,31 @@
+{
+  "servers": {
+    "typescript-language-server": {
+      "command": "typescript-language-server",
+      "args": ["--stdio"],
+      "fileTypes": [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"],
+      "rootMarkers": ["tsconfig.base.json", "pnpm-workspace.yaml", "package.json"],
+      "initOptions": {
+        "preferences": {
+          "importModuleSpecifierPreference": "non-relative",
+          "includeInlayParameterNameHints": "none"
+        }
+      },
+      "settings": {
+        "typescript": {
+          "tsserver": {
+            "log": "off"
+          },
+          "preferences": {
+            "importModuleSpecifierPreference": "non-relative"
+          }
+        },
+        "javascript": {
+          "preferences": {
+            "importModuleSpecifierPreference": "non-relative"
+          }
+        }
+      }
+    }
+  }
+}

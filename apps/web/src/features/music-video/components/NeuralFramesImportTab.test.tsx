@@ -753,6 +753,148 @@ describe("NeuralFramesImportTab metadata import", () => {
     );
   });
 
+  it("uses storyboard duration for Neural Frames director, style, and audio clips", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === "http://localhost:4041/api/import/neuralframes") {
+          return {
+            ok: true,
+            json: async () => ({
+              title: "Duration Fallback Storyboard",
+              shots: [
+                {
+                  id: "shot-1",
+                  label: "Scene 1",
+                  startSeconds: 0,
+                  endSeconds: 12,
+                  prompt: "performance",
+                  model: "nf",
+                  resolution: "720p",
+                  aspectRatio: "16:9",
+                  includeMainAudio: true,
+                  referenceAssetIds: [],
+                  generatedAssetIds: [],
+                  validation: { valid: true, warnings: [], errors: [] },
+                  outputs: [],
+                  selected: false,
+                },
+              ],
+              generatedAssets: [],
+              metadataTracks: [
+                {
+                  id: "track-style",
+                  label: "Style / LoRAs",
+                  kind: "motifs",
+                  visible: true,
+                  locked: false,
+                  blocks: [
+                    {
+                      id: "block-style",
+                      trackId: "track-style",
+                      label: "Dream Pop",
+                      kind: "visual_motif",
+                      startSeconds: 0,
+                      endSeconds: 0,
+                      text: "soft neon haze",
+                      linkedShotIds: [],
+                      linkedGeneratedAssetIds: [],
+                      source: "neuralframes",
+                      importSource: "neuralframes",
+                      importId: "style-1",
+                    },
+                  ],
+                },
+                {
+                  id: "track-director",
+                  label: "Director Notes",
+                  kind: "notes",
+                  visible: true,
+                  locked: false,
+                  blocks: [
+                    {
+                      id: "block-director",
+                      trackId: "track-director",
+                      label: "Storyboard brief",
+                      kind: "note",
+                      startSeconds: 0,
+                      endSeconds: 0,
+                      text: "Shoot like a dream.",
+                      linkedShotIds: [],
+                      linkedGeneratedAssetIds: [],
+                      source: "neuralframes",
+                      importSource: "neuralframes",
+                    },
+                  ],
+                },
+              ],
+              audio: {
+                duration: 0,
+                audioUrl: "main-song.wav",
+                videoIdea: "dream performance",
+              },
+            }),
+          };
+        }
+        return {
+          ok: true,
+          blob: async () => new Blob(["asset-bytes"], { type: "application/octet-stream" }),
+        };
+      }),
+    );
+    const raw = {
+      storyboard_props: {
+        storyboard_prompt: "Shoot like a dream.",
+        scenes: [
+          {
+            id: "scene-1",
+            scene_prompt: "performance",
+            start_time: 0,
+            end_time: 12,
+            status: "complete",
+          },
+        ],
+        characters: [],
+        loras: [
+          {
+            id: "style-1",
+            name: "Dream Pop",
+            training_image_urls: [],
+            visual_style: "soft neon haze",
+          },
+        ],
+      },
+      audio: {
+        trimmed_audio_path: "main-song.wav",
+        audio_analysis: { video_idea: "dream performance" },
+      },
+    };
+
+    const { container } = render(
+      <NeuralFramesImportTab openreelProjectId="project-1" orchestratorUrl="http://localhost:4041" />,
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File([JSON.stringify(raw)], "storyboard.json", {
+      type: "application/json",
+    });
+    Object.defineProperty(file, "text", {
+      value: vi.fn().mockResolvedValue(JSON.stringify(raw)),
+    });
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(storeState.addClip).toHaveBeenCalledTimes(4));
+    const directorTrack = storeState.project!.timeline.tracks.find((track) => track.name === "Director Notes");
+    const styleTrack = storeState.project!.timeline.tracks.find((track) => track.name === "Style / LoRAs");
+    const audioTrack = storeState.project!.timeline.tracks.find((track) => track.name === "Audio");
+    expect(directorTrack?.clips).toHaveLength(1);
+    expect(styleTrack?.clips).toHaveLength(1);
+    expect(audioTrack?.clips).toHaveLength(1);
+    expect(directorTrack?.clips[0]?.duration).toBe(12);
+    expect(styleTrack?.clips[0]?.duration).toBe(12);
+    expect(audioTrack?.clips[0]?.duration).toBe(12);
+  });
+
   it("shows the importer response error instead of a generic load failure", async () => {
     vi.stubGlobal(
       "fetch",
