@@ -4,6 +4,7 @@ import type { ImportError } from "../../../stores/ui-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { useProjectStore } from "../../../stores/project-store";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@openreel/ui";
+import { toast } from "../../../stores/notification-store";
 
 interface Props {
   errors: ImportError[];
@@ -82,15 +83,27 @@ export function ImportErrorsPanel({ errors }: Props) {
   const clearImportErrors = useUIStore((s) => s.clearImportErrors);
   const replaceMediaAsset = useProjectStore((s) => s.replaceMediaAsset);
   const [activeTab, setActiveTab] = useState<string>("all");
-
   const handleLinkFile = useCallback((mediaId: string) => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = "video/*,audio/*,image/*";
     input.onchange = async (event) => {
-      const file = (event.target as HTMLInputElement).files?.[0];
-      if (file) await replaceMediaAsset(mediaId, file);
+      try {
+        const file = (event.target as HTMLInputElement).files?.[0];
+        if (!file) return;
+        const result = await replaceMediaAsset(mediaId, file);
+        if (result.success) {
+          toast.success("File linked", `Replaced with ${file.name}`);
+        } else {
+          toast.error("Link failed", result.error?.message || "Could not replace file");
+        }
+      } catch (err) {
+        toast.error("Link failed", err instanceof Error ? err.message : "Unknown error");
+      } finally {
+        input.remove();
+      }
     };
+    document.body.appendChild(input);
     input.click();
   }, [replaceMediaAsset]);
 

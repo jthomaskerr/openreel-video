@@ -5,6 +5,7 @@ import type { MediaItem } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
+import { toast } from "../../../stores/notification-store";
 import { resolveAssetCategory } from "../asset-category";
 import {
   MetadataEditor,
@@ -194,9 +195,11 @@ function WaveformPreview({ item }: { item: MediaItem }) {
   const [currentTime, setCurrentTime] = useState(0);
 
   useEffect(() => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+
     const container = waveformRef.current;
     if (!container) return;
-
     let objectUrl: string | null = null;
     let url = item.originalUrl ?? null;
     if (item.blob && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
@@ -656,7 +659,6 @@ function AssetInspectorToolbar({ item }: { item: MediaItem }) {
   const replaceMediaAsset = useProjectStore((s) => s.replaceMediaAsset);
   const deleteMediaFn = useProjectStore((s) => s.deleteMedia);
   const setInspectedAsset = useUIStore((s) => s.setInspectedAsset);
-
   const handleReplace = useCallback(() => {
     const input = document.createElement("input");
     input.type = "file";
@@ -666,7 +668,15 @@ function AssetInspectorToolbar({ item }: { item: MediaItem }) {
       try {
         const target = event.target;
         const file = target instanceof HTMLInputElement ? target.files?.[0] : undefined;
-        if (file) await replaceMediaAsset(item.id, file);
+        if (!file) return;
+        const result = await replaceMediaAsset(item.id, file);
+        if (result.success) {
+          toast.success("File replaced", `Replaced with ${file.name}`);
+        } else {
+          toast.error("Replace failed", result.error?.message || "Could not replace file");
+        }
+      } catch (err) {
+        toast.error("Replace failed", err instanceof Error ? err.message : "Unknown error");
       } finally {
         input.remove();
       }

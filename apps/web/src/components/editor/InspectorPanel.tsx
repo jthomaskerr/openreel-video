@@ -113,7 +113,13 @@ export const InspectorPanel: React.FC = () => {
     if (!clip) return null;
     return getMediaItem(clip.mediaId) ?? null;
   }, [getClip, getMediaItem, selectedClipIds, project.modifiedAt]);
-  const effectiveInspectedAsset = inspectedAsset ?? selectedClipMediaItem;
+  // Always derive a fresh reference from the project store so that
+  // replaceMediaAsset (link file) updates are reflected immediately.
+  const effectiveInspectedAsset = useMemo(() => {
+    const base = inspectedAsset ?? selectedClipMediaItem;
+    if (!base) return null;
+    return getMediaItem(base.id) ?? base;
+  }, [inspectedAsset, selectedClipMediaItem, getMediaItem, project.modifiedAt]);
   const importErrors = useUIStore((state) => state.importErrors);
   const pausePlayback = useTimelineStore((state) => state.pause);
   const lockPlayback = useTimelineStore((state) => state.lockPlayback);

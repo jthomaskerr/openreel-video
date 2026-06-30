@@ -1,3 +1,4 @@
+import { toast } from "../../../stores/notification-store";
 import React from "react";
 import {
   Copy,
@@ -126,7 +127,6 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
     await pasteEffects(clip.id);
     onClose?.();
   };
-
   const handleLinkFile = () => {
     const input = document.createElement("input");
     input.type = "file";
@@ -135,8 +135,16 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
     input.onchange = async (event) => {
       try {
         const file = (event.target as HTMLInputElement).files?.[0];
-        if (file) await replaceMediaAsset(clip.mediaId, file);
-        onClose?.();
+        if (!file) return;
+        const result = await replaceMediaAsset(clip.mediaId, file);
+        if (result.success) {
+          toast.success("File linked", `Replaced with ${file.name}`);
+          onClose?.();
+        } else {
+          toast.error("Link failed", result.error?.message || "Could not replace file");
+        }
+      } catch (err) {
+        toast.error("Link failed", err instanceof Error ? err.message : "Unknown error");
       } finally {
         input.remove();
       }

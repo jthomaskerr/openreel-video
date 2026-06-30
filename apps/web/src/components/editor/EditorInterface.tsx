@@ -10,6 +10,7 @@ import { AudioMixer } from "../audio-mixer";
 import { KeyboardShortcutsOverlay } from "./KeyboardShortcutsOverlay";
 import { PanelErrorBoundary } from "../ErrorBoundary";
 import { setResolveActionHandler, problemBus, type ResolveActionId, type Problem } from "../../stores/problem-store";
+import { toast } from "../../stores/notification-store";
 import { SpotlightTour, MoGraphTour } from "./tour";
 import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
@@ -220,9 +221,22 @@ export const EditorInterface: React.FC = () => {
             input.type = "file";
             input.accept = "video/*,audio/*,image/*";
             input.onchange = async (event) => {
-              const file = (event.target as HTMLInputElement).files?.[0];
-              if (file) await replaceMediaAsset(problem.label, file);
-              problemBus.resolve(problem.id);
+              try {
+                const file = (event.target as HTMLInputElement).files?.[0];
+                if (file) {
+                  const result = await replaceMediaAsset(problem.label, file);
+                  if (result.success) {
+                    toast.success("File linked", `Replaced with ${file.name}`);
+                    problemBus.resolve(problem.id);
+                  } else {
+                    toast.error("Link failed", result.error?.message || "Could not replace file");
+                  }
+                }
+              } catch (err) {
+                toast.error("Link failed", err instanceof Error ? err.message : "Unknown error");
+              } finally {
+                input.remove();
+              }
             };
             input.click();
           }

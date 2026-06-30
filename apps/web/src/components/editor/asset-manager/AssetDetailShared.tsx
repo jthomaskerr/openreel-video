@@ -1,8 +1,9 @@
-import { useState, useCallback, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useState, useCallback, type KeyboardEvent, type ReactNode } from "react";
 import type { MediaItem } from "@openreel/core";
 import { Input, Button, Label } from "@openreel/ui";
 import { RefreshCw, X, Check, ImageIcon, Film, Music, Download, Trash2 } from "lucide-react";
 import { useProjectStore } from "../../../stores/project-store";
+import { toast } from "../../../stores/notification-store";
 
 // ── Metadata Editor ────────────────────────────────────────────────
 
@@ -74,7 +75,15 @@ export function MetadataEditor({ item, onSaved }: MetadataEditorProps) {
     input.onchange = async (event) => {
       try {
         const file = (event.target as HTMLInputElement).files?.[0];
-        if (file) await replaceMediaAsset(freshItem.id, file);
+        if (!file) return;
+        const result = await replaceMediaAsset(freshItem.id, file);
+        if (result.success) {
+          toast.success("File linked", `Replaced with ${file.name}`);
+        } else {
+          toast.error("Link failed", result.error?.message || "Could not replace file");
+        }
+      } catch (err) {
+        toast.error("Link failed", err instanceof Error ? err.message : "Unknown error");
       } finally {
         input.remove();
       }
@@ -227,9 +236,10 @@ function FileInfoRow({ label, value }: { label: string; value: string }) {
 // ── Type-Specific Section ───────────────────────────────────────────
 
 export function TypeSection({ title, children }: { title: string; children: ReactNode }) {
+  const headingId = useId();
   return (
-    <section className="rounded-lg border border-border bg-background-secondary p-3 space-y-1">
-      <Label className="text-[11px] text-text-muted">{title}</Label>
+    <section aria-labelledby={headingId} className="space-y-1">
+      <h3 id={headingId} className="text-[11px] font-medium text-text-muted uppercase tracking-wider">{title}</h3>
       {children}
     </section>
   );
