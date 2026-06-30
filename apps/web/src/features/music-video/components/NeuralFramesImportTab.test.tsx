@@ -307,12 +307,13 @@ describe("NeuralFramesImportTab metadata import", () => {
 
     fireEvent.change(input, { target: { files: [file] } });
 
-    await waitFor(() => expect(storeState.addClip).toHaveBeenCalledTimes(3));
-    expect(toast.success).toHaveBeenCalledWith("Import complete", expect.stringContaining("3 blocks across 3 tracks"));
+    await waitFor(() => expect(storeState.addClip).toHaveBeenCalledTimes(5));
+    expect(toast.success).toHaveBeenCalledWith("Import complete", expect.stringContaining("5 blocks across 4 tracks · 0 images · 0 audio"), 10000);
     expect(storeState.renameProject).toHaveBeenCalledWith("Imported Storyboard");
 
+    // 1 character media item + 2 metadata media items (via addTimelineClip); scene clips use addPlaceholderMedia
     expect(storeState.addGeneratedMedia).toHaveBeenCalledTimes(3);
-    expect(storeState.addClip).toHaveBeenCalledTimes(3);
+    expect(storeState.addClip).toHaveBeenCalledTimes(5);
     for (const call of storeState.addClip.mock.calls) {
       const mediaId = call[1];
       expect(mediaId).toEqual(expect.any(String));
@@ -451,7 +452,7 @@ describe("NeuralFramesImportTab metadata import", () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => expect(storeState.addPlaceholderMedia).toHaveBeenCalledTimes(2));
-    expect(toast.success).toHaveBeenCalledWith("Import complete", expect.stringContaining("0 blocks across 0 tracks · 2 images"));
+    expect(toast.success).toHaveBeenCalledWith("Import complete", expect.stringContaining("0 blocks across 0 tracks · 2 images · 0 audio"), 10000);
 
     expect(musicVideoStoreState.applyNeuralFramesImport).toHaveBeenCalledWith(
       "project-1",
@@ -490,26 +491,213 @@ describe("NeuralFramesImportTab metadata import", () => {
     );
   });
 
+  it("imports character and style image assets with generation metadata", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url === "http://localhost:4041/api/import/neuralframes") {
+          return {
+            ok: true,
+            json: async () => ({
+              title: "Asset Storyboard",
+              shots: [],
+              generatedAssets: [],
+              metadataTracks: [
+                {
+                  id: "track-characters",
+                  label: "Lead",
+                  kind: "continuity",
+                  visible: true,
+                  locked: false,
+                  blocks: [
+                    {
+                      id: "block-character",
+                      trackId: "track-characters",
+                      label: "Lead",
+                      kind: "continuity_note",
+                      startSeconds: 0,
+                      endSeconds: 4,
+                      text: "Lead character",
+                      linkedShotIds: [],
+                      linkedGeneratedAssetIds: [],
+                      source: "neuralframes",
+                      importSource: "neuralframes",
+                      importId: "char-1",
+                    },
+                  ],
+                },
+                {
+                  id: "track-styles",
+                  label: "Style / LoRAs",
+                  kind: "motifs",
+                  visible: true,
+                  locked: false,
+                  blocks: [
+                    {
+                      id: "block-style",
+                      trackId: "track-styles",
+                      label: "Dream Pop",
+                      kind: "visual_motif",
+                      startSeconds: 0,
+                      endSeconds: 4,
+                      text: "Dream Pop",
+                      linkedShotIds: [],
+                      linkedGeneratedAssetIds: [],
+                      source: "neuralframes",
+                      importSource: "neuralframes",
+                      importId: "style-1",
+                    },
+                  ],
+                },
+              ],
+            }),
+          };
+        }
+        return {
+          ok: true,
+          blob: async () => new Blob([url], { type: "image/png" }),
+        };
+      }),
+    );
+    const raw = {
+      storyboard_props: {
+        storyboard_prompt: "brief",
+        model: "storyboard-model",
+        scenes: [],
+        characters: [
+          {
+            id: "char-1",
+            name: "Lead",
+            image_job: {
+              assets: JSON.stringify(["http://localhost/lead-a.png", "http://localhost/lead-b.png"]),
+            },
+            physical_identity: "silver hair",
+            reference_wardrobe: "red jacket",
+            description: "confident vocalist",
+            reference_phrase: "lead singer portrait",
+          },
+        ],
+        loras: [
+          {
+            id: "style-1",
+            name: "Dream Pop",
+            training_image_urls: ["http://localhost/style-a.png", "http://localhost/style-b.png"],
+            visual_style: "soft neon haze",
+            trigger_word: "dream-pop",
+            base_model: "flux-dev",
+          },
+        ],
+      },
+    };
+
+    const { container } = render(
+      <NeuralFramesImportTab openreelProjectId="project-1" orchestratorUrl="http://localhost:4041" />,
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File([JSON.stringify(raw)], "storyboard.json", {
+      type: "application/json",
+    });
+    Object.defineProperty(file, "text", {
+      value: vi.fn().mockResolvedValue(JSON.stringify(raw)),
+    });
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => expect(storeState.addClip).toHaveBeenCalledTimes(2));
+
+    expect(storeState.addGeneratedMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "character: Lead",
+        thumbnailUrl: "http://localhost/lead-a.png",
+        generationMeta: expect.objectContaining({
+          provider: "neuralframes",
+          model: "storyboard-model",
+          prompt: "lead singer portrait",
+          inputs: expect.objectContaining({
+            physical_identity: "silver hair",
+            reference_wardrobe: "red jacket",
+            description: "confident vocalist",
+            reference_phrase: "lead singer portrait",
+          }),
+        }),
+      }),
+      expect.any(Blob),
+    );
+    expect(storeState.addGeneratedMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "style: Dream Pop",
+        description: "soft neon haze",
+        thumbnailUrl: "http://localhost/style-a.png",
+        generationMeta: expect.objectContaining({
+          provider: "neuralframes",
+          model: "flux-dev",
+          prompt: "soft neon haze",
+          inputs: expect.objectContaining({
+            visual_style: "soft neon haze",
+            trigger_word: "dream-pop",
+            base_model: "flux-dev",
+          }),
+        }),
+      }),
+      expect.any(Blob),
+    );
+    expect(storeState.addPlaceholderMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thumbnailUrl: "http://localhost/lead-b.png",
+        group: "Generated",
+        generationMeta: expect.objectContaining({
+          inputs: expect.objectContaining({ reference_phrase: "lead singer portrait" }),
+        }),
+      }),
+    );
+    expect(storeState.addPlaceholderMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        thumbnailUrl: "http://localhost/style-b.png",
+        description: "soft neon haze",
+        group: "Reference Images",
+        generationMeta: expect.objectContaining({
+          inputs: expect.objectContaining({ trigger_word: "dream-pop" }),
+        }),
+      }),
+    );
+  });
+
   it("imports storyboard audio as a relinkable placeholder clip when the file is not present", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        json: async () => ({
-          title: "Audio Storyboard",
-          shots: [],
-          generatedAssets: [],
-          metadataTracks: [],
-          audio: { duration: 42, bpm: 88, audioUrl: "main-song.wav" },
-        }),
-      })),
+      vi.fn(async (url: string) => {
+        if (url === "http://localhost:4041/api/import/neuralframes") {
+          return {
+            ok: true,
+            json: async () => ({
+              title: "Audio Storyboard",
+              shots: [],
+              generatedAssets: [],
+              metadataTracks: [],
+              audio: {
+                duration: 42,
+                bpm: 88,
+                key: "C",
+                scale: "minor",
+                hasLyrics: true,
+                videoIdea: "nocturnal performance",
+                audioUrl: "main-song.wav",
+              },
+            }),
+          };
+        }
+        return {
+          ok: true,
+          blob: async () => new Blob(["audio-bytes"], { type: "audio/wav" }),
+        };
+      }),
     );
     const raw = {
       storyboard_props: { storyboard_prompt: "brief", scenes: [], characters: [], loras: [] },
       audio: {
         duration: 42,
         trimmed_audio_path: "main-song.wav",
-        audio_analysis: { bpm: 88 },
+        audio_analysis: { bpm: 88, key: "C", scale: "minor", has_lyrics: true, video_idea: "nocturnal performance" },
       },
     };
     const { container } = render(
@@ -526,7 +714,7 @@ describe("NeuralFramesImportTab metadata import", () => {
     fireEvent.change(input, { target: { files: [file] } });
 
     await waitFor(() => expect(storeState.addClip).toHaveBeenCalled());
-    expect(toast.success).toHaveBeenCalledWith("Import complete", expect.stringContaining("0 blocks across 0 tracks · 0 images · 1 audio"));
+    expect(toast.success).toHaveBeenCalledWith("Import complete", expect.stringContaining("0 blocks across 1 track · 0 images · 1 audio"), 10000);
     expect(storeState.renameProject).toHaveBeenCalledWith("Audio Storyboard");
 
     expect(storeState.addPlaceholderMedia).toHaveBeenCalledWith(
@@ -536,7 +724,15 @@ describe("NeuralFramesImportTab metadata import", () => {
         type: "audio",
         isPlaceholder: true,
         sourceFile: expect.objectContaining({ name: "main-song.wav" }),
-        metadata: expect.objectContaining({ duration: 42 }),
+        originalUrl: "main-song.wav",
+        description: "nocturnal performance",
+        metadata: expect.objectContaining({
+          duration: 42,
+          bpm: 88,
+          key: "C",
+          scale: "minor",
+          has_lyrics: true,
+        }),
       }),
     );
     expect(storeState.addClip).toHaveBeenCalledWith(
@@ -544,6 +740,50 @@ describe("NeuralFramesImportTab metadata import", () => {
       expect.stringMatching(/^audio-[0-9a-f-]{36}$/),
       0,
       expect.objectContaining({ duration: 42 }),
+    );
+    const audioTrack = storeState.project!.timeline.tracks.find((track) => track.type === "audio");
+    expect(audioTrack?.name).toBe("Audio");
+    expect(audioTrack?.clips).toHaveLength(1);
+    await waitFor(() =>
+      expect(storeState.replacePlaceholderMedia).toHaveBeenCalledWith(
+        expect.stringMatching(/^audio-[0-9a-f-]{36}$/),
+        expect.any(Blob),
+        "main-song.wav",
+      ),
+    );
+  });
+
+  it("shows the importer response error instead of a generic load failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 500,
+        text: async () => "NF parser exploded: image_job.assets must be an array",
+      })),
+    );
+    const raw = {
+      storyboard_props: { storyboard_prompt: "brief", scenes: [], characters: [], loras: [] },
+    };
+
+    const { container } = render(
+      <NeuralFramesImportTab openreelProjectId="project-1" orchestratorUrl="http://localhost:4041" />,
+    );
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File([JSON.stringify(raw)], "storyboard.json", {
+      type: "application/json",
+    });
+    Object.defineProperty(file, "text", {
+      value: vi.fn().mockResolvedValue(JSON.stringify(raw)),
+    });
+
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith(
+        "Import failed",
+        "NF parser exploded: image_job.assets must be an array",
+      ),
     );
   });
 });

@@ -1,13 +1,20 @@
-import { useMemo, useState, useCallback, memo } from "react";
+import { useMemo, useState, useCallback, forwardRef, useImperativeHandle } from "react";
 import type { MediaItem } from "@openreel/core";
 import {
   Collapsible,
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@openreel/ui";
-import { ChevronDown, ChevronRight, Upload } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 type MediaViewMode = "large" | "small" | "list";
+
+export type GroupBy = "none" | "tag" | "type" | "status";
+
+export interface AssetBucketsHandle {
+  expandAll: () => void;
+  collapseAll: () => void;
+}
 
 interface BucketDef {
   id: string;
@@ -19,12 +26,12 @@ interface AssetBucketsProps {
   items: MediaItem[];
   viewMode: MediaViewMode;
   searchQuery: string;
+  groupBy: GroupBy;
   selectedItemIds: ReadonlySet<string>;
   onGenerateRef?: React.MutableRefObject<(item: MediaItem) => void>;
   onRetryKieAIRef?: React.MutableRefObject<(item: MediaItem) => void>;
   onManageRef?: React.MutableRefObject<(item: MediaItem) => void>;
   onRenameRef?: React.MutableRefObject<(item: MediaItem) => void>;
-  onAddMedia: () => void;
   /** Component that renders a single media item row */
   MediaRow: React.ComponentType<{
     item: MediaItem;
@@ -81,10 +88,17 @@ function getMetadataKind(item: MediaItem): string | null {
   }
 }
 
+function getStatusLabel(item: MediaItem): string {
+  if (item.kieaiError) return "Error";
+  if (item.isPending) return "Pending";
+  if (item.isPlaceholder) return "Placeholder";
+  return "Normal";
+}
+
 /**
- * Computes buckets from items — "All", by type, by tag, by group.
+ * Computes buckets from items based on groupBy mode.
  */
-function computeBuckets(items: MediaItem[], searchQuery: string): BucketDef[] {
+function computeBuckets(items: MediaItem[], searchQuery: string, groupBy: GroupBy): BucketDef[] {
   const query = searchQuery.toLowerCase();
 
   const filtered = query
@@ -100,114 +114,91 @@ function computeBuckets(items: MediaItem[], searchQuery: string): BucketDef[] {
 
   if (filtered.length === 0) return [];
 
-  const buckets: BucketDef[] = [];
+  switch (groupBy) {
+    case "none":
+      return [{ id: "all", label: "All Media", items: filtered }];
 
-  // All
-  buckets.push({ id: "all", label: "All Assets", items: filtered });
+    case "tag": {
+      const tagSet = new Set<string>();
+      for (const item of filtered) {
+        for (const tag of item.tags ?? []) tagSet.add(tag);
+      }
+      const buckets: BucketDef[] = [];
+      // Untagged
+      const untagged = filtered.filter((i) => !i.tags?.length);
+      if (untagged.length > 0) {
+        buckets.push({ id: "tag-untagged", label: "Untagged", items: untagged });
+      }
+      for (const tag of [...tagSet].sort()) {
+        const tagItems = filtered.filter((i) => i.tags?.includes(tag));
+        if (tagItems.length > 0) {
+          buckets.push({ id: `tag-${tag}`, label: `#${tag}`, items: tagItems });
+        }
+      }
+      return buckets;
+    }
 
-  // By semantic category. Metadata clips are backed by image MediaItems; keep
-  // them out of the real Images bucket.
-  for (const type of ["video", "audio", "image"] as const) {
-    const typeItems = filtered.filter((item) => {
-      const category = getAssetCategory(item);
-      return category.type === "media" && category.mediaType === type;
-    });
-    if (typeItems.length > 0) {
-      const labels: Record<string, string> = { video: "Videos", audio: "Audio", image: "Images" };
-      buckets.push({ id: `type-${type}`, label: labels[type], items: typeItems });
+    case "type": {
+      const typeLabels: Record<string, string> = { video: "Videos", audio: "Audio", image: "Images" };
+      const buckets: BucketDef[] = [];
+      for (const type of ["video", "audio", "image"] as const) {
+        const typeItems = filtered.filter((item) => {
+          const category = getAssetCategory(item);
+          return category.type === "media" && category.mediaType === type;
+        });
+        if (typeItems.length > 0) {
+          buckets.push({ id: `type-${type}`, label: typeLabels[type], items: typeItems });
+        }
+      }
+      // Metadata-backed items (notes, characters, etc.)
+      const metadataBuckets = new Map<string, BucketDef>();
+      for (const item of filtered) {
+        const category = getAssetCategory(item);
+        if (category.type !== "metadata") continue;
+        const id = `metadata-${category.kind}`;
+        const existing = metadataBuckets.get(id);
+        if (existing) {
+          existing.items.push(item);
+        } else {
+          metadataBuckets.set(id, { id, label: category.label, items: [item] });
+        }
+      }
+      buckets.push(...[...metadataBuckets.values()].sort((a, b) => a.label.localeCompare(b.label)));
+      return buckets;
+    }
+
+    case "status": {
+      const statusOrder = ["Normal", "Pending", "Error", "Placeholder"];
+      return statusOrder
+        .map((status) => {
+          const statusItems = filtered.filter((item) => getStatusLabel(item) === status);
+          return { id: `status-${status.toLowerCase()}`, label: status, items: statusItems };
+        })
+        .filter((b) => b.items.length > 0);
     }
   }
-
-  const metadataBuckets = new Map<string, BucketDef>();
-  for (const item of filtered) {
-    const category = getAssetCategory(item);
-    if (category.type !== "metadata") continue;
-    const id = `metadata-${category.kind}`;
-    const existing = metadataBuckets.get(id);
-    if (existing) {
-      existing.items.push(item);
-    } else {
-      metadataBuckets.set(id, { id, label: category.label, items: [item] });
-    }
-  }
-  buckets.push(...[...metadataBuckets.values()].sort((a, b) => a.label.localeCompare(b.label)));
-
-  // By tag
-  const tagSet = new Set<string>();
-  for (const item of filtered) {
-    for (const tag of item.tags ?? []) tagSet.add(tag);
-  }
-  for (const tag of [...tagSet].sort()) {
-    const tagItems = filtered.filter((i) => i.tags?.includes(tag));
-    if (tagItems.length > 0) {
-      buckets.push({ id: `tag-${tag}`, label: `#${tag}`, items: tagItems });
-    }
-  }
-
-  // By group
-  const groupSet = new Set<string>();
-  for (const item of filtered) {
-    if (item.group) groupSet.add(item.group);
-  }
-  for (const group of [...groupSet].sort()) {
-    const groupItems = filtered.filter((i) => i.group === group);
-    if (groupItems.length > 0) {
-      buckets.push({ id: `group-${group}`, label: group, items: groupItems });
-    }
-  }
-
-  return buckets;
 }
-
-function AddMediaButton({ viewMode, onClick }: { viewMode: MediaViewMode; onClick: () => void }) {
-  if (viewMode === "list") {
-    return (
-      <button
-        onClick={onClick}
-        className="flex items-center gap-3 px-2 py-1.5 rounded-lg border-2 border-dashed border-border hover:border-text-secondary cursor-pointer transition-all group"
-      >
-        <div className="w-12 h-8 rounded bg-background-tertiary flex items-center justify-center flex-shrink-0">
-          <Upload size={14} className="text-text-muted group-hover:text-text-secondary transition-colors" />
-        </div>
-        <span className="text-[11px] text-text-muted group-hover:text-text-secondary transition-colors font-medium">Add media</span>
-      </button>
-    );
-  }
-  return (
-    <div className="flex flex-col">
-      <button
-        onClick={onClick}
-        className="aspect-video bg-background-tertiary rounded-lg border-2 border-dashed border-border hover:border-text-secondary relative flex items-center justify-center cursor-pointer transition-all overflow-hidden shadow-sm group"
-      >
-        <div className="flex flex-col items-center gap-1.5">
-          <Upload size={viewMode === "small" ? 16 : 20} className="text-text-muted group-hover:text-text-secondary transition-colors" />
-          <span className="text-[10px] text-text-muted group-hover:text-text-secondary transition-colors">Add media</span>
-        </div>
-      </button>
-    </div>
-  );
-}
-
-// Memoize AddMediaButton to avoid re-creating on every render
-const MemoAddMediaButton = memo(AddMediaButton);
 
 /**
  * Renders media items in collapsible buckets. Multiple buckets expandable simultaneously.
  * Receives data as stable props (primitives + refs) — no render-props that churn identity.
  */
-export function AssetBuckets({
+export const AssetBuckets = forwardRef<AssetBucketsHandle, AssetBucketsProps>(function AssetBuckets({
   items,
   viewMode,
   searchQuery,
+  groupBy,
   selectedItemIds,
   onGenerateRef,
   onRetryKieAIRef,
   onManageRef,
   onRenameRef,
-  onAddMedia,
   MediaRow,
-}: AssetBucketsProps) {
-  const buckets = useMemo(() => computeBuckets(items, searchQuery), [items, searchQuery]);
+}, ref) {
+  const buckets = useMemo(
+    () => computeBuckets(items, searchQuery, groupBy),
+    [items, searchQuery, groupBy],
+  );
 
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
 
@@ -220,7 +211,17 @@ export function AssetBuckets({
     });
   }, []);
 
+  const expandAll = useCallback(() => setCollapsed(new Set()), []);
+  const collapseAll = useCallback(() => {
+    setCollapsed(new Set(buckets.map((b) => b.id)));
+  }, [buckets]);
+
+  useImperativeHandle(ref, () => ({ expandAll, collapseAll }), [expandAll, collapseAll]);
+
   if (buckets.length === 0) return null;
+
+  // Don't render bucket chrome for "none" groupBy with a single bucket
+  const flatMode = groupBy === "none" && buckets.length === 1;
 
   const gridClass =
     viewMode === "list"
@@ -228,6 +229,25 @@ export function AssetBuckets({
       : viewMode === "small"
         ? "grid grid-cols-3 gap-2"
         : "grid grid-cols-2 gap-3";
+
+  if (flatMode) {
+    return (
+      <div className={gridClass}>
+        {buckets[0].items.map((item) => (
+          <MediaRow
+            key={item.id}
+            item={item}
+            viewMode={viewMode}
+            isSelected={selectedItemIds.has(item.id)}
+            onGenerateRef={onGenerateRef}
+            onRetryKieAIRef={onRetryKieAIRef}
+            onManageRef={onManageRef}
+            onRenameRef={onRenameRef}
+          />
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
@@ -264,7 +284,6 @@ export function AssetBuckets({
                         onRenameRef={onRenameRef}
                       />
                     ))}
-                    {bucket.id === "all" && <MemoAddMediaButton viewMode={viewMode} onClick={onAddMedia} />}
                   </div>
                 </div>
               </CollapsibleContent>
@@ -274,4 +293,4 @@ export function AssetBuckets({
       })}
     </div>
   );
-}
+});

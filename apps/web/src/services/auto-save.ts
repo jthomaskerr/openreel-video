@@ -51,6 +51,7 @@ class AutoSaveManager {
 
   private pendingProject: Project | null = null;
   private isDirty: boolean = false;
+  private getProjectFn: (() => Project) | null = null;
 
   constructor(config: Partial<AutoSaveConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -108,13 +109,15 @@ class AutoSaveManager {
 
     this.stop(); // Stop any existing auto-save
 
+    this.getProjectFn = getProject;
+
     // Initial save
     this.pendingProject = getProject();
     this.saveIfDirty();
 
     // Set up periodic saves
     this.intervalId = setInterval(() => {
-      this.pendingProject = getProject();
+      this.pendingProject = this.getProjectFn!();
       this.saveIfDirty();
     }, this.config.interval);
   }
@@ -128,6 +131,7 @@ class AutoSaveManager {
       clearTimeout(this.debounceTimeoutId);
       this.debounceTimeoutId = null;
     }
+    this.getProjectFn = null;
   }
 
   markDirty(): void {
@@ -139,6 +143,11 @@ class AutoSaveManager {
     }
 
     this.debounceTimeoutId = setTimeout(() => {
+      // Capture fresh project state; pendingProject may be stale
+      // (from start() or the last interval) by the time this fires.
+      if (this.getProjectFn) {
+        this.pendingProject = this.getProjectFn();
+      }
       this.saveIfDirty();
     }, this.config.debounceTime);
   }

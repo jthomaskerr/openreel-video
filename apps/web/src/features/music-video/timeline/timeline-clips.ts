@@ -22,6 +22,10 @@ export interface AddTimelineClipInput {
   duration: number;
   metadata?: Record<string, unknown>;
   thumbnailUrl?: string;
+  description?: string;
+  group?: string;
+  tags?: string[];
+  generationMeta?: MediaItem["generationMeta"];
   /** Track type to create/find. Defaults to "metadata". Scenes should use "video". */
   trackType?: Track["type"];
 }
@@ -50,6 +54,10 @@ export async function addTimelineClip(
       color: input.color,
       duration: input.duration,
       thumbnailUrl: input.thumbnailUrl,
+      description: input.description,
+      group: input.group,
+      tags: input.tags,
+      generationMeta: input.generationMeta,
     });
 
     const mediaResult = await store.addGeneratedMedia(metadataMedia.item, metadataMedia.blob);

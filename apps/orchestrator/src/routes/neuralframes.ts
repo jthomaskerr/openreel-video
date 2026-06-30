@@ -62,8 +62,9 @@ neuralframesRouter.post("/", async (req, res) => {
     // Using a Set so each URL is downloaded exactly once.
     const remoteUrls = new Set<string>();
 
-    for (const asset of result.generatedAssets) {
-      if (asset.outputPath?.startsWith("http")) remoteUrls.add(asset.outputPath);
+    // Scene reference preview images (scene_image_url)
+    for (const shot of result.shots) {
+      if (shot.referenceImageUrl?.startsWith("http")) remoteUrls.add(shot.referenceImageUrl);
     }
     for (const track of result.metadataTracks) {
       for (const block of track.blocks) {
@@ -86,7 +87,6 @@ neuralframesRouter.post("/", async (req, res) => {
     if (raw.audio?.primary_audio_artwork_image_url?.startsWith("http"))
       remoteUrls.add(raw.audio.primary_audio_artwork_image_url);
 
-    // Download all remote URLs and build the original→local rewrite map.
     const remoteUrlMap: Record<string, string> = {};
     await Promise.all(
       Array.from(remoteUrls).map(async (url) => {
@@ -98,12 +98,13 @@ neuralframesRouter.post("/", async (req, res) => {
       }),
     );
 
-    // Rewrite all URL references inside the result.
-    for (const asset of result.generatedAssets) {
-      if (asset.outputPath && remoteUrlMap[asset.outputPath]) {
-        asset.outputPath = remoteUrlMap[asset.outputPath];
+    // Rewrite shot.referenceImageUrl
+    for (const shot of result.shots) {
+      if (shot.referenceImageUrl && remoteUrlMap[shot.referenceImageUrl]) {
+        shot.referenceImageUrl = remoteUrlMap[shot.referenceImageUrl];
       }
     }
+    // Rewrite block thumbnailUrls
     for (const track of result.metadataTracks) {
       for (const block of track.blocks) {
         if (block.thumbnailUrl && remoteUrlMap[block.thumbnailUrl]) {

@@ -2,7 +2,9 @@ import { DEFAULT_IMAGE_MODEL } from "./types.js";
 import type {
   GeneratedAsset,
   MetadataBlock,
+  NeuralFramesCharacter,
   NeuralFramesImportResult,
+  NeuralFramesLora,
   NeuralFramesStoryboard,
   StoryboardShot,
 } from "./types.js";
@@ -25,6 +27,11 @@ export interface NeuralFramesMediaSpec {
     sampleRate: number;
     channels: number;
     fileSize: number;
+    bpm?: number;
+    key?: string;
+    scale?: string;
+    has_lyrics?: boolean;
+    audioTrackCount?: number;
   };
   thumbnailUrl: string | null;
   originalUrl?: string;
@@ -35,16 +42,18 @@ export interface NeuralFramesMediaSpec {
   assetGroupId?: string;
   group?: string;
   tags?: string[];
-  generationMeta?: {
-    provider: string;
-    model: string;
-    prompt?: string;
-    negativePrompt?: string;
-    inputs?: Record<string, unknown>;
-    jobId?: string;
-    status?: string;
-  };
+  generationMeta?: NeuralFramesGenerationMeta;
   sourceFile: { name: string; size: number; lastModified: number };
+}
+
+export interface NeuralFramesGenerationMeta {
+  provider: string;
+  model: string;
+  prompt?: string;
+  negativePrompt?: string;
+  inputs?: Record<string, unknown>;
+  jobId?: string;
+  status?: string;
 }
 
 export interface SceneClipSpec {
@@ -65,7 +74,25 @@ export interface MetadataClipSpec {
   duration: number;
   trackType: "video" | "metadata";
   thumbnailUrl?: string;
+  description?: string;
+  generationMeta?: NeuralFramesGenerationMeta;
   metadata: Record<string, unknown>;
+}
+
+/** One media item per character, reused for every per-scene clip on that character's track. */
+export interface CharacterTrackSpec {
+  /** Track name = character name */
+  trackName: string;
+  /** Single media item shared across all clips on this track */
+  mediaSpec: NeuralFramesMediaSpec;
+  /** The resolved thumbnail URL (character reference image) */
+  thumbnailUrl?: string;
+  /** One entry per scene the character appears in */
+  clips: Array<{
+    startSeconds: number;
+    duration: number;
+    metadata: Record<string, unknown>;
+  }>;
 }
 
 export interface AudioClipSpec {
@@ -75,13 +102,21 @@ export interface AudioClipSpec {
     sourceFile: { name: string; size: number; lastModified: number };
     importSource: "neuralframes";
     kind: "audio";
+    bpm?: number;
+    key?: string;
+    scale?: string;
+    has_lyrics?: boolean;
+    videoIdea?: string;
   };
 }
 
 export interface NeuralFramesImportPlan {
   sceneClips: SceneClipSpec[];
   orphanedAssets: NeuralFramesMediaSpec[];
+  /** Non-character metadata clips (LoRA, notes, beats, etc.) */
   metadataClips: MetadataClipSpec[];
+  /** One entry per character — each holds a single media asset reused for N scene clips */
+  characterTracks: CharacterTrackSpec[];
   referenceImages: NeuralFramesMediaSpec[];
   audioClip: AudioClipSpec | null;
 }
@@ -90,72 +125,138 @@ export function buildImportPlan(
   result: NeuralFramesImportResult,
   raw: NeuralFramesStoryboard,
 ): NeuralFramesImportPlan {
-  const assetById = new Map(result.generatedAssets.map((asset) => [asset.id, asset] as const));
-  const placedAssetIds = new Set<string>();
   const resolveUrl = (url: string) => result.remoteUrlMap?.[url] ?? url;
   const referenceModel = raw.storyboard_props?.model ?? DEFAULT_IMAGE_MODEL;
 
-  const sceneClips: SceneClipSpec[] = [];
-  for (const shot of result.shots) {
+  // ── Scene clips (shots are unrealized — no generatedAssetIds) ────────────
+  // referenceImageUrl is a preview only, NOT a generated output.
+  const sceneClips: SceneClipSpec[] = result.shots.map((shot) => {
     const duration = clampDuration(shot.startSeconds, shot.endSeconds);
-    for (const assetId of shot.generatedAssetIds ?? []) {
-      const asset = assetById.get(assetId);
-      if (!asset) continue;
-      sceneClips.push({
-        mediaSpec: buildGeneratedMediaSpec(result, asset),
-        trackName: "Neural Frames Scenes",
-        startSeconds: shot.startSeconds,
-        duration,
-        clipMetadata: buildSceneClipMetadata(shot, asset),
-        fetchUrl: asset.outputPath ?? null,
-      });
-      placedAssetIds.add(assetId);
-    }
-  }
+    const thumbUrl = shot.referenceImageUrl ? resolveUrl(shot.referenceImageUrl) : null;
+    return {
+      mediaSpec: buildUnrealizedSceneMediaSpec(shot, thumbUrl),
+      trackName: "Neural Frames Scenes",
+      startSeconds: shot.startSeconds,
+      duration,
+      clipMetadata: buildSceneClipMetadata(shot, thumbUrl),
+      fetchUrl: null,
+    };
+  });
 
-  const orphanedAssets = result.generatedAssets
-    .filter((asset) => !placedAssetIds.has(asset.id))
-    .map((asset) => buildGeneratedMediaSpec(result, asset));
+  // Orphaned generated assets (empty for normal NF imports; kept for compatibility)
+  const orphanedAssets = result.generatedAssets.map((asset) =>
+    buildGeneratedMediaSpec(result, asset),
+  );
 
+  // ── Separate character tracks (continuity_note blocks) from other tracks ──
+  const characterTracks: CharacterTrackSpec[] = [];
   const metadataClips: MetadataClipSpec[] = [];
+
   for (const track of result.metadataTracks) {
-    for (const block of track.blocks) {
-      metadataClips.push({
+    const isCharacterTrack =
+      track.blocks.length > 0 && track.blocks.every((b) => b.kind === "continuity_note");
+
+    if (isCharacterTrack) {
+      const firstBlock = track.blocks[0]!;
+      const character = findCharacter(raw, firstBlock.importId);
+      const imageUrls = characterImageUrls(character, resolveUrl);
+      const thumbUrl = firstBlock.thumbnailUrl ? resolveUrl(firstBlock.thumbnailUrl) : imageUrls[0];
+      const generationMeta = buildCharacterGenerationMeta(
+        character,
+        track.label,
+        imageUrls,
+        referenceModel,
+        firstBlock.id,
+        thumbUrl ? "realized" : "unrealized",
+      );
+      characterTracks.push({
         trackName: track.label,
-        kind: blockKindToClipKind(block.kind),
-        label: block.label,
-        color: block.color ?? "#94a3b8",
-        startSeconds: block.startSeconds,
-        duration: clampDuration(block.startSeconds, block.endSeconds),
-        trackType: track.kind === "sections" ? "video" : "metadata",
-        thumbnailUrl: block.thumbnailUrl ? resolveUrl(block.thumbnailUrl) : undefined,
-        metadata: buildBlockMetadata(block, result, raw),
+        thumbnailUrl: thumbUrl,
+        mediaSpec: buildCharacterMediaSpec(track.label, thumbUrl, generationMeta, character),
+        clips: track.blocks.map((block) => ({
+          startSeconds: block.startSeconds,
+          duration: clampDuration(block.startSeconds, block.endSeconds),
+          metadata: buildBlockMetadata(block, result, raw),
+        })),
       });
+    } else {
+      for (const block of track.blocks) {
+        const lora = block.kind === "visual_motif" ? findLora(raw, block.importId) : undefined;
+        const loraUrls = lora ? loraTrainingImageUrls(lora, resolveUrl) : [];
+        const metadata = buildBlockMetadata(block, result, raw);
+        metadataClips.push({
+          trackName: track.label,
+          kind: blockKindToClipKind(block.kind),
+          label: block.label,
+          color: block.color ?? "#94a3b8",
+          startSeconds: block.startSeconds,
+          duration: clampDuration(block.startSeconds, block.endSeconds),
+          trackType: track.kind === "sections" ? "video" : "metadata",
+          thumbnailUrl: block.thumbnailUrl ? resolveUrl(block.thumbnailUrl) : loraUrls[0],
+          description: lora?.visual_style,
+          generationMeta: lora
+            ? buildStyleGenerationMeta(lora, loraUrls, block.id, lora.visual_style ? "realized" : "unrealized")
+            : undefined,
+          metadata,
+        });
+      }
     }
   }
 
+  // ── Reference images ──────────────────────────────────────────────────────
   const referenceImages: NeuralFramesMediaSpec[] = [];
+
+  // Scene preview images (scene_image_url)
+  for (const shot of result.shots) {
+    if (!shot.referenceImageUrl) continue;
+    const url = resolveUrl(shot.referenceImageUrl);
+    const name = displayFileName(url) || `${shot.label}.png`;
+    referenceImages.push(
+      buildReferenceMediaSpec({
+        id: uuid(),
+        name,
+        title: `Reference: ${shot.label}`,
+        description: `Scene reference: ${shot.label}`,
+        thumbnailUrl: url,
+        prompt: shot.prompt,
+        model: referenceModel,
+        tags: ["reference", "scene", "neuralframes"],
+      }),
+    );
+  }
+
+  // Character generated images
   for (const character of raw.storyboard_props?.characters ?? []) {
-    const imageJob = normalizeImageJob(character.image_job);
-    const urls = (imageJob?.assets ?? []).map((asset) => resolveUrl(asset.url));
+    const urls = characterImageUrls(character, resolveUrl);
+    const generationMeta = buildCharacterGenerationMeta(
+      character,
+      character.name,
+      urls,
+      referenceModel,
+      character.id,
+      "realized",
+    );
     for (const url of urls) {
-      const name = displayFileName(url) || `${character.name || "reference"}.png`;
-      referenceImages.push(
-        buildReferenceMediaSpec({
+      const name = displayFileName(url) || `${character.name || "character"}.png`;
+      orphanedAssets.push(
+        buildGeneratedImageMediaSpec({
           id: uuid(),
           name,
-          title: `Reference: ${character.name}`,
-          description: `Character reference: ${character.name}`,
+          title: character.name,
+          description: character.description ?? character.physical_identity ?? `Character: ${character.name}`,
           thumbnailUrl: url,
-          prompt: `Character reference: ${character.name}`,
-          model: referenceModel,
-          tags: ["reference", "character", "neuralframes"],
+          tags: ["generated", "character", "neuralframes"],
+          generationMeta,
+          group: "Generated",
         }),
       );
     }
   }
+
+  // LoRA training reference images
   for (const lora of raw.storyboard_props?.loras ?? []) {
-    const urls = (lora.training_image_urls ?? []).map((url) => resolveUrl(url));
+    const urls = loraTrainingImageUrls(lora, resolveUrl);
+    const generationMeta = buildStyleGenerationMeta(lora, urls, lora.id, "realized");
     for (const url of urls) {
       const name = displayFileName(url) || `${lora.name || "training"}.png`;
       referenceImages.push(
@@ -163,15 +264,18 @@ export function buildImportPlan(
           id: uuid(),
           name,
           title: `Training: ${lora.name}`,
-          description: `LoRA training: ${lora.name}`,
+          description: lora.visual_style ?? `LoRA training: ${lora.name}`,
           thumbnailUrl: url,
-          prompt: `LoRA training: ${lora.name}`,
-          model: referenceModel,
-          tags: ["training", "lora", "neuralframes"],
+          prompt: lora.visual_style ?? lora.trigger_word ?? `LoRA training: ${lora.name}`,
+          model: lora.base_model ?? referenceModel,
+          tags: ["reference", "training", "lora", "neuralframes"],
+          inputs: generationMeta.inputs,
         }),
       );
     }
   }
+
+  // Audio artwork
   if (result.audio?.artworkUrl) {
     const url = resolveUrl(result.audio.artworkUrl);
     const name = displayFileName(url) || `${result.title || "artwork"}.png`;
@@ -189,6 +293,7 @@ export function buildImportPlan(
     );
   }
 
+  // ── Audio clip ────────────────────────────────────────────────────────────
   let audioClip: AudioClipSpec | null = null;
   if (result.audio && (result.audio.duration > 0 || result.audio.audioUrl)) {
     const localAudioUrl = result.audio.audioUrl ? resolveUrl(result.audio.audioUrl) : undefined;
@@ -196,7 +301,7 @@ export function buildImportPlan(
     audioClip = {
       mediaSpec: buildAudioMediaSpec(
         result.title,
-        result.audio.duration,
+        result.audio,
         name,
         `audio-${uuid()}`,
         localAudioUrl,
@@ -207,11 +312,16 @@ export function buildImportPlan(
         sourceFile: { name, size: 0, lastModified: 0 },
         importSource: "neuralframes",
         kind: "audio",
+        bpm: result.audio.bpm,
+        key: result.audio.key,
+        scale: result.audio.scale,
+        has_lyrics: result.audio.hasLyrics,
+        videoIdea: result.audio.videoIdea,
       },
     };
   }
 
-  return { sceneClips, orphanedAssets, metadataClips, referenceImages, audioClip };
+  return { sceneClips, orphanedAssets, metadataClips, characterTracks, referenceImages, audioClip };
 }
 
 function buildGeneratedMediaSpec(result: NeuralFramesImportResult, asset: GeneratedAsset): NeuralFramesMediaSpec {
@@ -254,6 +364,35 @@ function buildGeneratedMediaSpec(result: NeuralFramesImportResult, asset: Genera
   };
 }
 
+function buildGeneratedImageMediaSpec(input: {
+  id: string;
+  name: string;
+  title: string;
+  description?: string;
+  thumbnailUrl: string;
+  tags: string[];
+  generationMeta: NeuralFramesGenerationMeta;
+  group: string;
+}): NeuralFramesMediaSpec {
+  return {
+    id: input.id,
+    name: input.name,
+    title: input.title,
+    description: input.description,
+    type: "image",
+    fileHandle: null,
+    blob: null,
+    metadata: mediaMetadata(),
+    thumbnailUrl: input.thumbnailUrl,
+    waveformData: null,
+    isPlaceholder: false,
+    group: input.group,
+    tags: input.tags,
+    generationMeta: { ...input.generationMeta, jobId: input.id, status: "realized" },
+    sourceFile: { name: input.name, size: 0, lastModified: 0 },
+  };
+}
+
 function buildReferenceMediaSpec(input: {
   id: string;
   name: string;
@@ -263,6 +402,7 @@ function buildReferenceMediaSpec(input: {
   prompt: string;
   model: string;
   tags: string[];
+  inputs?: Record<string, unknown>;
 }): NeuralFramesMediaSpec {
   return {
     id: input.id,
@@ -282,6 +422,7 @@ function buildReferenceMediaSpec(input: {
       provider: "neuralframes",
       model: input.model,
       prompt: input.prompt,
+      inputs: input.inputs,
       jobId: input.id,
       status: "realized",
     },
@@ -291,7 +432,7 @@ function buildReferenceMediaSpec(input: {
 
 function buildAudioMediaSpec(
   resultTitle: string,
-  duration: number,
+  audio: NeuralFramesImportResult["audio"],
   name: string,
   id: string,
   originalUrl?: string,
@@ -301,10 +442,17 @@ function buildAudioMediaSpec(
     id,
     name,
     title: resultTitle || "audio",
+    description: audio.videoIdea,
     type: "audio",
     fileHandle: null,
     blob: null,
-    metadata: mediaMetadata(duration),
+    metadata: {
+      ...mediaMetadata(audio.duration),
+      bpm: audio.bpm,
+      key: audio.key,
+      scale: audio.scale,
+      has_lyrics: audio.hasLyrics,
+    },
     thumbnailUrl: thumbnailUrl ?? null,
     originalUrl,
     waveformData: null,
@@ -315,22 +463,81 @@ function buildAudioMediaSpec(
   };
 }
 
-function buildSceneClipMetadata(shot: StoryboardShot, asset: GeneratedAsset): Record<string, unknown> {
-  const generatedAssetIds = shot.generatedAssetIds.length > 0 ? shot.generatedAssetIds : [asset.id];
+function buildSceneClipMetadata(shot: StoryboardShot, referenceImageUrl: string | null): Record<string, unknown> {
   return {
     text: shot.prompt,
     importSource: "neuralframes",
     importId: shot.id,
     source: "llm",
     linkedShotIds: [shot.id],
-    linkedGeneratedAssetIds: [asset.id],
+    linkedGeneratedAssetIds: [],
     kind: "scene",
     label: shot.label,
     color: "#4da8ff",
     prompt: shot.prompt,
     shotId: shot.id,
     shotIndex: shot.index,
-    generatedAssetIds,
+    generatedAssetIds: [],
+    referenceImageUrl: referenceImageUrl ?? undefined,
+  };
+}
+
+/** Media spec for an unrealized scene slot (no video generated yet). */
+function buildUnrealizedSceneMediaSpec(
+  shot: StoryboardShot,
+  thumbnailUrl: string | null,
+): NeuralFramesMediaSpec {
+  const id = uuid();
+  return {
+    id,
+    name: shot.label,
+    title: shot.label,
+    description: shot.prompt || undefined,
+    type: "video",
+    fileHandle: null,
+    blob: null,
+    metadata: mediaMetadata(),
+    thumbnailUrl,
+    waveformData: null,
+    isPlaceholder: true,
+    assetGroupId: id,
+    group: "Neural Frames Scenes",
+    tags: ["scene", "neuralframes", "unrealized"],
+    generationMeta: {
+      provider: "neuralframes",
+      model: shot.model,
+      prompt: shot.prompt,
+      jobId: id,
+      status: "unrealized",
+    },
+    sourceFile: { name: shot.label, size: 0, lastModified: 0 },
+  };
+}
+
+/** Single media spec for a character — shared across all of the character's timeline clips. */
+function buildCharacterMediaSpec(
+  characterName: string,
+  thumbnailUrl: string | undefined,
+  generationMeta: NeuralFramesGenerationMeta,
+  character: NeuralFramesCharacter | undefined,
+): NeuralFramesMediaSpec {
+  const id = uuid();
+  return {
+    id,
+    name: `Character: ${characterName}`,
+    title: characterName,
+    description: character?.description ?? character?.physical_identity ?? `Character reference: ${characterName}`,
+    type: "image",
+    fileHandle: null,
+    blob: null,
+    metadata: mediaMetadata(),
+    thumbnailUrl: thumbnailUrl ?? null,
+    waveformData: null,
+    isPlaceholder: !thumbnailUrl,
+    group: "Characters",
+    tags: ["character", "neuralframes"],
+    generationMeta: { ...generationMeta, jobId: id },
+    sourceFile: { name: `character: ${characterName}`, size: 0, lastModified: 0 },
   };
 }
 
@@ -364,32 +571,118 @@ function buildBlockMetadata(
   }
 
   if (block.kind === "continuity_note") {
-    const characters = raw.storyboard_props?.characters ?? [];
-    const character = characters.find((candidate) => candidate.id === block.importId);
-    const imageJob = normalizeImageJob(character?.image_job);
-    const urls = (imageJob?.assets ?? []).map((asset) => resolveUrl(asset.url));
+    const character = findCharacter(raw, block.importId);
+    const urls = characterImageUrls(character, resolveUrl);
     return {
       ...base,
       name: character?.name ?? block.label,
-      description: block.text,
+      description: character?.description ?? block.text,
+      physical_identity: character?.physical_identity,
+      reference_wardrobe: character?.reference_wardrobe,
+      reference_phrase: character?.reference_phrase,
       thumbnailUrl: block.thumbnailUrl ?? urls[0],
       referenceImageUrls: urls,
     };
   }
 
   if (block.kind === "visual_motif") {
-    const loras = raw.storyboard_props?.loras ?? [];
-    const lora = loras.find((candidate) => candidate.id === block.importId);
-    const urls = (lora?.training_image_urls ?? []).map((url) => resolveUrl(url));
+    const lora = findLora(raw, block.importId);
+    const urls = lora ? loraTrainingImageUrls(lora, resolveUrl) : [];
     return {
       ...base,
       name: lora?.name ?? block.label,
+      description: lora?.visual_style ?? block.text,
       trainingImageUrls: urls,
+      visual_style: lora?.visual_style,
+      trigger_word: lora?.trigger_word,
+      base_model: lora?.base_model,
       loraId: lora?.id,
     };
   }
 
   return base;
+}
+
+function findCharacter(
+  raw: NeuralFramesStoryboard,
+  importId: string | undefined,
+): NeuralFramesCharacter | undefined {
+  return raw.storyboard_props?.characters?.find((candidate) => candidate.id === importId);
+}
+
+function findLora(raw: NeuralFramesStoryboard, importId: string | undefined): NeuralFramesLora | undefined {
+  return raw.storyboard_props?.loras?.find((candidate) => candidate.id === importId);
+}
+
+function characterImageUrls(
+  character: NeuralFramesCharacter | undefined,
+  resolveUrl: (url: string) => string,
+): string[] {
+  const imageJob = normalizeImageJob(character?.image_job);
+  return (imageJob?.assets ?? []).map((asset) => resolveUrl(asset.url));
+}
+
+function loraTrainingImageUrls(
+  lora: NeuralFramesLora,
+  resolveUrl: (url: string) => string,
+): string[] {
+  return (lora.training_image_urls ?? []).map((url) => resolveUrl(url));
+}
+
+function buildCharacterGenerationMeta(
+  character: NeuralFramesCharacter | undefined,
+  fallbackName: string,
+  imageUrls: string[],
+  model: string,
+  jobId: string,
+  status: string,
+): NeuralFramesGenerationMeta {
+  const prompt = character?.reference_phrase ?? character?.description ?? `Character reference: ${fallbackName}`;
+  return {
+    provider: "neuralframes",
+    model,
+    prompt,
+    inputs: compactInputs({
+      physical_identity: character?.physical_identity,
+      reference_wardrobe: character?.reference_wardrobe,
+      description: character?.description,
+      reference_phrase: character?.reference_phrase,
+      image_job_assets: imageUrls,
+    }),
+    jobId,
+    status,
+  };
+}
+
+function buildStyleGenerationMeta(
+  lora: NeuralFramesLora,
+  trainingImageUrls: string[],
+  jobId: string,
+  status: string,
+): NeuralFramesGenerationMeta {
+  return {
+    provider: "neuralframes",
+    model: lora.base_model ?? DEFAULT_IMAGE_MODEL,
+    prompt: lora.visual_style ?? lora.trigger_word ?? lora.name,
+    inputs: compactInputs({
+      training_image_urls: trainingImageUrls,
+      visual_style: lora.visual_style,
+      trigger_word: lora.trigger_word,
+      base_model: lora.base_model,
+    }),
+    jobId,
+    status,
+  };
+}
+
+function compactInputs(input: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => {
+      if (value === undefined || value === null) return false;
+      if (Array.isArray(value)) return value.length > 0;
+      return value !== "";
+    }),
+  );
 }
 
 function blockKindToClipKind(kind: MetadataBlock["kind"]): string {

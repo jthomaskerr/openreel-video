@@ -59,10 +59,10 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
 }));
 
 export const toast = {
-  success: (title: string, message?: string) =>
+  success: (title: string, message?: string, duration?: number) =>
     useNotificationStore
       .getState()
-      .addNotification({ type: "success", title, message }),
+      .addNotification({ type: "success", title, message, duration }),
   error: (title: string, message?: string) => {
     logBus.entry({
       kind: "unknown_error",

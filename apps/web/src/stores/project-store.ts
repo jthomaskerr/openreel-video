@@ -2365,6 +2365,7 @@ export const useProjectStore = create<ProjectState>()(
           fileHandle: null,
           blob: file,
           metadata: {
+            ...previousItem?.metadata,
             duration: previousItem?.metadata.duration ?? 0,
             width,
             height,

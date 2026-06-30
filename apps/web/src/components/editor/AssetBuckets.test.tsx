@@ -45,8 +45,8 @@ describe("AssetBuckets semantic filtering", () => {
         items={[realImage, note]}
         viewMode="list"
         searchQuery=""
+        groupBy="type"
         selectedItemIds={new Set()}
-        onAddMedia={() => undefined}
         MediaRow={Row}
       />,
     );

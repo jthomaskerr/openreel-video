@@ -10,6 +10,10 @@ export interface MetadataMediaOptions {
   color: string;
   duration: number;
   thumbnailUrl?: string;
+  description?: string;
+  group?: string;
+  tags?: string[];
+  generationMeta?: MediaItem["generationMeta"];
 }
 
 export interface MetadataMediaResult {
@@ -84,12 +88,17 @@ export function createMetadataMedia(
   const item: MediaItem = {
     id,
     name: `${kind}: ${label}`,
+    title: label,
+    description: options.description,
     type: "image",
     fileHandle: null,
     blob,
     metadata,
     thumbnailUrl: options.thumbnailUrl ?? null,
     waveformData: null,
+    group: options.group,
+    tags: options.tags,
+    generationMeta: options.generationMeta,
     sourceFile: {
       name: `${kind}: ${label}`,
       size: blob.size,

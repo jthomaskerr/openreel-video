@@ -255,6 +255,8 @@ export interface StoryboardShot {
   includeMainAudio: boolean;
   referenceAssetIds: string[];
   generatedAssetIds: string[];
+  /** Preview image URL for an unrealized scene (the NeuralFrames scene_image_url). Not a generated output. */
+  referenceImageUrl?: string;
   validation: ValidationState;
   outputs: GenerationAttempt[];
   selected: boolean;
@@ -294,6 +296,25 @@ export interface NeuralFramesAudio {
   artworkUrl?: string;
 }
 
+export interface NeuralFramesCharacter {
+  id: string;
+  name: string;
+  image_job?: string | { assets?: string | Array<string | { url?: string }> };
+  physical_identity?: string;
+  reference_wardrobe?: string;
+  description?: string;
+  reference_phrase?: string;
+}
+
+export interface NeuralFramesLora {
+  id: string;
+  name: string;
+  training_image_urls: string[];
+  visual_style?: string;
+  trigger_word?: string;
+  base_model?: string;
+}
+
 /** Raw Neural Frames storyboard JSON shape (only fields we use) */
 export interface NeuralFramesStoryboard {
   storyboard_props: {
@@ -313,16 +334,8 @@ export interface NeuralFramesStoryboard {
       status: string;
       scene_image_url?: string;
     }>;
-    characters: Array<{
-      id: string;
-      name: string;
-      image_job?: { assets: Array<{ url: string }> };
-    }>;
-    loras: Array<{
-      id: string;
-      name: string;
-      training_image_urls: string[];
-    }>;
+    characters: NeuralFramesCharacter[];
+    loras: NeuralFramesLora[];
   };
   audio?: {
     duration: number;

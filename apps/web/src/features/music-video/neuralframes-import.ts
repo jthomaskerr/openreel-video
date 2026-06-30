@@ -2,6 +2,7 @@ import type { MediaItem, Track } from "@openreel/core";
 import {
   buildImportPlan,
   type AudioClipSpec,
+  type CharacterTrackSpec,
   type MetadataClipSpec,
   type NeuralFramesImportPlan,
   type NeuralFramesImportResult,
@@ -11,7 +12,7 @@ import {
 } from "@openreel/music-video-domain";
 import { v4 as uuidv4 } from "uuid";
 import { addTimelineClip, type TimelineClipStore } from "./timeline/timeline-clips";
-import type { MetadataKind } from "./timeline/metadata-media";
+import { createMetadataMedia, type MetadataKind } from "./timeline/metadata-media";
 import { useProjectStore, type ProjectState } from "../../stores/project-store";
 import { useMusicVideoStore } from "../../stores/music-video-store";
 import { useUIStore } from "../../stores/ui-store";
@@ -24,6 +25,39 @@ class HandledImportError extends Error {
     this.name = "HandledImportError";
   }
 }
+
+interface ImporterResponseData extends Partial<NeuralFramesImportResult> {
+  error?: string;
+  detail?: string;
+}
+
+async function readImporterResponse(response: Response): Promise<ImporterResponseData> {
+  const responseReaders = response as Response & {
+    text?: () => Promise<string>;
+    json?: () => Promise<unknown>;
+  };
+
+  if (typeof responseReaders.text === "function") {
+    const text = await responseReaders.text();
+    if (!text.trim()) return {};
+    try {
+      return JSON.parse(text) as ImporterResponseData;
+    } catch {
+      return { error: text };
+    }
+  }
+
+  if (typeof responseReaders.json === "function") {
+    return (await responseReaders.json()) as ImporterResponseData;
+  }
+
+  return {};
+}
+
+function importerErrorMessage(data: ImporterResponseData, response: Response): string {
+  return data.error ?? data.detail ?? `Importer returned HTTP ${response.status}`;
+}
+
 
 type ProjectStore = ProjectState;
 
@@ -102,6 +136,10 @@ async function placeMetadataClip(
     metadata: spec.metadata,
     trackType: spec.trackType,
     thumbnailUrl: spec.thumbnailUrl,
+    description: spec.description,
+    group: spec.kind === "style" ? "Reference Images" : undefined,
+    tags: spec.kind === "style" ? ["reference", "style", "neuralframes"] : undefined,
+    generationMeta: spec.generationMeta,
   });
   if (!clipResult.success) {
     return { success: false, failure: `${spec.label} (${clipResult.error?.code ?? "unknown"})` };
@@ -114,10 +152,14 @@ async function placeAudioClip(
   spec: AudioClipSpec,
   store: ProjectStore,
   addPlaceholderMedia: ProjectStore["addPlaceholderMedia"],
+  replacePlaceholderMedia: ProjectStore["replacePlaceholderMedia"],
 ): Promise<boolean> {
   const mediaSpec: NeuralFramesMediaSpec = spec.mediaSpec;
   const mediaItem: MediaItem = mediaSpec;
   addPlaceholderMedia(mediaItem);
+  if (mediaItem.originalUrl) {
+    queueReplacement(mediaItem.originalUrl, mediaItem, replacePlaceholderMedia, "audio asset");
+  }
 
   const audioTrackId = await findOrCreateTrack("audio", "Audio");
   if (!audioTrackId) return false;
@@ -129,22 +171,120 @@ async function placeAudioClip(
   return clipResult.success;
 }
 
+type CharacterTrackResult =
+  | { success: true; clipCount: number }
+  | { success: false; failure: string };
+
+type NamedTrackResult =
+  | { success: true; trackId: string }
+  | { success: false };
+
+/**
+ * Places a character track: one media item created once, then one clip per scene
+ * the character appears in. All clips share the same media item ID.
+ */
+async function placeCharacterTrack(
+  spec: CharacterTrackSpec,
+  store: TimelineClipStore,
+  replacePlaceholderMedia: ProjectStore["replacePlaceholderMedia"],
+): Promise<CharacterTrackResult> {
+  // 1. Create the character media item once
+  const metaMedia = createMetadataMedia({
+    kind: "character",
+    label: spec.trackName,
+    color: "#a855f7",
+    duration: 0,
+    thumbnailUrl: spec.mediaSpec.thumbnailUrl ?? spec.thumbnailUrl,
+    description: spec.mediaSpec.description,
+    group: spec.mediaSpec.group,
+    tags: spec.mediaSpec.tags,
+    generationMeta: spec.mediaSpec.generationMeta,
+  });
+
+  const mediaResult = await store.addGeneratedMedia(metaMedia.item, metaMedia.blob);
+  if (!mediaResult.success) {
+    return { success: false, failure: `${spec.trackName} (media: ${mediaResult.error?.code ?? "unknown"})` };
+  }
+
+  // Queue thumbnail replacement
+  if (spec.thumbnailUrl) {
+    queueReplacement(spec.thumbnailUrl, metaMedia.item, replacePlaceholderMedia, `character ${spec.trackName}`);
+  }
+
+  // 2. Find or create the character's own track (named after the character)
+  const trackResult = await findOrCreateNamedTrack(store, spec.trackName, "metadata");
+  if (!trackResult.success) {
+    return { success: false, failure: `${spec.trackName} (track)` };
+  }
+
+  // 3. Add one clip per scene
+  let clipsAdded = 0;
+  for (const clip of spec.clips) {
+    const clipResult = await store.addClip(
+      trackResult.trackId,
+      metaMedia.item.id,
+      clip.startSeconds,
+      {
+        duration: clip.duration,
+        metadata: {
+          ...clip.metadata,
+          kind: "character",
+          label: spec.trackName,
+          color: "#a855f7",
+        },
+      },
+    );
+    if (clipResult.success) clipsAdded++;
+  }
+
+  return { success: true, clipCount: clipsAdded };
+}
+
+/** Find or create a named track of the given type using the TimelineClipStore interface. */
+async function findOrCreateNamedTrack(
+  store: TimelineClipStore,
+  trackName: string,
+  trackType: Track["type"],
+): Promise<NamedTrackResult> {
+  const existing = store.project.timeline.tracks.find(
+    (t) => t.type === trackType && t.name === trackName,
+  );
+  if (existing) return { success: true, trackId: existing.id };
+
+  const beforeIds = new Set(store.project.timeline.tracks.map((t) => t.id));
+  const addResult = await store.addTrack(trackType);
+  if (!addResult.success) return { success: false };
+
+  const created = store.project.timeline.tracks.find(
+    (t) => t.type === trackType && !beforeIds.has(t.id),
+  );
+  if (!created) return { success: false };
+
+  store.renameTrack(created.id, trackName);
+  return { success: true, trackId: created.id };
+}
+
 export async function importNeuralFramesFile(
   file: File,
   opts: { orchestratorUrl: string; openreelProjectId: string },
 ): Promise<void> {
-  let progressToastId: string | null = null;
+  const progressToastIds: string[] = [];
   const showProgress = (message: string) => {
-    if (progressToastId) {
-      useNotificationStore.getState().removeNotification(progressToastId);
-    }
-    progressToastId = toast.info("Importing…", message);
+    progressToastIds.push(
+      useNotificationStore.getState().addNotification({
+        type: "info",
+        title: "Importing…",
+        message,
+        duration: 0,
+      }),
+    );
   };
   const clearProgress = () => {
-    if (progressToastId) {
-      useNotificationStore.getState().removeNotification(progressToastId);
-      progressToastId = null;
+    const store = useNotificationStore.getState();
+    for (const id of progressToastIds) {
+      store.removeNotification(id);
     }
+    progressToastIds.length = 0;
   };
   const failHandled = (message: string): never => {
     clearProgress();
@@ -169,11 +309,11 @@ export async function importNeuralFramesFile(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(raw),
     });
-    const data = (await response.json()) as NeuralFramesImportResult & { error?: string };
+    const data = await readImporterResponse(response);
     if (!response.ok || data.error) {
-      failHandled(data.error ?? "Import failed");
+      failHandled(importerErrorMessage(data, response));
     }
-    result = data;
+    result = data as NeuralFramesImportResult;
   } catch (error) {
     if (error instanceof HandledImportError) throw error;
     clearProgress();
@@ -208,6 +348,18 @@ export async function importNeuralFramesFile(
       const placement = await placeSceneClip(spec, store, addPlaceholderMedia, replacePlaceholderMedia);
       if (placement.success) {
         trackBlocksSucceeded++;
+      } else {
+        trackBlocksFailed++;
+        failedBlocks.push(placement.failure);
+      }
+    }
+
+    // Character tracks: one media item per character, clips for each scene it appears in
+    for (const spec of plan.characterTracks) {
+      showProgress(`Creating character "${spec.trackName}"…`);
+      const placement = await placeCharacterTrack(spec, storeIface, replacePlaceholderMedia);
+      if (placement.success) {
+        trackBlocksSucceeded += placement.clipCount;
       } else {
         trackBlocksFailed++;
         failedBlocks.push(placement.failure);
@@ -260,13 +412,16 @@ export async function importNeuralFramesFile(
       const mediaSpec: NeuralFramesMediaSpec = spec;
       const mediaItem: MediaItem = mediaSpec;
       addPlaceholderMedia(mediaItem);
+      if (mediaItem.thumbnailUrl) {
+        queueReplacement(mediaItem.thumbnailUrl, mediaItem, replacePlaceholderMedia, "reference image");
+      }
       imageCount++;
     }
 
     let audioCount = 0;
     if (plan.audioClip) {
       showProgress("Adding audio…");
-      if (await placeAudioClip(plan.audioClip, store, addPlaceholderMedia)) {
+      if (await placeAudioClip(plan.audioClip, store, addPlaceholderMedia, replacePlaceholderMedia)) {
         audioCount = 1;
       }
     }
@@ -276,11 +431,17 @@ export async function importNeuralFramesFile(
     }
 
     clearProgress();
-    const trackCount = result.metadataTracks.length;
+    const nonCharacterTrackNames = new Set(plan.metadataClips.map((s) => s.trackName));
+    const trackCount =
+      (plan.sceneClips.length > 0 ? 1 : 0) +
+      plan.characterTracks.length +
+      nonCharacterTrackNames.size +
+      audioCount;
     const warning = trackBlocksFailed > 0 ? ` (${trackBlocksFailed} block${trackBlocksFailed === 1 ? "" : "s"} failed)` : "";
     toast.success(
       "Import complete",
       `${trackBlocksSucceeded} blocks across ${trackCount} track${trackCount !== 1 ? "s" : ""} · ${imageCount} images · ${audioCount} audio in media library${warning}`,
+      10000,
     );
   } catch (error) {
     if (error instanceof HandledImportError) throw error;
