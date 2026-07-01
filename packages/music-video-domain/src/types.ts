@@ -153,6 +153,10 @@ export interface MetadataBlock {
   importId?: string;
   /** Thumbnail URL from external import sources (e.g. Neural Frames image_job.assets). */
   thumbnailUrl?: string;
+  /** Separate fields stored alongside `text` for director note blocks. */
+  storyboard_prompt?: string;
+  video_idea?: string;
+  storyboard_style_prompt?: string;
 }
 
 export interface MetadataTrack {

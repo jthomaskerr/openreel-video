@@ -226,6 +226,9 @@ export function importNeuralFrames(
         text: [props.storyboard_prompt, audioMeta?.video_idea]
           .filter(Boolean)
           .join("\n\nVideo concept: "),
+        storyboard_prompt: props.storyboard_prompt || undefined,
+        video_idea: audioMeta?.video_idea || undefined,
+        storyboard_style_prompt: props.style || undefined,
         linkedShotIds: [],
         linkedGeneratedAssetIds: [],
         source: "neuralframes" as const,

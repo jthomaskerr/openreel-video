@@ -602,6 +602,15 @@ function buildBlockMetadata(
     };
   }
 
+  if (block.kind === "note") {
+    return {
+      ...base,
+      ...(block.storyboard_prompt != null && { storyboard_prompt: block.storyboard_prompt }),
+      ...(block.video_idea != null && { video_idea: block.video_idea }),
+      ...(block.storyboard_style_prompt != null && { storyboard_style_prompt: block.storyboard_style_prompt }),
+    };
+  }
+
   return base;
 }
 
