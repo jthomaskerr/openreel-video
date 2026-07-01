@@ -31,7 +31,7 @@ export interface MediaLibrary {
 export interface MediaItem {
   readonly id: string;
   readonly name: string;
-  readonly type: "video" | "audio" | "image";
+  readonly type: "video" | "audio" | "image" | "srt";
   readonly fileHandle: FileSystemFileHandle | null;
   readonly blob: Blob | null;
   readonly metadata: MediaMetadata;
@@ -70,6 +70,8 @@ export interface MediaItem {
   readonly tags?: string[];
   /** User-assigned group / bucket for the asset */
   readonly group?: string;
+  /** Backend URL where this media version's binary is stored. Populated on load from backend; stripped before saving back. */
+  readonly remoteUrl?: string;
 }
 
 /** Thumbnail for filmstrip display in timeline */

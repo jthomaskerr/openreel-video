@@ -461,7 +461,7 @@ export const useUIStore = create<UIState>()(
                 label: err.label,
                 trackName: err.trackName,
                 projectId,
-                clipId: err.label,
+                mediaId: err.label,
               });
             }
           });

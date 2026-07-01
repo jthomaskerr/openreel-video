@@ -9,7 +9,7 @@ export interface TrackManagerOptions {
 }
 
 export interface CreateTrackParams {
-  type: "video" | "audio" | "image";
+  type: "video" | "audio" | "image" | "subtitle";
   name?: string;
   position?: number;
 }
@@ -255,7 +255,7 @@ export class TrackManager {
 }
 
 export function createTrack(
-  type: "video" | "audio" | "image",
+  type: "video" | "audio" | "image" | "subtitle",
   name?: string,
 ): Track {
   return {
@@ -292,7 +292,7 @@ export function getTrackClips(track: Track): Clip[] {
 
 export function canAcceptMediaType(
   track: Track,
-  mediaType: "video" | "audio" | "image",
+  mediaType: "video" | "audio" | "image" | "srt",
 ): boolean {
   // Video tracks can accept video and image
   if (track.type === "video") {
@@ -305,6 +305,10 @@ export function canAcceptMediaType(
   // Image tracks can only accept images
   if (track.type === "image") {
     return mediaType === "image";
+  }
+  // Subtitle tracks accept SRT media
+  if (track.type === "subtitle") {
+    return mediaType === "srt";
   }
   return false;
 }

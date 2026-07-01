@@ -131,8 +131,9 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const isAudio = track.type === "audio";
   const isImage = track.type === "image";
   const isMetadata = track.type === "metadata";
-  // metadata tracks without real media don't render any media UI
-  const mediaType = mediaItem?.type ?? (isAudio ? "audio" : isImage ? "image" : isMetadata ? "none" : "video");
+  const isSubtitle = track.type === "subtitle";
+  // metadata/subtitle tracks without real media don't render any media UI
+  const mediaType = mediaItem?.type ?? (isAudio ? "audio" : isImage ? "image" : (isMetadata || isSubtitle) ? "none" : "video");
   const clipStyle = getClipStyle(track.type);
   const isMissingMedia = !!mediaItem?.isPlaceholder;
 

@@ -73,6 +73,7 @@ export function getAssetCategory(item: MediaItem): AssetCategory {
     video: "Videos",
     audio: "Audio",
     image: "Images",
+    srt: "Subtitles",
   };
   return { type: "media", mediaType: item.type, label: labels[item.type] };
 }
@@ -139,9 +140,9 @@ function computeBuckets(items: MediaItem[], searchQuery: string, groupBy: GroupB
     }
 
     case "type": {
-      const typeLabels: Record<string, string> = { video: "Videos", audio: "Audio", image: "Images" };
+      const typeLabels: Record<string, string> = { video: "Videos", audio: "Audio", image: "Images", srt: "Subtitles" };
       const buckets: BucketDef[] = [];
-      for (const type of ["video", "audio", "image"] as const) {
+      for (const type of ["video", "audio", "image", "srt"] as const) {
         const typeItems = filtered.filter((item) => {
           const category = getAssetCategory(item);
           return category.type === "media" && category.mediaType === type;

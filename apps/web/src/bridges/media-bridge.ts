@@ -254,7 +254,7 @@ export class MediaBridge {
 
   async generateThumbnailsForMedia(
     file: File | Blob,
-    mediaType: "video" | "audio" | "image",
+    mediaType: "video" | "audio" | "image" | "srt",
   ): Promise<{ timestamp: number; dataUrl: string }[]> {
     if (!this.initialized || !this.mediaImportService) {
       return [];

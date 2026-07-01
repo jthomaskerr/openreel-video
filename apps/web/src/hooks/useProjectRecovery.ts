@@ -10,7 +10,7 @@ interface RecoveryState {
   error: string | null;
 }
 
-export function useProjectRecovery() {
+export function useProjectRecovery(autoRestoreProjectId?: string) {
   const [state, setState] = useState<RecoveryState>({
     isChecking: true,
     availableSaves: [],
@@ -25,6 +25,19 @@ export function useProjectRecovery() {
       try {
         await autoSaveManager.initialize();
         const saves = await autoSaveManager.checkForRecovery();
+
+        if (autoRestoreProjectId) {
+          // Silently restore the most recent save for the project in the URL.
+          // No dialog — the URL is the source of truth.
+          const projectSaves = saves
+            .filter((s) => s.projectId === autoRestoreProjectId)
+            .sort((a, b) => b.timestamp - a.timestamp);
+          if (projectSaves.length > 0) {
+            await recoverFromAutoSave(projectSaves[0].id);
+          }
+          setState({ isChecking: false, availableSaves: [], showDialog: false, error: null });
+          return;
+        }
 
         if (saves.length > 0) {
           setState({

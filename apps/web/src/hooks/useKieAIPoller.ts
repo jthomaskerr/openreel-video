@@ -17,6 +17,7 @@ import { useProjectStore } from "../stores/project-store";
 import { useKieAIStore, MAX_POLL_RETRIES } from "../stores/kieai-store";
 import { pollTaskOnce, getResultUrl } from "../services/kieai/image-generation";
 import { KieAIError } from "../services/kieai/types";
+import { problemBus } from "../stores/problem-store";
 
 const FIRST_POLL_DELAY_MS = 5_000;
 const POLL_INTERVAL_IMAGE_MS = 30_000;
@@ -58,9 +59,10 @@ export function useKieAIPoller() {
   const setKieAIItemStateRef = useRef(setKieAIItemState);
   setKieAIItemStateRef.current = setKieAIItemState;
 
-  const handleExpiredTask = useCallback((taskId: string, mediaId: string) => {
+  const handleExpiredTask = useCallback((taskId: string, mediaId: string, suggestedName: string, projectId: string) => {
     markFailed(taskId);
     setKieAIItemStateRef.current(mediaId, false, true);
+    problemBus.report({ kind: "generation_failed", label: suggestedName, message: "Generation task expired", mediaId, projectId });
   }, [markFailed]);
 
   useEffect(() => {
@@ -75,7 +77,7 @@ export function useKieAIPoller() {
 
       // Expire tasks older than 3 days
       if (Date.now() - task.createdAt > TASK_MAX_AGE_MS) {
-        handleExpiredTask(task.taskId, task.mediaId);
+        handleExpiredTask(task.taskId, task.mediaId, task.suggestedName, task.projectId);
         continue;
       }
 
@@ -120,12 +122,14 @@ export function useKieAIPoller() {
               console.error(`[KieAIPoller] download failed for ${task.taskId}:`, downloadErr);
               markFailed(task.taskId);
               setKieAIItemStateRef.current(task.mediaId, false, true);
+              problemBus.report({ kind: "generation_failed", label: task.suggestedName, message: "Failed to download generation result", mediaId: task.mediaId, projectId: task.projectId });
             }
 
           } else if (record.state === "fail") {
             console.warn(`[KieAIPoller] task ${task.taskId} failed: ${record.failMsg}`);
             setKieAIItemStateRef.current(task.mediaId, false, true);
             markFailed(task.taskId);
+            problemBus.report({ kind: "generation_failed", label: task.suggestedName, message: record.failMsg ?? "Generation failed", mediaId: task.mediaId, projectId: task.projectId });
 
           } else {
             // Still generating — schedule next poll
@@ -138,6 +142,7 @@ export function useKieAIPoller() {
             console.warn("[KieAIPoller] auth error — stopping poll for", task.taskId);
             markFailed(task.taskId);
             setKieAIItemStateRef.current(task.mediaId, false, true);
+            problemBus.report({ kind: "generation_failed", label: task.suggestedName, message: "Authentication error — check your API key", mediaId: task.mediaId, projectId: task.projectId });
             return;
           }
 
@@ -157,6 +162,7 @@ export function useKieAIPoller() {
             );
             markFailed(task.taskId);
             setKieAIItemStateRef.current(task.mediaId, false, true);
+            problemBus.report({ kind: "generation_failed", label: task.suggestedName, message: "Generation failed after too many retries", mediaId: task.mediaId, projectId: task.projectId });
           } else {
             const t = setTimeout(doPoll, interval);
             timersRef.current.set(task.taskId, t);

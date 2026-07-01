@@ -1,7 +1,7 @@
 export interface ProcessedMedia {
   id: string;
   name: string;
-  type: "video" | "audio" | "image";
+  type: "video" | "audio" | "image" | "srt";
   blob: Blob;
   metadata: MediaTrackInfo;
   thumbnails: ThumbnailResult[];

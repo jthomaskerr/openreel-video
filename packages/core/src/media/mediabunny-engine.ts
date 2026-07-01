@@ -41,6 +41,10 @@ export const SUPPORTED_IMAGE_FORMATS = [
   "image/webp",
   "image/gif",
 ];
+export const SUPPORTED_SUBTITLE_FORMATS = [
+  "text/srt",
+  "application/x-subrip",
+];
 
 const EXTENSION_MIME_MAP: Record<string, string> = {
   ".mp4": "video/mp4",
@@ -59,8 +63,8 @@ const EXTENSION_MIME_MAP: Record<string, string> = {
   ".png": "image/png",
   ".webp": "image/webp",
   ".gif": "image/gif",
+  ".srt": "text/srt",
 };
-
 /** Derive MIME type from filename extension as a fallback when browser reports empty/unknown. */
 function mimeFromExtension(filename: string): string | null {
   const dot = filename.lastIndexOf(".");
@@ -74,18 +78,20 @@ export function isSupportedFormat(mimeType: string, fileName?: string): boolean 
   if (
     SUPPORTED_VIDEO_FORMATS.includes(baseMimeType) ||
     SUPPORTED_AUDIO_FORMATS.includes(baseMimeType) ||
-    SUPPORTED_IMAGE_FORMATS.includes(baseMimeType)
+    SUPPORTED_IMAGE_FORMATS.includes(baseMimeType) ||
+    SUPPORTED_SUBTITLE_FORMATS.includes(baseMimeType)
   ) {
     return true;
   }
-  // Fallback: browser may report empty or non-standard MIME for some containers (e.g. WAV)
+  // Fallback: browser may report empty or non-standard MIME for some containers (e.g. WAV, SRT)
   if (fileName) {
     const extMime = mimeFromExtension(fileName);
     if (extMime) {
       return (
         SUPPORTED_VIDEO_FORMATS.includes(extMime) ||
         SUPPORTED_AUDIO_FORMATS.includes(extMime) ||
-        SUPPORTED_IMAGE_FORMATS.includes(extMime)
+        SUPPORTED_IMAGE_FORMATS.includes(extMime) ||
+        SUPPORTED_SUBTITLE_FORMATS.includes(extMime)
       );
     }
   }
@@ -95,11 +101,12 @@ export function isSupportedFormat(mimeType: string, fileName?: string): boolean 
 export function inferMediaType(
   mimeType: string,
   fileName?: string,
-): "video" | "audio" | "image" | null {
+): "video" | "audio" | "image" | "srt" | null {
   const baseMimeType = mimeType.split(";")[0].trim();
   if (SUPPORTED_VIDEO_FORMATS.includes(baseMimeType)) return "video";
   if (SUPPORTED_AUDIO_FORMATS.includes(baseMimeType)) return "audio";
   if (SUPPORTED_IMAGE_FORMATS.includes(baseMimeType)) return "image";
+  if (SUPPORTED_SUBTITLE_FORMATS.includes(baseMimeType)) return "srt";
   // Fallback to extension
   if (fileName) {
     const extMime = mimeFromExtension(fileName);
@@ -107,6 +114,7 @@ export function inferMediaType(
       if (SUPPORTED_VIDEO_FORMATS.includes(extMime)) return "video";
       if (SUPPORTED_AUDIO_FORMATS.includes(extMime)) return "audio";
       if (SUPPORTED_IMAGE_FORMATS.includes(extMime)) return "image";
+      if (SUPPORTED_SUBTITLE_FORMATS.includes(extMime)) return "srt";
     }
   }
   return null;

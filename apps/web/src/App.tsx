@@ -7,6 +7,7 @@ import { WelcomeScreen } from "./components/welcome";
 import { RecoveryDialog } from "./components/welcome/RecoveryDialog";
 import { SharePage } from "./pages/SharePage";
 import { useUIStore } from "./stores/ui-store";
+import { useProjectStore } from "./stores/project-store";
 import { useRouter } from "./hooks/use-router";
 import { useProjectRecovery } from "./hooks/useProjectRecovery";
 import { useKieAIPoller } from "./hooks/useKieAIPoller";
@@ -38,9 +39,15 @@ const PRESET_DIMENSIONS: Record<string, SocialMediaCategory> = {
 function App() {
   const { activeModal, closeModal, skipWelcomeScreen } = useUIStore();
   const { openModal: openSearchModal } = useUIStore();
-  const { showDialog, availableSaves, recover, dismiss, clearAll } = useProjectRecovery();
+  const { project, explicitlyCreated } = useProjectStore();
 
-  const { route, params, navigate, parsedDimensions } = useRouter();
+  const { route, params, navigate, updateParams, parsedDimensions } = useRouter();
+
+  // Pass the projectId from the URL so the recovery hook auto-restores silently.
+  const { showDialog, availableSaves, recover, dismiss, clearAll } = useProjectRecovery(
+    route === "editor" ? params.projectId : undefined,
+  );
+
   const hasHandledInitialRoute = useRef(false);
 
   useKieAIPoller();
@@ -75,6 +82,16 @@ function App() {
       hasHandledInitialRoute.current = true;
     }
   }, [route, navigate, skipWelcomeScreen]);
+
+  // Keep the project ID in the URL while the editor is open so that a page
+  // reload can silently restore the correct project without a dialog.
+  useEffect(() => {
+    if (route === "editor" && explicitlyCreated && project.id) {
+      if (params.projectId !== project.id) {
+        updateParams({ projectId: project.id });
+      }
+    }
+  }, [route, explicitlyCreated, project.id, params.projectId, updateParams]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {

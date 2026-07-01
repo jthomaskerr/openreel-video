@@ -329,10 +329,11 @@ export class ActionExecutor {
     }
   }
 
-  private inferMediaType(file: File): "video" | "audio" | "image" {
+  private inferMediaType(file: File): "video" | "audio" | "image" | "srt" {
     if (file.type.startsWith("video/")) return "video";
     if (file.type.startsWith("audio/")) return "audio";
     if (file.type.startsWith("image/")) return "image";
+    if (file.name.endsWith(".srt") || file.type === "text/srt" || file.type === "application/x-subrip") return "srt";
     return "video";
   }
 
@@ -356,6 +357,7 @@ export class ActionExecutor {
           text: "Text",
           graphics: "Graphics",
           metadata: "Metadata",
+          subtitle: "Subtitle",
         };
         const trackCount =
           timeline.tracks.filter(

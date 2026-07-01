@@ -361,6 +361,8 @@ export interface AssetActionsProps {
 }
 
 export function AssetActions({ item, onReplace, onDelete, onDownload, onAddToTimeline }: AssetActionsProps) {
+  const isReplacing = useProjectStore((s) => s.replacingMediaIds.has(item.id));
+
   return (
     <div className="flex flex-wrap gap-2 pt-2 border-t border-border">
       {onAddToTimeline && (
@@ -368,9 +370,13 @@ export function AssetActions({ item, onReplace, onDelete, onDownload, onAddToTim
           Add to Timeline
         </Button>
       )}
-      <Button size="sm" variant="outline" onClick={onReplace} className="text-xs h-8">
-        <RefreshCw size={12} className="mr-1.5" />
-        Replace
+      <Button size="sm" variant="outline" onClick={onReplace} disabled={isReplacing} className="text-xs h-8">
+        {isReplacing ? (
+          <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent mr-1.5" />
+        ) : (
+          <RefreshCw size={12} className="mr-1.5" />
+        )}
+        {isReplacing ? "Replacing…" : "Replace"}
       </Button>
       {item.blob && onDownload && (
         <Button size="sm" variant="outline" onClick={onDownload} className="text-xs h-8">

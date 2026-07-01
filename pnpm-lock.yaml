@@ -17,6 +17,13 @@ importers:
       mediabunny:
         specifier: ^1.25.3
         version: 1.25.3
+    devDependencies:
+      typescript:
+        specifier: ^5.4.5
+        version: 5.9.3
+      typescript-language-server:
+        specifier: ^5.3.0
+        version: 5.3.0
 
   apps/image:
     dependencies:
@@ -3906,6 +3913,11 @@ packages:
     resolution: {integrity: sha512-TkRKr9sUTxEH8MdfuCSP7VizJyzRNMjj2J2do2Jr3Kym598JVdEksuzPQCnlFPW4ky9Q+iA+ma9BGm06XQBy8g==}
     engines: {node: '>= 0.6'}
 
+  typescript-language-server@5.3.0:
+    resolution: {integrity: sha512-5puofxZHgFdAYtfNpmwCAvgtaYgg8wrUnH30m7Ze3QuguId5RNRadKASpOpyDxTyUdAF51FjhTdjntLw/EuWcQ==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   typescript@5.9.3:
     resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
     engines: {node: '>=14.17'}
@@ -4044,6 +4056,20 @@ packages:
         optional: true
       jsdom:
         optional: true
+
+  vscode-jsonrpc@5.0.1:
+    resolution: {integrity: sha512-JvONPptw3GAQGXlVV2utDcHx0BiY34FupW/kI6mZ5x06ER5DdPG/tXWMVHjTNULF5uKPOUUD0SaXg5QaubJL0A==}
+    engines: {node: '>=8.0.0 || >=10.0.0'}
+
+  vscode-jsonrpc@9.0.0:
+    resolution: {integrity: sha512-+VvMmQPJhtvJ+8O+zu2JKIRiLxXF8NW7krWgyMGeOHrp4Cn23T5hc0v2LknNeopDOB70wghHAds7mKtcZ0I4Sg==}
+    engines: {node: '>=14.0.0'}
+
+  vscode-languageserver-protocol@3.18.1:
+    resolution: {integrity: sha512-RTiiVHdpxpYcJVI5sq6S5TLjQ4WDR/rBrIWru+kPXe6sGQ9PFQ3GamrTKLvPqbR4ylr1SoodhmcqbFII0WXVuw==}
+
+  vscode-languageserver-types@3.18.0:
+    resolution: {integrity: sha512-8TsGPNMIMiiBdkORgRSvLjuiEIiAFtO+KssmYWxQ+uSVvlf7RjK8YKCOjPzZ+YA04jXEV7+7LvkSmHkhpNS99g==}
 
   w3c-xmlserializer@5.0.0:
     resolution: {integrity: sha512-o8qghlI8NZHU1lLPrpi2+Uq7abh4GGPpYANlalzWxyWteJOCsr/P+oPBA49TOLu5FTZO4d3F9MnWJfiMo4BkmA==}
@@ -7528,6 +7554,11 @@ snapshots:
       media-typer: 0.3.0
       mime-types: 2.1.35
 
+  typescript-language-server@5.3.0:
+    dependencies:
+      vscode-jsonrpc: 5.0.1
+      vscode-languageserver-protocol: 3.18.1
+
   typescript@5.9.3: {}
 
   ufo@1.6.1: {}
@@ -7653,6 +7684,17 @@ snapshots:
       - sugarss
       - supports-color
       - terser
+
+  vscode-jsonrpc@5.0.1: {}
+
+  vscode-jsonrpc@9.0.0: {}
+
+  vscode-languageserver-protocol@3.18.1:
+    dependencies:
+      vscode-jsonrpc: 9.0.0
+      vscode-languageserver-types: 3.18.0
+
+  vscode-languageserver-types@3.18.0: {}
 
   w3c-xmlserializer@5.0.0:
     dependencies:

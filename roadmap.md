@@ -1,0 +1,8 @@
+- [ ] On load new audio file extract subtitles
+- [ ] New subtitles track/clip type
+- [ ] Storyboard ui
+- [ ] Audio analysis - genre, beat detection, sentiment, librosa (energy?)?
+  - UI to manually pick that
+- [ ] Generate storyboard tool (specialised prompt, structured output. Existing HF or other model/prompt?
+- [ ] Alter storyboard tool (params: what, how)
+-

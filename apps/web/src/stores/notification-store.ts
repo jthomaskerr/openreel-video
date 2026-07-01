@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import { logBus } from "./log-store";
-import { problemBus } from "./problem-store";
 
 export type NotificationType = "success" | "error" | "warning" | "info";
 
@@ -72,15 +71,10 @@ export const toast = {
   },
   error: (title: string, message?: string) => {
     logBus.entry({
-      kind: "unknown_error",
+      kind: "error",
       message: message ?? title,
       label: title,
       source: "toast.error",
-    });
-    problemBus.report({
-      kind: "unknown_error",
-      message: message ?? title,
-      label: title,
     });
     return useNotificationStore
       .getState()

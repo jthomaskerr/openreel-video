@@ -548,11 +548,16 @@ export class MediaImportService {
 
   async generateThumbnailsForMedia(
     file: File | Blob,
-    mediaType: "video" | "audio" | "image",
+    mediaType: "video" | "audio" | "image" | "srt",
     options: { count?: number; width?: number } = {},
   ): Promise<ThumbnailResult[]> {
     if (!this.initialized) {
       await this.initialize();
+    }
+
+    // SRT files don't produce thumbnails
+    if (mediaType === "audio" || mediaType === "srt") {
+      return [];
     }
 
     const { count = 10, width = 160 } = options;

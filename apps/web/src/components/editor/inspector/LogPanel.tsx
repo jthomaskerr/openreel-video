@@ -19,7 +19,6 @@ import {
   Filter,
   Hash,
 } from "lucide-react";
-import type { ProblemKind } from "../../../stores/problem-store";
 import { useLogStore, type LogFilter } from "../../../stores/log-store";
 import { useProjectStore } from "../../../stores/project-store";
 import { Input, Checkbox } from "@openreel/ui";
@@ -27,53 +26,53 @@ import { cn } from "@openreel/ui/lib/utils";
 
 // ── Kind metadata ──────────────────────────────────────────────────
 
-const KIND_ICON: Partial<Record<ProblemKind, typeof AlertTriangle>> = {
-  block_failed: FileWarning,
-  missing_media: AlertTriangle,
-  image_failed: FileWarning,
-  bridge_error: Bug,
-  engine_error: Cpu,
-  import_error: FileWarning,
-  export_error: MonitorX,
-  effect_error: Sparkles,
-  render_error: Film,
-  audio_error: AudioLines,
-  text_error: Type,
-  graphics_error: Shapes,
-  photo_error: Camera,
+const KIND_ICON: Record<string, typeof AlertTriangle> = {
+  block_failed:    FileWarning,
+  missing_media:   AlertTriangle,
+  image_failed:    FileWarning,
+  bridge_error:    Bug,
+  engine_error:    Cpu,
+  import_error:    FileWarning,
+  export_error:    MonitorX,
+  effect_error:    Sparkles,
+  render_error:    Film,
+  audio_error:     AudioLines,
+  text_error:      Type,
+  graphics_error:  Shapes,
+  photo_error:     Camera,
   transition_error: Zap,
-  playback_error: Film,
-  media_error: ImageOff,
-  unknown_error: Bug,
+  playback_error:  Film,
+  media_error:     ImageOff,
+  generation_failed: Sparkles,
 };
 
-const KIND_LABEL: Partial<Record<ProblemKind, string>> = {
-  block_failed: "Block failed",
-  missing_media: "Missing file",
-  image_failed: "Image failed",
-  bridge_error: "Bridge error",
-  engine_error: "Engine error",
-  import_error: "Import error",
-  export_error: "Export error",
-  effect_error: "Effect error",
-  render_error: "Render error",
-  audio_error: "Audio error",
-  text_error: "Text error",
-  graphics_error: "Graphics error",
-  photo_error: "Photo error",
+const KIND_LABEL: Record<string, string> = {
+  block_failed:    "Block failed",
+  missing_media:   "Missing file",
+  image_failed:    "Image failed",
+  bridge_error:    "Bridge error",
+  engine_error:    "Engine error",
+  import_error:    "Import error",
+  export_error:    "Export error",
+  effect_error:    "Effect error",
+  render_error:    "Render error",
+  audio_error:     "Audio error",
+  text_error:      "Text error",
+  graphics_error:  "Graphics error",
+  photo_error:     "Photo error",
   transition_error: "Transition error",
-  playback_error: "Playback error",
-  media_error: "Media error",
-  unknown_error: "Error",
+  playback_error:  "Playback error",
+  media_error:     "Media error",
+  generation_failed: "Generation failed",
 };
 
-const KIND_TABS: Array<{ value: ProblemKind | "all"; label: string }> = [
-  { value: "all", label: "All" },
+const KIND_TABS: Array<{ value: string; label: string }> = [
+  { value: "all",          label: "All" },
   { value: "engine_error", label: "Engine" },
   { value: "bridge_error", label: "Bridge" },
   { value: "render_error", label: "Render" },
   { value: "missing_media", label: "Files" },
-  { value: "unknown_error", label: "Other" },
+  { value: "import_error", label: "Import" },
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -155,7 +154,7 @@ export function LogPanel() {
   const filtered = useMemo(() => {
     const filter: LogFilter = {};
     if (kindFilter !== "all") {
-      filter.kinds = [kindFilter as ProblemKind];
+      filter.kinds = [kindFilter];
     }
     if (searchQuery.trim()) {
       filter.search = searchQuery.trim();

@@ -1,6 +1,6 @@
-import { readFile, writeFile, readdir, unlink, mkdir } from "node:fs/promises";
+import { readFile, writeFile, readdir, mkdir, rm, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, extname } from "node:path";
+import { join } from "node:path";
 import type { Project, ProjectSettings } from "@openreel/core";
 
 export interface ProjectSummary {
@@ -40,42 +40,46 @@ function defaultProject(overrides: {
 export class ProjectStore {
   constructor(private readonly projectsDir: string) {}
 
-  private projectPath(id: string): string {
-    return join(this.projectsDir, `${id}.json`);
+  private projectDir(id: string): string {
+    return join(this.projectsDir, id);
   }
 
-  async ensureDir(): Promise<void> {
-    if (!existsSync(this.projectsDir)) {
-      await mkdir(this.projectsDir, { recursive: true });
-    }
+  private projectJsonPath(id: string): string {
+    return join(this.projectDir(id), "project.json");
+  }
+
+  private async ensureProjectDir(id: string): Promise<void> {
+    await mkdir(this.projectDir(id), { recursive: true });
   }
 
   async listProjects(): Promise<ProjectSummary[]> {
-    await this.ensureDir();
-    const entries = await readdir(this.projectsDir);
-    const jsonFiles = entries.filter((e) => extname(e) === ".json");
-
-    const summaries: ProjectSummary[] = [];
-    for (const file of jsonFiles) {
-      try {
-        const raw = await readFile(join(this.projectsDir, file), "utf-8");
-        const project: Project = JSON.parse(raw);
-        summaries.push({
-          id: project.id,
-          name: project.name,
-          createdAt: project.createdAt,
-          modifiedAt: project.modifiedAt,
-        });
-      } catch {
-        // Skip corrupt files
-      }
-    }
-    summaries.sort((a, b) => b.modifiedAt - a.modifiedAt);
-    return summaries;
+    await mkdir(this.projectsDir, { recursive: true });
+    const entries = await readdir(this.projectsDir, { withFileTypes: true });
+    const dirs = entries.filter((entry) => entry.isDirectory());
+    const summaries = (
+      await Promise.all(
+        dirs.map(async (dir) => {
+          const jsonPath = this.projectJsonPath(dir.name);
+          try {
+            const raw = await readFile(jsonPath, "utf-8");
+            const project = JSON.parse(raw) as Project;
+            return {
+              id: project.id,
+              name: project.name,
+              createdAt: project.createdAt,
+              modifiedAt: project.modifiedAt,
+            } as ProjectSummary;
+          } catch {
+            return null;
+          }
+        }),
+      )
+    ).filter((summary): summary is ProjectSummary => summary !== null);
+    return summaries.sort((a, b) => b.modifiedAt - a.modifiedAt);
   }
 
   async loadProject(id: string): Promise<Project | null> {
-    const path = this.projectPath(id);
+    const path = this.projectJsonPath(id);
     if (!existsSync(path)) return null;
     try {
       const raw = await readFile(path, "utf-8");
@@ -85,32 +89,33 @@ export class ProjectStore {
     }
   }
 
-  async saveProject(project: Project): Promise<void> {
-    await this.ensureDir();
+  async saveProject(project: Project): Promise<Project> {
+    await this.ensureProjectDir(project.id);
     const updated: Project = { ...project, modifiedAt: Date.now() };
-    await writeFile(this.projectPath(project.id), JSON.stringify(updated, null, 2), "utf-8");
+    const finalPath = this.projectJsonPath(project.id);
+    const tmpPath = `${finalPath}.tmp`;
+    await writeFile(tmpPath, JSON.stringify(updated, null, 2), "utf-8");
+    await rename(tmpPath, finalPath);
+    return updated;
   }
 
   async createProject(name: string, settings?: Partial<ProjectSettings>): Promise<Project> {
-    await this.ensureDir();
     const id = crypto.randomUUID();
     const project = defaultProject({ id, name, settings });
-    await this.saveProject(project);
-    return project;
+    return this.saveProject(project);
   }
 
   async renameProject(id: string, name: string): Promise<Project | null> {
     const project = await this.loadProject(id);
     if (!project) return null;
-    const renamed: Project = { ...project, name, modifiedAt: Date.now() };
-    await this.saveProject(renamed);
-    return renamed;
+    const renamed: Project = { ...project, name };
+    return this.saveProject(renamed);
   }
 
   async deleteProject(id: string): Promise<boolean> {
-    const path = this.projectPath(id);
-    if (!existsSync(path)) return false;
-    await unlink(path);
+    const dir = this.projectDir(id);
+    if (!existsSync(dir)) return false;
+    await rm(dir, { recursive: true, force: true });
     return true;
   }
 }

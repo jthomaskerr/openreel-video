@@ -3,34 +3,18 @@ import { create } from "zustand";
 // ── Problem type — generalizes ImportError ──────────────────────────
 
 export type ProblemKind =
-  | "block_failed"
   | "missing_media"
+  | "block_failed"
   | "image_failed"
-  | "bridge_error"
-  | "engine_error"
   | "import_error"
-  | "export_error"
-  | "effect_error"
-  | "render_error"
-  | "audio_error"
-  | "text_error"
-  | "graphics_error"
-  | "photo_error"
-  | "transition_error"
-  | "playback_error"
-  | "media_error"
-  | "unknown_error";
+  | "generation_failed";
 
 // ── Resolve actions — what the user can do about a problem ──────────
 
 export type ResolveActionId =
   | "link_file"
   | "remove_media"
-  | "retry_import"
-  | "retry_render"
-  | "retry_export"
-  | "restart_engine"
-  | "reload_bridge"
+  | "retry_generation"
   | "dismiss";
 
 export interface ResolveAction {
@@ -40,71 +24,26 @@ export interface ResolveAction {
   resolves: boolean;
 }
 
-// ── Resolve actions per kind — what actions are available ───────────
+// ── Resolve actions per kind ────────────────────────────────────────
 
-export const RESOLVE_ACTIONS_BY_KIND: Record<
-  ProblemKind,
-  ResolveAction[]
-> = {
+export const RESOLVE_ACTIONS_BY_KIND: Record<ProblemKind, ResolveAction[]> = {
   missing_media: [
-    { id: "link_file", label: "Link File", resolves: true },
-    { id: "remove_media", label: "Remove", resolves: true },
-    { id: "dismiss", label: "Ignore", resolves: true },
+    { id: "link_file",    label: "Link File", resolves: true },
+    { id: "remove_media", label: "Remove",    resolves: true },
   ],
   block_failed: [
-    { id: "retry_import", label: "Retry", resolves: false },
-    { id: "dismiss", label: "Dismiss", resolves: true },
+    { id: "remove_media", label: "Remove", resolves: true },
   ],
   image_failed: [
-    { id: "retry_import", label: "Retry", resolves: false },
-    { id: "dismiss", label: "Dismiss", resolves: true },
-  ],
-  bridge_error: [
-    { id: "reload_bridge", label: "Reload Bridge", resolves: false },
-    { id: "dismiss", label: "Dismiss", resolves: true },
-  ],
-  engine_error: [
-    { id: "restart_engine", label: "Restart Engine", resolves: false },
-    { id: "dismiss", label: "Dismiss", resolves: true },
+    { id: "link_file",    label: "Link File", resolves: true },
+    { id: "remove_media", label: "Remove",    resolves: true },
   ],
   import_error: [
-    { id: "retry_import", label: "Retry", resolves: false },
-    { id: "dismiss", label: "Dismiss", resolves: true },
+    { id: "remove_media", label: "Remove", resolves: true },
   ],
-  export_error: [
-    { id: "retry_export", label: "Retry Export", resolves: false },
-    { id: "dismiss", label: "Dismiss", resolves: true },
-  ],
-  render_error: [
-    { id: "retry_render", label: "Retry Render", resolves: false },
-    { id: "dismiss", label: "Dismiss", resolves: true },
-  ],
-  effect_error: [
-    { id: "dismiss", label: "Dismiss", resolves: true },
-  ],
-  audio_error: [
-    { id: "dismiss", label: "Dismiss", resolves: true },
-  ],
-  text_error: [
-    { id: "dismiss", label: "Dismiss", resolves: true },
-  ],
-  graphics_error: [
-    { id: "dismiss", label: "Dismiss", resolves: true },
-  ],
-  photo_error: [
-    { id: "dismiss", label: "Dismiss", resolves: true },
-  ],
-  transition_error: [
-    { id: "dismiss", label: "Dismiss", resolves: true },
-  ],
-  playback_error: [
-    { id: "dismiss", label: "Dismiss", resolves: true },
-  ],
-  media_error: [
-    { id: "dismiss", label: "Dismiss", resolves: true },
-  ],
-  unknown_error: [
-    { id: "dismiss", label: "Dismiss", resolves: true },
+  generation_failed: [
+    { id: "retry_generation", label: "Retry",  resolves: false },
+    { id: "remove_media",     label: "Remove", resolves: true  },
   ],
 };
 
@@ -118,10 +57,9 @@ export interface Problem {
   trackName?: string;
   timestamp: number;
   resolved: boolean;
-  /** The project this problem belongs to (null = global / unknown) */
   projectId?: string;
-  /** The clip this problem relates to */
-  clipId?: string;
+  /** ID of the media item this problem relates to */
+  mediaId?: string;
 }
 
 // ── Problem input (before adding id/timestamp/resolved) ────────────
@@ -132,7 +70,7 @@ export interface ProblemInput {
   label: string;
   trackName?: string;
   projectId?: string;
-  clipId?: string;
+  mediaId?: string;
 }
 
 // ── Problem bus — for non-React code (bridges) to report problems ──

@@ -4,7 +4,7 @@
 export interface ChannelStripState {
   readonly trackId: string;
   readonly trackName: string;
-  readonly trackType: "video" | "audio" | "image" | "text" | "graphics";
+  readonly trackType: "video" | "audio" | "image" | "text" | "graphics" | "subtitle";
   readonly volume: number; // 0-4 (0 = -inf dB, 1 = 0dB, 4 = +12dB)
   readonly pan: number; // -1 (left) to 1 (right)
   readonly muted: boolean;

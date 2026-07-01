@@ -1232,7 +1232,7 @@ export const Preview: React.FC = () => {
         .map((t, idx) => ({ track: t, originalIndex: idx }))
         .filter(
           ({ track }) =>
-            (track.type === "text" || track.type === "graphics") &&
+            (track.type === "text" || track.type === "graphics" || track.type === "subtitle") &&
             !track.hidden,
         );
 
@@ -1264,6 +1264,20 @@ export const Preview: React.FC = () => {
             );
           }
         } else if (track.type === "text") {
+          const trackTextClips = textClips.filter(
+            (tc) => tc.trackId === track.id,
+          );
+          for (const textClip of trackTextClips) {
+            await renderTextClipWithSubjectMask(
+              ctx,
+              textClip,
+              canvasWidth,
+              canvasHeight,
+              time,
+              subjectFrame,
+            );
+          }
+        } else if (track.type === "subtitle") {
           const trackTextClips = textClips.filter(
             (tc) => tc.trackId === track.id,
           );
@@ -2043,7 +2057,8 @@ export const Preview: React.FC = () => {
               (track.type === "video" ||
                 track.type === "image" ||
                 track.type === "text" ||
-                track.type === "graphics") &&
+                track.type === "graphics" ||
+                track.type === "subtitle") &&
               !track.hidden,
           )
           .sort((a, b) => b.originalIndex - a.originalIndex);
@@ -2206,6 +2221,22 @@ export const Preview: React.FC = () => {
 
               hasRenderedFrame = true;
             }
+          } else if (track.type === "subtitle") {
+            const trackTextClips = activeTextClips.filter(
+              (tc) => tc.trackId === track.id,
+            );
+            for (const textClip of trackTextClips) {
+              await renderTextClipWithSubjectMask(
+                ctx,
+                textClip,
+                canvas.width,
+                canvas.height,
+                time,
+                subjectFrame,
+              );
+
+              hasRenderedFrame = true;
+            }
           }
         }
         subjectFrame?.close();
@@ -2317,7 +2348,8 @@ export const Preview: React.FC = () => {
             (track.type === "video" ||
               track.type === "image" ||
               track.type === "text" ||
-              track.type === "graphics") &&
+              track.type === "graphics" ||
+              track.type === "subtitle") &&
             !track.hidden,
         )
         .sort((a, b) => b.originalIndex - a.originalIndex);
@@ -2382,6 +2414,20 @@ export const Preview: React.FC = () => {
             hasRenderedContent = true;
           }
         } else if (track.type === "text") {
+          const trackTextClips = activeTextClips.filter(
+            (tc) => tc.trackId === track.id,
+          );
+          for (const textClip of trackTextClips) {
+            renderTextClipToCanvas(
+              ctx,
+              textClip,
+              canvas.width,
+              canvas.height,
+              time,
+            );
+            hasRenderedContent = true;
+          }
+        } else if (track.type === "subtitle") {
           const trackTextClips = activeTextClips.filter(
             (tc) => tc.trackId === track.id,
           );

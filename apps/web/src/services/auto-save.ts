@@ -111,9 +111,11 @@ class AutoSaveManager {
 
     this.getProjectFn = getProject;
 
-    // Initial save
+    // Force an initial save so the project is persisted immediately,
+    // even before the user makes any changes.
+    this.isDirty = true;
     this.pendingProject = getProject();
-    this.saveIfDirty();
+    void this.saveIfDirty();
 
     // Set up periodic saves
     this.intervalId = setInterval(() => {
@@ -132,6 +134,8 @@ class AutoSaveManager {
       this.debounceTimeoutId = null;
     }
     this.getProjectFn = null;
+    this.isDirty = false;
+    this.pendingProject = null;
   }
 
   markDirty(): void {

@@ -194,7 +194,7 @@ export const AudioMixer: React.FC<AudioMixerProps> = ({
     return audioTracks.map((track) => ({
       trackId: track.id,
       trackName: track.name,
-      trackType: track.type as "video" | "audio" | "image" | "text" | "graphics",
+      trackType: track.type as "video" | "audio" | "image" | "text" | "graphics" | "subtitle",
       volume: trackVolumes[track.id] ?? 1,
       pan: trackPans[track.id] ?? 0,
       muted: track.muted,

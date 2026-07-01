@@ -2,10 +2,14 @@ import type { MediaItem } from "@openreel/core";
 
 export async function generateThumbnailFromBlob(
   blob: Blob,
-  type: "video" | "audio" | "image",
+  type: "video" | "audio" | "image" | "srt",
 ): Promise<string | null> {
   if (type === "audio") {
     return null;
+  }
+
+  if (type === "srt") {
+    return null; // SRT files don't have thumbnails
   }
 
   if (type === "image") {

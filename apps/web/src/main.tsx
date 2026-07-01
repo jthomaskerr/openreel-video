@@ -7,43 +7,26 @@ import "./index.css";
 import { registerServiceWorker } from "./services/service-worker";
 import { initCustomFonts } from "./components/editor/inspector/font-options";
 
-// ── Global console.error → log + problems stores ────────────────────
-// Intercept every console.error so errors are captured in both the
-// immutable Log pane and the actionable Problems pane.
+// ── Global console.error → log store ────────────────────────────────
+// Intercept every console.error so errors are captured in the Log pane.
 import { logBus } from "./stores/log-store";
-import { problemBus } from "./stores/problem-store";
 const _origConsoleError = console.error.bind(console);
 console.error = (...args: unknown[]) => {
   _origConsoleError(...args);
   const msg = args.map((a) => (typeof a === "string" ? a : String(a))).join(" ");
   if (msg.length > 0 && msg.length < 500) {
-    // Derive a rough kind and source from the message prefix
-    let kind: import("./stores/problem-store").ProblemKind = "unknown_error";
+    let kind: import("./stores/problem-store").ProblemKind = "import_error";
     let source = "console.error";
-    if (msg.includes("[EffectsBridge]")) { kind = "effect_error"; source = "bridge:effects"; }
-    else if (msg.includes("[TransitionBridge]")) { kind = "transition_error"; source = "bridge:transition"; }
-    else if (msg.includes("[RenderBridge]") || msg.includes("RenderBridge")) { kind = "render_error"; source = "bridge:render"; }
-    else if (msg.includes("MediaBridge")) { kind = "media_error"; source = "bridge:media"; }
-    else if (msg.includes("GraphicsBridge")) { kind = "graphics_error"; source = "bridge:graphics"; }
-    else if (msg.includes("TextBridge")) { kind = "text_error"; source = "bridge:text"; }
-    else if (msg.includes("PhotoBridge")) { kind = "photo_error"; source = "bridge:photo"; }
-    else if (msg.includes("Bridge")) { kind = "bridge_error"; source = "bridge"; }
-    else if (msg.includes("Engine") || msg.includes("initializ")) { kind = "engine_error"; source = "engine"; }
-    else if (msg.includes("export")) kind = "export_error";
-    else if (msg.includes("import")) kind = "import_error";
-    else if (msg.includes("render")) kind = "render_error";
-    else if (msg.includes("audio") || msg.includes("Audio")) kind = "audio_error";
-
+    if (msg.includes("Bridge")) { source = "bridge"; }
+    else if (msg.includes("Engine") || msg.includes("initializ")) { source = "engine"; }
+    else if (msg.includes("export")) { source = "export"; }
+    else if (msg.includes("import")) { source = "import"; }
+    else if (msg.includes("audio") || msg.includes("Audio")) { source = "audio"; }
     logBus.entry({
       kind,
       message: msg.slice(0, 300),
       label: msg.slice(0, 80),
       source,
-    });
-    problemBus.report({
-      kind,
-      message: msg.slice(0, 300),
-      label: msg.slice(0, 80),
     });
   }
 };

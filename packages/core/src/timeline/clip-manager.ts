@@ -393,7 +393,7 @@ export class ClipManager {
 
   canTrackAcceptClip(
     track: Track,
-    mediaType: "video" | "audio" | "image",
+    mediaType: "video" | "audio" | "image" | "srt",
   ): boolean {
     // Video tracks can accept video and image
     if (track.type === "video") {
@@ -406,6 +406,10 @@ export class ClipManager {
     // Image tracks can only accept images
     if (track.type === "image") {
       return mediaType === "image";
+    }
+    // Subtitle tracks accept SRT media
+    if (track.type === "subtitle") {
+      return mediaType === "srt";
     }
     return false;
   }

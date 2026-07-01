@@ -230,6 +230,14 @@ export const getTrackInfo = (track: Track, index: number): TrackInfo => {
         textColor: "text-sky-400",
         bgLight: "bg-sky-500/20",
       };
+    case "subtitle":
+      return {
+        label: `S${index + 1}`,
+        icon: FileText,
+        color: "bg-rose-500",
+        textColor: "text-rose-400",
+        bgLight: "bg-rose-500/20",
+      };
     default:
       return {
         label: `?${index + 1}`,
@@ -272,6 +280,13 @@ export const getClipStyle = (trackType: string): ClipStyle => {
         border: "border-sky-500/50",
         text: "text-sky-200/90",
         selectedText: "text-sky-100",
+      };
+    case "subtitle":
+      return {
+        bg: "bg-rose-600/25",
+        border: "border-rose-500/60",
+        text: "text-white/90",
+        selectedText: "text-white",
       };
     default:
       return {

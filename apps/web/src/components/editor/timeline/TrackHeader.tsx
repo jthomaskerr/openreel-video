@@ -43,7 +43,8 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
     track.type === "video" ||
     track.type === "image" ||
     track.type === "text" ||
-    track.type === "graphics";
+    track.type === "graphics" ||
+    track.type === "subtitle";
 
   const handleRemoveTrack = async () => {
     await removeTrack(track.id);

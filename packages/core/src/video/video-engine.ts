@@ -554,7 +554,8 @@ export class VideoEngine {
           (track.type === "video" ||
             track.type === "image" ||
             track.type === "text" ||
-            track.type === "graphics") &&
+            track.type === "graphics" ||
+            track.type === "subtitle") &&
           !track.hidden,
       )
       .sort((a, b) => b.originalIndex - a.originalIndex);
@@ -881,6 +882,20 @@ export class VideoEngine {
           );
         }
       } else if (track.type === "text") {
+        const trackTextClips = activeTextClips.filter(
+          (tc) => tc.trackId === track.id,
+        );
+        for (const textClip of trackTextClips) {
+          await this.renderTextClipWithSubjectMask(
+            ctx,
+            textClip,
+            time,
+            width,
+            height,
+            subjectFrame,
+          );
+        }
+      } else if (track.type === "subtitle") {
         const trackTextClips = activeTextClips.filter(
           (tc) => tc.trackId === track.id,
         );

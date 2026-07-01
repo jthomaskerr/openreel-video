@@ -15,6 +15,7 @@ import { SpotlightTour, MoGraphTour } from "./tour";
 import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
 import { useEngineStore } from "../../stores/engine-store";
+import { useKieAIStore } from "../../stores/kieai-store";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import {
   initializePlaybackBridge,
@@ -212,50 +213,52 @@ export const EditorInterface: React.FC = () => {
   // ── Resolve action handler for problem actions ────────────────────
   useEffect(() => {
     setResolveActionHandler((actionId: ResolveActionId, problem: Problem) => {
+      const mediaId = problem.mediaId ?? problem.label;
       switch (actionId) {
-        case "link_file":
-          // Trigger file picker for missing media
-          if (problem.label) {
-            const { replaceMediaAsset } = useProjectStore.getState();
-            const input = document.createElement("input");
-            input.type = "file";
-            input.accept = "video/*,audio/*,image/*";
-            input.onchange = async (event) => {
-              try {
-                const file = (event.target as HTMLInputElement).files?.[0];
-                if (file) {
-                  const result = await replaceMediaAsset(problem.label, file);
-                  if (result.success) {
-                    toast.success("File linked", `Replaced with ${file.name}`);
-                    problemBus.resolve(problem.id);
-                  } else {
-                    toast.error("Link failed", result.error?.message || "Could not replace file");
-                  }
+        case "link_file": {
+          if (!mediaId) break;
+          const { replaceMediaAsset } = useProjectStore.getState();
+          const input = document.createElement("input");
+          input.type = "file";
+          input.accept = "video/*,audio/*,image/*";
+          input.onchange = async (event) => {
+            try {
+              const file = (event.target as HTMLInputElement).files?.[0];
+              if (file) {
+                const result = await replaceMediaAsset(mediaId, file);
+                if (result.success) {
+                  toast.success("File linked", `Replaced with ${file.name}`);
+                  problemBus.resolve(problem.id);
+                } else {
+                  toast.error("Link failed", result.error?.message || "Could not replace file");
                 }
-              } catch (err) {
-                toast.error("Link failed", err instanceof Error ? err.message : "Unknown error");
-              } finally {
-                input.remove();
               }
-            };
-            input.click();
-          }
+            } catch (err) {
+              toast.error("Link failed", err instanceof Error ? err.message : "Unknown error");
+            } finally {
+              input.remove();
+            }
+          };
+          input.click();
           break;
+        }
         case "remove_media":
-          if (problem.label) {
-            const { deleteMedia } = useProjectStore.getState();
-            deleteMedia(problem.label);
+          if (mediaId) {
+            useProjectStore.getState().deleteMedia(mediaId);
           }
           problemBus.resolve(problem.id);
           break;
-        case "retry_import":
-        case "retry_render":
-        case "retry_export":
-        case "restart_engine":
-        case "reload_bridge":
-          // Non-resolving actions: user must verify result manually
-          window.location.reload();
+        case "retry_generation": {
+          if (!mediaId) break;
+          const mediaItem = useProjectStore.getState().getMediaItem(mediaId);
+          if (mediaItem?.kieaiTaskId) {
+            const { retryTask } = useKieAIStore.getState();
+            useProjectStore.getState().setKieAIItemState(mediaId, true, false);
+            retryTask(mediaItem.kieaiTaskId);
+            problemBus.resolve(problem.id);
+          }
           break;
+        }
         default:
           break;
       }

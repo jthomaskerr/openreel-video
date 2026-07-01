@@ -1,30 +1,28 @@
 import { create } from "zustand";
-import type { ProblemKind } from "./problem-store";
+
+// ── Log kind — broader than ProblemKind; includes infrastructure sources ──
+
+export type LogKind = string;
 
 // ── Log entry type — immutable global error record ───────────────────
 
 export interface LogEntry {
   id: string;
-  kind: ProblemKind;
+  kind: LogKind;
   message: string;
   label: string;
   timestamp: number;
-  /** The project ID active when this error was logged, if known */
   projectId?: string;
-  /** Human-readable project name */
   projectName?: string;
-  /** The clip ID associated with this error, if known */
   clipId?: string;
-  /** Track name associated with this error, if known */
   trackName?: string;
-  /** Source identifier — e.g. "console.error", "bridge:effects", "engine" */
   source?: string;
 }
 
 // ── Log entry creation input — project/clip metadata optional ────────
 
 export interface LogEntryInput {
-  kind: ProblemKind;
+  kind: LogKind;
   message: string;
   label: string;
   projectId?: string;
@@ -38,7 +36,7 @@ export interface LogEntryInput {
 
 export interface LogFilter {
   /** Filter to specific problem kinds */
-  kinds?: ProblemKind[];
+  kinds?: LogKind[];
   /** Filter to specific project IDs */
   projectIds?: string[];
   /** Filter to specific clip IDs */
