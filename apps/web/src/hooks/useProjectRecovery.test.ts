@@ -10,11 +10,13 @@ import type { MediaItem, Project } from "@openreel/core";
 // ---------------------------------------------------------------------------
 const {
   mockAutoSaveRecover,
+  mockBackendLoad,
   mockCheckForRecovery,
   mockLoadProjectMedia,
   mockSaveMediaBlob,
 } = vi.hoisted(() => ({
   mockAutoSaveRecover: vi.fn<[], Promise<Project | null>>(),
+  mockBackendLoad: vi.fn<[string], Promise<Project | null>>().mockResolvedValue(null),
   mockCheckForRecovery: vi
     .fn<[], Promise<AutoSaveMetadata[]>>()
     .mockResolvedValue([]),
@@ -25,6 +27,15 @@ const {
     >()
     .mockResolvedValue([]),
   mockSaveMediaBlob: vi.fn<unknown[], Promise<void>>().mockResolvedValue(undefined),
+}));
+vi.mock("../services/backend-save", () => ({
+  backendSaveService: {
+    load: (...args: unknown[]) => mockBackendLoad(...(args as [string])),
+    uploadMediaAsync: vi.fn(),
+    resetForProject: vi.fn(),
+    save: vi.fn().mockResolvedValue(undefined),
+    isReachable: vi.fn().mockResolvedValue(true),
+  },
 }));
 
 // ---------------------------------------------------------------------------
@@ -296,6 +307,7 @@ describe("useProjectRecovery hook", () => {
     mockAutoSaveRecover.mockReset();
     mockCheckForRecovery.mockReset().mockResolvedValue([]);
     mockLoadProjectMedia.mockReset().mockResolvedValue([]);
+    mockBackendLoad.mockReset().mockResolvedValue(null);
     useProjectStore.getState().createNewProject();
   });
 
@@ -320,6 +332,56 @@ describe("useProjectRecovery hook", () => {
       expect(result.current.isChecking).toBe(false);
     });
     expect(result.current.showDialog).toBe(false);
+  });
+  it("restores from backend first and hydrates media blobs before loading project", async () => {
+    const storedBlob = new Blob(["backend-audio"], { type: "audio/mpeg" });
+    const backendProject = makeProject({
+      name: "Backend Cut",
+      mediaItems: [makeMediaItem()],
+    });
+
+    mockCheckForRecovery.mockResolvedValue([]);
+    mockBackendLoad.mockResolvedValue(backendProject);
+    mockLoadProjectMedia.mockResolvedValue([
+      {
+        id: "media-1",
+        projectId: backendProject.id,
+        blob: storedBlob,
+        metadata: {},
+      },
+    ]);
+
+    const { result } = renderHook(() => useProjectRecovery(backendProject.id));
+
+    await waitFor(() => {
+      expect(result.current.isChecking).toBe(false);
+    });
+
+    expect(mockBackendLoad).toHaveBeenCalledWith(backendProject.id);
+    expect(mockLoadProjectMedia).toHaveBeenCalledWith(backendProject.id);
+    expect(mockAutoSaveRecover).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().project.name).toBe("Backend Cut");
+    expect(useProjectStore.getState().project.mediaLibrary.items[0]?.blob).toBe(storedBlob);
+    expect(result.current.showDialog).toBe(false);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("falls back to IDB auto-saves when backend restore is unavailable", async () => {
+    mockCheckForRecovery.mockResolvedValue([makeSave()]);
+    mockBackendLoad.mockResolvedValue(null);
+    mockAutoSaveRecover.mockResolvedValue(makeProject({ name: "Fallback Cut" }));
+
+    const { result } = renderHook(() => useProjectRecovery("test-project-id"));
+
+    await waitFor(() => {
+      expect(result.current.isChecking).toBe(false);
+    });
+
+    expect(mockBackendLoad).toHaveBeenCalledWith("test-project-id");
+    expect(mockAutoSaveRecover).toHaveBeenCalledWith("save-1");
+    expect(useProjectStore.getState().project.name).toBe("Fallback Cut");
+    expect(result.current.showDialog).toBe(false);
+    expect(result.current.error).toBeNull();
   });
 
   it("hides dialog and clears error after successful recovery", async () => {

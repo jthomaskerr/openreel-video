@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
+import { backendSaveService } from "../services/backend-save";
 import { autoSaveManager, type AutoSaveMetadata } from "../services/auto-save";
-import { clearAllStorage } from "../services/media-storage";
+import { clearAllStorage, loadProjectMedia } from "../services/media-storage";
+import { restoreMediaItem } from "../utils/media-recovery";
 import { useProjectStore } from "../stores/project-store";
 
 interface RecoveryState {
@@ -19,6 +21,7 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
   });
 
   const recoverFromAutoSave = useProjectStore((s) => s.recoverFromAutoSave);
+  const loadProject = useProjectStore((s) => s.loadProject);
 
   useEffect(() => {
     const checkForRecovery = async () => {
@@ -27,8 +30,27 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
         const saves = await autoSaveManager.checkForRecovery();
 
         if (autoRestoreProjectId) {
-          // Silently restore the most recent save for the project in the URL.
-          // No dialog — the URL is the source of truth.
+          // Backend is the primary store — try it first.
+          const backendProject = await backendSaveService.load(autoRestoreProjectId);
+          if (backendProject) {
+            // Merge blobs from IDB for any media the engine needs immediately.
+            const stored = await loadProjectMedia(backendProject.id);
+            const blobMap = new Map(stored.map((m) => [m.id, m.blob]));
+            const restoredItems = await Promise.all(
+              backendProject.mediaLibrary.items.map((item) =>
+                restoreMediaItem({ ...item, blob: null }, blobMap.get(item.id)),
+              ),
+            );
+            const fullyRestored = {
+              ...backendProject,
+              mediaLibrary: { ...backendProject.mediaLibrary, items: restoredItems },
+            };
+            loadProject(fullyRestored);
+            setState({ isChecking: false, availableSaves: [], showDialog: false, error: null });
+            return;
+          }
+
+          // Backend unreachable or no save — fall back to IDB auto-saves.
           const projectSaves = saves
             .filter((s) => s.projectId === autoRestoreProjectId)
             .sort((a, b) => b.timestamp - a.timestamp);
