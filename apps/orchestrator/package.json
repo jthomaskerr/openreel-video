@@ -17,11 +17,13 @@
     "@openreel/music-video-domain": "workspace:*",
     "cors": "^2.8.5",
     "express": "^4.19.2",
+    "multer": "^2.2.0",
     "wavespeed": "^0.2.4"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
     "@types/express": "^4.17.21",
+    "@types/multer": "^2.1.0",
     "@types/node": "^20.14.0",
     "tsx": "^4.15.0",
     "typescript": "^5.4.5"

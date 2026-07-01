@@ -2,16 +2,17 @@ import express from "express";
 import type { Express } from "express";
 import cors from "cors";
 import { config } from "./env";
-import { ProjectStore, createProjectRouter } from "./projects";
+import { ProjectStore, createProjectRouter, GitStore } from "./projects";
 import { neuralframesRouter, wavespeedRouter } from "./routes/index";
 import { mkdirSync } from "node:fs";
 
 export function createApp(): Express {
-  const projectStore = new ProjectStore(config.projectsDir);
+  const gitStore = new GitStore(config.projectsRepo);
+  const projectStore = new ProjectStore(gitStore);
   const app = express();
 
   app.use(cors());
-  app.use(express.json({ limit: "10mb" }));
+  app.use(express.json({ limit: "50mb" }));
 
   // Serve locally cached generated assets (scene images etc.)
   mkdirSync(config.generatedAssetsDir, { recursive: true });
@@ -31,7 +32,7 @@ export function createApp(): Express {
 
   app.use("/api/import/neuralframes", neuralframesRouter);
   app.use("/api/generate/wavespeed", wavespeedRouter);
-  app.use("/api/projects", createProjectRouter(projectStore));
+  app.use("/api/projects", createProjectRouter(projectStore, gitStore));
 
   return app;
 }

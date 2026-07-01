@@ -3,6 +3,7 @@ import { Switch } from "@openreel/ui";
 import { Label } from "@openreel/ui";
 import { useSettingsStore, SERVICE_REGISTRY, type TtsProvider, type LlmProvider, type AggregatorProvider } from "../../../stores/settings-store";
 import { useProjectStore } from "../../../stores/project-store";
+import { ORCHESTRATOR_URL } from "../../../stores/music-video-store";
 
 const ASPECT_PRESETS: Array<{ label: string; width: number; height: number }> = [
   { label: "16:9 Landscape (1080p)", width: 1920, height: 1080 },
@@ -40,6 +41,40 @@ export const GeneralPanel: React.FC = () => {
     setDraftWidth(String(projectWidth));
     setDraftHeight(String(projectHeight));
   }, [projectWidth, projectHeight]);
+
+  // Remote repository
+  const [remoteUrl, setRemoteUrl] = React.useState("");
+  const [remoteDirty, setRemoteDirty] = React.useState(false);
+  const [remoteSaving, setRemoteSaving] = React.useState(false);
+  const [remoteStatus, setRemoteStatus] = React.useState<"" | "saved" | "error">("");
+
+  // Load remote URL from backend on mount
+  React.useEffect(() => {
+    fetch(`${ORCHESTRATOR_URL}/api/projects/config`)
+      .then((res) => res.json())
+      .then((cfg: { remote?: string }) => setRemoteUrl(cfg.remote ?? ""))
+      .catch(() => {});
+  }, []);
+
+  const saveRemote = useCallback(async () => {
+    setRemoteSaving(true);
+    setRemoteStatus("");
+    try {
+      const res = await fetch(`${ORCHESTRATOR_URL}/api/projects/config`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ remote: remoteUrl.trim() }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setRemoteDirty(false);
+      setRemoteStatus("saved");
+      setTimeout(() => setRemoteStatus(""), 3000);
+    } catch {
+      setRemoteStatus("error");
+    } finally {
+      setRemoteSaving(false);
+    }
+  }, [remoteUrl]);
 
   const applyDimensions = useCallback(
     async (width: number, height: number) => {
@@ -182,6 +217,49 @@ export const GeneralPanel: React.FC = () => {
               <option value={30}>30 minutes</option>
             </select>
           </div>
+        )}
+      </div>
+
+
+      {/* Remote Repository */}
+      <div className="space-y-4">
+        <h3 className="text-sm font-medium text-text-primary">Remote Repository</h3>
+        <p className="text-xs text-text-muted">
+          Git remote URL for project backups. All projects are stored as branches in a single shared repository.
+        </p>
+
+        <div className="flex items-end gap-2">
+          <div className="flex-1">
+            <Label className="text-xs text-text-secondary">Git Remote URL</Label>
+            <input
+              type="text"
+              placeholder="git@github.com:you/openreel-projects.git"
+              value={remoteUrl}
+              onChange={(e) => {
+                setRemoteUrl(e.target.value);
+                setRemoteDirty(true);
+                setRemoteStatus("");
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") saveRemote();
+              }}
+              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-3 text-sm font-mono"
+            />
+          </div>
+          <button
+            onClick={saveRemote}
+            disabled={remoteSaving || !remoteDirty}
+            className="h-9 px-3 rounded-md bg-primary text-white text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            {remoteSaving ? "Saving…" : "Save"}
+          </button>
+        </div>
+
+        {remoteStatus === "saved" && (
+          <p className="text-xs text-green-500">Remote URL saved successfully.</p>
+        )}
+        {remoteStatus === "error" && (
+          <p className="text-xs text-red-500">Failed to save remote URL. Check the backend is running.</p>
         )}
       </div>
 

@@ -1,7 +1,8 @@
 import { readFile, writeFile, readdir, mkdir, rm, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, extname, basename } from "node:path";
 import type { Project, ProjectSettings } from "@openreel/core";
+import type { GitStore } from "./git-store";
 
 export interface ProjectSummary {
   readonly id: string;
@@ -38,23 +39,33 @@ function defaultProject(overrides: {
 }
 
 export class ProjectStore {
-  constructor(private readonly projectsDir: string) {}
+  constructor(private readonly gitStore: GitStore) {}
 
-  private projectDir(id: string): string {
-    return join(this.projectsDir, id);
+  /** Worktree path for a project. */
+  projectDir(id: string): string {
+    return this.gitStore.worktreePath(id);
   }
 
   private projectJsonPath(id: string): string {
     return join(this.projectDir(id), "project.json");
   }
 
-  private async ensureProjectDir(id: string): Promise<void> {
-    await mkdir(this.projectDir(id), { recursive: true });
+  /** Media directory inside the worktree. */
+  mediaDir(id: string): string {
+    return join(this.projectDir(id), "media");
   }
 
+  private async ensureProjectDir(id: string): Promise<void> {
+    await this.gitStore.ensureWorktree(id);
+  }
+
+  // ── CRUD ─────────────────────────────────────────────────────────────────
+
   async listProjects(): Promise<ProjectSummary[]> {
-    await mkdir(this.projectsDir, { recursive: true });
-    const entries = await readdir(this.projectsDir, { withFileTypes: true });
+    await this.gitStore.ensureSharedRepo();
+    const projectsParent = join(this.projectDir("_"), "..");
+    await mkdir(projectsParent, { recursive: true });
+    const entries = await readdir(projectsParent, { withFileTypes: true });
     const dirs = entries.filter((entry) => entry.isDirectory());
     const summaries = (
       await Promise.all(
@@ -114,8 +125,31 @@ export class ProjectStore {
 
   async deleteProject(id: string): Promise<boolean> {
     const dir = this.projectDir(id);
-    if (!existsSync(dir)) return false;
-    await rm(dir, { recursive: true, force: true });
-    return true;
+    const existed = existsSync(dir);
+    if (existed) {
+      await this.gitStore.deleteWorktree(id);
+      // deleteWorktree should have cleaned up, but rm as safety net
+      try {
+        await rm(dir, { recursive: true, force: true });
+      } catch {
+        // already gone
+      }
+    }
+    return existed;
+  }
+
+  // ── Media files ──────────────────────────────────────────────────────────
+
+  /** Scan the media directory and return { [mediaId]: storedFilename }. */
+  async scanMedia(projectId: string): Promise<Record<string, string>> {
+    const dir = this.mediaDir(projectId);
+    if (!existsSync(dir)) return {};
+    const files = await readdir(dir);
+    const result: Record<string, string> = {};
+    for (const file of files) {
+      const mediaId = basename(file, extname(file));
+      result[mediaId] = file;
+    }
+    return result;
   }
 }

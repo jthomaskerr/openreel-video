@@ -5,7 +5,10 @@
 
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
+
+const home = homedir();
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 
@@ -51,9 +54,9 @@ export const config = {
     "MVD_BIN",
     join(__dir, "../../../../mvd-skill/.venv/bin/mvd"),
   ),
-  projectsDir: env(
-    "MV_PROJECTS_DIR",
-    join(__dir, "../../../../music-video-studio/projects"),
+  projectsRepo: env(
+    "MV_PROJECTS_REPO",
+    join(home, "openreel-projects"),
   ),
   generatedAssetsDir: env(
     "MV_GENERATED_ASSETS_DIR",
