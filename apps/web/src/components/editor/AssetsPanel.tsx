@@ -4,7 +4,7 @@ import {
   Square, Circle, Triangle, Star, ArrowRight, Hexagon, FileCode, AlertTriangle,
   RefreshCw, Palette, LayoutGrid, Grid2x2, List, Sparkles, Video,
   Type, Shapes, Wand2, LayoutTemplate, Zap, Shuffle, Pencil, Settings,
-  ChevronsUpDown, Check,
+  ChevronsUpDown,
 } from "lucide-react";
 import {
   BACKGROUND_PRESETS,
@@ -41,8 +41,9 @@ import {
 } from "@openreel/ui";
 import { GenerateAssetDialog } from "./generate/GenerateAssetDialog";
 import type { GenerateAssetDialogProps } from "./generate/GenerateAssetDialog";
-import { loadMediaBlob } from "../../services/media-storage";
+import { loadMediaBlob, saveFileHandle, saveDirectoryHandle, scanDirectoryRecursive } from "../../services/media-storage";
 import { useKieAIStore } from "../../stores/kieai-store";
+import { useMusicVideoStore } from "../../stores/music-video-store";
 import { AssetBuckets, type AssetBucketsHandle, type GroupBy } from "./AssetBuckets";
 const formatDuration = (seconds: number): string => {
   const mins = Math.floor(seconds / 60);
@@ -158,6 +159,7 @@ const MediaThumbnail: React.FC<{
   onRename,
 }) {
   const [isHovered, setIsHovered] = useState(false);
+  const isReplacing = useProjectStore((s) => s.replacingMediaIds.has(item.id));
 
   const getIcon = () => {
     switch (item.type) {
@@ -203,8 +205,14 @@ const MediaThumbnail: React.FC<{
       : isSelected
         ? "border-primary ring-1 ring-primary/50 shadow-[0_0_10px_rgba(34,197,94,0.2)]"
         : "border-border hover:border-text-secondary";
-
-  const hoverOverlay = (
+  const hoverOverlay = isReplacing ? (
+    <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center animate-in fade-in duration-200">
+      <div className="flex flex-col items-center gap-2">
+        <div className="h-6 w-6 animate-spin rounded-full border-3 border-blue-400 border-t-transparent" />
+        <span className="text-[10px] text-blue-300 font-medium">Replacing…</span>
+      </div>
+    </div>
+  ) : (
     <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center gap-2 animate-in fade-in duration-200">
       {item.kieaiError ? (
         <button
@@ -296,6 +304,11 @@ const MediaThumbnail: React.FC<{
           {!item.kieaiError && item.isPending && (
             <div className="absolute inset-0 flex items-center justify-center bg-purple-500/10">
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-purple-400 border-t-transparent" />
+            </div>
+          )}
+          {isReplacing && (
+            <div className="absolute inset-0 flex items-center justify-center bg-blue-500/10">
+              <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
             </div>
           )}
           {!item.kieaiError && !item.isPending && item.isPlaceholder && (
@@ -520,6 +533,16 @@ const MediaThumbnail: React.FC<{
         {!item.kieaiError && !item.isPending && item.isPlaceholder && !isHovered && (
           <div className="absolute inset-0 flex items-center justify-center bg-yellow-500/10">
             <AlertTriangle size={viewMode === "small" ? 20 : 32} className="text-yellow-500/50" />
+          </div>
+        )}
+
+        {/* Replacing overlay */}
+        {isReplacing && !isHovered && (
+          <div className="absolute inset-0 flex items-center justify-center bg-blue-500/10">
+            <div className="flex flex-col items-center gap-1.5">
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-400 border-t-transparent" />
+              <span className="text-[10px] text-blue-300 font-medium">Replacing…</span>
+            </div>
           </div>
         )}
 
