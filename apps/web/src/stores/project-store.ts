@@ -74,6 +74,7 @@ import {
 } from "../services/media-storage";
 import { restoreMediaItem } from "../utils/media-recovery";
 import { projectManager } from "../services/project-manager";
+import { toast } from "./notification-store";
 
 /**
  * ProjectState - Complete state interface for project management
@@ -113,6 +114,9 @@ export interface ProjectState {
   error: string | null;
   explicitlyCreated: boolean;
 
+  // Media operations in flight
+  replacingMediaIds: Set<string>;
+
   createNewProject: (
     name?: string,
     settings?: Partial<ProjectSettings>,
@@ -146,7 +150,7 @@ export interface ProjectState {
 
   // Track actions
   addTrack: (
-    trackType: "video" | "audio" | "image" | "text" | "graphics" | "metadata",
+    trackType: "video" | "audio" | "image" | "text" | "graphics" | "metadata" | "subtitle",
     position?: number,
   ) => Promise<ActionResult>;
   removeTrack: (trackId: string) => Promise<ActionResult>;
@@ -1491,6 +1495,7 @@ export const useProjectStore = create<ProjectState>()(
       isLoading: false,
       explicitlyCreated: false,
       error: null,
+      replacingMediaIds: new Set<string>(),
       clipboard: [] as Clip[],
       copiedEffects: [] as Effect[],
 
@@ -1685,7 +1690,18 @@ export const useProjectStore = create<ProjectState>()(
       // Save project as file
       saveProjectAsDialog: async () => {
         const { project } = get();
-        return projectManager.saveProjectAs(project);
+        try {
+          const success = await projectManager.saveProjectAs(project);
+          if (success) {
+            toast.success("Project saved", `"${project.name}" saved successfully`);
+          } else {
+            toast.error("Save failed", "Could not save project");
+          }
+          return success;
+        } catch (err) {
+          toast.error("Save failed", err instanceof Error ? err.message : "Unknown error");
+          return false;
+        }
       },
 
       // Media library actions
@@ -1915,6 +1931,7 @@ export const useProjectStore = create<ProjectState>()(
 
       replaceMediaAsset: async (mediaId: string, file: File, sourceFolder?: string) => {
         const { project } = get();
+        set((s) => ({ replacingMediaIds: new Set([...s.replacingMediaIds, mediaId]) }));
 
         try {
           const mediaBridge = getMediaBridge();
@@ -2099,6 +2116,12 @@ export const useProjectStore = create<ProjectState>()(
                 error instanceof Error ? error.message : "Unknown import error",
             },
           };
+        } finally {
+          set((s) => {
+            const next = new Set(s.replacingMediaIds);
+            next.delete(mediaId);
+            return { replacingMediaIds: next };
+          });
         }
       },
 
@@ -2319,6 +2342,8 @@ export const useProjectStore = create<ProjectState>()(
 
       replacePlaceholderMedia: async (mediaId: string, blob: Blob, name: string) => {
         const { project } = get();
+        set((s) => ({ replacingMediaIds: new Set([...s.replacingMediaIds, mediaId]) }));
+        try {
 
         // For images use createImageBitmap (no mediaBridge dependency).
         // This avoids WASM initialisation races and works immediately in any context.
@@ -2407,11 +2432,18 @@ export const useProjectStore = create<ProjectState>()(
         } catch (err) {
           console.error("[ProjectStore] Failed to persist KieAI result blob:", err);
         }
+        } finally {
+          set((s) => {
+            const next = new Set(s.replacingMediaIds);
+            next.delete(mediaId);
+            return { replacingMediaIds: next };
+          });
+        }
       },
 
       // Track actions
       addTrack: async (
-        trackType: "video" | "audio" | "image" | "text" | "graphics" | "metadata",
+        trackType: "video" | "audio" | "image" | "text" | "graphics" | "metadata" | "subtitle",
         position?: number,
       ) => {
         const { project, actionExecutor } = get();
@@ -4061,7 +4093,7 @@ export const useProjectStore = create<ProjectState>()(
               // Check if track has any remaining clips based on track type
               let trackHasClips = false;
 
-              if (track.type === "text") {
+              if (track.type === "text" || track.type === "subtitle") {
                 const titleEngine = useEngineStore.getState().getTitleEngine();
                 const textClips = titleEngine?.getAllTextClips() || [];
                 trackHasClips = textClips.some(c => c.trackId === trackId);
@@ -4417,6 +4449,7 @@ export const useProjectStore = create<ProjectState>()(
             templateUndoStack: [],
             templateRedoStack: [],
             error: null,
+            explicitlyCreated: true,
           });
 
           await projectManager.addToRecent(projectWithMedia);
@@ -4842,7 +4875,7 @@ export const useProjectStore = create<ProjectState>()(
         return textAnimationEngine.getAvailablePresets();
       },
 
-      // Subtitle actions - subtitles are now created as text clips on a "Captions" track
+      // Subtitle actions - subtitles are created as text clips on a "Captions" subtitle track
 
       /**
        * Add a subtitle as a text clip on a Captions track
@@ -4851,7 +4884,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, addTrack, createTextClip } = get();
 
         let captionsTrack = project.timeline.tracks.find(
-          (t) => t.type === "text" && t.name === "Captions"
+          (t) => (t.type === "subtitle" || t.type === "text") && t.name === "Captions"
         );
 
         if (!captionsTrack) {
