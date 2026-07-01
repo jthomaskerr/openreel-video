@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Move, Palette, Wand2, Volume2, Gauge, Film, Sparkles, Type } from "lucide-react";
+import { Move, Palette, Wand2, Volume2, Gauge, Film, Sparkles, Type, StickyNote } from "lucide-react";
 
 export type InspectorTabId =
   | "transform"
@@ -9,7 +9,8 @@ export type InspectorTabId =
   | "speed"
   | "animate"
   | "ai"
-  | "style";
+  | "style"
+  | "note";
 
 export type InspectorClipType =
   | "video"
@@ -18,7 +19,8 @@ export type InspectorClipType =
   | "text"
   | "shape"
   | "svg"
-  | "sticker";
+  | "sticker"
+  | "note";
 
 export interface InspectorTabDef {
   id: InspectorTabId;
@@ -35,6 +37,7 @@ export const TAB_DEFS: Record<InspectorTabId, InspectorTabDef> = {
   animate: { id: "animate", label: "Animate", icon: Film },
   ai: { id: "ai", label: "AI", icon: Sparkles },
   style: { id: "style", label: "Style", icon: Type },
+  note: { id: "note", label: "Note", icon: StickyNote },
 };
 const TABS_BY_CLIP_TYPE: Record<InspectorClipType, InspectorTabId[]> = {
   video: ["transform", "color", "effects", "audio", "speed", "animate", "ai"],
@@ -44,6 +47,7 @@ const TABS_BY_CLIP_TYPE: Record<InspectorClipType, InspectorTabId[]> = {
   shape: ["transform", "style", "effects", "animate"],
   svg: ["transform", "style", "effects", "animate"],
   sticker: ["transform", "effects", "animate"],
+  note: ["note"],
 };
 
 export function getTabIdsForClipType(

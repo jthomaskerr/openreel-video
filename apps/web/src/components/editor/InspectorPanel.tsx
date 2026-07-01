@@ -828,14 +828,18 @@ export const InspectorPanel: React.FC = () => {
 
   const problemCount = useProblemCount();
 
-  const clipTabs = useMemo(
-    () => getTabsForClipType(clipType as InspectorClipType | null),
-    [clipType],
-  );
-  const clipTabIds = useMemo(
-    () => getTabIdsForClipType(clipType as InspectorClipType | null),
-    [clipType],
-  );
+  const clipTabs = useMemo(() => {
+    if (isMetadataClip) {
+      return metadataKind === "note" ? getTabsForClipType("note") : [];
+    }
+    return getTabsForClipType(clipType as InspectorClipType | null);
+  }, [clipType, isMetadataClip, metadataKind]);
+  const clipTabIds = useMemo(() => {
+    if (isMetadataClip) {
+      return metadataKind === "note" ? getTabIdsForClipType("note") : [];
+    }
+    return getTabIdsForClipType(clipType as InspectorClipType | null);
+  }, [clipType, isMetadataClip, metadataKind]);
 
   const inspectorActiveTab = useUIStore((s) => s.inspectorActiveTab);
   const setInspectorActiveTab = useUIStore((s) => s.setInspectorActiveTab);
@@ -931,7 +935,13 @@ export const InspectorPanel: React.FC = () => {
           <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
             <ImportErrorsPanel errors={importErrors} />
             {isMetadataClip ? (
-              <MetadataClipInspector clip={selectedTimelineClip!} kind={metadataKind} />
+              metadataKind === "note" ? (
+                <InspectorTabPanel tab="note" active={activeTab}>
+                  <MetadataClipInspector clip={selectedTimelineClip!} kind="note" />
+                </InspectorTabPanel>
+              ) : (
+                <MetadataClipInspector clip={selectedTimelineClip!} kind={metadataKind} />
+              )
             ) : selectedClip ? (
               <InspectorTabErrorBoundary key={activeTab}>
                 <InspectorTabPanel tab="effects" active={activeTab}>
