@@ -1,11 +1,11 @@
 {
     "schema_version": 1,
-    "commit": "9ab137a927dbf408d3150d328ce30e31cc8d8b31",
-    "indexed_at": "2026-07-03T15:53:49Z",
+    "commit": "e8a540702bbd6ad67cc6635351727d4d2e2691b0",
+    "indexed_at": "2026-07-03T16:00:58Z",
     "project": "Volumes-Joseph-Projects1-ai-agents-openreel-video",
-    "nodes": 0,
-    "edges": 0,
-    "original_size": 102400,
-    "compressed_size": 1396,
+    "nodes": 11384,
+    "edges": 34873,
+    "original_size": 32768000,
+    "compressed_size": 3741106,
     "compression_level": 3
 }

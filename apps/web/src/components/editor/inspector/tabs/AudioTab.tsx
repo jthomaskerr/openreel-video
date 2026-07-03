@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React from "react";
 import {
   AutoCutSilenceSection,
   AudioTextSyncPanel,
@@ -7,6 +7,7 @@ import {
   AudioDuckingSection,
 } from "../";
 import { InspectorSection } from "../shell/InspectorSection";
+import { WaveformPreview } from "../WaveformPreview";
 import { useProjectStore } from "../../../../stores/project-store";
 
 export interface AudioTabProps {
@@ -24,31 +25,17 @@ export const AudioTab: React.FC<AudioTabProps> = ({
   noiseReductionSectionTitle,
   selectedNoiseReductionEffect,
 }) => {
-  const project = useProjectStore((state) => state.project);
-  const clipMedia = useMemo(() => {
-    const clip = project.timeline.tracks.flatMap((track) => track.clips).find((candidate) => candidate.id === clipId);
-    const mediaItem = clip ? project.mediaLibrary.items.find((item) => item.id === clip.mediaId) : undefined;
-    return { clip, mediaItem };
+  const project = useProjectStore((s) => s.project);
+  const mediaItem = React.useMemo(() => {
+    const clip = project.timeline.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
+    return clip ? project.mediaLibrary.items.find((item) => item.id === clip.mediaId) : undefined;
   }, [clipId, project.mediaLibrary.items, project.timeline.tracks]);
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!clipMedia.mediaItem?.blob) {
-      setBlobUrl(null);
-      return;
-    }
-    const url = URL.createObjectURL(clipMedia.mediaItem.blob);
-    setBlobUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [clipMedia.mediaItem?.blob]);
-
-  const audioUrl = blobUrl ?? clipMedia.mediaItem?.originalUrl ?? null;
 
   return (
     <>
-      {showAudioEffects && audioUrl && (
+      {showAudioEffects && mediaItem && (mediaItem.blob ?? mediaItem.originalUrl) && (
         <InspectorSection title="Audio Preview" sectionId="audio-preview" defaultOpen>
-          <audio controls src={audioUrl} className="w-full" preload="metadata" />
+          <WaveformPreview item={mediaItem} />
         </InspectorSection>
       )}
       {showAudioEffects && (

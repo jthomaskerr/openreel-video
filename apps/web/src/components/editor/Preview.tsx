@@ -73,6 +73,7 @@ import {
   MotionPathOverlay,
   ParticleRenderer,
 } from "./preview/index";
+import { getAudioPlaybackClips } from "./preview-audio-playback";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 import {
   getPersonSegmentationEngine,
@@ -1309,8 +1310,11 @@ export const Preview: React.FC = () => {
    */
   const setupAudioFromAudioTrack = useCallback(
     async (timelinePosition: number): Promise<void> => {
-      const tracks = timelineTracksRef.current;
-      const audioTracks = tracks.filter((t) => t.type === "audio" && !t.hidden);
+      const audioPlaybackClips = getAudioPlaybackClips(
+        timelineTracksRef.current,
+        getMediaItem,
+        timelinePosition,
+      );
 
       if (!audioGraphRef.current) {
         audioGraphRef.current = getRealtimeAudioGraph();
@@ -1321,7 +1325,7 @@ export const Preview: React.FC = () => {
       const speedEngine = getSpeedEngine();
       const scheduledClips: AudioClipSchedule[] = [];
 
-      for (const audioTrack of audioTracks) {
+      for (const { track: audioTrack, clip: audioClip } of audioPlaybackClips) {
         audioGraph.createTrack({
           trackId: audioTrack.id,
           volume: 1,
@@ -1331,86 +1335,71 @@ export const Preview: React.FC = () => {
           effects: [],
         });
 
-        if (audioTrack.muted) {
+        const mediaItem = getMediaItem(audioClip.mediaId);
+        if (!mediaItem?.blob) {
           continue;
         }
 
-        for (const audioClip of audioTrack.clips) {
-          const clipEnd = audioClip.startTime + audioClip.duration;
-
-          if (
-            timelinePosition >= audioClip.startTime &&
-            timelinePosition < clipEnd
-          ) {
-            const mediaItem = getMediaItem(audioClip.mediaId);
-            if (!mediaItem?.blob) {
+        const audioCacheKey = getAudioBufferCacheKey(
+          audioClip.mediaId,
+          audioClip.audioTrackIndex,
+        );
+        let audioBuffer = audioBufferCacheRef.current.get(audioCacheKey);
+        if (!audioBuffer) {
+          try {
+            const audioContext = audioGraph.getAudioContext();
+            const loaded = await loadAudioBuffer(
+              audioContext,
+              mediaItem.blob,
+              audioClip.audioTrackIndex ?? 0,
+            );
+            if (!loaded) {
               continue;
             }
-
-            const audioCacheKey = getAudioBufferCacheKey(
-              audioClip.mediaId,
-              audioClip.audioTrackIndex,
+            audioBuffer = loaded;
+            audioBufferCacheRef.current.set(audioCacheKey, audioBuffer);
+          } catch (error) {
+            console.warn(
+              `[Preview] Failed to decode audio for clip ${audioClip.id}:`,
+              error,
             );
-            let audioBuffer = audioBufferCacheRef.current.get(audioCacheKey);
-            if (!audioBuffer) {
-              try {
-                const audioContext = audioGraph.getAudioContext();
-                const loaded = await loadAudioBuffer(
-                  audioContext,
-                  mediaItem.blob,
-                  audioClip.audioTrackIndex ?? 0,
-                );
-                if (!loaded) {
-                  continue;
-                }
-                audioBuffer = loaded;
-                audioBufferCacheRef.current.set(audioCacheKey, audioBuffer);
-              } catch (error) {
-                console.warn(
-                  `[Preview] Failed to decode audio for clip ${audioClip.id}:`,
-                  error,
-                );
-                continue;
-              }
-            }
-
-            const audioEffects = getResolvedClipAudioEffects(audioClip);
-
-            const enabledEffects = audioEffects.filter(
-              (e: Effect) => e.enabled,
-            );
-            const previewAudio = await getPreviewAudioBufferForEffects(
-              audioBuffer,
-              audioCacheKey,
-              enabledEffects,
-            );
-
-            audioGraph.updateTrackEffects(audioTrack.id, previewAudio.effects);
-
-            const clipLocalTime = timelinePosition - audioClip.startTime;
-            const isReverse = speedEngine.isReverse(audioClip.id);
-
-            let mediaOffset = (audioClip.inPoint || 0) + clipLocalTime;
-            if (isReverse) {
-              mediaOffset = audioBuffer.duration - mediaOffset;
-              mediaOffset = Math.max(0, mediaOffset);
-            }
-
-            scheduledClips.push({
-              clipId: audioClip.id,
-              trackId: audioTrack.id,
-              audioBuffer: previewAudio.audioBuffer,
-              startTime: audioClip.startTime,
-              endTime: clipEnd,
-              mediaOffset,
-              volume: audioClip.volume ?? 1,
-              volumeAutomation: getResolvedClipVolumeAutomation(audioClip),
-              pan: 0,
-              effects: previewAudio.effects,
-              speed: audioClip.speed ?? 1,
-            });
+            continue;
           }
         }
+
+        const audioEffects = getResolvedClipAudioEffects(audioClip);
+
+        const enabledEffects = audioEffects.filter((e: Effect) => e.enabled);
+        const previewAudio = await getPreviewAudioBufferForEffects(
+          audioBuffer,
+          audioCacheKey,
+          enabledEffects,
+        );
+
+        audioGraph.updateTrackEffects(audioTrack.id, previewAudio.effects);
+
+        const clipLocalTime = timelinePosition - audioClip.startTime;
+        const isReverse = speedEngine.isReverse(audioClip.id);
+
+        let mediaOffset = (audioClip.inPoint || 0) + clipLocalTime;
+        if (isReverse) {
+          mediaOffset = audioBuffer.duration - mediaOffset;
+          mediaOffset = Math.max(0, mediaOffset);
+        }
+
+        scheduledClips.push({
+          clipId: audioClip.id,
+          trackId: audioTrack.id,
+          audioBuffer: previewAudio.audioBuffer,
+          startTime: audioClip.startTime,
+          endTime: audioClip.startTime + audioClip.duration,
+          mediaOffset,
+          volume: audioClip.volume ?? 1,
+          volumeAutomation: getResolvedClipVolumeAutomation(audioClip),
+          pan: 0,
+          effects: previewAudio.effects,
+          speed: audioClip.speed ?? 1,
+        });
       }
 
       if (scheduledClips.length > 0) {
@@ -1489,69 +1478,70 @@ export const Preview: React.FC = () => {
 
   const getAudioClipsForScheduler = useCallback(
     (time: number): AudioClipSchedule[] => {
-      const tracks = timelineTracksRef.current;
-      const tracksWithAudio = tracks.filter(
-        (t) => (t.type === "audio" || t.type === "video") && !t.hidden && !t.muted,
+      const audioPlaybackClips = getAudioPlaybackClips(
+        timelineTracksRef.current,
+        getMediaItem,
+        time,
+        1,
       );
       const schedules: AudioClipSchedule[] = [];
 
-      for (const track of tracksWithAudio) {
-        for (const clip of track.clips) {
-          const clipEnd = clip.startTime + clip.duration;
-          if (clipEnd <= time || clip.startTime > time + 1) {
-            continue;
-          }
-
-          const audioBuffer = audioBufferCacheRef.current.get(
-            getAudioBufferCacheKey(clip.mediaId, clip.audioTrackIndex),
-          );
-          if (!audioBuffer) {
-            continue;
-          }
-
-          const audioEffects = getResolvedClipAudioEffects(clip).filter(
-            (e: Effect) => e.enabled,
-          );
-          const previewEffects = getPreviewAudioEffects(audioEffects);
-          const { profileAwareNoiseEffects, realtimeEffects } =
-            splitProfileAwareNoiseReductionEffects(previewEffects);
-          let scheduleAudioBuffer = audioBuffer;
-          let scheduleEffects = previewEffects;
-
-          if (profileAwareNoiseEffects.length > 0) {
-            const processedCacheKey = `${getAudioBufferCacheKey(
-              clip.mediaId,
-              clip.audioTrackIndex,
-            )}:profile-denoise:${getAudioEffectSignature(profileAwareNoiseEffects)}`;
-            const processedAudioBuffer =
-              processedAudioBufferCacheRef.current.get(processedCacheKey);
-
-            if (processedAudioBuffer) {
-              scheduleAudioBuffer = processedAudioBuffer;
-              scheduleEffects = realtimeEffects;
-            }
-          }
-
-          schedules.push({
-            clipId: clip.id,
-            trackId: track.id,
-            audioBuffer: scheduleAudioBuffer,
-            startTime: clip.startTime,
-            endTime: clipEnd,
-            mediaOffset: clip.inPoint || 0,
-            volume: clip.volume ?? 1,
-            volumeAutomation: getResolvedClipVolumeAutomation(clip),
-            pan: 0,
-            effects: scheduleEffects,
-            speed: clip.speed ?? 1,
-          });
+      for (const { track, clip } of audioPlaybackClips) {
+        const clipEnd = clip.startTime + clip.duration;
+        if (clipEnd <= time || clip.startTime > time + 1) {
+          continue;
         }
+
+        const audioBuffer = audioBufferCacheRef.current.get(
+          getAudioBufferCacheKey(clip.mediaId, clip.audioTrackIndex),
+        );
+        if (!audioBuffer) {
+          continue;
+        }
+
+        const audioEffects = getResolvedClipAudioEffects(clip).filter(
+          (e: Effect) => e.enabled,
+        );
+        const previewEffects = getPreviewAudioEffects(audioEffects);
+        const { profileAwareNoiseEffects, realtimeEffects } =
+          splitProfileAwareNoiseReductionEffects(previewEffects);
+        let scheduleAudioBuffer = audioBuffer;
+        let scheduleEffects = previewEffects;
+
+        if (profileAwareNoiseEffects.length > 0) {
+          const processedCacheKey = `${getAudioBufferCacheKey(
+            clip.mediaId,
+            clip.audioTrackIndex,
+          )}:profile-denoise:${getAudioEffectSignature(profileAwareNoiseEffects)}`;
+          const processedAudioBuffer =
+            processedAudioBufferCacheRef.current.get(processedCacheKey);
+
+          if (processedAudioBuffer) {
+            scheduleAudioBuffer = processedAudioBuffer;
+            scheduleEffects = realtimeEffects;
+          }
+        }
+
+        schedules.push({
+          clipId: clip.id,
+          trackId: track.id,
+          audioBuffer: scheduleAudioBuffer,
+          startTime: clip.startTime,
+          endTime: clipEnd,
+          mediaOffset: clip.inPoint || 0,
+          volume: clip.volume ?? 1,
+          volumeAutomation: getResolvedClipVolumeAutomation(clip),
+          pan: 0,
+          effects: scheduleEffects,
+          speed: clip.speed ?? 1,
+        });
       }
 
       return schedules;
     },
     [
       getAudioEffectSignature,
+      getMediaItem,
       getResolvedClipAudioEffects,
       getResolvedClipVolumeAutomation,
     ],
@@ -3823,16 +3813,12 @@ export const Preview: React.FC = () => {
         playbackStartPosition,
       );
 
-      const audioTracks = timelineTracksRef.current.filter(
-        (t) => t.type === "audio" && !t.hidden,
-      );
-      const hasActiveAudioClip = audioTracks.some((track) =>
-        track.clips.some(
-          (clip) =>
-            playbackStartPosition >= clip.startTime &&
-            playbackStartPosition < clip.startTime + clip.duration,
-        ),
-      );
+      const hasActiveAudioClip =
+        getAudioPlaybackClips(
+          timelineTracksRef.current,
+          getMediaItem,
+          playbackStartPosition,
+        ).length > 0;
 
       const hasAnyVisualContent =
         initialClips.length > 0 ||
@@ -3985,16 +3971,12 @@ export const Preview: React.FC = () => {
             currentPlayhead,
           );
 
-          const audioTracksForFrame = timelineTracksRef.current.filter(
-            (t) => t.type === "audio" && !t.hidden,
-          );
-          const hasCurrentAudioClip = audioTracksForFrame.some((track) =>
-            track.clips.some(
-              (clip) =>
-                currentPlayhead >= clip.startTime &&
-                currentPlayhead < clip.startTime + clip.duration,
-            ),
-          );
+          const hasCurrentAudioClip =
+            getAudioPlaybackClips(
+              timelineTracksRef.current,
+              getMediaItem,
+              currentPlayhead,
+            ).length > 0;
 
           const hasVisualContent =
             activeClips.length > 0 ||
@@ -4726,15 +4708,17 @@ export const Preview: React.FC = () => {
 
     const findNextAudioClipStartTime = (afterTime: number): number | null => {
       const tracks = timelineTracksRef.current;
-      const audioTracks = tracks.filter((t) => t.type === "audio" && !t.hidden);
       let nextStart: number | null = null;
 
-      for (const track of audioTracks) {
-        for (const clip of track.clips) {
-          if (clip.startTime > afterTime) {
-            if (nextStart === null || clip.startTime < nextStart) {
-              nextStart = clip.startTime;
-            }
+      for (const { clip } of getAudioPlaybackClips(
+        tracks,
+        getMediaItem,
+        afterTime,
+        Math.max(0, actualEndTime - afterTime),
+      )) {
+        if (clip.startTime > afterTime) {
+          if (nextStart === null || clip.startTime < nextStart) {
+            nextStart = clip.startTime;
           }
         }
       }
