@@ -4,6 +4,7 @@ import type {
   EasingType,
   SubtitleStyle,
   AutomationPoint,
+  ClipType,
 } from "./timeline";
 import type { TransitionType } from "./effects";
 export interface Action {
@@ -102,7 +103,14 @@ export type TrackAction =
 export type ClipAction =
   | {
       type: "clip/add";
-      params: { trackId: string; mediaId: string; startTime: number };
+      params: {
+        trackId: string;
+        mediaId: string;
+        startTime: number;
+        type?: ClipType;
+        duration?: number;
+        metadata?: Record<string, unknown>;
+      };
     }
   | { type: "clip/remove"; params: { clipId: string } }
   | {

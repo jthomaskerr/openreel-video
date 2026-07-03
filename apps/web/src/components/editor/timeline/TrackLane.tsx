@@ -141,7 +141,15 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
                 .getState()
                 .project.mediaLibrary.items.find(i => !beforeIds.has(i.id));
               if (newItem) {
-                await addClip(track.id, newItem.id, snapResult.time);
+                const TRACK_TO_CLIP_TYPE: Partial<Record<string, "metadata" | "audio" | "image">> = {
+                  metadata: "metadata", audio: "audio", image: "image",
+                };
+                const MEDIA_TO_CLIP_TYPE: Partial<Record<string, "audio" | "image">> = {
+                  audio: "audio", image: "image",
+                };
+                await addClip(track.id, newItem.id, snapResult.time, {
+                  type: TRACK_TO_CLIP_TYPE[track.type] ?? MEDIA_TO_CLIP_TYPE[newItem.type] ?? "video",
+                });
                 toast.success(`Added to ${track.name}`, file.name);
               }
             }

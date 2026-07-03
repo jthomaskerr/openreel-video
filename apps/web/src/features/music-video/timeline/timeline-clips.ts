@@ -10,7 +10,11 @@ export interface TimelineClipStore {
     trackId: string,
     mediaId: string,
     startTime: number,
-    options?: { duration?: number; metadata?: Record<string, unknown> },
+    options?: {
+      duration?: number;
+      type?: "video" | "audio" | "image" | "metadata";
+      metadata?: Record<string, unknown>;
+    },
   ) => Promise<ActionResult>;
 }
 export interface AddTimelineClipInput {
@@ -82,6 +86,7 @@ export async function addTimelineClip(
 
     const clipResult = await store.addClip(trackResult.trackId, metadataMedia.item.id, input.startTime, {
       duration: input.duration,
+      type: "metadata",
       metadata: clipMetadata,
     });
     if (!clipResult.success) {

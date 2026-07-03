@@ -528,12 +528,23 @@ export const Timeline: React.FC = () => {
     async (trackId: string, mediaId: string, startTime: number) => {
       const { addClip, addClipToNewTrack } = useProjectStore.getState();
       if (trackId) {
-        await addClip(trackId, mediaId, startTime);
+        const track = project.timeline.tracks.find((candidate) => candidate.id === trackId);
+        const mediaItem = project.mediaLibrary.items.find((candidate) => candidate.id === mediaId);
+        const TRACK_TO_CLIP_TYPE: Partial<Record<string, "metadata" | "audio" | "image">> = {
+          metadata: "metadata", audio: "audio", image: "image",
+        };
+        const MEDIA_TYPE_TO_CLIP_TYPE: Partial<Record<string, "audio" | "image">> = {
+          audio: "audio", image: "image",
+        };
+        const type = TRACK_TO_CLIP_TYPE[track?.type ?? ""]
+          ?? MEDIA_TYPE_TO_CLIP_TYPE[mediaItem?.type ?? ""]
+          ?? "video";
+        await addClip(trackId, mediaId, startTime, { type });
       } else {
         await addClipToNewTrack(mediaId, startTime);
       }
     },
-    [],
+    [project.mediaLibrary.items, project.timeline.tracks],
   );
 
   const { moveClip } = useProjectStore();

@@ -59,6 +59,7 @@ import { StyleTab } from "./inspector/tabs/StyleTab";
 import { EffectsTab } from "./inspector/tabs/EffectsTab";
 import { AiTab } from "./inspector/tabs/AiTab";
 import { MetadataClipInspector } from "./inspector/MetadataClipInspector";
+import { SceneMetadataInspector } from "./inspector/SceneMetadataInspector";
 import { ProblemsPanel } from "./inspector/ProblemsPanel";
 import { ImportErrorsPanel } from "./inspector/ImportErrorsPanel";
 import { LogPanel } from "./inspector/LogPanel";
@@ -165,14 +166,7 @@ export const InspectorPanel: React.FC = () => {
     return getClip(selectedClipIds[0]) || null;
   }, [getClip, project.modifiedAt, selectedClipIds]);
 
-  // Detect clips on metadata tracks or carrying a metadata kind
-  const isMetadataClip = useMemo(() => {
-    if (!selectedTimelineClip) return false;
-    if (typeof selectedTimelineClip.metadata?.kind === "string") return true;
-    return project.timeline.tracks.some(
-      (t) => t.type === "metadata" && t.clips.some((c) => c.id === selectedTimelineClip.id),
-    );
-  }, [selectedTimelineClip, project.timeline.tracks]);
+  const isSelectedMetadataClip = selectedTimelineClip?.type === "metadata";
 
   const metadataKind = useMemo(
     () =>
@@ -660,54 +654,48 @@ export const InspectorPanel: React.FC = () => {
   const tolerance = (chromaKeySettings?.tolerance || 0.3) * 100;
 
   /**
-   * Detect clip type based on track type and clip properties
+   * Detect clip type based on explicit clip.type first, then fall back to
+   * track/media heuristics and engine-only clips (text/shape/svg/sticker).
    */
   const clipType = useMemo(() => {
     if (!selectedClip) return null;
 
-    // Check mediaId prefix first for text, shape, and SVG clips (they may not be in timeline tracks)
-    if (selectedClip.mediaId.startsWith("text-")) {
-      return "text";
+    const MEDIA_ID_PREFIXES: [string, InspectorClipType][] = [
+      ["text-", "text"],
+      ["shape-", "shape"],
+      ["svg-", "svg"],
+      ["sticker-", "sticker"],
+      ["emoji-", "sticker"],
+    ];
+    for (const [prefix, type] of MEDIA_ID_PREFIXES) {
+      if (selectedClip.mediaId.startsWith(prefix)) return type;
     }
 
-    if (selectedClip.mediaId.startsWith("shape-")) {
-      return "shape";
+    if (selectedTimelineClip?.type) {
+      const CLIP_TYPE_TO_INSPECTOR: Record<string, InspectorClipType> = {
+        video: "video", audio: "audio", image: "image", metadata: "note",
+        text: "text", shape: "shape", svg: "svg", sticker: "sticker",
+      };
+      return CLIP_TYPE_TO_INSPECTOR[selectedTimelineClip.type] ?? "video";
     }
 
-    if (selectedClip.mediaId.startsWith("svg-")) {
-      return "svg";
-    }
-
-    if (
-      selectedClip.mediaId.startsWith("sticker-") ||
-      selectedClip.mediaId.startsWith("emoji-")
-    ) {
-      return "sticker";
-    }
-
-    // Find the track this clip belongs to
     const track = project.timeline.tracks.find((t) =>
       t.clips.some((c) => c.id === selectedClip.id),
     );
-
     if (!track) return "video";
 
-    // Check for clip types based on track type and media
-    const mediaItem = project.mediaLibrary.items.find(
-      (item) => item.id === selectedClip.mediaId,
-    );
+    const TRACK_TYPE_TO_INSPECTOR: Record<string, InspectorClipType> = {
+      audio: "audio",
+      image: "image",
+    };
+    const fromTrack = TRACK_TYPE_TO_INSPECTOR[track.type];
+    if (fromTrack) return fromTrack;
 
-    if (track.type === "audio") {
-      return "audio";
-    }
+    const mediaItem = project.mediaLibrary.items.find((item) => item.id === selectedClip.mediaId);
+    if (mediaItem?.type === "image") return "image";
 
-    if (track.type === "image" || mediaItem?.type === "image") {
-      return "image";
-    }
-
-    // Default to video for video tracks
     return "video";
-  }, [selectedClip, project.timeline.tracks, project.mediaLibrary.items]);
+  }, [selectedClip, selectedTimelineClip, project.timeline.tracks, project.mediaLibrary.items]);
 
   /**
    * Determine which sections to show based on clip type
@@ -829,17 +817,17 @@ export const InspectorPanel: React.FC = () => {
   const problemCount = useProblemCount();
 
   const clipTabs = useMemo(() => {
-    if (isMetadataClip) {
+    if (isSelectedMetadataClip) {
       return metadataKind === "note" ? getTabsForClipType("note") : [];
     }
     return getTabsForClipType(clipType as InspectorClipType | null);
-  }, [clipType, isMetadataClip, metadataKind]);
+  }, [clipType, isSelectedMetadataClip, metadataKind]);
   const clipTabIds = useMemo(() => {
-    if (isMetadataClip) {
+    if (isSelectedMetadataClip) {
       return metadataKind === "note" ? getTabIdsForClipType("note") : [];
     }
     return getTabIdsForClipType(clipType as InspectorClipType | null);
-  }, [clipType, isMetadataClip, metadataKind]);
+  }, [clipType, isSelectedMetadataClip, metadataKind]);
 
   const inspectorActiveTab = useUIStore((s) => s.inspectorActiveTab);
   const setInspectorActiveTab = useUIStore((s) => s.setInspectorActiveTab);
@@ -934,7 +922,7 @@ export const InspectorPanel: React.FC = () => {
           )}
           <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
             <ImportErrorsPanel errors={importErrors} />
-            {isMetadataClip ? (
+            {isSelectedMetadataClip ? (
               metadataKind === "note" ? (
                 <InspectorTabPanel tab="note" active={activeTab}>
                   <MetadataClipInspector clip={selectedTimelineClip!} kind="note" />
@@ -943,7 +931,13 @@ export const InspectorPanel: React.FC = () => {
                 <MetadataClipInspector clip={selectedTimelineClip!} kind={metadataKind} />
               )
             ) : selectedClip ? (
-              <InspectorTabErrorBoundary key={activeTab}>
+              <>
+                {selectedTimelineClip?.type === "video" && metadataKind === "scene" && (
+                  <div className="border-b border-border/50 px-3 py-3">
+                    <SceneMetadataInspector clip={selectedTimelineClip} />
+                  </div>
+                )}
+                <InspectorTabErrorBoundary key={activeTab}>
                 <InspectorTabPanel tab="effects" active={activeTab}>
                   <EffectsTab
                     clipId={clipId}
@@ -1033,7 +1027,8 @@ export const InspectorPanel: React.FC = () => {
                     showSVGSection={showSVGSection}
                   />
                 </InspectorTabPanel>
-              </InspectorTabErrorBoundary>
+                </InspectorTabErrorBoundary>
+              </>
             ) : selectedSubtitle ? (
               <>
                 <div className="mb-4 p-3 bg-primary/10 rounded-lg border border-primary/30">

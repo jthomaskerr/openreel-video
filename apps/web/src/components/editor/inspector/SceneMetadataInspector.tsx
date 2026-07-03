@@ -1,9 +1,9 @@
 import { useCallback, useMemo, useState } from "react";
 import type { Clip } from "@openreel/core";
-import { Input } from "@openreel/ui";
-import { User, Image, Edit2 } from "lucide-react";
+import { User, Edit2 } from "lucide-react";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
+import { ReferenceImages } from "./ReferenceImages";
 
 interface Props { clip: Clip }
 
@@ -25,22 +25,24 @@ type PromptToken =
 function parsePrompt(text: string, characters: CharacterRef[]): PromptToken[] {
   if (!text || characters.length === 0) return [{ kind: "text", value: text }];
 
-  // Build a regex that matches any character ID in the prompt
-  const escaped = characters.map((c) =>
-    c.characterId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
-  );
-  const pattern = new RegExp(`(${escaped.join("|")})`, "g");
+  const refsByToken = new Map<string, CharacterRef>();
+  for (const character of characters) {
+    refsByToken.set(character.characterId.toLowerCase(), character);
+    refsByToken.set(character.name.toLowerCase().replace(/\s+/g, "_"), character);
+  }
 
   const tokens: PromptToken[] = [];
+  const pattern = /@([A-Za-z0-9_.-]+)/g;
   let lastIndex = 0;
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(text)) !== null) {
+    const ref = refsByToken.get(match[1].toLowerCase());
+    if (!ref) continue;
     if (match.index > lastIndex) {
       tokens.push({ kind: "text", value: text.slice(lastIndex, match.index) });
     }
-    const ref = characters.find((c) => c.characterId === match![0]);
-    if (ref) tokens.push({ kind: "character", ref });
+    tokens.push({ kind: "character", ref });
     lastIndex = match.index + match[0].length;
   }
 
@@ -48,7 +50,7 @@ function parsePrompt(text: string, characters: CharacterRef[]): PromptToken[] {
     tokens.push({ kind: "text", value: text.slice(lastIndex) });
   }
 
-  return tokens;
+  return tokens.length > 0 ? tokens : [{ kind: "text", value: text }];
 }
 
 export function SceneMetadataInspector({ clip }: Props) {
@@ -56,14 +58,25 @@ export function SceneMetadataInspector({ clip }: Props) {
   const tracks = useProjectStore((s) => s.project.timeline.tracks);
   const select = useUIStore((s) => s.select);
 
-  const payload = (clip.metadata?.payload ?? clip.metadata ?? {}) as Record<string, unknown>;
-  const [prompt, setPrompt] = useState(String(payload.text ?? clip.metadata?.label ?? ""));
+  const payload = useMemo(() => {
+    const merged: Record<string, unknown> = clip.metadata ? { ...clip.metadata } : {};
+    const nestedPayload = clip.metadata?.payload;
+    if (nestedPayload && typeof nestedPayload === "object" && !Array.isArray(nestedPayload)) {
+      Object.assign(merged, nestedPayload);
+    }
+    return merged;
+  }, [clip.metadata]);
+  const [prompt, setPrompt] = useState(
+    String(payload.prompt ?? payload.text ?? clip.metadata?.label ?? ""),
+  );
   const [editing, setEditing] = useState(false);
 
   const save = useCallback(() => {
     updateClipMetadata(clip.id, {
       label: prompt.slice(0, 60) || "Scene",
-      payload: { ...payload, text: prompt || undefined },
+      prompt: prompt || undefined,
+      text: prompt || undefined,
+      payload: { ...payload, prompt: prompt || undefined, text: prompt || undefined },
     });
     setEditing(false);
   }, [clip.id, prompt, payload, updateClipMetadata]);
@@ -74,10 +87,14 @@ export function SceneMetadataInspector({ clip }: Props) {
     const refs: CharacterRef[] = [];
     for (const track of tracks) {
       for (const c of track.clips) {
-        const meta = (c.metadata?.payload ?? c.metadata ?? {}) as Record<string, unknown>;
-        if (meta.kind !== "character" && c.metadata?.kind !== "character") continue;
+        const meta: Record<string, unknown> = c.metadata ? { ...c.metadata } : {};
+        const nestedPayload = c.metadata?.payload;
+        if (nestedPayload && typeof nestedPayload === "object" && !Array.isArray(nestedPayload)) {
+          Object.assign(meta, nestedPayload);
+        }
+        if (meta.kind !== "character") continue;
         const characterId = String(meta.importId ?? "");
-        const name = String(meta.name ?? meta.label ?? c.metadata?.label ?? "");
+        const name = String(meta.name ?? meta.label ?? "");
         if (!characterId || !name) continue;
         // Only add once per character ID (multiple clips share the same character)
         if (!refs.some((r) => r.characterId === characterId)) {
@@ -100,12 +117,7 @@ export function SceneMetadataInspector({ clip }: Props) {
   );
 
   // Reference image URL stored in clip metadata from the scene reference image
-  const referenceImageUrl =
-    typeof payload.referenceImageUrl === "string" && payload.referenceImageUrl
-      ? payload.referenceImageUrl
-      : null;
 
-  const hasCharacterRefs = tokens.some((t) => t.kind === "character");
 
   return (
     <div className="space-y-3" data-testid="scene-metadata-inspector">
@@ -127,13 +139,16 @@ export function SceneMetadataInspector({ clip }: Props) {
         </div>
 
         {editing ? (
-          <Input
+          <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onBlur={save}
-            onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") { setEditing(false); } }}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") save();
+              if (e.key === "Escape") setEditing(false);
+            }}
             placeholder="Scene description / generation prompt"
-            className="text-xs h-8"
+            className="min-h-28 w-full rounded-md border border-input bg-background px-3 py-2 text-xs leading-relaxed text-text-primary placeholder:text-text-muted resize-y focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             autoFocus
           />
         ) : (
@@ -162,33 +177,7 @@ export function SceneMetadataInspector({ clip }: Props) {
         )}
       </div>
 
-      {!hasCharacterRefs && characters.length > 0 && (
-        <div className="space-y-1">
-          <p className="text-[10px] text-text-muted">Characters</p>
-          <div className="flex flex-wrap gap-1">
-            {characters.map((c) => (
-              <CharacterPill
-                key={c.characterId}
-                ref_={c}
-                onSelect={() => select({ type: "clip", id: c.clipId, trackId: c.trackId })}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {referenceImageUrl && (
-        <div className="space-y-1">
-          <p className="text-[10px] text-text-muted">Reference Image</p>
-          <div className="flex flex-wrap gap-1">
-            <AssetPill
-              icon={<Image size={10} />}
-              label="Scene reference"
-              thumbnailUrl={referenceImageUrl}
-            />
-          </div>
-        </div>
-      )}
+      <ReferenceImages clip={clip} metadataKey="referenceImageUrls" title="Scene Reference Images" />
 
       <p className="text-[10px] text-text-muted">
         Use Generate Image/Video from AI Tools for this shot.
@@ -224,27 +213,3 @@ function CharacterPill({
   );
 }
 
-function AssetPill({
-  icon,
-  label,
-  thumbnailUrl,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  thumbnailUrl?: string | null;
-}) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-background-secondary px-2 py-0.5 text-[10px] text-text-secondary">
-      {thumbnailUrl ? (
-        <img
-          src={thumbnailUrl}
-          alt={label}
-          className="w-3 h-3 rounded-full object-cover flex-shrink-0"
-        />
-      ) : (
-        <span className="flex-shrink-0">{icon}</span>
-      )}
-      <span>{label}</span>
-    </span>
-  );
-}

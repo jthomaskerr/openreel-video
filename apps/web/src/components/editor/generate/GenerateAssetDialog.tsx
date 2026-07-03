@@ -86,7 +86,7 @@ interface KieAIDefaults {
 }
 
 function makeKieAIDefaults(asset?: GeneratedAsset, shot?: StoryboardShot): KieAIDefaults {
-  const prompt = asset?.prompt ?? shot?.prompt ?? "";
+  const prompt = asset?.prompt ?? shot?.videoPrompt ?? shot?.prompt ?? "";
   const negPrompt = asset?.negativePrompt ?? shot?.negativePrompt ?? "";
   const asp = (shot?.aspectRatio ?? "16:9") as "1:1" | "4:3" | "3:4" | "16:9" | "9:16";
   return {
@@ -104,7 +104,7 @@ function makeWsDefaults(model: WavespeedModel, asset?: GeneratedAsset, shot?: St
   if (!schema?.properties) return {};
   const defaults: Record<string, unknown> = {};
   for (const [key, prop] of Object.entries(schema.properties)) {
-    if ("default" in prop) defaults[key] = (prop as { default: unknown }).default;
+    if (prop && typeof prop === "object" && "default" in prop) defaults[key] = prop.default;
   }
   if ("prompt" in schema.properties) defaults.prompt = asset?.prompt ?? shot?.videoPrompt ?? shot?.prompt ?? defaults.prompt ?? "";
   if ("negative_prompt" in schema.properties) defaults.negative_prompt = asset?.negativePrompt ?? shot?.negativePrompt ?? defaults.negative_prompt ?? "";

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import {
   Mic,
   Subtitles,
@@ -116,6 +116,12 @@ export const AIGenTab: React.FC = () => {
   const activeJobCount = useGenerationJobStore(
     (s) => s.jobs.filter((job) => job.status === "queued" || job.status === "running").length,
   );
+
+  useEffect(() => {
+    const openGenerateDialog = () => setGenerateOpen(true);
+    window.addEventListener("openreel:open-generate-asset-dialog", openGenerateDialog);
+    return () => window.removeEventListener("openreel:open-generate-asset-dialog", openGenerateDialog);
+  }, []);
 
   const navigateAway = useCallback((next: FeatureId) => {
     if (activeFeature === "tts" && next !== "tts" && ttsHasUnsaved) {

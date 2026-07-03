@@ -381,9 +381,37 @@ function formatGenerationInputValue(value: unknown): string {
   return String(value);
 }
 
+function readGenerationPrompt(gen: MediaItem["generationMeta"]): string {
+  if (!gen) return "";
+  if (gen.prompt) return gen.prompt;
+  const inputs = gen.inputs;
+  if (!inputs || typeof inputs !== "object") return "";
+  const prompt = inputs.prompt ?? inputs.text_prompt ?? inputs.video_prompt;
+  return typeof prompt === "string" ? prompt : "";
+}
+
+function updateGenerationMetadata(itemId: string, generationMeta: NonNullable<MediaItem["generationMeta"]>) {
+  useProjectStore.setState((state) => ({
+    project: {
+      ...state.project,
+      mediaLibrary: {
+        ...state.project.mediaLibrary,
+        items: state.project.mediaLibrary.items.map((candidate) =>
+          candidate.id === itemId ? { ...candidate, generationMeta } : candidate,
+        ),
+      },
+      modifiedAt: Date.now(),
+    },
+  }));
+}
+
+
 function GenerationTab({ item }: { item: MediaItem }) {
   const gen = item.generationMeta;
   if (!gen) return <div className="px-4 pt-3 text-[11px] text-text-muted">No generation data.</div>;
+  const [prompt, setPrompt] = useState(readGenerationPrompt(gen));
+  const [negativePrompt, setNegativePrompt] = useState(gen.negativePrompt ?? "");
+  const [inputsText, setInputsText] = useState(JSON.stringify(gen.inputs ?? {}, null, 2));
 
   const mediaItems = useProjectStore((s) => s.project.mediaLibrary.items);
   const setInspectedAsset = useUIStore((s) => s.setInspectedAsset);
@@ -416,6 +444,21 @@ function GenerationTab({ item }: { item: MediaItem }) {
       }));
   }, [gen.inputs]);
 
+  const saveGeneration = useCallback(() => {
+    try {
+      const inputs = inputsText.trim() ? JSON.parse(inputsText) : {};
+      updateGenerationMetadata(item.id, {
+        ...gen,
+        prompt: prompt || undefined,
+        negativePrompt: negativePrompt || undefined,
+        inputs,
+      });
+      toast.success("Generation metadata updated");
+    } catch {
+      toast.error("Generation metadata must be valid JSON");
+    }
+  }, [gen, inputsText, item.id, negativePrompt, prompt]);
+
   return (
     <div className="space-y-3 px-4 pt-3 pb-4">
       <TypeSection title="Provider">
@@ -430,25 +473,42 @@ function GenerationTab({ item }: { item: MediaItem }) {
         </div>
       </TypeSection>
 
-      {gen.prompt && (
-        <TypeSection title="Prompt">
-          <p className="text-[10px] text-text-primary leading-relaxed">{gen.prompt}</p>
-        </TypeSection>
-      )}
+      <TypeSection title="Prompt">
+        <textarea
+          value={prompt}
+          onChange={(event) => setPrompt(event.target.value)}
+          onBlur={saveGeneration}
+          placeholder="Generation prompt"
+          className="min-h-24 w-full rounded-md border border-border bg-background px-3 py-2 text-[10px] leading-relaxed text-text-primary resize-y focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+      </TypeSection>
 
-      {gen.negativePrompt && (
-        <TypeSection title="Negative Prompt">
-          <p className="text-[10px] text-text-muted leading-relaxed">{gen.negativePrompt}</p>
-        </TypeSection>
-      )}
+      <TypeSection title="Negative Prompt">
+        <textarea
+          value={negativePrompt}
+          onChange={(event) => setNegativePrompt(event.target.value)}
+          onBlur={saveGeneration}
+          placeholder="Negative prompt"
+          className="min-h-16 w-full rounded-md border border-border bg-background px-3 py-2 text-[10px] leading-relaxed text-text-muted resize-y focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+      </TypeSection>
 
-      {inputRows.length > 0 && (
-        <TypeSection title="Generation Metadata">
-          {inputRows.map((row) => (
-            <TypeDetailRow key={row.label} label={row.label} value={row.value} />
-          ))}
-        </TypeSection>
-      )}
+      <TypeSection title="Generation Metadata">
+        {inputRows.length > 0 && (
+          <div className="space-y-1 pb-2">
+            {inputRows.map((row) => (
+              <TypeDetailRow key={row.label} label={row.label} value={row.value} />
+            ))}
+          </div>
+        )}
+        <textarea
+          value={inputsText}
+          onChange={(event) => setInputsText(event.target.value)}
+          onBlur={saveGeneration}
+          spellCheck={false}
+          className="min-h-32 w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-[10px] leading-relaxed text-text-primary resize-y focus:outline-none focus:ring-1 focus:ring-ring"
+        />
+      </TypeSection>
 
       {sourceItems.length > 0 && (
         <TypeSection title="Source Assets">

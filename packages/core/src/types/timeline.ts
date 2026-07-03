@@ -67,8 +67,20 @@ export interface EffectMetadata {
   readonly [key: string]: unknown;
 }
 
+export type ClipType =
+  | "video"
+  | "audio"
+  | "image"
+  | "metadata"
+  | "text"
+  | "shape"
+  | "svg"
+  | "sticker";
+
 export interface Clip {
   readonly id: string;
+  /** Explicit clip discriminator used by inspectors, migrations, and serializers. */
+  readonly type: ClipType;
   readonly mediaId: string;
   readonly trackId: string;
   readonly startTime: number;

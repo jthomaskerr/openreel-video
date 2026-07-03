@@ -167,7 +167,11 @@ export interface ProjectState {
     trackId: string,
     mediaId: string,
     startTime: number,
-    options?: { duration?: number; metadata?: Record<string, unknown> },
+    options?: {
+      duration?: number;
+      type?: "video" | "audio" | "image" | "metadata";
+      metadata?: Record<string, unknown>;
+    },
   ) => Promise<ActionResult>;
   addClipToNewTrack: (
     mediaId: string,
@@ -2593,7 +2597,11 @@ export const useProjectStore = create<ProjectState>()(
         trackId: string,
         mediaId: string,
         startTime: number,
-        options?: { duration?: number; metadata?: Record<string, unknown> },
+        options?: {
+          duration?: number;
+          type?: "video" | "audio" | "image" | "metadata";
+          metadata?: Record<string, unknown>;
+        },
       ) => {
         const { project, actionExecutor } = get();
         const projectCopy = structuredClone(project);
@@ -2672,7 +2680,17 @@ export const useProjectStore = create<ProjectState>()(
           type: "clip/add",
           id: uuidv4(),
           timestamp: Date.now(),
-          params: { trackId: newTrack.id, mediaId, startTime: clipStartTime },
+          params: {
+            trackId: newTrack.id,
+            mediaId,
+            startTime: clipStartTime,
+            type:
+              mediaItem.type === "audio"
+                ? "audio"
+                : mediaItem.type === "image"
+                  ? "image"
+                  : "video",
+          },
         };
 
         const result = await exec.execute(action, projectCopy);

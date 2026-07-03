@@ -468,6 +468,7 @@ export class ActionExecutor {
           trackId: string;
           mediaId: string;
           startTime: number;
+          type?: Clip["type"];
           duration?: number;
           inPoint?: number;
           outPoint?: number;
@@ -504,8 +505,35 @@ export class ActionExecutor {
             opacity: 1,
             fitMode: "contain" as const,
           };
+
+          const MEDIA_ID_PREFIX_TYPE: Record<string, Clip["type"]> = {
+            "text-": "text",
+            "shape-": "shape",
+            "svg-": "svg",
+            "sticker-": "sticker",
+            "emoji-": "sticker",
+          };
+          const TRACK_TYPE_CLIP_TYPE: Partial<Record<string, Clip["type"]>> = {
+            audio: "audio",
+            image: "image",
+            metadata: "metadata",
+            text: "text",
+            graphics: "shape",
+            video: "video",
+          };
+          const MEDIA_TYPE_CLIP_TYPE: Partial<Record<string, Clip["type"]>> = {
+            audio: "audio",
+            image: "image",
+          };
+          const inferredType: Clip["type"] = params.type
+            ?? Object.entries(MEDIA_ID_PREFIX_TYPE).find(([prefix]) => params.mediaId.startsWith(prefix))?.[1]
+            ?? MEDIA_TYPE_CLIP_TYPE[mediaItem?.type ?? ""]
+            ?? TRACK_TYPE_CLIP_TYPE[track.type]
+            ?? "video";
+
           const newClip = {
             id: crypto.randomUUID(),
+            type: inferredType,
             mediaId: params.mediaId,
             trackId: params.trackId,
             startTime: params.startTime,

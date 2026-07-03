@@ -8,6 +8,7 @@ import {
 
 const createClip = (overrides: Partial<Clip>): Clip => ({
   id: "clip",
+  type: "video",
   mediaId: "media-1",
   trackId: "video-track",
   startTime: 0,

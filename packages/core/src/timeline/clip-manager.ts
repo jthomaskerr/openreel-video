@@ -16,6 +16,8 @@ export interface AddClipParams {
   mediaId: string;
   startTime: number;
   duration?: number;
+  type?: "video" | "audio" | "image" | "metadata";
+  metadata?: Record<string, unknown>;
 }
 
 export interface MoveClipParams {
@@ -95,6 +97,8 @@ export class ClipManager {
         mediaId: params.mediaId,
         startTime,
         duration,
+        ...(params.type ? { type: params.type } : {}),
+        ...(params.metadata ? { metadata: params.metadata } : {}),
       },
     };
 
@@ -677,9 +681,11 @@ export function createClip(
   trackId: string,
   startTime: number = 0,
   duration: number = 5,
+  type: Clip["type"] = "video",
 ): Clip {
   return {
     id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+    type,
     mediaId,
     trackId,
     startTime,

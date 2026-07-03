@@ -1,24 +1,34 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Clip } from "@openreel/core";
 import { Input } from "@openreel/ui";
 import { useProjectStore } from "../../../stores/project-store";
+import { ReferenceImages } from "./ReferenceImages";
 
 interface Props { clip: Clip }
 
 export function CharacterMetadataInspector({ clip }: Props) {
   const updateClipMetadata = useProjectStore((s) => s.updateClipMetadata);
-  const payload = (clip.metadata?.payload ?? clip.metadata ?? {}) as Record<string, unknown>;
+  const payload = useMemo(() => {
+    const merged: Record<string, unknown> = clip.metadata ? { ...clip.metadata } : {};
+    const nestedPayload = clip.metadata?.payload;
+    if (nestedPayload && typeof nestedPayload === "object" && !Array.isArray(nestedPayload)) {
+      Object.assign(merged, nestedPayload);
+    }
+    return merged;
+  }, [clip.metadata]);
 
   const [name, setName] = useState(String(payload.name ?? clip.metadata?.label ?? ""));
   const [description, setDescription] = useState(String(payload.text ?? payload.description ?? ""));
-  const [refImages, setRefImages] = useState(String(payload.referenceAssetIds ?? ""));
 
   const save = useCallback(() => {
     updateClipMetadata(clip.id, {
       label: name || "Character",
-      payload: { ...payload, name: name || undefined, text: description || undefined, referenceAssetIds: refImages || undefined },
+      name: name || undefined,
+      text: description || undefined,
+      description: description || undefined,
+      payload: { ...payload, name: name || undefined, text: description || undefined, description: description || undefined },
     });
-  }, [clip.id, name, description, refImages, payload, updateClipMetadata]);
+  }, [clip.id, name, description, payload, updateClipMetadata]);
 
   return (
     <div className="space-y-3" data-testid="character-metadata-inspector">
@@ -36,26 +46,16 @@ export function CharacterMetadataInspector({ clip }: Props) {
       </Field>
 
       <Field label="Description">
-        <Input
+        <textarea
           value={description}
           onChange={(e) => { setDescription(e.target.value); }}
           onBlur={save}
-          onKeyDown={(e) => { if (e.key === "Enter") save(); }}
           placeholder="Appearance, role, notes…"
-          className="text-xs h-8"
+          className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-xs leading-relaxed text-text-primary placeholder:text-text-muted resize-y focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
       </Field>
 
-      <Field label="Reference Image IDs">
-        <Input
-          value={refImages}
-          onChange={(e) => { setRefImages(e.target.value); }}
-          onBlur={save}
-          onKeyDown={(e) => { if (e.key === "Enter") save(); }}
-          placeholder="Comma-separated asset IDs"
-          className="text-xs h-8"
-        />
-      </Field>
+      <ReferenceImages clip={clip} metadataKey="referenceImageUrls" />
     </div>
   );
 }

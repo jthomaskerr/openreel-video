@@ -6,6 +6,7 @@ import { MetadataClipInspector } from "./MetadataClipInspector";
 function makeClip(kind?: string): Clip {
   return {
     id: "clip-meta-01",
+    type: "metadata",
     trackId: "metadata-track",
     mediaId: "media-1",
     startTime: 0,
@@ -50,7 +51,7 @@ describe("MetadataClipInspector routing", () => {
   it("renders character inspector for kind character", () => {
     render(<MetadataClipInspector clip={makeClip("character")} kind="character" />);
     expect(screen.getByTestId("character-metadata-inspector")).toBeInTheDocument();
-    expect(screen.getByText("Reference Image IDs")).toBeInTheDocument();
+    expect(screen.getByTestId("reference-images")).toBeInTheDocument();
   });
 
   it("renders style inspector for kind style", () => {

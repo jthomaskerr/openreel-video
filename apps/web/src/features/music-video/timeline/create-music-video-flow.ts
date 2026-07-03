@@ -113,6 +113,7 @@ export async function createMusicVideoFlow(
   // 4. Place audio clip at t=0
   const clipResult = await store.addClip(audioTrackId, mediaId, 0, {
     duration: audioDuration,
+    type: "audio",
   });
   if (!clipResult.success) {
     return {

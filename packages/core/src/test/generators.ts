@@ -149,6 +149,7 @@ export const keyframeArb: fc.Arbitrary<Keyframe> = fc.record({
 
 export const clipArb: fc.Arbitrary<Clip> = fc.record({
   id: idArb,
+  type: fc.constantFrom("video" as const, "audio" as const, "image" as const, "metadata" as const),
   mediaId: idArb,
   trackId: idArb,
   startTime: timePositionArb,

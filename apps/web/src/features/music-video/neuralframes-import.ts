@@ -113,6 +113,7 @@ async function placeSceneClip(
 
   const clipResult = await store.addClip(trackId, mediaItem.id, spec.startSeconds, {
     duration: spec.duration,
+    type: "video",
     metadata: spec.clipMetadata,
   });
   if (!clipResult.success) {
@@ -166,6 +167,7 @@ async function placeAudioClip(
 
   const clipResult = await store.addClip(audioTrackId, mediaItem.id, 0, {
     duration: spec.duration,
+    type: "audio",
     metadata: spec.clipMetadata,
   });
   return clipResult.success;
@@ -226,6 +228,7 @@ async function placeCharacterTrack(
       clip.startSeconds,
       {
         duration: clip.duration,
+        type: "metadata",
         metadata: {
           ...clip.metadata,
           kind: "character",

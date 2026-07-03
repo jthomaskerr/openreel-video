@@ -70,6 +70,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-channel-name",
+              type: "text",
               mediaId: "text-channel",
               trackId: "track-text-1",
               startTime: 1,
@@ -144,6 +145,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-cta",
+              type: "text",
               mediaId: "text-cta",
               trackId: "track-text-1",
               startTime: 10,
@@ -221,6 +223,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-name",
+              type: "text",
               mediaId: "text-name",
               trackId: "track-text-name",
               startTime: 0.5,
@@ -252,6 +255,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-title",
+              type: "text",
               mediaId: "text-title",
               trackId: "track-text-title",
               startTime: 0.7,
@@ -325,6 +329,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-image-1",
+              type: "image",
               mediaId: "placeholder-image-1",
               trackId: "track-images",
               startTime: 0,
@@ -341,6 +346,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
             },
             {
               id: "clip-image-2",
+              type: "image",
               mediaId: "placeholder-image-2",
               trackId: "track-images",
               startTime: 6,
@@ -357,6 +363,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
             },
             {
               id: "clip-image-3",
+              type: "image",
               mediaId: "placeholder-image-3",
               trackId: "track-images",
               startTime: 12,
@@ -373,6 +380,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
             },
             {
               id: "clip-image-4",
+              type: "image",
               mediaId: "placeholder-image-4",
               trackId: "track-images",
               startTime: 18,
@@ -389,6 +397,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
             },
             {
               id: "clip-image-5",
+              type: "image",
               mediaId: "placeholder-image-5",
               trackId: "track-images",
               startTime: 24,
@@ -417,6 +426,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-caption",
+              type: "text",
               mediaId: "text-caption",
               trackId: "track-text-caption",
               startTime: 2,
@@ -496,6 +506,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-hook",
+              type: "text",
               mediaId: "text-hook",
               trackId: "track-text-hook",
               startTime: 0.5,
@@ -527,6 +538,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-cta-reel",
+              type: "text",
               mediaId: "text-cta-reel",
               trackId: "track-text-cta",
               startTime: 25,
@@ -611,6 +623,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-title-short",
+              type: "text",
               mediaId: "text-title-short",
               trackId: "track-text-title",
               startTime: 0,
@@ -639,6 +652,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-subscribe",
+              type: "text",
               mediaId: "text-subscribe",
               trackId: "track-text-subscribe",
               startTime: 50,
@@ -720,6 +734,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-quote",
+              type: "text",
               mediaId: "text-quote",
               trackId: "track-text-quote",
               startTime: 0.5,
@@ -751,6 +766,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-author",
+              type: "text",
               mediaId: "text-author",
               trackId: "track-text-author",
               startTime: 1.5,
@@ -832,6 +848,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-headline",
+              type: "text",
               mediaId: "text-headline",
               trackId: "track-text-headline",
               startTime: 0,
@@ -863,6 +880,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-price",
+              type: "text",
               mediaId: "text-price",
               trackId: "track-text-price",
               startTime: 5,
@@ -894,6 +912,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-cta-promo",
+              type: "text",
               mediaId: "text-cta-promo",
               trackId: "track-text-cta-promo",
               startTime: 10,
@@ -985,6 +1004,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-event",
+              type: "text",
               mediaId: "text-event",
               trackId: "track-text-event",
               startTime: 0,
@@ -1016,6 +1036,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-date",
+              type: "text",
               mediaId: "text-date",
               trackId: "track-text-date",
               startTime: 1,
@@ -1044,6 +1065,7 @@ export const BUILTIN_TEMPLATES: Template[] = [
           clips: [
             {
               id: "clip-swipe",
+              type: "text",
               mediaId: "text-swipe",
               trackId: "track-text-swipe",
               startTime: 5,

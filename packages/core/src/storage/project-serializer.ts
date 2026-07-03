@@ -193,8 +193,17 @@ export class ProjectSerializer {
       return item;
     });
 
-    for (const track of project.timeline.tracks ?? []) {
-      for (const clip of track.clips ?? []) {
+    const processedTracks = project.timeline.tracks.map((track) => ({
+      ...track,
+      clips: track.clips.map((clip) => ({
+        ...clip,
+        type: clip.type ?? this.inferClipType(track, itemsById.get(clip.mediaId)),
+      })),
+    }));
+
+
+    for (const track of processedTracks) {
+      for (const clip of track.clips) {
         if (!clip.mediaId || this.isVirtualMediaId(clip.mediaId) || itemsById.has(clip.mediaId)) {
           continue;
         }
@@ -206,6 +215,10 @@ export class ProjectSerializer {
 
     return {
       ...project,
+      timeline: {
+        ...project.timeline,
+        tracks: processedTracks,
+      },
       mediaLibrary: {
         ...project.mediaLibrary,
         items: processedItems,
@@ -292,6 +305,15 @@ export class ProjectSerializer {
       if (typeof value === "number" && Number.isFinite(value)) return value;
     }
     return undefined;
+  }
+
+  private inferClipType(track: Track, mediaItem: MediaItem | undefined): Clip["type"] {
+    if (mediaItem?.type === "audio" || track.type === "audio") return "audio";
+    if (mediaItem?.type === "image" || track.type === "image") return "image";
+    if (track.type === "metadata") return "metadata";
+    if (track.type === "text") return "text";
+    if (track.type === "graphics") return "shape";
+    return "video";
   }
 
   private trackTypeToMediaType(trackType: Track["type"]): MediaItem["type"] {

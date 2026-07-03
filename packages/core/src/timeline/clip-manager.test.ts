@@ -4,6 +4,7 @@ import type { Timeline, Track, Clip } from "../types";
 
 const createMockClip = (overrides?: Partial<Clip>): Clip => ({
   id: "clip-1",
+  type: "video",
   mediaId: "media-1",
   trackId: "track-1",
   startTime: 0,

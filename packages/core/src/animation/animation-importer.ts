@@ -226,6 +226,7 @@ export class AnimationImporter {
         for (const audioConfig of processedSchema.audio.tracks) {
           const clip: Clip = {
             id: `clip-audio-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+            type: "audio",
             mediaId: audioConfig.assetId,
             trackId: audioTrack.id,
             startTime: audioConfig.startTime,
@@ -451,6 +452,7 @@ export class AnimationImporter {
       id:
         layer.id ||
         `clip-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      type: "image",
       mediaId: layer.assetId,
       trackId: videoTrack.id,
       startTime: layer.startTime ?? 0,
@@ -492,6 +494,7 @@ export class AnimationImporter {
       id:
         layer.id ||
         `clip-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      type: "video",
       mediaId: layer.assetId,
       trackId: videoTrack.id,
       startTime: layer.startTime ?? 0,

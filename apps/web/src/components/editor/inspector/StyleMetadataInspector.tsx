@@ -1,21 +1,32 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { Clip } from "@openreel/core";
 import { Input } from "@openreel/ui";
 import { useProjectStore } from "../../../stores/project-store";
+import { ReferenceImages } from "./ReferenceImages";
 
 interface Props { clip: Clip }
 
 export function StyleMetadataInspector({ clip }: Props) {
   const updateClipMetadata = useProjectStore((s) => s.updateClipMetadata);
-  const payload = (clip.metadata?.payload ?? clip.metadata ?? {}) as Record<string, unknown>;
+  const payload = useMemo(() => {
+    const merged: Record<string, unknown> = clip.metadata ? { ...clip.metadata } : {};
+    const nestedPayload = clip.metadata?.payload;
+    if (nestedPayload && typeof nestedPayload === "object" && !Array.isArray(nestedPayload)) {
+      Object.assign(merged, nestedPayload);
+    }
+    return merged;
+  }, [clip.metadata]);
 
-  const [stylePrompt, setStylePrompt] = useState(String(payload.text ?? clip.metadata?.label ?? ""));
+  const [stylePrompt, setStylePrompt] = useState(String(payload.text ?? payload.description ?? clip.metadata?.label ?? ""));
   const [loraInfo, setLoraInfo] = useState(String(payload.loraId ?? payload.loraIds ?? ""));
 
   const save = useCallback(() => {
     updateClipMetadata(clip.id, {
       label: stylePrompt.slice(0, 60) || "Style",
-      payload: { ...payload, text: stylePrompt || undefined, loraId: loraInfo || undefined },
+      text: stylePrompt || undefined,
+      description: stylePrompt || undefined,
+      loraId: loraInfo || undefined,
+      payload: { ...payload, text: stylePrompt || undefined, description: stylePrompt || undefined, loraId: loraInfo || undefined },
     });
   }, [clip.id, stylePrompt, loraInfo, payload, updateClipMetadata]);
 
@@ -24,13 +35,12 @@ export function StyleMetadataInspector({ clip }: Props) {
       <h3 className="text-sm font-semibold text-text-primary">Style</h3>
 
       <Field label="Style Prompt">
-        <Input
+        <textarea
           value={stylePrompt}
           onChange={(e) => { setStylePrompt(e.target.value); }}
           onBlur={save}
-          onKeyDown={(e) => { if (e.key === "Enter") save(); }}
           placeholder="Visual style description"
-          className="text-xs h-8"
+          className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-xs leading-relaxed text-text-primary placeholder:text-text-muted resize-y focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         />
       </Field>
 
@@ -45,6 +55,8 @@ export function StyleMetadataInspector({ clip }: Props) {
         />
       </Field>
 
+
+      <ReferenceImages clip={clip} metadataKey="trainingImageUrls" />
       <p className="text-[10px] text-text-muted">
         Applies as optional generation context for selected timeline range.
       </p>

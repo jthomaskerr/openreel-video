@@ -291,21 +291,18 @@ export const useUIStore = create<UIState>()(
 
         select: (item: SelectionItem, addToSelection = false) => {
           const { selectedItems } = get();
-          const isClip = (item.type === "clip" || item.type === "text-clip" || item.type === "shape-clip");
           if (addToSelection) {
             const isAlreadySelected = selectedItems.some((s) => s.id === item.id);
             if (!isAlreadySelected) {
               set({
                 selectedItems: [...selectedItems, item],
                 lastSelectedItem: item,
-                ...(isClip ? { sidebarTab: "inspector" as const } : {}),
               });
             }
           } else {
             set({
               selectedItems: [item],
               lastSelectedItem: item,
-              ...(isClip ? { sidebarTab: "inspector" as const } : {}),
             });
           }
         },

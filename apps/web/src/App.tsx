@@ -37,11 +37,13 @@ const PRESET_DIMENSIONS: Record<string, SocialMediaCategory> = {
 };
 
 function App() {
-  const { activeModal, closeModal, skipWelcomeScreen } = useUIStore();
+  const { activeModal, modalData, closeModal, skipWelcomeScreen } = useUIStore();
   const { openModal: openSearchModal } = useUIStore();
   const { project, explicitlyCreated } = useProjectStore();
 
   const { route, params, navigate, updateParams, parsedDimensions } = useRouter();
+  const scriptViewInitialTab =
+    modalData?.tab === "import" ? "import" : "export";
 
   // Pass the projectId from the URL so the recovery hook auto-restores silently.
   const { showDialog, availableSaves, recover, dismiss, clearAll } = useProjectRecovery(
@@ -138,6 +140,7 @@ function App() {
         <ScriptViewDialog
           isOpen={activeModal === "scriptView"}
           onClose={closeModal}
+          initialTab={scriptViewInitialTab}
         />
         <SearchModal isOpen={activeModal === "search"} onClose={closeModal} />
         {showDialog && availableSaves.length > 0 && (

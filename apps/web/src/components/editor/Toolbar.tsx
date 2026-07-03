@@ -860,9 +860,13 @@ export const Toolbar: React.FC = () => {
               <HelpCircle size={14} />
               <span>Help & shortcuts (press ?)</span>
             </DropdownMenuItem>
-            <DropdownMenuItem className="gap-2 text-fg-muted">
+            <DropdownMenuItem onClick={() => openModal("scriptView")} className="gap-2">
               <FileCode size={14} />
               <span>Project JSON</span>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openModal("scriptView", { tab: "import" })} className="gap-2">
+              <Upload size={14} />
+              <span>Load Project JSON</span>
             </DropdownMenuItem>
             <DropdownMenuItem className="gap-2 text-fg-muted">
               <Command size={14} />

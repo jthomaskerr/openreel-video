@@ -911,25 +911,35 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
 
 /** Compact metadata summary shown in the clip body when no thumbnail is available. */
 function MetadataSummary({ clip }: { clip: Clip }) {
-  const payload = (clip.metadata?.payload ?? {}) as Record<string, unknown>;
-  const kind = clip.metadata?.["kind"] as string | undefined;
+  const payload: Record<string, unknown> = clip.metadata ? { ...clip.metadata } : {};
+  const nestedPayload = clip.metadata?.payload;
+  if (nestedPayload && typeof nestedPayload === "object" && !Array.isArray(nestedPayload)) {
+    Object.assign(payload, nestedPayload);
+  }
+  const kind = typeof payload.kind === "string" ? payload.kind : undefined;
 
-  // Collect a few meaningful lines for the summary
   const lines: string[] = [];
+  const addLine = (value: unknown) => {
+    if (typeof value !== "string") return;
+    const trimmed = value.trim();
+    if (!trimmed || lines.includes(trimmed)) return;
+    lines.push(trimmed);
+  };
 
-  const text = typeof payload.text === "string" ? payload.text : null;
-  const storyboardPrompt = typeof payload.storyboard_prompt === "string" ? payload.storyboard_prompt : null;
-  const videoIdea = typeof payload.video_idea === "string" ? payload.video_idea : null;
-  const stylePrompt = typeof payload.storyboard_style_prompt === "string" ? payload.storyboard_style_prompt : null;
-  const description = typeof payload.description === "string" ? payload.description : null;
-  const prompt = typeof payload.prompt === "string" ? payload.prompt : null;
-
-  if (text) lines.push(text);
-  if (storyboardPrompt) lines.push(storyboardPrompt);
-  if (videoIdea) lines.push(videoIdea);
-  if (stylePrompt) lines.push(stylePrompt);
-  if (description) lines.push(description);
-  if (prompt) lines.push(prompt);
+  if (kind === "note") {
+    addLine(payload.text);
+    if (lines.length === 0) {
+      addLine(payload.storyboard_prompt);
+      addLine(payload.video_idea);
+    }
+  } else {
+    addLine(payload.text);
+    addLine(payload.storyboard_prompt);
+    addLine(payload.video_idea);
+    addLine(payload.storyboard_style_prompt);
+    addLine(payload.description);
+    addLine(payload.prompt);
+  }
 
   // Fallback: show kind + label
   if (lines.length === 0) {

@@ -7,7 +7,11 @@ export interface GeneratedAssetPlacementStore {
     trackId: string,
     mediaId: string,
     startTime: number,
-    options?: { duration?: number; metadata?: Record<string, unknown> },
+    options?: {
+      duration?: number;
+      type?: "video" | "audio" | "image" | "metadata";
+      metadata?: Record<string, unknown>;
+    },
   ) => Promise<ActionResult>;
 }
 
@@ -71,6 +75,7 @@ export async function placeGeneratedAssetOnTimeline(
   };
   const clipResult = await store.addClip(trackResult.trackId, media.id, input.startTime, {
     duration: input.duration,
+    type: trackType,
     metadata,
   });
   if (!clipResult.success) {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import {
   Copy,
   Download,
@@ -22,6 +22,11 @@ import {
 import { useProjectStore } from "../../stores/project-store";
 import { toast } from "../../stores/notification-store";
 import { createProjectSerializer, createStorageEngine } from "@openreel/core";
+import { saveFileHandle } from "../../services/media-storage";
+import {
+  matchProjectJsonAssetFiles,
+  type ProjectJsonAssetFile,
+} from "./project-json-assets";
 import type { ValidationResult } from "@openreel/core/storage/schema-types";
 
 SyntaxHighlighter.registerLanguage("json", json);
@@ -29,23 +34,125 @@ SyntaxHighlighter.registerLanguage("json", json);
 interface ScriptViewDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  initialTab?: "export" | "import";
+}
+
+interface PickedProjectJsonAssetFile extends ProjectJsonAssetFile {
+  readonly handle?: FileSystemFileHandle;
+}
+
+type FileWithRelativePath = File & { readonly webkitRelativePath?: string };
+
+function isProjectJsonFile(file: File): boolean {
+  return file.type === "application/json" || file.name.toLowerCase().endsWith(".json");
+}
+
+function fileRelativePath(file: File): string | undefined {
+  return (file as FileWithRelativePath).webkitRelativePath || undefined;
+}
+
+function readTextFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result;
+      typeof content === "string"
+        ? resolve(content)
+        : reject(new Error("Selected project file could not be read as text"));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Failed to read project file"));
+    reader.readAsText(file);
+  });
+}
+
+async function scanDirectoryAssets(
+  dirHandle: FileSystemDirectoryHandle,
+): Promise<PickedProjectJsonAssetFile[]> {
+  const files: PickedProjectJsonAssetFile[] = [];
+  const pending: Array<{ handle: FileSystemDirectoryHandle; path: string }> = [
+    { handle: dirHandle, path: "" },
+  ];
+
+  while (pending.length > 0) {
+    const current = pending.shift()!;
+    for await (const [name, handle] of current.handle as unknown as AsyncIterable<[string, FileSystemHandle]>) {
+      const relativePath = current.path ? `${current.path}/${name}` : name;
+      if (handle.kind === "file") {
+        const fileHandle = handle as FileSystemFileHandle;
+        files.push({
+          file: await fileHandle.getFile(),
+          relativePath,
+          handle: fileHandle,
+        });
+      } else if (handle.kind === "directory") {
+        pending.push({
+          handle: handle as FileSystemDirectoryHandle,
+          path: relativePath,
+        });
+      }
+    }
+  }
+
+  return files;
+}
+
+async function pickProjectFolderFiles(): Promise<PickedProjectJsonAssetFile[]> {
+  if ("showDirectoryPicker" in window) {
+    const dirHandle = await (
+      window as unknown as {
+        showDirectoryPicker: () => Promise<FileSystemDirectoryHandle>;
+      }
+    ).showDirectoryPicker();
+    return scanDirectoryAssets(dirHandle);
+  }
+
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.webkitdirectory = true;
+    input.multiple = true;
+    input.onchange = () => {
+      resolve(
+        Array.from(input.files ?? []).map((file) => ({
+          file,
+          relativePath: fileRelativePath(file),
+        })),
+      );
+      input.remove();
+    };
+    input.oncancel = () => {
+      resolve([]);
+      input.remove();
+    };
+    input.click();
+  });
 }
 
 export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
   isOpen,
   onClose,
+  initialTab = "export",
 }) => {
   const { project } = useProjectStore();
-  const [activeTab, setActiveTab] = useState<"export" | "import">("export");
+  const [activeTab, setActiveTab] = useState<"export" | "import">(initialTab);
   const [importJson, setImportJson] = useState("");
   const [validation, setValidation] = useState<ValidationResult | null>(null);
   const [isValidating, setIsValidating] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [jsonRelativePath, setJsonRelativePath] = useState<string>();
+  const [assetFiles, setAssetFiles] = useState<PickedProjectJsonAssetFile[]>([]);
+  const [isImportingProject, setIsImportingProject] = useState(false);
 
   const storage = useMemo(() => createStorageEngine(), []);
   const serializer = useMemo(() => createProjectSerializer(storage), [storage]);
+
+  useEffect(() => {
+    if (isOpen) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab, isOpen]);
 
   const exportedJson = useMemo(() => {
     if (!project) return "";
@@ -81,10 +188,16 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
   }, [exportedJson, project?.name, project?.modifiedAt]);
 
   const processImportJson = useCallback(
-    (jsonString: string) => {
+    (jsonString: string, jsonFile?: File, candidateFiles: readonly File[] = []) => {
       setImportJson(jsonString);
+      setJsonRelativePath(jsonFile ? fileRelativePath(jsonFile) || jsonFile.name : undefined);
+      setAssetFiles(
+        candidateFiles.map((file) => ({
+          file,
+          relativePath: fileRelativePath(file),
+        })),
+      );
       setValidation(null);
-      // Auto-validate
       try {
         const result = serializer.validateProjectJson(jsonString);
         setValidation(result);
@@ -102,24 +215,32 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
   );
 
   const handleFileUpload = useCallback(
-    (file: File) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const content = e.target?.result;
-        if (typeof content === "string") {
-          processImportJson(content);
-        }
-      };
-      reader.readAsText(file);
+    async (file: File, candidateFiles: readonly File[] = []) => {
+      try {
+        processImportJson(await readTextFile(file), file, candidateFiles);
+      } catch (error) {
+        setValidation({
+          valid: false,
+          errors: [
+            `Import error: ${error instanceof Error ? error.message : "Unknown error"}`,
+          ],
+          warnings: [],
+        });
+      }
     },
     [processImportJson],
   );
 
   const handleFileInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) handleFileUpload(file);
-      // Reset so same file can be selected again
+      const files = Array.from(e.target.files ?? []);
+      const projectFile = files.find(isProjectJsonFile);
+      if (projectFile) {
+        void handleFileUpload(
+          projectFile,
+          files.filter((file) => file !== projectFile),
+        );
+      }
       e.target.value = "";
     },
     [handleFileUpload],
@@ -139,10 +260,14 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
     (e: React.DragEvent) => {
       e.preventDefault();
       setIsDragging(false);
-      const file = e.dataTransfer.files[0];
-      if (file && file.type === "application/json") {
-        handleFileUpload(file);
-      } else if (file) {
+      const files = Array.from(e.dataTransfer.files ?? []);
+      const projectFile = files.find(isProjectJsonFile);
+      if (projectFile) {
+        void handleFileUpload(
+          projectFile,
+          files.filter((file) => file !== projectFile),
+        );
+      } else if (files.length > 0) {
         setValidation({
           valid: false,
           errors: ["Please upload a .json file"],
@@ -152,6 +277,18 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
     },
     [handleFileUpload],
   );
+
+  const handleChooseProjectFolder = useCallback(async () => {
+    try {
+      const files = await pickProjectFolderFiles();
+      setAssetFiles(files);
+      if (files.length > 0) {
+        toast.success(`Loaded ${files.length} project folder file${files.length !== 1 ? "s" : ""}`);
+      }
+    } catch {
+      // User cancelled the folder picker.
+    }
+  }, []);
 
   const handleValidate = useCallback(() => {
     setIsValidating(true);
@@ -171,24 +308,66 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
     }
   }, [importJson, serializer]);
 
-  const handleImport = useCallback(() => {
-    if (!validation?.valid) return;
+  const handleImport = useCallback(async () => {
+    if (!validation?.valid || isImportingProject) return;
 
+    setIsImportingProject(true);
     try {
       const { project: importedProject } =
         serializer.importFromJsonWithValidation(importJson);
-      if (importedProject) {
-        useProjectStore.getState().loadProject(importedProject);
-        onClose();
-        const missingCount = importedProject.mediaLibrary.items.filter(
-          (item) => item.isPlaceholder,
-        ).length;
-        if (missingCount > 0) {
-          toast.warning(
-            `${missingCount} asset${missingCount !== 1 ? "s" : ""} need relinking`,
-            "Go to Assets panel → click \"Relink from Folder\" to restore missing media.",
+      if (!importedProject) return;
+
+      let candidateFiles = assetFiles;
+      let matches = matchProjectJsonAssetFiles(
+        importedProject,
+        candidateFiles,
+        jsonRelativePath,
+      );
+
+      if (matches.length === 0 && importedProject.mediaLibrary.items.some((item) => item.isPlaceholder)) {
+        try {
+          candidateFiles = await pickProjectFolderFiles();
+          setAssetFiles(candidateFiles);
+          matches = matchProjectJsonAssetFiles(
+            importedProject,
+            candidateFiles,
+            jsonRelativePath,
           );
+        } catch {
+          // User cancelled the folder picker; import the project with placeholders.
         }
+      }
+
+      const { loadProject, replaceMediaAsset } = useProjectStore.getState();
+      loadProject(importedProject);
+
+      let importedAssetCount = 0;
+      for (const match of matches) {
+        try {
+          const matchedSource = candidateFiles.find((candidate) => candidate.file === match.file);
+          if (matchedSource?.handle) {
+            await saveFileHandle(match.file.name, match.file.size, matchedSource.handle);
+          }
+          const result = await replaceMediaAsset(match.mediaId, match.file, match.sourceFolder);
+          if (result.success) importedAssetCount++;
+        } catch (error) {
+          console.error(`[Project JSON] Failed to import ${match.file.name}:`, error);
+        }
+      }
+
+      onClose();
+
+      const missingCount = useProjectStore
+        .getState()
+        .project.mediaLibrary.items.filter((item) => item.isPlaceholder).length;
+      if (importedAssetCount > 0) {
+        toast.success(`Imported ${importedAssetCount} referenced asset${importedAssetCount !== 1 ? "s" : ""}`);
+      }
+      if (missingCount > 0) {
+        toast.warning(
+          `${missingCount} asset${missingCount !== 1 ? "s" : ""} need relinking`,
+          "Choose the folder containing the project JSON so relative asset paths can be resolved.",
+        );
       }
     } catch (error) {
       setValidation({
@@ -198,8 +377,10 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
         ],
         warnings: [],
       });
+    } finally {
+      setIsImportingProject(false);
     }
-  }, [importJson, validation, serializer, onClose]);
+  }, [assetFiles, importJson, isImportingProject, jsonRelativePath, onClose, serializer, validation]);
 
   if (!isOpen) return null;
 
@@ -306,6 +487,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
                 ref={fileInputRef}
                 type="file"
                 accept=".json,application/json"
+                multiple
                 onChange={handleFileInputChange}
                 className="hidden"
               />
@@ -333,10 +515,20 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
                       : "Drop a JSON file here or click to browse"}
                   </p>
                   <p className="text-xs text-text-muted mt-1">
-                    Accepts .json project files
+                    Select the JSON file. Drop or select extra files to import referenced assets.
                   </p>
                 </div>
               </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleChooseProjectFolder}
+                className="self-start"
+              >
+                <Upload size={16} />
+                Choose project folder for referenced files
+              </Button>
 
               {/* Show loaded file info */}
               {importJson && (
@@ -344,6 +536,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
                   <FileCode size={16} className="text-text-secondary" />
                   <span className="text-sm text-text-primary flex-1">
                     {importJson.length.toLocaleString()} characters loaded
+                    {assetFiles.length > 0 ? ` · ${assetFiles.length} asset candidate${assetFiles.length !== 1 ? "s" : ""}` : ""}
                   </span>
                   <Button
                     variant="outline"
@@ -351,6 +544,8 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
                     onClick={() => {
                       setImportJson("");
                       setValidation(null);
+                      setAssetFiles([]);
+                      setJsonRelativePath(undefined);
                     }}
                   >
                     Clear
@@ -413,8 +608,9 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
                           Missing Assets ({validation.missingAssets.length})
                         </div>
                         <p className="text-xs text-text-muted">
-                          These assets will be imported as placeholders and can
-                          be replaced later.
+                          Relative paths are resolved from the project JSON file.
+                          On import, referenced files are loaded from the selected
+                          folder or extra dropped files when they match.
                         </p>
                       </div>
                     )}
@@ -423,9 +619,9 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
 
               {/* Import button */}
               {importJson && (
-                <Button onClick={handleImport} disabled={!validation?.valid}>
+                <Button onClick={handleImport} disabled={!validation?.valid || isImportingProject}>
                   <Upload size={16} />
-                  Import Project
+                  {isImportingProject ? "Importing..." : "Import Project"}
                 </Button>
               )}
             </div>

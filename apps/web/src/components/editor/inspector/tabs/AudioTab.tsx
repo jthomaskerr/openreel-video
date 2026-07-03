@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   AutoCutSilenceSection,
   AudioTextSyncPanel,
@@ -7,6 +7,7 @@ import {
   AudioDuckingSection,
 } from "../";
 import { InspectorSection } from "../shell/InspectorSection";
+import { useProjectStore } from "../../../../stores/project-store";
 
 export interface AudioTabProps {
   clipId: string;
@@ -23,8 +24,33 @@ export const AudioTab: React.FC<AudioTabProps> = ({
   noiseReductionSectionTitle,
   selectedNoiseReductionEffect,
 }) => {
+  const project = useProjectStore((state) => state.project);
+  const clipMedia = useMemo(() => {
+    const clip = project.timeline.tracks.flatMap((track) => track.clips).find((candidate) => candidate.id === clipId);
+    const mediaItem = clip ? project.mediaLibrary.items.find((item) => item.id === clip.mediaId) : undefined;
+    return { clip, mediaItem };
+  }, [clipId, project.mediaLibrary.items, project.timeline.tracks]);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!clipMedia.mediaItem?.blob) {
+      setBlobUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(clipMedia.mediaItem.blob);
+    setBlobUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [clipMedia.mediaItem?.blob]);
+
+  const audioUrl = blobUrl ?? clipMedia.mediaItem?.originalUrl ?? null;
+
   return (
     <>
+      {showAudioEffects && audioUrl && (
+        <InspectorSection title="Audio Preview" sectionId="audio-preview" defaultOpen>
+          <audio controls src={audioUrl} className="w-full" preload="metadata" />
+        </InspectorSection>
+      )}
       {showAudioEffects && (
         <InspectorSection
           title="Auto Cut Silence"

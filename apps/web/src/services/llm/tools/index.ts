@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import type { Action, ActionResult, TimelineAction } from "@openreel/core";
+import type { Action, ActionResult, Clip, TimelineAction } from "@openreel/core";
 import type { SelectionType } from "../../../stores/ui-store";
 import type { EditorStateSnapshot } from "../snapshot";
 import { buildEditorSnapshot } from "../snapshot";
@@ -155,10 +155,21 @@ export function buildToolSet(_state: EditorStateSnapshot) {
         outPoint: z.number().nonnegative().optional(),
       }),
       execute: async ({ trackId, mediaId, startTime, duration, inPoint, outPoint }) => {
+        const { project, addClip } = useProjectStore.getState();
+        const track = project.timeline.tracks.find((candidate) => candidate.id === trackId);
+        const mediaItem = project.mediaLibrary.items.find((candidate) => candidate.id === mediaId);
+        const type: Clip["type"] =
+          track?.type === "metadata"
+            ? "metadata"
+            : mediaItem?.type === "audio" || track?.type === "audio"
+              ? "audio"
+              : mediaItem?.type === "image" || track?.type === "image"
+                ? "image"
+                : "video";
         const options = duration ?? inPoint ?? outPoint
-          ? { duration, metadata: { inPoint, outPoint } }
-          : undefined;
-        return executeEditorMutation("Add clip", async () => useProjectStore.getState().addClip(trackId, mediaId, startTime, options));
+          ? { duration, type, metadata: { inPoint, outPoint } }
+          : { type };
+        return executeEditorMutation("Add clip", async () => addClip(trackId, mediaId, startTime, options));
       },
     }),
 
