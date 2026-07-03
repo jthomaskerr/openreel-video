@@ -125,7 +125,9 @@ function statusColor(status: string | undefined): string {
 function AssetPreview({ item }: { item: MediaItem }) {
   const category = resolveAssetCategory(item);
   if (category.isMetadata) {
-    if (!item.thumbnailUrl) return null;
+    // Metadata media items use a 1×1 transparent PNG placeholder blob.
+    // Only show the thumbnail section when a real (non-blob) thumbnail exists.
+    if (!item.thumbnailUrl || item.thumbnailUrl.startsWith("blob:")) return null;
     return (
       <div className="mx-4 mt-3 rounded-lg border border-border bg-background-secondary overflow-hidden">
         <img

@@ -749,15 +749,15 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
             )}
 
             {/* Image / character / style: repeat thumbnail across full clip width */}
-            {mediaType === "image" && mediaItem?.thumbnailUrl && (
+            {mediaType === "image" && mediaItem?.thumbnailUrl && !mediaItem.thumbnailUrl.startsWith("blob:") && (
               <div
                 className="absolute inset-0 opacity-65"
                 style={{ backgroundImage: `url(${mediaItem.thumbnailUrl})`, backgroundRepeat: "repeat-x", backgroundSize: "auto 100%" }}
               />
             )}
 
-            {/* Metadata clip: compact summary when no thumbnail */}
-            {isMetadata && !mediaItem?.thumbnailUrl && (
+            {/* Metadata clip: compact summary when no real thumbnail (blob URL = 1×1 placeholder) */}
+            {isMetadata && (!mediaItem?.thumbnailUrl || mediaItem.thumbnailUrl.startsWith("blob:")) && (
               <MetadataSummary clip={clip} />
             )}
 

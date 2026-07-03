@@ -1,17 +1,16 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, useMemo } from "react";
 import type { Clip } from "@openreel/core";
 import { Input } from "@openreel/ui";
 import { useProjectStore } from "../../../stores/project-store";
 
 interface Props { clip: Clip }
 
-/** Keys that are internal plumbing — not meaningful to a human editor. */
-const HIDDEN_KEYS: Record<string, true> = {
-  importSource: true,
-  importId: true,
-  source: true,
-  linkedShotIds: true,
-  linkedGeneratedAssetIds: true,
+/** Reserved keys handled separately (label, color) or structural (kind, payload). */
+const RESERVED_KEYS: Record<string, true> = {
+  kind: true,
+  label: true,
+  color: true,
+  payload: true,
 };
 
 /** Keys whose values are long-form prose → use a textarea. */
@@ -41,18 +40,36 @@ export function NoteMetadataInspector({ clip }: Props) {
   const reservedColor = String(clip.metadata?.color ?? "#94a3b8");
   const payload = (clip.metadata?.payload ?? {}) as Record<string, unknown>;
 
-  // Editable payload fields: only string and number primitives, excluding internal keys
-  const payloadFields = Object.entries(payload).filter(
-    ([key, value]) =>
-      !HIDDEN_KEYS[key] &&
-      (typeof value === "string" || typeof value === "number"),
-  );
+  // Collect all editable fields: top-level metadata + payload, deduplicated
+  const allFields = useMemo(() => {
+    const seen = new Set<string>();
+    const fields: Array<[string, unknown]> = [];
+
+    const add = (key: string, value: unknown) => {
+      if (RESERVED_KEYS[key] || seen.has(key)) return;
+      if (typeof value !== "string" && typeof value !== "number") return;
+      seen.add(key);
+      fields.push([key, value]);
+    };
+
+    // Top-level metadata first
+    if (clip.metadata) {
+      for (const [key, value] of Object.entries(clip.metadata)) {
+        add(key, value);
+      }
+    }
+    // Then payload (deduped by seen)
+    for (const [key, value] of Object.entries(payload)) {
+      add(key, value);
+    }
+
+    return fields;
+  }, [clip.metadata, payload]);
 
   const [label, setLabel] = useState(String(clip.metadata?.label ?? "Note"));
   const [color, setColor] = useState(reservedColor);
-  // Per-field local state keyed by payload key
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() =>
-    Object.fromEntries(payloadFields.map(([k, v]) => [k, String(v)])),
+    Object.fromEntries(allFields.map(([k, v]) => [k, String(v ?? "")])),
   );
 
   const saveReserved = useCallback(() => {
@@ -101,8 +118,8 @@ export function NoteMetadataInspector({ clip }: Props) {
         </div>
       </Field>
 
-      {/* ── Dynamic payload fields ─────────────────────────────── */}
-      {payloadFields.map(([key]) => {
+      {/* ── All metadata fields ───────────────────────────────── */}
+      {allFields.map(([key]) => {
         const raw = fieldValues[key] ?? "";
         const asColor = isColorValue(raw);
         const isArea = isTextareaKey(key);
@@ -138,7 +155,7 @@ export function NoteMetadataInspector({ clip }: Props) {
                   setFieldValues((prev) => ({ ...prev, [key]: e.target.value }))
                 }
                 onBlur={() => saveField(key)}
-                rows={3}
+                rows={Math.min(8, Math.max(3, raw.split("\n").length))}
                 placeholder={`Enter ${humanLabel(key).toLowerCase()}…`}
                 className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs text-text-primary placeholder:text-text-muted resize-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               />
@@ -168,7 +185,9 @@ export function NoteMetadataInspector({ clip }: Props) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
-      <p className="text-[10px] text-text-muted">{label}</p>
+      <label className="text-[10px] font-medium text-text-secondary uppercase tracking-wider">
+        {label}
+      </label>
       {children}
     </div>
   );
