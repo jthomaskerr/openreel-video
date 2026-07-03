@@ -5,4 +5,4 @@
   - UI to manually pick that
 - [ ] Generate storyboard tool (specialised prompt, structured output. Existing HF or other model/prompt?
 - [ ] Alter storyboard tool (params: what, how)
--
+- [ ] support atlascloud
