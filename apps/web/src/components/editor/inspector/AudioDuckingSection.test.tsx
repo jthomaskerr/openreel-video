@@ -24,6 +24,7 @@ const createProjectWithPersistedDucking = (): Project => {
           clips: [
             {
               id: targetClipId,
+              type: "audio",
               mediaId: "media-music",
               trackId: "track-music",
               startTime: 0,
@@ -74,6 +75,7 @@ const createProjectWithPersistedDucking = (): Project => {
           clips: [
             {
               id: "clip-dialogue",
+              type: "video",
               mediaId: "media-dialogue",
               trackId: triggerTrackId,
               startTime: 0,

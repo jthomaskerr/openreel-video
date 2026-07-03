@@ -706,6 +706,7 @@ describe("ProjectStore", () => {
               clips: [
                 {
                   id: "clip-1",
+                  type: "video",
                   mediaId: "media-1",
                   trackId: "track-1",
                   startTime: 0,
@@ -726,6 +727,7 @@ describe("ProjectStore", () => {
                 },
                 {
                   id: "clip-2",
+                  type: "video",
                   mediaId: "media-2",
                   trackId: "track-1",
                   startTime: 10,
@@ -788,6 +790,7 @@ describe("ProjectStore", () => {
             clips: [
               {
                 id: "video-clip-1",
+                type: "video",
                 mediaId: "video-media-1",
                 trackId: "video-track-1",
                 startTime: 0,
@@ -904,6 +907,7 @@ describe("ProjectStore", () => {
 
       const clip: Clip = {
         id: "video-clip-1",
+        type: "video",
         mediaId: mediaItem.id,
         trackId: "video-track-1",
         startTime: 0,
@@ -1223,6 +1227,7 @@ describe("ProjectStore", () => {
             clips: [
               {
                 id: "clip-a",
+                type: "video",
                 mediaId: "video-a",
                 trackId: "video-track-1",
                 startTime: 0,
@@ -1243,6 +1248,7 @@ describe("ProjectStore", () => {
               },
               {
                 id: "clip-b",
+                type: "video",
                 mediaId: "video-b",
                 trackId: "video-track-1",
                 startTime: 4,
@@ -1390,6 +1396,7 @@ describe("ProjectStore", () => {
     it("should copy clips to clipboard", () => {
       const mockClip: Clip = {
         id: "clip-to-copy",
+        type: "video",
         mediaId: "media-1",
         trackId: "track-1",
         startTime: 0,
@@ -1474,6 +1481,7 @@ describe("ProjectStore", () => {
 
       const videoClip: Clip = {
         id: "video-clip-1",
+        type: "video",
         mediaId: "video-media-1",
         trackId: "video-track-1",
         startTime: 0,

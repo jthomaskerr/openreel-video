@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import type { Clip, MediaItem } from "@openreel/core";
-import { Button, Input } from "@openreel/ui";
+import { Button } from "@openreel/ui";
 import { ImagePlus, ExternalLink, Wand2 } from "lucide-react";
 import { useProjectStore } from "../../../stores/project-store";
 
@@ -130,15 +130,16 @@ export function ReferenceImages({
 
       <div className="space-y-1">
         <p className="text-[10px] text-text-muted">URLs or asset IDs, one per line</p>
-        <Input
+        <textarea
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onBlur={save}
           onKeyDown={(event) => {
             if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) save();
           }}
-          placeholder="https://… or media asset ID"
-          className="text-xs"
+          placeholder="https://… or asset ID, one per line"
+          rows={3}
+          className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs resize-y focus:outline-none focus:ring-1 focus:ring-ring placeholder:text-muted-foreground"
         />
       </div>
     </div>

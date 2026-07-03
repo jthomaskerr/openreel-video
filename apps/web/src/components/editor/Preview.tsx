@@ -3884,6 +3884,36 @@ export const Preview: React.FC = () => {
 
       await audioGraph.resume();
 
+      // Audio-only path: skip canvas entirely when there is nothing to render visually.
+      // The WebGPU renderer owns the canvas context, so canvas.getContext("2d") always
+      // returns null. Starting the masterClock and scheduler here is sufficient.
+      if (!hasAnyVisualContent) {
+        const masterClock = getMasterClock();
+        masterClock.setDuration(actualEndTime);
+        masterClock.seek(playbackStartPosition);
+        audioGraph.seekTo(playbackStartPosition);
+        await masterClock.play();
+        audioGraph.startScheduler(getAudioClipsForScheduler);
+
+        const audioOnlyLoop = () => {
+          if (!isActive) return;
+          const t = masterClock.currentTime;
+          setPlayheadPosition(t);
+          if (t >= actualEndTime) {
+            if (!isScrubbingRef.current) {
+              setPlayheadPosition(0);
+              startPositionRef.current = 0;
+              pause();
+            }
+            return;
+          }
+          animationRef.current = requestAnimationFrame(audioOnlyLoop);
+        };
+        animationRef.current = requestAnimationFrame(audioOnlyLoop);
+        return;
+      }
+
+
       const mainCtx = canvas.getContext("2d");
       if (!mainCtx) {
         console.error("[Preview] Failed to get 2D context");

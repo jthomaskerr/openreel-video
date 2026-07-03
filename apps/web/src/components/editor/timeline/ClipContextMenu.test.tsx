@@ -9,6 +9,7 @@ import { useProjectStore } from "../../../stores/project-store";
 function makeClip(): Clip {
   return {
     id: "clip-1",
+    type: "video",
     mediaId: "missing-media",
     trackId: "track-1",
     startTime: 0,

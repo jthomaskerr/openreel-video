@@ -28,6 +28,7 @@ function seedClip(opts: {
           clips: [
             {
               id: clipId,
+              type: opts.trackType === "audio" ? "audio" : opts.trackType === "image" ? "image" : "video",
               mediaId: opts.mediaId,
               trackId,
               startTime: 0,

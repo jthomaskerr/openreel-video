@@ -110,6 +110,7 @@ export const AIGenTab: React.FC = () => {
   const [activeFeature, setActiveFeature] = useState<FeatureId>(null);
   const ttsHasUnsaved = useTtsAudioStore((s) => s.generatedAudio !== null && !s.isAudioSaved);
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [generateClipId, setGenerateClipId] = useState<string | undefined>(undefined);
   const musicVideoInputRef = useRef<HTMLInputElement>(null);
   const neuralFramesInputRef = useRef<HTMLInputElement>(null);
   const select = useUIStore((s) => s.select);
@@ -118,7 +119,11 @@ export const AIGenTab: React.FC = () => {
   );
 
   useEffect(() => {
-    const openGenerateDialog = () => setGenerateOpen(true);
+    const openGenerateDialog = (e: Event) => {
+      const clipId = (e as CustomEvent<{ clipId?: string }>).detail?.clipId;
+      setGenerateClipId(clipId);
+      setGenerateOpen(true);
+    };
     window.addEventListener("openreel:open-generate-asset-dialog", openGenerateDialog);
     return () => window.removeEventListener("openreel:open-generate-asset-dialog", openGenerateDialog);
   }, []);
@@ -359,7 +364,7 @@ export const AIGenTab: React.FC = () => {
         event.target.value = "";
       }}
     />
-    <GenerateAssetDialog open={generateOpen} onClose={() => setGenerateOpen(false)} />
+    <GenerateAssetDialog open={generateOpen} onClose={() => setGenerateOpen(false)} clipId={generateClipId} />
     </>
   );
 };

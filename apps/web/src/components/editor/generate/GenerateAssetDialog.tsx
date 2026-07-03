@@ -11,7 +11,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, Button } from "@openreel/ui";
 import { ChevronLeft, Search } from "lucide-react";
-import type { GeneratedAsset, StoryboardShot } from "@openreel/music-video-domain";
+import type { GeneratedAsset, StoryboardShot, ValidationState } from "@openreel/music-video-domain";
 
 // ── KieAI models ────────────────────────────────────────────────────────────
 import type { ImageModelInput } from "../../../services/kieai/image-generation";
@@ -123,13 +123,15 @@ export interface GenerateAssetDialogProps {
   previewUrl?: string | null;
   asset?: GeneratedAsset;
   shot?: StoryboardShot;
+  /** Clip ID passed from ReferenceImages "Generate" button — used to seed prompt from clip metadata */
+  clipId?: string;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 type Step = "pick" | "form" | "submitting" | "error";
 
-export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, asset, shot }: GenerateAssetDialogProps) {
+export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, asset, shot, clipId }: GenerateAssetDialogProps) {
   const [step, setStep] = useState<Step>("pick");
   const [search, setSearch] = useState("");
   const [model, setModel] = useState<UnifiedModel | null>(null);
@@ -141,8 +143,32 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
   const { project, addPlaceholderMedia } = useProjectStore();
   const enqueueJob = useGenerationJobStore((s) => s.enqueue);
 
+  // If opened from a clip's ReferenceImages "Generate" button, pull the prompt
+  // from that clip's metadata payload so the dialog pre-fills correctly.
+  const effectiveShot: StoryboardShot | undefined = useMemo(() => {
+    if (!clipId) return shot;
+    const clip = project.timeline.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
+    if (!clip) return shot;
+    const payload = clip.metadata && typeof clip.metadata.payload === "object" && clip.metadata.payload !== null
+      ? (clip.metadata.payload as Record<string, unknown>)
+      : (clip.metadata as Record<string, unknown>) ?? {};
+    const prompt = typeof payload.prompt === "string" ? payload.prompt
+      : typeof payload.text === "string" ? payload.text
+      : typeof payload.videoPrompt === "string" ? payload.videoPrompt
+      : shot?.prompt ?? "";
+    if (!prompt && !shot) return undefined;
+    if (shot) return { ...shot, prompt };
+    const validation: ValidationState = { valid: true, warnings: [], errors: [] };
+    return {
+      id: clipId, index: 0, label: "", startSeconds: 0, endSeconds: 0,
+      prompt, model: "", resolution: "", aspectRatio: "16:9",
+      includeMainAudio: false, referenceAssetIds: [], generatedAssetIds: [],
+      validation, outputs: [], selected: false,
+    };
+  }, [clipId, project.timeline.tracks, shot]);
+
   // ── KieAI input state ────────────────────────────────────────────────────
-  const defaults = makeKieAIDefaults(asset, shot);
+  const defaults = makeKieAIDefaults(asset, effectiveShot);
   const [seedream, setSeedream] = useState(defaults.seedream);
   const [zimage, setZimage] = useState(defaults.zimage);
   const [nanoBanana2, setNanoBanana2] = useState(defaults.nanoBanana2);
@@ -186,7 +212,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
   // Reset on open
   useEffect(() => {
     if (!open) return;
-    const d = makeKieAIDefaults(asset, shot);
+    const d = makeKieAIDefaults(asset, effectiveShot);
     setStep("pick");
     setModel(null);
     setError("");
@@ -250,7 +276,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
     setModel(m);
     if (m.provider === "wavespeed" && m.wsModel) {
       const schema = m.wsModel.api_schema?.api_schemas?.[0]?.request_schema;
-      const base = makeWsDefaults(m.wsModel, asset, shot);
+      const base = makeWsDefaults(m.wsModel, asset, effectiveShot);
       if (schema) {
         setWsInputs(injectImageInputs(schema, base, getRefImageUrls(project?.mediaLibrary.items ?? [], refIds)));
       } else {
@@ -258,7 +284,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
       }
     }
     setStep("form");
-  }, [asset, shot, project, refIds]);
+  }, [asset, effectiveShot, project, refIds]);
 
   // Re-inject reference images into WaveSpeed inputs when refIds change
   useEffect(() => {

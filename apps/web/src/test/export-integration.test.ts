@@ -41,6 +41,7 @@ vi.mock("../bridges/media-bridge", () => ({
 
 const createTestClip = (overrides?: Partial<Clip>): Clip => ({
   id: `clip-${Date.now()}`,
+  type: "video",
   mediaId: "media-1",
   trackId: "track-1",
   startTime: 0,

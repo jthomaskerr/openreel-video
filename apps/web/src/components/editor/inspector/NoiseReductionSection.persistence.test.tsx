@@ -70,6 +70,7 @@ const createProjectWithNoiseReduction = (): Project => {
           clips: [
             {
               id: clipId,
+              type: "video",
               mediaId: "media-1",
               trackId,
               startTime: 0,
@@ -141,6 +142,7 @@ const createProjectForAnalysis = (): Project => {
           clips: [
             {
               id: clipId,
+              type: "video",
               mediaId: "media-1",
               trackId,
               startTime: 0,

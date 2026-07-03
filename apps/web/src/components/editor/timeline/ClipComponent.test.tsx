@@ -40,6 +40,7 @@ function mediaItem(id: string): MediaItem {
 function makeClip(): Clip {
   return {
     id: "clip-1",
+    type: "video",
     mediaId: "media-1",
     trackId: "track-1",
     startTime: 0,
