@@ -756,6 +756,11 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
               />
             )}
 
+            {/* Metadata clip: compact summary when no thumbnail */}
+            {isMetadata && !mediaItem?.thumbnailUrl && (
+              <MetadataSummary clip={clip} />
+            )}
+
             {/* Waveform — time-accurate: sliced to clip.inPoint … inPoint+duration */}
             {(mediaType === "audio" || mediaType === "video") && mediaItem?.waveformData && (
               <div className={`absolute inset-x-0 px-1 ${
@@ -903,3 +908,52 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
     </ContextMenu>
   );
 };
+
+/** Compact metadata summary shown in the clip body when no thumbnail is available. */
+function MetadataSummary({ clip }: { clip: Clip }) {
+  const payload = (clip.metadata?.payload ?? {}) as Record<string, unknown>;
+  const kind = clip.metadata?.["kind"] as string | undefined;
+
+  // Collect a few meaningful lines for the summary
+  const lines: string[] = [];
+
+  const text = typeof payload.text === "string" ? payload.text : null;
+  const storyboardPrompt = typeof payload.storyboard_prompt === "string" ? payload.storyboard_prompt : null;
+  const videoIdea = typeof payload.video_idea === "string" ? payload.video_idea : null;
+  const stylePrompt = typeof payload.storyboard_style_prompt === "string" ? payload.storyboard_style_prompt : null;
+  const description = typeof payload.description === "string" ? payload.description : null;
+  const prompt = typeof payload.prompt === "string" ? payload.prompt : null;
+
+  if (text) lines.push(text);
+  if (storyboardPrompt) lines.push(storyboardPrompt);
+  if (videoIdea) lines.push(videoIdea);
+  if (stylePrompt) lines.push(stylePrompt);
+  if (description) lines.push(description);
+  if (prompt) lines.push(prompt);
+
+  // Fallback: show kind + label
+  if (lines.length === 0) {
+    const label = clip.metadata?.["label"] as string | undefined;
+    if (label) lines.push(label);
+    else if (kind) lines.push(kind);
+  }
+
+  if (lines.length === 0) return null;
+
+  // Show at most 3 lines
+  const displayLines = lines.slice(0, 3);
+
+  return (
+    <div className="absolute inset-0 flex flex-col justify-center px-2 py-1 opacity-60 pointer-events-none">
+      {displayLines.map((line, i) => (
+        <span
+          key={i}
+          className="text-[8px] leading-tight text-text-primary truncate"
+          style={{ maxWidth: "100%" }}
+        >
+          {line}
+        </span>
+      ))}
+    </div>
+  );
+}

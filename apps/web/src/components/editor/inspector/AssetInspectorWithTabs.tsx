@@ -125,20 +125,14 @@ function statusColor(status: string | undefined): string {
 function AssetPreview({ item }: { item: MediaItem }) {
   const category = resolveAssetCategory(item);
   if (category.isMetadata) {
+    if (!item.thumbnailUrl) return null;
     return (
       <div className="mx-4 mt-3 rounded-lg border border-border bg-background-secondary overflow-hidden">
-        {item.thumbnailUrl ? (
-          <img
-            src={item.thumbnailUrl}
-            alt={item.title ?? item.name}
-            className="w-full aspect-square object-cover"
-          />
-        ) : (
-          <div className="w-full h-20 flex flex-col items-center justify-center bg-background-tertiary gap-1.5">
-            <FileText size={28} className="text-purple-400/40" />
-            <span className="text-[10px] text-text-muted">{category.label}</span>
-          </div>
-        )}
+        <img
+          src={item.thumbnailUrl}
+          alt={item.title ?? item.name}
+          className="w-full aspect-square object-cover"
+        />
       </div>
     );
   }

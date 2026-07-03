@@ -1,3 +1,4 @@
+import { DirectorNotesInspector } from "./DirectorNotesInspector";
 import type { Clip } from "@openreel/core";
 import { MusicVideoMetadataInspector } from "./MusicVideoMetadataInspector";
 import { SceneMetadataInspector } from "./SceneMetadataInspector";
@@ -34,8 +35,18 @@ export function MetadataClipInspector({ clip, kind }: Props) {
       return <CharacterMetadataInspector clip={clip} />;
     case "style":
       return <StyleMetadataInspector clip={clip} />;
-    case "note":
+    case "note": {
+      const payload = clip.metadata?.payload as Record<string, unknown> | undefined;
+      const isDirectorNote =
+        payload != null &&
+        (payload.storyboard_prompt != null ||
+          payload.video_idea != null ||
+          payload.storyboard_style_prompt != null);
+      if (isDirectorNote) {
+        return <DirectorNotesInspector clip={clip} />;
+      }
       return <NoteMetadataInspector clip={clip} />;
+    }
     default:
       return <UnknownKindFallback kind={kind} />;
   }
