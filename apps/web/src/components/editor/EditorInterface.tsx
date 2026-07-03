@@ -280,6 +280,7 @@ export const EditorInterface: React.FC = () => {
     setPanelWidth,
     timelineMaximized,
   } = useUIStore();
+  const { project, updateClipKeyframes } = useProjectStore();
   const tracks = project.timeline.tracks;
 
   const [selectedKeyframeIds, setSelectedKeyframeIds] = React.useState<string[]>([]);
