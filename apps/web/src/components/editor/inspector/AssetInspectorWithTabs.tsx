@@ -123,15 +123,16 @@ function statusColor(status: string | undefined): string {
 // ── Preview ────────────────────────────────────────────────────────
 
 function AssetPreview({ item }: { item: MediaItem }) {
+  const effectiveThumbnailUrl = item.thumbnailUrl;
   const category = resolveAssetCategory(item);
   if (category.isMetadata) {
     // Metadata media items use a 1×1 transparent PNG placeholder blob.
     // Only show the thumbnail section when a real (non-blob) thumbnail exists.
-    if (!item.thumbnailUrl || item.thumbnailUrl.startsWith("blob:")) return null;
+    if (!effectiveThumbnailUrl || effectiveThumbnailUrl.startsWith("blob:")) return null;
     return (
       <div className="mx-4 mt-3 rounded-lg border border-border bg-background-secondary overflow-hidden">
         <img
-          src={item.thumbnailUrl}
+          src={effectiveThumbnailUrl}
           alt={item.title ?? item.name}
           className="w-full aspect-square object-cover"
         />
@@ -154,9 +155,9 @@ function AssetPreview({ item }: { item: MediaItem }) {
   }
   return (
     <div className="mx-4 mt-3 rounded-lg border border-border bg-background-secondary overflow-hidden">
-      {item.thumbnailUrl ? (
+      {effectiveThumbnailUrl ? (
         <img
-          src={item.thumbnailUrl}
+          src={effectiveThumbnailUrl}
           alt={item.title ?? item.name}
           className="w-full aspect-video object-cover"
         />
@@ -198,6 +199,7 @@ function ClipTab({ item }: { item: MediaItem }) {
 // ── Tab: File ──────────────────────────────────────────────────────
 
 function FileTab({ item }: { item: MediaItem }) {
+  const effectiveThumbnailUrl = item.thumbnailUrl;
   const fileRows: InfoRow[] = [];
   fileRows.push({ label: "Filename", value: item.name });
   fileRows.push({ label: "Type", value: item.type });
@@ -223,7 +225,7 @@ function FileTab({ item }: { item: MediaItem }) {
       {item.type === "image" && (
         <TypeSection title="Image">
           <TypeDetailRow label="Codec" value={item.metadata.codec || "—"} />
-          <TypeDetailRow label="Thumbnail" value={item.thumbnailUrl ? "Available" : "Not generated"} />
+          <TypeDetailRow label="Thumbnail" value={effectiveThumbnailUrl ? "Available" : "Not generated"} />
         </TypeSection>
       )}
       <FileInfoGrid rows={fileRows} />

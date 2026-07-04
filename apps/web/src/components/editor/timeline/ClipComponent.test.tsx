@@ -144,6 +144,132 @@ describe("ClipComponent", () => {
     expect(container.innerHTML).toContain("data:image/png;base64,thumb");
   });
 
+  it("falls back to clip referenceAssetIds when the media item has no file and no thumbnail", () => {
+    const refMedia = {
+      ...mediaItem("ref-1"),
+      id: "ref-1",
+      name: "ref.png",
+      type: "image" as const,
+      thumbnailUrl: "data:image/png;base64,ref-thumb",
+    };
+    const media = {
+      ...mediaItem("media-1"),
+      thumbnailUrl: null,
+    };
+    const clip: Clip = {
+      ...makeClip(),
+      metadata: { referenceAssetIds: ["ref-1"] },
+    };
+    const track = makeTrack(clip);
+    useProjectStore.setState((state) => ({
+      project: {
+        ...state.project,
+        mediaLibrary: { items: [media, refMedia] },
+        timeline: { ...state.project.timeline, tracks: [track] },
+      },
+    }));
+
+    const { container } = render(
+      <div style={{ position: "relative", width: 500, height: 80 }}>
+        <ClipComponent
+          clip={clip}
+          track={track}
+          allTracks={[track]}
+          pixelsPerSecond={20}
+          isSelected={false}
+          trackHeights={new Map([[track.id, 60]])}
+          timelineRef={{ current: document.createElement("div") }}
+          onSelect={vi.fn()}
+          onMoveClip={vi.fn()}
+          onSnapIndicator={vi.fn()}
+        />
+      </div>,
+    );
+
+    expect(container.innerHTML).toContain("data:image/png;base64,ref-thumb");
+  });
+
+  it("falls back to clip referenceImageUrl when referenceAssetIds yield nothing", () => {
+    const media = {
+      ...mediaItem("media-1"),
+      thumbnailUrl: null,
+    };
+    const clip: Clip = {
+      ...makeClip(),
+      metadata: { referenceImageUrl: "https://cdn.example.com/scene.jpg" },
+    };
+    const track = makeTrack(clip);
+    useProjectStore.setState((state) => ({
+      project: {
+        ...state.project,
+        mediaLibrary: { items: [media] },
+        timeline: { ...state.project.timeline, tracks: [track] },
+      },
+    }));
+
+    const { container } = render(
+      <div style={{ position: "relative", width: 500, height: 80 }}>
+        <ClipComponent
+          clip={clip}
+          track={track}
+          allTracks={[track]}
+          pixelsPerSecond={20}
+          isSelected={false}
+          trackHeights={new Map([[track.id, 60]])}
+          timelineRef={{ current: document.createElement("div") }}
+          onSelect={vi.fn()}
+          onMoveClip={vi.fn()}
+          onSnapIndicator={vi.fn()}
+        />
+      </div>,
+    );
+
+    expect(container.innerHTML).toContain("https://cdn.example.com/scene.jpg");
+  });
+
+  it("falls back to the first clip referenceImageUrls entry when other fallbacks are absent", () => {
+    const media = {
+      ...mediaItem("media-1"),
+      thumbnailUrl: null,
+    };
+    const clip: Clip = {
+      ...makeClip(),
+      metadata: {
+        referenceImageUrls: [
+          "https://cdn.example.com/a.jpg",
+          "https://cdn.example.com/b.jpg",
+        ],
+      },
+    };
+    const track = makeTrack(clip);
+    useProjectStore.setState((state) => ({
+      project: {
+        ...state.project,
+        mediaLibrary: { items: [media] },
+        timeline: { ...state.project.timeline, tracks: [track] },
+      },
+    }));
+
+    const { container } = render(
+      <div style={{ position: "relative", width: 500, height: 80 }}>
+        <ClipComponent
+          clip={clip}
+          track={track}
+          allTracks={[track]}
+          pixelsPerSecond={20}
+          isSelected={false}
+          trackHeights={new Map([[track.id, 60]])}
+          timelineRef={{ current: document.createElement("div") }}
+          onSelect={vi.fn()}
+          onMoveClip={vi.fn()}
+          onSnapIndicator={vi.fn()}
+        />
+      </div>,
+    );
+
+    expect(container.innerHTML).toContain("https://cdn.example.com/a.jpg");
+  });
+
   it("shows generated media status badges on timeline clips", () => {
     const clip = makeClip();
     const track = makeTrack(clip);

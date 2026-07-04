@@ -77,3 +77,6 @@ export {
   isAnimatedGif,
 } from "./gif-decoder";
 export type { GifFrame, DecodedGif, GifFrameCache } from "./gif-decoder";
+
+// Thumbnail utilities
+export { getEffectiveThumbnailUrl, isVideoFileMissing } from "./thumbnail-utils";

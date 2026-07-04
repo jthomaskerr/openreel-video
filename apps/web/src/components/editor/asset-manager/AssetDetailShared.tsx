@@ -277,8 +277,8 @@ export function GenerationInfo({ item }: { item: MediaItem }) {
 // ── Version List ────────────────────────────────────────────────────
 
 export function VersionList({ item }: { item: MediaItem }) {
-  const mediaItems = useProjectStore((s) => s.project.mediaLibrary.items);
   const setCurrentVersion = useProjectStore((s) => s.setCurrentAssetVersion);
+  const mediaItems = useProjectStore((s) => s.project.mediaLibrary.items);
   const freshItem = mediaItems.find((m) => m.id === item.id) ?? item;
   const assetGroupId = freshItem.assetGroupId ?? freshItem.id;
 
@@ -297,54 +297,57 @@ export function VersionList({ item }: { item: MediaItem }) {
     <div className="space-y-2">
       <Label className="text-[11px] text-text-muted">Versions ({versions.length})</Label>
       <div className="space-y-1.5">
-        {sorted.map((v) => (
-          <div
-            key={v.id}
-            className={`flex items-center gap-3 rounded-lg border p-2 ${
-              v.isCurrent ? "border-primary/40 bg-primary/5" : "border-border bg-background-secondary"
-            }`}
-          >
-            {/* Thumbnail */}
-            <div className="w-12 h-8 rounded bg-background-tertiary overflow-hidden flex-shrink-0 flex items-center justify-center">
-              {v.thumbnailUrl ? (
-                <img src={v.thumbnailUrl} alt={v.name} className="w-full h-full object-cover" />
-              ) : (
-                <AssetTypeIcon type={v.type} />
-              )}
-            </div>
-
-            {/* Info */}
-            <div className="flex-1 min-w-0">
-              <div className="text-[11px] font-medium truncate flex items-center gap-1.5">
-                {v.title || v.name}
-                {v.isCurrent && (
-                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-semibold flex-shrink-0">
-                    CURRENT
-                  </span>
+        {sorted.map((v) => {
+          const thumbnailUrl = v.thumbnailUrl;
+          return (
+            <div
+              key={v.id}
+              className={`flex items-center gap-3 rounded-lg border p-2 ${
+                v.isCurrent ? "border-primary/40 bg-primary/5" : "border-border bg-background-secondary"
+              }`}
+            >
+              {/* Thumbnail */}
+              <div className="w-12 h-8 rounded bg-background-tertiary overflow-hidden flex-shrink-0 flex items-center justify-center">
+                {thumbnailUrl ? (
+                  <img src={thumbnailUrl} alt={v.name} className="w-full h-full object-cover" />
+                ) : (
+                  <AssetTypeIcon type={v.type} />
                 )}
               </div>
-              <div className="text-[9px] text-text-muted">
-                {v.metadata?.width && v.metadata?.height
-                  ? `${v.metadata.width}×${v.metadata.height}`
-                  : ""}
-                {v.metadata?.fileSize ? ` · ${formatSize(v.metadata.fileSize)}` : ""}
-              </div>
-            </div>
 
-            {/* Promote action */}
-            {!v.isCurrent && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setCurrentVersion(v.id)}
-                className="h-7 text-[10px] flex-shrink-0"
-              >
-                <Check size={12} className="mr-1" />
-                Set Current
-              </Button>
-            )}
-          </div>
-        ))}
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <div className="text-[11px] font-medium truncate flex items-center gap-1.5">
+                  {v.title || v.name}
+                  {v.isCurrent && (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-primary/20 text-primary font-semibold flex-shrink-0">
+                      CURRENT
+                    </span>
+                  )}
+                </div>
+                <div className="text-[9px] text-text-muted">
+                  {v.metadata?.width && v.metadata?.height
+                    ? `${v.metadata.width}×${v.metadata.height}`
+                    : ""}
+                  {v.metadata?.fileSize ? ` · ${formatSize(v.metadata.fileSize)}` : ""}
+                </div>
+              </div>
+
+              {/* Promote action */}
+              {!v.isCurrent && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCurrentVersion(v.id)}
+                  className="h-7 text-[10px] flex-shrink-0"
+                >
+                  <Check size={12} className="mr-1" />
+                  Set Current
+                </Button>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

@@ -160,6 +160,7 @@ const MediaThumbnail: React.FC<{
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const isReplacing = useProjectStore((s) => s.replacingMediaIds.has(item.id));
+  const effectiveThumbnailUrl = item.thumbnailUrl;
 
   const getIcon = () => {
     switch (item.type) {
@@ -289,8 +290,8 @@ const MediaThumbnail: React.FC<{
       >
         {/* Small thumbnail */}
         <div className="w-12 h-8 rounded bg-background-tertiary relative overflow-hidden flex-shrink-0">
-          {item.thumbnailUrl ? (
-            <img src={item.thumbnailUrl} alt={item.name} className="w-full h-full object-cover" />
+          {effectiveThumbnailUrl ? (
+            <img src={effectiveThumbnailUrl} alt={item.name} className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full flex items-center justify-center">
               <Icon size={14} className={iconColor} />
@@ -451,9 +452,9 @@ const MediaThumbnail: React.FC<{
         className={`aspect-video bg-background-tertiary rounded-lg border-2 relative group cursor-pointer transition-all overflow-hidden shadow-sm ${borderClass}`}
       >
         {/* Thumbnail or placeholder */}
-        {item.thumbnailUrl ? (
+        {effectiveThumbnailUrl ? (
           <img
-            src={item.thumbnailUrl}
+            src={effectiveThumbnailUrl}
             alt={item.name}
             className="w-full h-full object-cover"
           />
@@ -501,7 +502,7 @@ const MediaThumbnail: React.FC<{
 
 
         {/* Missing Asset Badge */}
-        {!item.kieaiError && !item.isPending && item.isPlaceholder && !item.thumbnailUrl && (
+        {!item.kieaiError && !item.isPending && item.isPlaceholder && !effectiveThumbnailUrl && (
           <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-yellow-500 rounded text-[8px] text-black font-bold flex items-center gap-1">
             <AlertTriangle size={10} />
             Missing
