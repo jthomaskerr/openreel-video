@@ -1,0 +1,178 @@
+[
+  {
+    "category": "Project Management",
+    "message_count": 99,
+    "implications": [
+      "No automatic project creation: projects must only be created via explicit \"New Project\" action.",
+      "New project action must prompt for a project name.",
+      "/new and \"Start from scratch\" should create a new project with name prompt.",
+      "Deleting a project must remove the entire project directory and media files.",
+      "Project picker should list all projects with multi-select, bulk actions, and per-project action toolbar.",
+      "Importing should name the project according to importer information."
+    ],
+    "sample_messages": [
+      "projects are still being automagically created. this should never happen",
+      "Complete the assignment below, thoroughly:\n\n# Target\napps/web/src/components/editor/AssetBuckets.test.tsx only. Non-goals: production code, broad test suites.\n# Change\nAdd behavior tests proving: groupBy=\"none\" renders a flat ungrouped list without b",
+      "Complete the assignment below, thoroughly:\n\nExplore the project structure to find the media list component. Look at the root directory, find the main app structure, identify the media list page/component, any existing expand/collapse or group by func",
+      "Complete the assignment below, thoroughly:\n\n# Target\nContext discovery for adding controls to apps/web media assets list: collapse all, expand all, group by dropdown.\n# Change\nFind relevant context/standards files and project conventions. Identify cr",
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview these changed files:\n- `packages/core/src/media/thumbnail-utils.ts` (read it \u2014 not in diff)\n- `packages/core/src/media/thumbnail-utils.test.ts` (read it \u2014 not in diff)\n- `apps/web/src/compon"
+    ]
+  },
+  {
+    "category": "Media Import / Timeline",
+    "message_count": 184,
+    "implications": [
+      "Scenes must be imported as video clips on a video track, not metadata track.",
+      "Characters and reference clips must use reference images as thumbnails.",
+      "Audio files referenced by import JSON (trimmed_audio_path) must be imported into audio clips.",
+      "Missing files during import must still create clips with a \"Link file\" action.",
+      "Generated clips must display status badges (pending, cancelled, failed, etc.).",
+      "Overlapping clips on a single track must be an error.",
+      "Timeline thumbnails must be shown for all appropriate clip types.",
+      "Metadata tracks should be rendered with the same layout as audio/video tracks."
+    ],
+    "sample_messages": [
+      "some file and function names are misleading - eg createMetadataTrack actually creates all kinds of track. find and fix ALL of these",
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview these changed files:\n- `packages/core/src/media/thumbnail-utils.ts` (read it \u2014 not in diff)\n- `packages/core/src/media/thumbnail-utils.test.ts` (read it \u2014 not in diff)\n- `apps/web/src/compon",
+      "Complete the assignment below, thoroughly:\n\n## Task 9: Backend-first restore in useProjectRecovery\n\n**File:** `apps/web/src/hooks/useProjectRecovery.ts`\n\nThe file currently accepts `autoRestoreProjectId?: string` and has an IDB-based auto-restore bra",
+      "Complete the assignment below, thoroughly:\n\nReview `apps/orchestrator/src/projects/project-store.ts` at commit `36049a0` for code quality only (not spec compliance \u2014 that already passed).\n\nCheck for: bugs, error handling gaps, resource leaks, unneces",
+      "Complete the assignment below, thoroughly:\n\n## Task 4: New orchestrator routes\n\n**Rewrite:** `apps/orchestrator/src/projects/routes.ts`\n\nThis file currently has basic CRUD. Replace the entire file with the implementation below.\n\nNote: `ProjectStore.s"
+    ]
+  },
+  {
+    "category": "Inspector / UI Shell",
+    "message_count": 111,
+    "implications": [
+      "Primary right sidebar tab bar must contain: Inspector, Edit, Problems, Log.",
+      "Edit pane secondary tabs should include Transform, Color, Audio, etc.",
+      "Inspector pane secondary tabs should contain clip/asset-specific inspector tabs.",
+      "Selecting a timeline clip must update the inspector.",
+      "Metadata clips should have their own inspector sub-tabs with editable properties.",
+      "Video clips should have Clip, File, Generation, and Versions tabs.",
+      "Audio clips should have File tab with waveform, playback controls, BPM, key, scale.",
+      "Waveform must support click-to-seek and current-time highlight."
+    ],
+    "sample_messages": [
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview only apps/web/src/components/editor/AssetBuckets.tsx, apps/web/src/components/editor/AssetsPanel.tsx, apps/web/src/components/editor/AssetBuckets.test.tsx.\n# Change\nValidate that previous bl",
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview only apps/web/src/components/editor/AssetBuckets.tsx, apps/web/src/components/editor/AssetsPanel.tsx, apps/web/src/components/editor/AssetBuckets.test.tsx. Non-goals: unrelated existing issu",
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview these changed files:\n- `packages/core/src/media/thumbnail-utils.ts` (read it \u2014 not in diff)\n- `packages/core/src/media/thumbnail-utils.test.ts` (read it \u2014 not in diff)\n- `apps/web/src/compon",
+      "Complete the assignment below, thoroughly:\n\nFind the standards/patterns files most relevant to a small TypeScript utility in apps/orchestrator, especially any rules about filesystem/process calls, async fire-and-forget methods, logging, and module ex",
+      "Complete the assignment below, thoroughly:\n\n## Task 9: Backend-first restore in useProjectRecovery\n\n**File:** `apps/web/src/hooks/useProjectRecovery.ts`\n\nThe file currently accepts `autoRestoreProjectId?: string` and has an IDB-based auto-restore bra"
+    ]
+  },
+  {
+    "category": "Thumbnails / Fallbacks",
+    "message_count": 33,
+    "implications": [
+      "If a video file is missing, fallback to first first-frame reference or first reference_image as thumbnail in all contexts.",
+      "For non-video assets (images/characters), thumbnail blocks should fill the clip area by repeating the thumbnail.",
+      "Videos should extract frames every N seconds and show them as a sequence in the timeline."
+    ],
+    "sample_messages": [
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview these changed files:\n- `packages/core/src/media/thumbnail-utils.ts` (read it \u2014 not in diff)\n- `packages/core/src/media/thumbnail-utils.test.ts` (read it \u2014 not in diff)\n- `apps/web/src/compon",
+      "Complete the assignment below, thoroughly:\n\n## Task 7: BackendSaveService (web)\n\n**Create:** `apps/web/src/services/backend-save.ts`\n\n```typescript\n// apps/web/src/services/backend-save.ts\nimport type { Project, MediaItem } from \"@openreel/core\";\n\nco",
+      "Complete the assignment below, thoroughly:\n\nReview the following commits for spec compliance AND code quality. Report per-task: APPROVED or specific issues.\n\n---\n\n## Task 2 fix (commit a25527d) \u2014 GitStore security fixes\nFile: `apps/orchestrator/src/p",
+      "the importer still fails to assign (or perhaps render) a thumbnail for characters. further, the metadata for scenes is incorrect: the 'file information' is for the reference image, but these scenes are actually *unrealized* (the video has not been ge",
+      "the director notes clip still missing its type-specific inspector pane. commit your current changes first. Also update the netadata clip timeline display where the clip type has no actual thumbnail. Instead of a thumbnail, display a compact summary o"
+    ]
+  },
+  {
+    "category": "AI Generation / Providers",
+    "message_count": 74,
+    "implications": [
+      "AI Generate tab should be a unified dialog for all providers.",
+      "Provider model lists should be cached and refreshed in the background.",
+      "All provider settings must be multi-instance, with optional API key and base URL.",
+      "Model selection must validate generation parameters per model.",
+      "There must be a default video generator model and a default image generator model."
+    ],
+    "sample_messages": [
+      "Complete the assignment below, thoroughly:\n\nExplore the project structure to find the media list component. Look at the root directory, find the main app structure, identify the media list page/component, any existing expand/collapse or group by func",
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview these changed files:\n- `packages/core/src/media/thumbnail-utils.ts` (read it \u2014 not in diff)\n- `packages/core/src/media/thumbnail-utils.test.ts` (read it \u2014 not in diff)\n- `apps/web/src/compon",
+      "the importer still fails to assign (or perhaps render) a thumbnail for characters. further, the metadata for scenes is incorrect: the 'file information' is for the reference image, but these scenes are actually *unrealized* (the video has not been ge",
+      "[Error] ReferenceError: Can't find variable: project\n   EditorInterface (EditorInterface.tsx:247)\n   renderWithHooks (chunk-YYN6DZAU.js:11548)\n   updateFunctionComponent (chunk-YYN6DZAU.js:14582)\n   mountLazyComponent (chunk-YYN6DZAU.js:14833)\n   cal",
+      "why does the director note have only a single text field? It should have numerous properties. The reference images in character and elsewhere are pathetic - you should create a reference images component that shows the image, allows direct updating a"
+    ]
+  },
+  {
+    "category": "Backend / Persistence",
+    "message_count": 51,
+    "implications": [
+      "Project versions must be immutable and everything versioned (media, metadata).",
+      "Version list must include current and allow reverting without losing subsequent versions.",
+      "Relative file paths in project JSON must resolve relative to the project file.",
+      "Importing a JSON file must import all referenced files.",
+      "Backend-first project restore must replace IDB-based auto-restore.",
+      "Media files should be stored immutably; git-lfs should be used for large media."
+    ],
+    "sample_messages": [
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview these changed files:\n- `packages/core/src/media/thumbnail-utils.ts` (read it \u2014 not in diff)\n- `packages/core/src/media/thumbnail-utils.test.ts` (read it \u2014 not in diff)\n- `apps/web/src/compon",
+      "Complete the assignment below, thoroughly:\n\n## Task 9: Backend-first restore in useProjectRecovery\n\n**File:** `apps/web/src/hooks/useProjectRecovery.ts`\n\nThe file currently accepts `autoRestoreProjectId?: string` and has an IDB-based auto-restore bra",
+      "Complete the assignment below, thoroughly:\n\n## Task 6: Add remoteUrl to MediaItem (core)\n\n**File:** `packages/core/src/types/project.ts`\n\nIn the `MediaItem` interface, add one optional field after the `group?: string` field:\n\n```typescript\n/** Backen",
+      "Complete the assignment below, thoroughly:\n\n## Task 3: Add multer to orchestrator\n\n**Install:**\n```bash\ncd /Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/backend-autosave-git-lfs/apps/orchestrator\npnpm add multer && pnpm add -D @types/",
+      "Complete the assignment below, thoroughly:\n\n## Task 5: Raise JSON body limit in orchestrator app\n\n**File:** `apps/orchestrator/src/app.ts`\n\nChange the JSON body limit from `\"10mb\"` to `\"50mb\"`:\n\n```typescript\napp.use(express.json({ limit: \"50mb\" }));"
+    ]
+  },
+  {
+    "category": "Problems / Errors / Logging",
+    "message_count": 68,
+    "implications": [
+      "Errors must never be console-only; they must appear in a Problems tab.",
+      "Problems must be limited to fixable issues with specific fix actions.",
+      "Log pane must contain all errors immutably, tagged with project/clip/scope and filterable.",
+      "Selecting a clip must not automatically filter the log."
+    ],
+    "sample_messages": [
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview only apps/web/src/components/editor/AssetBuckets.tsx, apps/web/src/components/editor/AssetsPanel.tsx, apps/web/src/components/editor/AssetBuckets.test.tsx. Non-goals: unrelated existing issu",
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview these changed files:\n- `packages/core/src/media/thumbnail-utils.ts` (read it \u2014 not in diff)\n- `packages/core/src/media/thumbnail-utils.test.ts` (read it \u2014 not in diff)\n- `apps/web/src/compon",
+      "Complete the assignment below, thoroughly:\n\nFind the standards/patterns files most relevant to a small TypeScript utility in apps/orchestrator, especially any rules about filesystem/process calls, async fire-and-forget methods, logging, and module ex",
+      "Complete the assignment below, thoroughly:\n\n## Task 9: Backend-first restore in useProjectRecovery\n\n**File:** `apps/web/src/hooks/useProjectRecovery.ts`\n\nThe file currently accepts `autoRestoreProjectId?: string` and has an IDB-based auto-restore bra",
+      "Complete the assignment below, thoroughly:\n\n## Task 6: Add remoteUrl to MediaItem (core)\n\n**File:** `packages/core/src/types/project.ts`\n\nIn the `MediaItem` interface, add one optional field after the `group?: string` field:\n\n```typescript\n/** Backen"
+    ]
+  },
+  {
+    "category": "Testing",
+    "message_count": 78,
+    "implications": [
+      "All new behaviors must have tests; regressions must have regression tests.",
+      "Examples: project auto-creation prevention, missing-file thumbnail fallback, asset title preservation."
+    ],
+    "sample_messages": [
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview only apps/web/src/components/editor/AssetBuckets.tsx, apps/web/src/components/editor/AssetsPanel.tsx, apps/web/src/components/editor/AssetBuckets.test.tsx.\n# Change\nValidate that previous bl",
+      "Complete the assignment below, thoroughly:\n\n# Target\napps/web/src/components/editor/AssetBuckets.test.tsx only. Non-goals: production code, broad test suites.\n# Change\nAdd behavior tests proving: groupBy=\"none\" renders a flat ungrouped list without b",
+      "Complete the assignment below, thoroughly:\n\n# Target\napps/web/src/components/editor/AssetBuckets.test.tsx only.\n# Change\nAdd one high-signal test proving collapseAll and expandAll are no-ops in groupBy=\"none\" flat mode: render with a ref and one or m",
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview only apps/web/src/components/editor/AssetBuckets.tsx, apps/web/src/components/editor/AssetsPanel.tsx, apps/web/src/components/editor/AssetBuckets.test.tsx. Non-goals: unrelated existing issu",
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview these changed files:\n- `packages/core/src/media/thumbnail-utils.ts` (read it \u2014 not in diff)\n- `packages/core/src/media/thumbnail-utils.test.ts` (read it \u2014 not in diff)\n- `apps/web/src/compon"
+    ]
+  },
+  {
+    "category": "Audio Analysis / Subtitles",
+    "message_count": 41,
+    "implications": [
+      "Audio analysis should provide genre, beat detection, sentiment (as a time-series aligned to sections), librosa energy.",
+      "Sentiment should align with start/end of repeated lyric sections (choruses).",
+      "Subtitles should be a first-class track/clip type with rendering and editing support."
+    ],
+    "sample_messages": [
+      "Complete the assignment below, thoroughly:\n\nExplore the project structure to find the media list component. Look at the root directory, find the main app structure, identify the media list page/component, any existing expand/collapse or group by func",
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview these changed files:\n- `packages/core/src/media/thumbnail-utils.ts` (read it \u2014 not in diff)\n- `packages/core/src/media/thumbnail-utils.test.ts` (read it \u2014 not in diff)\n- `apps/web/src/compon",
+      "Complete the assignment below, thoroughly:\n\nFind the standards/patterns files most relevant to a small TypeScript utility in apps/orchestrator, especially any rules about filesystem/process calls, async fire-and-forget methods, logging, and module ex",
+      "Complete the assignment below, thoroughly:\n\n## Task 1: Per-project directory structure (orchestrator ProjectStore)\n\n**Files:**\n- Rewrite: `apps/orchestrator/src/projects/project-store.ts`\n\nReplace the entire file with the implementation below. This c",
+      "fuck isMetadataClip off entirely. explicitly encode the fucking clip type. but call it type not clipType you repetitive monkey"
+    ]
+  },
+  {
+    "category": "Export / Rendering",
+    "message_count": 48,
+    "implications": [
+      "Export formats must include MP4 (H.264/H.265), WebM, ProRes, image sequences, audio-only."
+    ],
+    "sample_messages": [
+      "Complete the assignment below, thoroughly:\n\n# Target\napps/web/src/components/editor/AssetBuckets.test.tsx only. Non-goals: production code, broad test suites.\n# Change\nAdd behavior tests proving: groupBy=\"none\" renders a flat ungrouped list without b",
+      "Complete the assignment below, thoroughly:\n\n# Target\napps/web/src/components/editor/AssetBuckets.test.tsx only.\n# Change\nAdd one high-signal test proving collapseAll and expandAll are no-ops in groupBy=\"none\" flat mode: render with a ref and one or m",
+      "Complete the assignment below, thoroughly:\n\n# Target\nReview these changed files:\n- `packages/core/src/media/thumbnail-utils.ts` (read it \u2014 not in diff)\n- `packages/core/src/media/thumbnail-utils.test.ts` (read it \u2014 not in diff)\n- `apps/web/src/compon",
+      "Complete the assignment below, thoroughly:\n\nFind the standards/patterns files most relevant to a small TypeScript utility in apps/orchestrator, especially any rules about filesystem/process calls, async fire-and-forget methods, logging, and module ex",
+      "Complete the assignment below, thoroughly:\n\n## Task 9: Backend-first restore in useProjectRecovery\n\n**File:** `apps/web/src/hooks/useProjectRecovery.ts`\n\nThe file currently accepts `autoRestoreProjectId?: string` and has an IDB-based auto-restore bra"
+    ]
+  }
+]

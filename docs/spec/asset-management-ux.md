@@ -136,6 +136,8 @@ Shows metadata in a right-side inspector panel (not a modal), replacing current 
 
 ## 6. Character Management (Music Video Domain)
 
+> **See also:** `docs/spec/inspector-shell.md` §3.8 (Character Pills in Prompt Fields) for how character mentions inside scene/shot prompts render as inline, clickable pills, and §3.8.6 (Reference Images Pane) for reference-image linking behavior. Both apply to characters managed here.
+
 ### Current state
 Characters exist as `MetadataBlock` entries (`kind: "continuity_note"`) on a "Characters" `MetadataTrack` inside `MusicVideoProject`. Imported from Neural Frames JSON. Inspector is read-only.
 
@@ -155,7 +157,7 @@ Characters exist as `MetadataBlock` entries (`kind: "continuity_note"`) on a "Ch
 
 **Reference images:**
 - Character's reference images stored as `assetGroupId` array
-- Click reference image thumbnail → opens in media library view filtered to that group
+- Click reference image thumbnail → opens in media library view filtered to that group (see `inspector-shell.md` §3.8.6 for the general clickable/linking requirement)
 - Images shown as small thumbnails in character card and inspector
 
 ---
@@ -224,3 +226,129 @@ Characters exist as `MetadataBlock` entries (`kind: "continuity_note"`) on a "Ch
 - [ ] IndexedDB thumbnail cache
 - [ ] Performance profiling pass with React DevTools
 - [ ] Accessibility audit (keyboard nav, ARIA labels, screen reader)
+
+---
+
+## 9. Project Lifecycle *(Operational)*
+
+> Derived from user directives. Detailed implementation spec TBD.
+
+- Projects MUST NOT be created automatically; creation MUST only occur via an explicit "New Project" action.
+- The "New Project" action MUST prompt the user for a project name before creation.
+- The `/new` command and "Start from scratch" entry point MUST both trigger the same name-prompt flow.
+- Deleting a project MUST remove the entire project directory and all associated media files.
+- The project picker MUST list all projects with multi-select support, bulk actions, and a per-project action toolbar.
+- Importing a project MUST name the project according to importer-provided information (e.g., JSON metadata, filename).
+
+---
+
+## 10. Media Import & Timeline Placement *(Operational)*
+
+> Derived from user directives. Detailed implementation spec TBD.
+
+- Scenes MUST be imported as video clips on a video track, not as metadata-track entries.
+- Characters and reference clips MUST use reference images as their thumbnails.
+- Audio files referenced by an import JSON (`trimmed_audio_path`) MUST be imported as audio clips.
+- Missing files during import MUST still create placeholder clips with a "Link file" action to resolve later.
+- Generated clips MUST display status badges (e.g., pending, cancelled, failed, completed).
+- Overlapping clips on a single track MUST be treated as an error.
+- Timeline thumbnails MUST be shown for all clip types that support them.
+- Metadata tracks MUST reuse the same visual layout as audio/video tracks.
+
+---
+
+## 11. Inspector / Right-Sidebar Shell *(Operational)*
+
+> Derived from user directives. Detailed implementation spec TBD.
+
+- The primary right-sidebar tab bar MUST contain: **Inspector**, **Edit**, **Problems**, **Log**.
+- The **Edit** pane MUST have secondary tabs including Transform, Color, Audio, and others as needed.
+- The **Inspector** pane MUST have secondary tabs specific to the selected clip or asset type.
+- Selecting a timeline clip MUST update the inspector to show that clip's properties.
+- Metadata clips MUST have their own inspector sub-tabs with editable properties.
+- Video clips MUST have tabs: **Clip**, **File**, **Generation**, **Versions**.
+- Audio clips MUST have a **File** tab with waveform visualization, playback controls, BPM, key, and scale display.
+- The waveform MUST support click-to-seek and highlight the current playback time.
+
+---
+
+## 12. Thumbnails & Missing-File Fallbacks *(Operational)*
+
+> Derived from user directives. Detailed implementation spec TBD.
+
+- When a video file is missing, the thumbnail MUST fall back to the first first-frame reference or the first `reference_image` in all display contexts.
+- For non-video assets (images, characters), thumbnail blocks MUST fill the clip area by repeating the thumbnail image.
+- Video clips on the timeline MUST extract frames at a periodic interval (every N seconds) and display them as a frame sequence.
+
+---
+
+## 13. AI Generation & Providers *(Operational)*
+
+> Derived from user directives. Detailed implementation spec TBD.
+
+- The AI Generate dialog MUST be a unified interface for all providers.
+- Provider model lists MUST be cached locally and refreshed in the background.
+- All provider settings MUST support multiple instances, each with an optional API key and base URL.
+- Model selection MUST validate generation parameters against the selected model's capabilities.
+- There MUST be a configurable default video generator model and a default image generator model.
+
+---
+
+## 14. Backend, Persistence & Versioning *(Operational)*
+
+> Derived from user directives. Detailed implementation spec TBD.
+
+- Project versions MUST be immutable; both media and metadata MUST be versioned.
+- The version list MUST include the current version and MUST allow reverting to any prior version without losing subsequent versions.
+- Relative file paths in project JSON MUST resolve relative to the project file location.
+- Importing a project JSON file MUST import all referenced media files.
+- Project restore MUST be backend-first, replacing any IndexedDB-based auto-restore mechanism.
+- Media files MUST be stored immutably; git-lfs SHOULD be used for large media assets.
+
+---
+
+## 15. Problems, Errors & Logging *(Operational)*
+
+> Derived from user directives. Detailed implementation spec TBD.
+
+- Errors MUST surface in the **Problems** tab; they MUST NOT be console-only.
+- The Problems tab MUST be limited to fixable issues, each with a specific fix action.
+- The **Log** pane MUST contain all errors immutably, tagged with project, clip, and scope metadata, and MUST be filterable.
+- Selecting a clip MUST NOT automatically filter the log to that clip.
+
+---
+
+## 16. Testing Expectations *(Operational)*
+
+> Derived from user directives. Detailed implementation spec TBD.
+
+- All new behaviors MUST have corresponding tests.
+- Regressions MUST have dedicated regression tests.
+- Examples of required regression coverage:
+  - Project auto-creation prevention.
+  - Missing-file thumbnail fallback.
+  - Asset title preservation across operations.
+
+---
+
+## 17. Audio Analysis & Subtitles *(Operational)*
+
+> Derived from user directives. Detailed implementation spec TBD.
+
+- Audio analysis MUST provide genre, beat detection, and sentiment as time-series data aligned to song sections.
+- Sentiment analysis SHOULD align with the start/end boundaries of repeated lyric sections (e.g., choruses).
+- Audio analysis MUST include librosa energy as a time-series metric.
+- Subtitles MUST be a first-class track/clip type with rendering and editing support.
+
+---
+
+## 18. Export *(Operational)*
+
+> Derived from user directives. Detailed implementation spec TBD.
+
+- Export MUST support the following output formats:
+  - MP4 (H.264 and H.265 codecs)
+  - WebM
+  - ProRes
+  - Image sequences
+  - Audio-only

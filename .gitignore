@@ -43,7 +43,6 @@ coverage/
 .worktrees/
 .temp/
 .docs/
-docs/
 # Project-specific
 /public/projects/
 *.openreel
