@@ -1226,14 +1226,26 @@ export const AssetsPanel: React.FC = () => {
               <button
                 onClick={() => assetBucketsRef.current?.collapseAll()}
                 title="Collapse all"
-                className="p-1.5 rounded bg-background-tertiary border border-border text-text-muted hover:text-text-secondary transition-colors"
+                aria-label="Collapse all buckets"
+                disabled={groupBy === "none"}
+                className={`p-1.5 rounded bg-background-tertiary border border-border text-text-muted transition-colors ${
+                  groupBy === "none"
+                    ? "opacity-40 cursor-not-allowed"
+                    : "hover:text-text-secondary"
+                }`}
               >
                 <ChevronsUpDown size={13} className="rotate-180" />
               </button>
               <button
                 onClick={() => assetBucketsRef.current?.expandAll()}
                 title="Expand all"
-                className="p-1.5 rounded bg-background-tertiary border border-border text-text-muted hover:text-text-secondary transition-colors"
+                aria-label="Expand all buckets"
+                disabled={groupBy === "none"}
+                className={`p-1.5 rounded bg-background-tertiary border border-border text-text-muted transition-colors ${
+                  groupBy === "none"
+                    ? "opacity-40 cursor-not-allowed"
+                    : "hover:text-text-secondary"
+                }`}
               >
                 <ChevronsUpDown size={13} />
               </button>
@@ -1243,10 +1255,10 @@ export const AssetsPanel: React.FC = () => {
                 </SelectTrigger>
                 <SelectContent className="bg-background-secondary border-border">
                   {([
-                    { value: "none", label: "Ungrouped" },
-                    { value: "tag", label: "By Tag" },
-                    { value: "type", label: "By Type" },
-                    { value: "status", label: "By Status" },
+                    { value: "none", label: "None" },
+                    { value: "tag", label: "Tag" },
+                    { value: "type", label: "Type" },
+                    { value: "status", label: "Status" },
                   ] as const).map(({ value, label }) => (
                     <SelectItem key={value} value={value}>
                       {label}

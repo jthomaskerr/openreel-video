@@ -1,10 +1,5 @@
 import { useMemo, useState, useCallback, forwardRef, useImperativeHandle } from "react";
 import type { MediaItem } from "@openreel/core";
-import {
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
-} from "@openreel/ui";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 type MediaViewMode = "large" | "small" | "list";
@@ -252,43 +247,46 @@ export const AssetBuckets = forwardRef<AssetBucketsHandle, AssetBucketsProps>(fu
 
   return (
     <div className="space-y-3">
-      {buckets.map((bucket) => {
+      {buckets.map((bucket, index) => {
         const isCollapsed = collapsed.has(bucket.id);
+        const contentId = `asset-bucket-content-${index}`;
 
         return (
           <div key={bucket.id}>
-            <Collapsible open={!isCollapsed} onOpenChange={() => toggleBucket(bucket.id)}>
-              <CollapsibleTrigger asChild>
-                <button className="flex items-center gap-1.5 w-full text-left px-4 py-1.5 hover:bg-background-tertiary/50 rounded transition-colors">
-                  {isCollapsed ? (
-                    <ChevronRight size={12} className="text-text-muted flex-shrink-0" />
-                  ) : (
-                    <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
-                  )}
-                  <span className="text-[11px] font-medium text-text-primary">{bucket.label}</span>
-                  <span className="text-[10px] text-text-muted ml-1">{bucket.items.length}</span>
-                </button>
-              </CollapsibleTrigger>
+            <button
+              type="button"
+              aria-expanded={!isCollapsed}
+              aria-controls={contentId}
+              onClick={() => toggleBucket(bucket.id)}
+              className="flex items-center gap-1.5 w-full text-left px-4 py-1.5 hover:bg-background-tertiary/50 rounded transition-colors"
+            >
+              {isCollapsed ? (
+                <ChevronRight size={12} className="text-text-muted flex-shrink-0" />
+              ) : (
+                <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
+              )}
+              <span className="text-[11px] font-medium text-text-primary">{bucket.label}</span>
+              <span className="text-[10px] text-text-muted ml-1">{bucket.items.length}</span>
+            </button>
 
-              <CollapsibleContent>
-                <div className="px-4 pt-1 pb-2">
-                  <div className={gridClass}>
-                    {bucket.items.map((item) => (
-                      <MediaRow
-                        key={item.id}
-                        item={item}
-                        viewMode={viewMode}
-                        isSelected={selectedItemIds.has(item.id)}
-                        onGenerateRef={onGenerateRef}
-                        onRetryKieAIRef={onRetryKieAIRef}
-                        onManageRef={onManageRef}
-                        onRenameRef={onRenameRef}
-                      />
-                    ))}
-                  </div>
+            {!isCollapsed && (
+              <div id={contentId} className="px-4 pt-1 pb-2">
+                <div className={gridClass}>
+                  {bucket.items.map((item) => (
+                    <MediaRow
+                      key={item.id}
+                      item={item}
+                      viewMode={viewMode}
+                      isSelected={selectedItemIds.has(item.id)}
+                      onGenerateRef={onGenerateRef}
+                      onRetryKieAIRef={onRetryKieAIRef}
+                      onManageRef={onManageRef}
+                      onRenameRef={onRenameRef}
+                    />
+                  ))}
                 </div>
-              </CollapsibleContent>
-            </Collapsible>
+              </div>
+            )}
           </div>
         );
       })}
