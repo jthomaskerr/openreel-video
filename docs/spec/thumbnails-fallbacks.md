@@ -1,8 +1,8 @@
-# §12 Thumbnails & Missing-File Fallbacks (Operational)
+# Thumbnails & Missing-File Fallbacks — Operational Spec
 
 > **Derived from user directives.** Source: 33 user messages in the Thumbnails / Fallbacks category.
-> Reference plans: `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md`, `docs/superpowers/plans/2026-07-03-storyboard-ui.md`, `docs/superpowers/plans/2026-07-03-track-grouping-expansion.md`.
-> Reference existing spec: `docs/spec/asset-management-ux.md` §7 (Performance Architecture).
+> Reference plans: [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md), [Storyboard UI plan](../superpowers/plans/2026-07-03-storyboard-ui.md), [Track Grouping Expansion plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md).
+> Reference existing spec: [Asset Management UX spec](./asset-management-ux.md) §7 (Performance Architecture).
 
 ---
 
@@ -235,7 +235,7 @@ Thumbnails for clips that are closer to the playhead or currently selected SHOUL
 
 ## 12.8 Integration with Performance Architecture
 
-This section extends §7 (Performance Architecture) of `docs/spec/asset-management-ux.md`.
+This section extends §7 (Performance Architecture) of [Asset Management UX spec](./asset-management-ux.md).
 
 ### 12.8.1 Narrow Subscriptions
 

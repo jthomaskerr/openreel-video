@@ -1,9 +1,9 @@
-# Track Grouping Operational Specification
+# Track Grouping — Operational Spec
 
-**Document Version:** 1.0  
-**Date:** 2026-07-04  
-**Status:** Complete Operational Spec  
-**Reference Plan:** [`2026-07-03-track-grouping-expansion.md`](../superpowers/plans/2026-07-03-track-grouping-expansion.md)
+**Document Version:** 1.0
+**Date:** 2026-07-04
+**Status:** Complete Operational Spec
+**Reference Plan:** [Track Grouping Expansion plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md)
 
 ---
 
@@ -35,11 +35,11 @@ This specification defines the timeline track grouping system that organizes vid
 ### 2.1 TimelineGroupId Type
 
 ```
-TimelineGroupId = "storyboard" 
-                | "characters" 
-                | "sections" 
-                | "metadata" 
-                | "audio" 
+TimelineGroupId = "storyboard"
+                | "characters"
+                | "sections"
+                | "metadata"
+                | "audio"
                 | `track:${string}`
 ```
 
@@ -112,31 +112,31 @@ Clips in video tracks that represent storyboard shots MUST carry metadata confor
 interface StoryboardClipMetadata {
   // Marks a timeline video clip as the clip-level specialization of a StoryboardShot.
   kind: "storyboard-shot";
-  
+
   // Foreign key to the StoryboardShot in the project.shots array.
   shotId: string;
-  
+
   // Index of the shot within the storyboard sequence (for ordering).
   shotIndex: number;
-  
+
   // Human-readable short name for the shot (e.g., "Opening", "Chorus A").
   label: string;
-  
+
   // Generation prompt or description.
   prompt: string;
-  
+
   // Optional reference image URL for the shot.
   referenceImageUrl?: string;
-  
+
   // Array of generated or imported asset IDs associated with this shot.
   generatedAssetIds: string[];
-  
+
   // Source of the shot definition: "neuralframes", "storyboard-generation", or "manual".
   source: "neuralframes" | "storyboard-generation" | "manual";
-  
+
   // Optional record of the import source system (e.g., "neuralframes" for AI imports).
   importSource?: string;
-  
+
   // Optional import system record ID.
   importId?: string;
 }
@@ -669,5 +669,5 @@ Timeline:
 
 ## Document History
 
-- **v1.0 (2026-07-04):** Initial operational specification written from plan `2026-07-03-track-grouping-expansion.md`. Covers all grouping rules, component contracts, data flow, and testing requirements.
+- **v1.0 (2026-07-04):** Initial operational specification written from the [Track Grouping Expansion plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md). Covers all grouping rules, component contracts, data flow, and testing requirements.
 

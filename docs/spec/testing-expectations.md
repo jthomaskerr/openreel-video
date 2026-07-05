@@ -3,14 +3,14 @@
 > Derived from user directives and plan documents. Detailed implementation spec TBD.
 
 **Sources:**
-- `docs/spec/OPERATIONAL-SPEC-UPDATE-SUMMARY.md` §16 (Testing category, 78 user messages)
-- `docs/superpowers/plans/spec-update/openreel-spec-implications-report.json` (Testing category)
-- `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` (TDD discipline)
-- `docs/superpowers/plans/2026-07-03-alter-storyboard-tool.md` (TDD discipline)
-- `docs/superpowers/plans/2026-07-03-audio-analysis-and-selection.md` (TDD discipline)
-- `docs/superpowers/plans/2026-07-03-audio-auto-subtitle-extraction.md` (TDD discipline)
-- `docs/superpowers/plans/2026-07-03-storyboard-ui.md` (TDD discipline)
-- `docs/superpowers/plans/2026-07-03-track-grouping-expansion.md` (regression set)
+- [Operational Spec Update Summary](./OPERATIONAL-SPEC-UPDATE-SUMMARY.md) §16 (Testing category, 78 user messages)
+- [OpenReel Spec Implications report](../superpowers/plans/spec-update/openreel-spec-implications-report.json) (Testing category)
+- [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) (TDD discipline)
+- [Alter Storyboard Tool plan](../superpowers/plans/2026-07-03-alter-storyboard-tool.md) (TDD discipline)
+- [Audio Analysis & Selection plan](../superpowers/plans/2026-07-03-audio-analysis-and-selection.md) (TDD discipline)
+- [Audio Auto-Subtitle Extraction plan](../superpowers/plans/2026-07-03-audio-auto-subtitle-extraction.md) (TDD discipline)
+- [Storyboard UI plan](../superpowers/plans/2026-07-03-storyboard-ui.md) (TDD discipline)
+- [Track Grouping Expansion plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md) (regression set)
 - Collected user messages (jsonl): regression reports, test directives, TDD mandates
 
 ---

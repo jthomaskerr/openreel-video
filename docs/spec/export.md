@@ -1,10 +1,10 @@
-# §18 Export — Operational Spec
+# Export — Operational Spec
 
 > **Status:** Operational — derived from user directives and implementation plans.
 > **Sources:**
-> - `docs/spec/OPERATIONAL-SPEC-UPDATE-SUMMARY.md` §18
-> - `docs/superpowers/plans/spec-update/openreel-spec-implications-report.json` (Export / Rendering category, 48 messages)
-> - `docs/superpowers/plans/2026-07-03-subtitle-track-clip-type.md` Task 6 (export subtitle rendering)
+> - [Operational Spec Update Summary](./OPERATIONAL-SPEC-UPDATE-SUMMARY.md) §18
+> - [OpenReel Spec Implications report](../superpowers/plans/spec-update/openreel-spec-implications-report.json) (Export / Rendering category, 48 messages)
+> - [Subtitle Track/Clip Type plan](../superpowers/plans/2026-07-03-subtitle-track-clip-type.md) Task 6 (export subtitle rendering)
 > - `packages/core/src/export/types.ts` — authoritative type definitions
 > - `packages/core/src/export/export-engine.ts` — current export implementation
 > - `packages/core/src/video/upscaling/upscaling-engine.ts` — WebGPU upscaling
@@ -566,7 +566,7 @@ After cancellation (or any error), the engine SHALL:
 
 The export engine MUST read subtitle data from subtitle track clips, NOT from a flat `timeline.subtitles` array.
 
-> **Source:** `docs/superpowers/plans/2026-07-03-subtitle-track-clip-type.md` Task 6. The current implementation (`export-engine.ts:1395–1400`) reads from `timeline.subtitles` — this is a known workaround that MUST be migrated to track-based clips.
+> **Source:** [Subtitle Track/Clip Type plan](../superpowers/plans/2026-07-03-subtitle-track-clip-type.md) Task 6. The current implementation (`export-engine.ts:1395–1400`) reads from `timeline.subtitles` — this is a known workaround that MUST be migrated to track-based clips.
 
 ### 13.2 Duration Calculation
 

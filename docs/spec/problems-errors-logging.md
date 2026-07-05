@@ -1,7 +1,7 @@
 # Problems, Errors & Logging — Operational Spec
 
 > Derived from user directives and existing implementation patterns.
-> Sources: `OPERATIONAL-SPEC-UPDATE-SUMMARY.md` §15, `openreel-spec-implications-report.json` (Problems / Errors / Logging category, 68 messages), `problem-store.ts`, `log-store.ts`, `ProblemsPanel.tsx`, `LogPanel.tsx`, `inspector-shell.md` §4–5.
+> Sources: [Operational Spec Update Summary](./OPERATIONAL-SPEC-UPDATE-SUMMARY.md) §15, [OpenReel Spec Implications report](../superpowers/plans/spec-update/openreel-spec-implications-report.json) (Problems / Errors / Logging category, 68 messages), `problem-store.ts`, `log-store.ts`, `ProblemsPanel.tsx`, `LogPanel.tsx`, [Inspector Shell spec](./inspector-shell.md) §4–5.
 
 ---
 

@@ -3,15 +3,15 @@
 **Status:** Operational (derived from plan)
 **Date:** 2026-07-04
 **Sources:**
-- `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` (primary)
-- `docs/superpowers/plans/2026-07-03-storyboard-ui.md`
-- `docs/superpowers/plans/2026-07-03-track-grouping-expansion.md`
-- `docs/superpowers/plans/2026-07-03-generate-storyboard-tool.md`
-- `docs/superpowers/plans/2026-07-03-alter-storyboard-tool.md`
-- `docs/superpowers/plans/2026-07-03-section-identification-flow.md`
-- `docs/superpowers/plans/2026-07-03-atlascloud-support.md`
-- `docs/superpowers/plans/2026-07-03-audio-auto-subtitle-extraction.md`
-- `docs/superpowers/plans/2026-07-03-subtitle-track-clip-type.md`
+- [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) (primary)
+- [Storyboard UI plan](../superpowers/plans/2026-07-03-storyboard-ui.md)
+- [Track Grouping Expansion plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md)
+- [Generate Storyboard Tool plan](../superpowers/plans/2026-07-03-generate-storyboard-tool.md)
+- [Alter Storyboard Tool plan](../superpowers/plans/2026-07-03-alter-storyboard-tool.md)
+- [Section Identification Flow plan](../superpowers/plans/2026-07-03-section-identification-flow.md)
+- [Atlascloud Support plan](../superpowers/plans/2026-07-03-atlascloud-support.md)
+- [Audio Auto-Subtitle Extraction plan](../superpowers/plans/2026-07-03-audio-auto-subtitle-extraction.md)
+- [Subtitle Track/Clip Type plan](../superpowers/plans/2026-07-03-subtitle-track-clip-type.md)
 
 ---
 

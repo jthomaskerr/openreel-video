@@ -1,7 +1,7 @@
-# §9 Project Lifecycle (Operational)
+# Project Lifecycle — Operational Spec
 
 > **Derived from user directives.** Source: 99 user messages in the Project Management category.
-> Reference plans: `docs/superpowers/plans/2026-07-01-backend-autosave-git-lfs.md`.
+> Reference plans: [Backend Autosave + Git LFS plan](../superpowers/plans/2026-07-01-backend-autosave-git-lfs.md).
 
 ---
 

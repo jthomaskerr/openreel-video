@@ -1,7 +1,7 @@
 # Inspector / Right-Sidebar Shell — Operational Spec
 
 > Derived from user directives and existing implementation patterns.
-> Sources: `OPERATIONAL-SPEC-UPDATE-SUMMARY.md` §11, `openreel-spec-implications-report.json` (Inspector / UI Shell category), `2026-07-03-storyboard-ui.md` (panel registration), `ui-store.ts` (PanelId / DEFAULT_PANELS), `InspectorPanel.tsx`, `AssetInspectorWithTabs.tsx`, `clip-tabs.config.ts`, `WaveformPreview.tsx`, `ProblemsPanel.tsx`, `LogPanel.tsx`, `SceneMetadataInspector.tsx` (character pill / `@token` prompt parsing).
+> Sources: [Operational Spec Update Summary](./OPERATIONAL-SPEC-UPDATE-SUMMARY.md) §11, [OpenReel Spec Implications report](../superpowers/plans/spec-update/openreel-spec-implications-report.json) (Inspector / UI Shell category), [Storyboard UI plan](../superpowers/plans/2026-07-03-storyboard-ui.md) (panel registration), `ui-store.ts` (PanelId / DEFAULT_PANELS), `InspectorPanel.tsx`, `AssetInspectorWithTabs.tsx`, `clip-tabs.config.ts`, `WaveformPreview.tsx`, `ProblemsPanel.tsx`, `LogPanel.tsx`, `SceneMetadataInspector.tsx` (character pill / `@token` prompt parsing).
 
 ---
 

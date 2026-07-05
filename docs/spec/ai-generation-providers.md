@@ -2,10 +2,10 @@
 
 **Status:** Operational (derived from user directives)
 **Sources:**
-- `docs/spec/OPERATIONAL-SPEC-UPDATE-SUMMARY.md` §13
-- `docs/superpowers/plans/spec-update/openreel-spec-implications-report.json` (AI Generation / Providers category, 74 messages)
-- `docs/superpowers/plans/2026-07-03-atlascloud-support.md` (provider integration pattern)
-- `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` tasks 12–15 (job store, poller, reference images)
+- [Operational Spec Update Summary](./OPERATIONAL-SPEC-UPDATE-SUMMARY.md) §13
+- [OpenReel Spec Implications report](../superpowers/plans/spec-update/openreel-spec-implications-report.json) (AI Generation / Providers category, 74 messages)
+- [Atlascloud Support plan](../superpowers/plans/2026-07-03-atlascloud-support.md) (provider integration pattern)
+- [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) tasks 12–15 (job store, poller, reference images)
 
 ---
 
@@ -317,7 +317,7 @@ The General settings panel (`GeneralPanel.tsx`) MUST include an aggregator/provi
 - **Result:** Downloaded by orchestrator to local cache, served from assets directory (same pattern as WaveSpeed).
 - **Reference images:** Optional `image_url` field in generation payload; may require prior upload via `POST /api/v1/model/uploadMedia`.
 
-**Source:** `docs/superpowers/plans/2026-07-03-atlascloud-support.md`
+**Source:** [Atlascloud Support plan](../superpowers/plans/2026-07-03-atlascloud-support.md)
 
 ---
 
@@ -335,7 +335,7 @@ The General settings panel (`GeneralPanel.tsx`) MUST include an aggregator/provi
 
 ## 12. References
 
-- `docs/superpowers/plans/2026-07-03-atlascloud-support.md` — Atlascloud provider integration plan (orchestrator route, web client, job store wiring, UI)
-- `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` tasks 12–15 — Generation job store, poller, job management panel, reference image picker
-- `docs/spec/OPERATIONAL-SPEC-UPDATE-SUMMARY.md` §13 — Category mapping and placeholder bullets
-- `docs/superpowers/plans/spec-update/openreel-spec-implications-report.json` — AI Generation / Providers category (74 user messages)
+- [Atlascloud Support plan](../superpowers/plans/2026-07-03-atlascloud-support.md) — Atlascloud provider integration plan (orchestrator route, web client, job store wiring, UI)
+- [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) tasks 12–15 — Generation job store, poller, job management panel, reference image picker
+- [Operational Spec Update Summary](./OPERATIONAL-SPEC-UPDATE-SUMMARY.md) §13 — Category mapping and placeholder bullets
+- [OpenReel Spec Implications report](../superpowers/plans/spec-update/openreel-spec-implications-report.json) — AI Generation / Providers category (74 user messages)

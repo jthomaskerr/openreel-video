@@ -1,12 +1,12 @@
-# Storyboard Operational Spec
+# Storyboard — Operational Spec
 
-**Status:** Operational Specification  
-**Version:** 1.0  
-**Date:** 2026-07-03  
+**Status:** Operational Specification
+**Version:** 1.0
+**Date:** 2026-07-03
 **Relates to:**
-- `docs/superpowers/plans/2026-07-03-storyboard-ui.md`
-- `docs/superpowers/plans/2026-07-03-generate-storyboard-tool.md`
-- `docs/superpowers/plans/2026-07-03-alter-storyboard-tool.md`
+- [Storyboard UI plan](../superpowers/plans/2026-07-03-storyboard-ui.md)
+- [Generate Storyboard Tool plan](../superpowers/plans/2026-07-03-generate-storyboard-tool.md)
+- [Alter Storyboard Tool plan](../superpowers/plans/2026-07-03-alter-storyboard-tool.md)
 
 ---
 
@@ -413,9 +413,9 @@ export interface StoryboardGenerationResult {
 
 **System prompt (outline):**
 ```
-You are a creative storyboard director. Given a music video's creative brief, 
-confirmed song sections, and timing analysis, generate a sequence of shot 
-descriptions as a JSON array of StoryboardShot objects. 
+You are a creative storyboard director. Given a music video's creative brief,
+confirmed song sections, and timing analysis, generate a sequence of shot
+descriptions as a JSON array of StoryboardShot objects.
 
 Each shot MUST:
 - Have a unique label (max 100 chars)
@@ -587,13 +587,13 @@ export interface FieldDiff {
 
 **System prompt (outline):**
 ```
-You are a storyboard editing assistant. Given a music video storyboard and 
+You are a storyboard editing assistant. Given a music video storyboard and
 a natural-language instruction, produce a JSON diff describing the changes.
 
 RULES:
 - Output ONLY valid JSON.
 - Never add or remove shots.
-- Never change immutable fields (id, index, startSeconds, endSeconds, 
+- Never change immutable fields (id, index, startSeconds, endSeconds,
   generatedAssetIds, validation) unless explicitly instructed.
 - Preserve section boundaries unless the instruction asks to change them.
 - All field values MUST match their expected types (string, number, boolean).
@@ -715,14 +715,14 @@ All imported shots use the same `metadata.shotId` linkage as generated shots, en
 
 ### Section Identification Flow
 
-The storyboard generation workflow depends on confirmed song sections from `2026-07-03-section-identification-flow.md`:
+The storyboard generation workflow depends on confirmed song sections from the [Section Identification Flow plan](../superpowers/plans/2026-07-03-section-identification-flow.md) and the [Sections Identification spec](./sections-identification.md):
 - User infers or manually defines sections (intro, verse, chorus, bridge, outro).
 - Sections must be confirmed before generation is triggered.
 - LLM prompt includes section boundaries to guide shot creation.
 
 ### Track Grouping and Timeline Layout
 
-The storyboard panel integrates with track grouping (from `2026-07-03-track-grouping-expansion.md`):
+The storyboard panel integrates with track grouping (from the [Track Grouping Expansion plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md) and [Track Grouping spec](./track-grouping.md)):
 - Storyboard shots can be grouped into "shot groups" by section.
 - Timeline track grouping allows collapsing/expanding shot groups.
 - Shots appear both in the storyboard panel grid and as clips in the timeline.
@@ -830,8 +830,8 @@ TODO:
 
 ## References
 
-- [Storyboard UI Implementation Plan](../superpowers/plans/2026-07-03-storyboard-ui.md)
-- [Generate Storyboard Tool Plan](../superpowers/plans/2026-07-03-generate-storyboard-tool.md)
-- [Alter Storyboard Tool Plan](../superpowers/plans/2026-07-03-alter-storyboard-tool.md)
-- [Track Grouping Expansion Plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md)
-- [Section Identification Flow Plan](../superpowers/plans/2026-07-03-section-identification-flow.md)
+- [Storyboard UI plan](../superpowers/plans/2026-07-03-storyboard-ui.md)
+- [Generate Storyboard Tool plan](../superpowers/plans/2026-07-03-generate-storyboard-tool.md)
+- [Alter Storyboard Tool plan](../superpowers/plans/2026-07-03-alter-storyboard-tool.md)
+- [Track Grouping Expansion plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md)
+- [Section Identification Flow plan](../superpowers/plans/2026-07-03-section-identification-flow.md)

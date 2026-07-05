@@ -1,8 +1,8 @@
 # Atlascloud Provider Support — Operational Spec
 
-**Status:** Implementation-ready (derived from 2026-07-03-atlascloud-support.md plan)
+**Status:** Implementation-ready (derived from [Atlascloud Support plan](../superpowers/plans/2026-07-03-atlascloud-support.md))
 
-**Source:** `docs/superpowers/plans/2026-07-03-atlascloud-support.md`
+**Source:** [Atlascloud Support plan](../superpowers/plans/2026-07-03-atlascloud-support.md)
 
 **Last updated:** 2026-07-04
 
@@ -573,10 +573,10 @@ Adding Atlascloud MUST NOT break existing WaveSpeed or KieAI workflows. The chan
 
 ## 10. References
 
-- `docs/superpowers/plans/2026-07-03-atlascloud-support.md` — Full implementation plan with Task 1–7 checklists
-- `docs/spec/ai-generation-providers.md` — Unified AI generation subsystem spec (covering all providers)
+- [Atlascloud Support plan](../superpowers/plans/2026-07-03-atlascloud-support.md) — Full implementation plan with Task 1–7 checklists
+- [AI Generation & Providers spec](./ai-generation-providers.md) — Unified AI generation subsystem spec (covering all providers)
 - `https://atlascloud.ai/docs` — Atlascloud API documentation (external)
-- `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` — Job store and poller context
+- [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) — Job store and poller context
 
 ---
 

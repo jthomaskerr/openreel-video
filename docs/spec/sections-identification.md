@@ -1,9 +1,9 @@
-# Sections Identification Operational Spec
+# Sections Identification — Operational Spec
 
-**Version:** 1.0  
-**Status:** Specification  
-**Last Updated:** 2026-07-04  
-**Source Plan:** `docs/superpowers/plans/2026-07-03-section-identification-flow.md`
+**Version:** 1.0
+**Status:** Specification
+**Last Updated:** 2026-07-04
+**Source Plan:** [Section Identification Flow plan](../superpowers/plans/2026-07-03-section-identification-flow.md)
 
 ---
 
@@ -604,7 +604,7 @@ Energy boundary snapping applies only when:
 
 ## References
 
-- Implementation Plan: `docs/superpowers/plans/2026-07-03-section-identification-flow.md`
-- Related Audio Analysis Plan: `docs/superpowers/plans/2026-07-03-audio-analysis-and-selection.md`
-- Related Generate Storyboard Plan: `docs/superpowers/plans/2026-07-03-generate-storyboard-tool.md`
-- Related Alter Storyboard Plan: `docs/superpowers/plans/2026-07-03-alter-storyboard-tool.md`
+- Implementation Plan: [Section Identification Flow plan](../superpowers/plans/2026-07-03-section-identification-flow.md)
+- Related Audio Analysis Plan: [Audio Analysis & Selection plan](../superpowers/plans/2026-07-03-audio-analysis-and-selection.md)
+- Related Generate Storyboard Plan: [Generate Storyboard Tool plan](../superpowers/plans/2026-07-03-generate-storyboard-tool.md)
+- Related Alter Storyboard Plan: [Alter Storyboard Tool plan](../superpowers/plans/2026-07-03-alter-storyboard-tool.md)

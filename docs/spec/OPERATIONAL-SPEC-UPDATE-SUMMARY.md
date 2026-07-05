@@ -7,7 +7,7 @@
 | File | Role |
 |---|---|
 | `openreel-user-messages-collected.jsonl` | 506 user messages extracted from all sessions under `~/.omp/agent/sessions/*openreel*` |
-| `openreel-spec-implications-report.json` | Categorized implications derived from user messages |
+| [OpenReel Spec Implications report](../superpowers/plans/spec-update/openreel-spec-implications-report.json) | Categorized implications derived from user messages |
 | `spec/asset-management-ux.md` | Existing authoritative spec (sections 1–8 preserved) |
 | `spec/music-video-timeline-native/decisions.md` | Existing music-video decisions (read, not modified) |
 | `spec/music-video-timeline-native/tasks.md` | Existing music-video tasks (read, not modified) |
@@ -20,39 +20,34 @@
 
 | Implication Category | Message Count | Mapped To Spec Section |
 |---|---|---|
-| Project Management | 99 | §9 Project Lifecycle |
-| Media Import / Timeline | 184 | §10 Media Import & Timeline Placement |
-| Inspector / UI Shell | 111 | §11 Inspector / Right-Sidebar Shell |
-| Thumbnails / Fallbacks | 33 | §12 Thumbnails & Missing-File Fallbacks |
-| AI Generation / Providers | 74 | §13 AI Generation & Providers |
-| Backend / Persistence | 51 | §14 Backend, Persistence & Versioning |
-| Problems / Errors / Logging | 68 | §15 Problems, Errors & Logging |
-| Testing | 78 | §16 Testing Expectations |
-| Audio Analysis / Subtitles | 41 | §17 Audio Analysis & Subtitles |
-| Export / Rendering | 48 | §18 Export |
+| Project Management | 99 | [Project Lifecycle — Operational Spec](./project-lifecycle.md) |
+| Media Import / Timeline | 184 | [Media Import & Timeline Placement — Operational Spec](./media-import-timeline.md) |
+| Inspector / UI Shell | 111 | [Inspector / Right-Sidebar Shell — Operational Spec](./inspector-shell.md) |
+| Thumbnails / Fallbacks | 33 | [Thumbnails & Missing-File Fallbacks — Operational Spec](./thumbnails-fallbacks.md) |
+| AI Generation / Providers | 74 | [AI Generation & Providers — Operational Spec](./ai-generation-providers.md) |
+| Backend / Persistence | 51 | [Backend, Persistence & Versioning — Operational Spec](./backend-persistence-versioning.md) |
+| Problems / Errors / Logging | 68 | [Problems, Errors & Logging — Operational Spec](./problems-errors-logging.md) |
+| Testing | 78 | [Testing Expectations — Operational Spec](./testing-expectations.md) |
+| Audio Analysis / Subtitles | 41 | [Audio Analysis & Subtitles — Operational Spec](./audio-analysis-subtitles.md) |
+| Export / Rendering | 48 | [Export — Operational Spec](./export.md) |
 
-## Added Sections in `spec/asset-management-ux.md`
+## Operational Specs Created or Split Out
 
-All new sections are labeled **(Operational)** with the header "Derived from user directives. Detailed implementation spec TBD." and placeholder bullets. Existing sections 1–8 are untouched.
+The original update appended operational sections after the existing Asset Management UX spec. Those sections have since been split into dedicated operational spec files and cross-linked directly below.
 
-| Section | Title | Key Placeholder Topics |
+| Spec | Title | Key Placeholder Topics |
 |---|---|---|
-| §9 | Project Lifecycle | No auto-creation; name prompt on new; `/new` creates project; delete removes directory+media; project picker with bulk actions; importer names project |
-| §10 | Media Import & Timeline Placement | Scenes as video clips; character/reference thumbnails; audio import from JSON; missing-file clips with "Link file" action; status badges; overlapping-clip error; metadata track layout |
-| §11 | Inspector / Right-Sidebar Shell | Tab bar: Inspector, Edit, Problems, Log; Edit secondary tabs; clip-specific inspector sub-tabs; metadata clip editable properties; video clip tabs (Clip, File, Generation, Versions); audio File tab with waveform/playback/BPM/key/scale; click-to-seek waveform |
-| §12 | Thumbnails & Missing-File Fallbacks | Missing video → first-frame/reference fallback; non-video thumbnail fill; video frame extraction every N seconds |
-| §13 | AI Generation & Providers | Unified generate dialog; cached/background-refreshed model lists; multi-instance provider settings; per-model parameter validation; default video/image generator models |
-| §14 | Backend, Persistence & Versioning | Immutable project versions; version list with revert; relative file paths; import imports all referenced files; backend-first restore; git-lfs for media |
-| §15 | Problems, Errors & Logging | Errors in Problems tab, not console-only; fixable issues with fix actions; immutable log with project/clip/scope tags and filters; no auto-filter on clip select |
-| §16 | Testing Expectations | All new behaviors tested; regression tests for regressions; examples: auto-creation prevention, thumbnail fallback, title preservation |
-| §17 | Audio Analysis & Subtitles | Genre, beat detection, time-series sentiment aligned to sections; subtitles as first-class track/clip type with rendering/editing |
-| §18 | Export | MP4 (H.264/H.265), WebM, ProRes, image sequences, audio-only |
+| [Project Lifecycle](./project-lifecycle.md) | Project Lifecycle — Operational Spec | No auto-creation; name prompt on new; `/new` creates project; delete removes directory+media; project picker with bulk actions; importer names project |
+| [Media Import & Timeline Placement](./media-import-timeline.md) | Media Import & Timeline Placement — Operational Spec | Scenes as video clips; character/reference thumbnails; audio import from JSON; missing-file clips with "Link file" action; status badges; overlapping-clip error; metadata track layout |
+| [Inspector / Right-Sidebar Shell](./inspector-shell.md) | Inspector / Right-Sidebar Shell — Operational Spec | Tab bar: Inspector, Edit, Problems, Log; Edit secondary tabs; clip-specific inspector sub-tabs; metadata clip editable properties; video clip tabs (Clip, File, Generation, Versions); audio File tab with waveform/playback/BPM/key/scale; click-to-seek waveform |
+| [Thumbnails & Missing-File Fallbacks](./thumbnails-fallbacks.md) | Thumbnails & Missing-File Fallbacks — Operational Spec | Missing video → first-frame/reference fallback; non-video thumbnail fill; video frame extraction every N seconds |
+| [AI Generation & Providers](./ai-generation-providers.md) | AI Generation & Providers — Operational Spec | Unified generate dialog; cached/background-refreshed model lists; multi-instance provider settings; per-model parameter validation; default video/image generator models |
+| [Backend, Persistence & Versioning](./backend-persistence-versioning.md) | Backend, Persistence & Versioning — Operational Spec | Immutable project versions; version list with revert; relative file paths; import imports all referenced files; backend-first restore; git-lfs for media |
+| [Problems, Errors & Logging](./problems-errors-logging.md) | Problems, Errors & Logging — Operational Spec | Errors in Problems tab, not console-only; fixable issues with fix actions; immutable log with project/clip/scope tags and filters; no auto-filter on clip select |
+| [Testing Expectations](./testing-expectations.md) | Testing Expectations — Operational Spec | All new behaviors tested; regression tests for regressions; examples: auto-creation prevention, thumbnail fallback, title preservation |
+| [Audio Analysis & Subtitles](./audio-analysis-subtitles.md) | Audio Analysis & Subtitles — Operational Spec | Genre, beat detection, time-series sentiment aligned to sections; subtitles as first-class track/clip type with rendering/editing |
+| [Export](./export.md) | Export — Operational Spec | MP4 (H.264/H.265), WebM, ProRes, image sequences, audio-only |
 
-## Other Files Changed/Created
+## Alignment Follow-Up
 
-| File | Action |
-|---|---|
-| `spec/asset-management-ux.md` | Modified — 10 new sections (9–18) appended after existing §8 |
-| `spec/OPERATIONAL-SPEC-UPDATE-SUMMARY.md` | Created — this file |
-
-No other files were created or modified.
+The 2026-07-05 alignment pass standardized spec titles, replaced implicit path mentions with direct Markdown links, and consolidated subtitle/audio requirements into [Audio Analysis & Subtitles — Operational Spec](./audio-analysis-subtitles.md). The legacy subtitle-specific files now act as redirect stubs so older links remain valid without creating competing sources of truth.

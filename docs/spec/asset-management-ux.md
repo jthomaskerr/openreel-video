@@ -136,7 +136,7 @@ Shows metadata in a right-side inspector panel (not a modal), replacing current 
 
 ## 6. Character Management (Music Video Domain)
 
-> **See also:** `docs/spec/inspector-shell.md` §3.8 (Character Pills in Prompt Fields) for how character mentions inside scene/shot prompts render as inline, clickable pills, and §3.8.6 (Reference Images Pane) for reference-image linking behavior. Both apply to characters managed here.
+> **See also:** [Inspector Shell spec](./inspector-shell.md) §3.8 (Character Pills in Prompt Fields) for how character mentions inside scene/shot prompts render as inline, clickable pills, and §3.8.6 (Reference Images Pane) for reference-image linking behavior. Both apply to characters managed here.
 
 ### Current state
 Characters exist as `MetadataBlock` entries (`kind: "continuity_note"`) on a "Characters" `MetadataTrack` inside `MusicVideoProject`. Imported from Neural Frames JSON. Inspector is read-only.

@@ -2,11 +2,11 @@
 
 > **Status:** Operational — derived from user directives and implementation plans.
 > **Sources:**
-> - `docs/spec/OPERATIONAL-SPEC-UPDATE-SUMMARY.md` §10
-> - `docs/superpowers/plans/spec-update/openreel-spec-implications-report.json` (Media Import / Timeline category, 184 messages)
-> - `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` — timeline-native Music Video workflow
-> - `docs/superpowers/plans/2026-07-03-track-grouping-expansion.md` — storyboard clip metadata contract and track grouping
-> - `docs/spec/music-video-timeline-native/decisions.md` — architectural decisions
+> - [Operational Spec Update Summary](./OPERATIONAL-SPEC-UPDATE-SUMMARY.md) §10
+> - [OpenReel Spec Implications report](../superpowers/plans/spec-update/openreel-spec-implications-report.json) (Media Import / Timeline category, 184 messages)
+> - [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) — timeline-native Music Video workflow
+> - [Track Grouping Expansion plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md) — storyboard clip metadata contract and track grouping
+> - [Music Video Timeline Native decisions](./music-video-timeline-native/decisions.md) — architectural decisions
 
 ---
 
@@ -56,7 +56,7 @@ Tracks are organized into logical groups for the timeline UI. Grouping is derive
 | Audio | All `audio` tracks |
 | Fallback | Any track not matching a group above (rendered as a single-track group) |
 
-> **Source:** `docs/superpowers/plans/2026-07-03-track-grouping-expansion.md` Task 04.
+> **Source:** [Track Grouping Expansion plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md) Task 04.
 
 ---
 
@@ -66,7 +66,7 @@ Tracks are organized into logical groups for the timeline UI. Grouping is derive
 
 Neural Frames JSON import produces timeline clips from storyboard shot data. The import flow is triggered from the AI Tools tab via a file picker that accepts `.json` files.
 
-> **Source:** `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` Task 05, Task 08.
+> **Source:** [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) Task 05, Task 08.
 
 ### 3.2 Scene Clips on Video Track
 
@@ -84,8 +84,8 @@ Every imported metadata clip (scene, character, style) MUST reference a real `Me
 
 Metadata media is created by a factory (`createMetadataMedia`) that generates a lightweight local image `Blob`/`File` and registers it as a `MediaItem` in the media library. The generated image carries `kind`, `label`, `color`, and `duration` in metadata-compatible fields.
 
-> **Source:** `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` Task 01, Task 03.
-> **Decision:** `docs/spec/music-video-timeline-native/decisions.md` — "Real media for metadata clips."
+> **Source:** [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) Task 01, Task 03.
+> **Decision:** [Music Video Timeline Native decisions](./music-video-timeline-native/decisions.md) — "Real media for metadata clips."
 
 ### 3.4 Storyboard-Specialized Video Clip Metadata Contract
 
@@ -119,7 +119,7 @@ interface StoryboardClipMetadata {
 - `importSource` — when `source` is `"neuralframes"`, this SHOULD be `"neuralframes"`.
 - `importId` — the original import identifier, when available.
 
-> **Source:** `docs/superpowers/plans/2026-07-03-track-grouping-expansion.md` Task 01.
+> **Source:** [Track Grouping Expansion plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md) Task 01.
 
 ### 3.5 Type Guards
 
@@ -129,7 +129,7 @@ The system MUST provide type guards to identify storyboard-specialized video cli
 - `getStoryboardClipMetadata(clip)` — extracts and validates `StoryboardClipMetadata` from a clip's metadata, returning `null` for non-storyboard clips.
 - `joinStoryboardClipToShot(clip, shots)` — joins a storyboard clip to its matching `StoryboardShot` by `metadata.shotId`.
 
-> **Source:** `docs/superpowers/plans/2026-07-03-track-grouping-expansion.md` Task 02.
+> **Source:** [Track Grouping Expansion plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md) Task 02.
 
 ### 3.6 Character and Style Clips
 
@@ -138,7 +138,7 @@ Character and style/LoRA metadata from Neural Frames import MUST also create rea
 - **Character clips** — `metadata.kind === "character"`, placed on a metadata track named `Character: <name>`. Span the character's referenced scene range or full project duration when no tighter range exists.
 - **Style/LoRA clips** — `metadata.kind === "style"`, placed on a metadata track. Default to full duration when no tighter range exists.
 
-> **Source:** `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` Task 08.
+> **Source:** [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) Task 08.
 
 ---
 
@@ -154,7 +154,7 @@ The Music Video workflow starts by importing an audio file. The flow:
 4. A Music Video metadata track is created with a full-duration metadata clip (`metadata.kind === "music-video"`).
 5. The metadata clip is selected, opening the Music Video inspector.
 
-> **Source:** `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` Task 04.
+> **Source:** [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) Task 04.
 
 ### 4.2 Audio from Import JSON
 
@@ -196,7 +196,7 @@ When a generated image or video asset is accepted, the system MUST place it on t
 - Clip metadata MUST link `shotId`, `assetGroupId`, and provider job ID when available.
 - The system MUST NOT create duplicate clips if the same version is already placed for that shot.
 
-> **Source:** `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` Task 11.
+> **Source:** [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) Task 11.
 
 ---
 
@@ -215,7 +215,7 @@ When a video file is missing, the clip thumbnail MUST fall back to:
 2. The first `reference_image` associated with the clip, if available.
 3. A generic "missing file" placeholder as a last resort.
 
-> **Source:** `docs/spec/OPERATIONAL-SPEC-UPDATE-SUMMARY.md` §12.
+> **Source:** [Operational Spec Update Summary](./OPERATIONAL-SPEC-UPDATE-SUMMARY.md) §12.
 
 ---
 
@@ -234,7 +234,7 @@ Generated clips MUST display status badges reflecting their generation job state
 | `canceled` | Cancelled | Job was cancelled by user or system |
 
 > **Source:** Implications report: "Generated clips must display status badges (pending, cancelled, failed, etc.)."
-> **Source:** `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` Task 12 (generation job store with explicit statuses).
+> **Source:** [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) Task 12 (generation job store with explicit statuses).
 
 ### 7.2 Job Lifecycle
 
@@ -243,7 +243,7 @@ Generated clips MUST display status badges reflecting their generation job state
 - Cancellation marks the local job as `canceled`; provider-side cancellation is attempted only when the provider API supports it.
 - The job management panel groups jobs by status and exposes retry, cancel, view result, and use-as-reference actions.
 
-> **Source:** `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` Task 12, Task 14.
+> **Source:** [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) Task 12, Task 14.
 
 ---
 
@@ -275,7 +275,7 @@ Characters and reference clips MUST use their associated reference images as thu
 
 Video clips on the timeline MUST extract frames at a periodic interval (every N seconds) and display them as a frame sequence across the clip's width. The interval SHOULD be configurable but default to a value that produces a visually informative strip (e.g., every 2–5 seconds depending on clip duration).
 
-> **Source:** `docs/spec/OPERATIONAL-SPEC-UPDATE-SUMMARY.md` §12.
+> **Source:** [Operational Spec Update Summary](./OPERATIONAL-SPEC-UPDATE-SUMMARY.md) §12.
 
 ---
 
@@ -292,7 +292,7 @@ The system MUST provide a single helper (`addMetadataClip`) that:
 
 The helper MUST return `{ trackId, mediaId, clipId }` and MUST NOT call `addClip` with an empty `mediaId`.
 
-> **Source:** `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` Task 03.
+> **Source:** [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) Task 03.
 
 ### 9.2 Metadata Clip Kinds
 
@@ -310,7 +310,7 @@ Metadata clips carry a `metadata.kind` field that determines their inspector rou
 
 Unknown `kind` values MUST render a minimal read-only fallback in the inspector, not crash.
 
-> **Source:** `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` Task 06, Task 08, Task 09.
+> **Source:** [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) Task 06, Task 08, Task 09.
 
 ---
 
@@ -327,7 +327,7 @@ The project store MUST expose `addGeneratedMedia(item, blob)` that:
 
 This method MUST NOT reuse `addPlaceholderMedia` for available generated assets, and MUST NOT overwrite existing media IDs.
 
-> **Source:** `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` Task 02.
+> **Source:** [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) Task 02.
 
 ### 10.2 Asset Versioning
 
@@ -339,8 +339,8 @@ Generated assets support version history:
 - `setCurrentAssetVersion` flips current flags inside only that asset group.
 - Timeline clips always reference the current version's `mediaId`.
 
-> **Source:** `docs/superpowers/plans/2026-06-28-music-video-timeline-native.md` Task 10.
-> **Decision:** `docs/spec/music-video-timeline-native/decisions.md` — "Asset version history."
+> **Source:** [Music Video Timeline Native plan](../superpowers/plans/2026-06-28-music-video-timeline-native.md) Task 10.
+> **Decision:** [Music Video Timeline Native decisions](./music-video-timeline-native/decisions.md) — "Asset version history."
 
 ---
 

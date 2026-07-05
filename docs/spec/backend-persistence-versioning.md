@@ -1,8 +1,8 @@
-# §14 Backend, Persistence & Versioning (Operational)
+# Backend, Persistence & Versioning — Operational Spec
 
 > **Derived from user directives.** Source: 51 user messages in the Backend / Persistence category.
-> Reference plans: `docs/superpowers/plans/2026-07-01-backend-autosave-git-lfs.md`.
-> Related spec: `docs/spec/project-lifecycle.md` (§9.4–9.5).
+> Reference plans: [Backend Autosave + Git LFS plan](../superpowers/plans/2026-07-01-backend-autosave-git-lfs.md).
+> Related spec: [Project Lifecycle spec](./project-lifecycle.md) (§9.4–9.5).
 
 ---
 
