@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import type { Clip, Track, TransitionType } from "@openreel/core";
+import { getEffectiveThumbnailUrl } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
@@ -54,6 +55,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   onTrimClip,
 }) => {
   const { getMediaItem } = useProjectStore();
+  const allMediaItems = useProjectStore((state) => state.project.mediaLibrary.items);
   const { snapSettings } = useUIStore();
   const effectApplicationClipId = useUIStore(
     (state) => state.effectApplicationClipId,
@@ -63,6 +65,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   );
   const { playheadPosition } = useTimelineStore();
   const mediaItem = getMediaItem(clip.mediaId);
+  const effectiveThumbnailUrl = getEffectiveThumbnailUrl(mediaItem, allMediaItems, clip.metadata);
   const [isDragging, setIsDragging] = useState(false);
   const [isPendingDrag, setIsPendingDrag] = useState(false);
   const [dragOffset, setDragOffset] = useState(0);
@@ -741,18 +744,18 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
             )}
 
             {/* Video: single thumbnail fallback — repeat-fill */}
-            {mediaType === "video" && !mediaItem?.filmstripThumbnails?.length && mediaItem?.thumbnailUrl && (
+            {mediaType === "video" && !mediaItem?.filmstripThumbnails?.length && effectiveThumbnailUrl && (
               <div
                 className="absolute inset-0 opacity-60"
-                style={{ backgroundImage: `url(${mediaItem.thumbnailUrl})`, backgroundRepeat: "repeat-x", backgroundSize: "auto 100%" }}
+                style={{ backgroundImage: `url(${effectiveThumbnailUrl})`, backgroundRepeat: "repeat-x", backgroundSize: "auto 100%" }}
               />
             )}
 
             {/* Image / character / style: repeat thumbnail across full clip width */}
-            {mediaType === "image" && mediaItem?.thumbnailUrl && !mediaItem.thumbnailUrl.startsWith("blob:") && (
+            {mediaType === "image" && effectiveThumbnailUrl && !effectiveThumbnailUrl.startsWith("blob:") && (
               <div
                 className="absolute inset-0 opacity-65"
-                style={{ backgroundImage: `url(${mediaItem.thumbnailUrl})`, backgroundRepeat: "repeat-x", backgroundSize: "auto 100%" }}
+                style={{ backgroundImage: `url(${effectiveThumbnailUrl})`, backgroundRepeat: "repeat-x", backgroundSize: "auto 100%" }}
               />
             )}
 
