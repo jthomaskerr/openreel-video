@@ -2,7 +2,7 @@
 
 **Current Step:** PARTIAL — First Spec Complete (AI Generation & Providers)  
 **Status:** ✅ First Spec Investigated & Planned; Ready for Decomposition  
-**Last Updated:** 2026-07-05 10:20  
+**Last Updated:** 2026-07-05 19:35  
 **Review Level:** 1  
 **Review Counter:** 0  
 **Iteration:** 1  
@@ -73,10 +73,41 @@
 ---
 
 ### Step 4: Prioritized Plan List (Deliverable)
-**Status:** ⬜ Pending (Deferred to end of full gap analysis)
+**Status:** ⬜ In Progress (Deferred to end of full gap analysis)
 
-- [ ] Will write `docs/superpowers/plans/2026-07-05-spec-gap-priorities.md` after all 19 specs analyzed
-- [ ] For first spec (AI Generation): **P0** (foundational, high user impact, 28–36 hours)
+#### Specs Requiring Investigation (excluding those with plans ≤ 2026-07-03)
+
+Specs **WITH** existing plans (skip from new-plan processing):
+- [x] music-video-timeline-native (2026-06-28)
+- [x] backend-autosave-git-lfs (2026-07-01)
+- [x] alter-storyboard-tool (2026-07-03)
+- [x] atlascloud-support (2026-07-03)
+- [x] audio-analysis-and-selection (2026-07-03)
+- [x] audio-auto-subtitle-extraction (2026-07-03)
+- [x] generate-storyboard-tool (2026-07-03)
+- [x] section-identification-flow (2026-07-03)
+- [x] storyboard-ui (2026-07-03)
+- [x] subtitle-track-clip-type (2026-07-03)
+- [x] track-grouping-expansion (2026-07-03)
+
+Specs **REQUIRING** new investigation & planning:
+- [ ] ai-generation-providers (SPECIAL: newer plan exists at 2026-07-05)
+- [ ] asset-management-ux
+- [ ] atlascloud-provider
+- [ ] audio-analysis-subtitles
+- [ ] backend-persistence-versioning
+- [ ] export
+- [ ] inspector-shell
+- [ ] media-import-timeline
+- [ ] music-video-workflow
+- [ ] problems-errors-logging
+- [ ] project-lifecycle
+- [ ] sections-identification
+- [ ] testing-expectations
+- [ ] thumbnails-fallbacks
+
+**Next Step:** Will write `docs/superpowers/plans/2026-07-05-spec-gap-priorities.md` after analyzing remaining 14 specs
+- **AI Generation (2026-07-05 plan):** Already has dedicated implementation plan (491 lines, 8 phases); marked **P0**
 
 ---
 
@@ -128,14 +159,73 @@
 
 ---
 
+---
+
+## ANALYSIS: Atlascloud Support Plan (2026-07-03)
+
+### Plan Overview
+**File:** `docs/superpowers/plans/2026-07-03-atlascloud-support.md` (961 lines)  
+**Status:** ✅ Ready for execution; 0/41 checklist items completed  
+**Structure:** 9 comprehensive tasks across domain, orchestrator, web, UI, settings, and tests
+
+### Completeness Assessment
+
+#### ✅ STRENGTHS (Plan is well-structured)
+- **Domain types (Task 1):** Type union updated for `atlascloud` provider
+- **Orchestrator layer (Tasks 2–3):** Full proxy route implementation with model cache, submission, polling, and file download
+- **Web service client (Task 4):** AtlasCloud service module with types, fetch wrapper, and caching
+- **Integration (Tasks 5–6):** Job store, poller dispatch, and unified model picker UI with provider badges
+- **Settings (Task 7):** Service registry and aggregator dropdown updates
+- **Testing (Task 8):** Unit tests for orchestrator route, web client, and job store
+- **Verification (Task 9):** Complete checklist (TypeScript, unit tests, orchestrator health, models endpoint)
+- **File mapping:** All create/modify operations clearly mapped
+- **API unknowns:** External dependencies documented for pre-implementation research
+
+#### ⚠️ ISSUES & NOTES (Plan needs context update)
+1. **Implementation approach:** Plan assumes direct Atlascloud REST API calls
+   - **STATUS.md decision:** Use `atlascloud-cli` package instead (documented in current STATUS.md)
+   - **Impact:** Low — mainly affects Task 3 (orchestrator route) implementation approach
+   - **Action:** Update orchestrator route to use CLI instead of direct API fetch
+
+2. **Unknown API details** (flagged at plan end, research-gated):
+   - `/api/v1/models` response format → Impacts Task 6 (model picker)
+   - Image generation endpoint path → Impacts Task 3 (route dispatch)
+   - Per-model request schemas → Impacts Task 6 (dynamic forms)
+   - Output URL handling (CDN vs download) → Impacts Task 3 (poller logic)
+   - Rate limits and retry semantics → Impacts Task 3 error handling
+
+3. **Execution readiness:**
+   - Tasks 1–2 (types, env) can start immediately (no external dependencies)
+   - Tasks 3–8 should start after atlascloud-cli research is complete
+   - Task 9 (verification) runs last as a quality gate
+
+### Recommendations
+
+**Before execution:**
+- [ ] Research Atlascloud API (or atlascloud-cli package) to confirm unknowns
+- [ ] Update Task 3 (orchestrator route) to use atlascloud-cli if available
+- [ ] Verify model list endpoint exists and response schema
+- [ ] Check output URL format (direct CDN or requires download)
+
+**Execution order:**
+1. Task 1 (types) — 10 min, no blockers
+2. Task 2 (env) — 10 min, no blockers
+3. Tasks 3–8 (implementation) — parallel after Task 2, ~28–32 hours total
+4. Task 9 (verification) — final QA gate, ~2 hours
+
+**Estimated effort:** 28–36 hours (consistent with STATUS.md)
+
+---
+
 ## Blockers
 
 **For AI Generation & Providers spec:**
-- ⚠️ Atlascloud plan (2026-07-03) needs update to use atlascloud-cli instead of direct API calls (minor, ~1 hour to update)
-- ✅ No blocking issues for implementation to proceed
+- ⚠️ Atlascloud plan (2026-07-03) needs context update: should use `atlascloud-cli` package instead of direct API (minor, ~2 hours to re-plan Task 3)
+- ✅ No blocking issues for implementation to proceed; API unknowns are pre-documented
 
 **For full DOC-001 task:**
-- Pending analysis of remaining 18 specs (estimated 2–3 days)
+- Pending analysis of remaining 14 specs (excluding AI Generation which has newer 2026-07-05 plan)
+- Estimated timeline: 2–3 days for full analysis
 
 ---
 
