@@ -43,6 +43,11 @@ coverage/
 .worktrees/
 .temp/
 .docs/
+
+# OrchID working files
+orchid-wt-*/
+.pi/orchid-runtime/
+.pi/sessions/
 # Project-specific
 /public/projects/
 *.openreel
