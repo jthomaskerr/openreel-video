@@ -74,7 +74,6 @@ export interface AudioAsset {
   durationSeconds: number;
   localPath: string; // absolute path on local filesystem
   bpm?: number;
-  waveformData?: number[]; // normalised amplitude samples for display
 }
 
 // ── Timing ────────────────────────────────────────────────────────────────────

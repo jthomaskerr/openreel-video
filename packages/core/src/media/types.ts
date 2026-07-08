@@ -5,7 +5,6 @@ export interface ProcessedMedia {
   blob: Blob;
   metadata: MediaTrackInfo;
   thumbnails: ThumbnailResult[];
-  waveformData: WaveformData | null;
 }
 
 export interface MediaTrackInfo {
