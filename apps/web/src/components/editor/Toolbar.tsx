@@ -1066,7 +1066,6 @@ export const Toolbar: React.FC = () => {
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-      </div>
 
       {/* ─── Auxiliary popups & dialogs ───────────────────────── */}
       <ExportDialog
