@@ -1,0 +1,5 @@
+{"timestamp":"2026-07-05T09:48:15.070Z","type":"wave_start","batchId":"20260705T194806","waveIndex":0,"phase":"executing","taskIds":["DOC-001"],"laneCount":1}
+{"timestamp":"2026-07-05T09:58:52.408Z","type":"task_complete","batchId":"20260705T194806","waveIndex":0,"phase":"executing","taskId":"DOC-001","durationMs":636630,"outcome":"succeeded"}
+{"timestamp":"2026-07-05T09:58:52.468Z","type":"merge_start","batchId":"20260705T194806","waveIndex":0,"phase":"merging","laneCount":1}
+{"timestamp":"2026-07-05T10:02:00.338Z","type":"merge_success","batchId":"20260705T194806","waveIndex":0,"phase":"merging","laneCount":1,"durationMs":187868,"totalWaves":1}
+{"timestamp":"2026-07-05T10:02:00.529Z","type":"batch_complete","batchId":"20260705T194806","waveIndex":0,"phase":"completed","succeededTasks":1,"failedTasks":0,"skippedTasks":0,"blockedTasks":0,"batchDurationMs":833624}

@@ -1,0 +1,67 @@
+{
+  "capturedAt": "2026-07-05T09:58:56.272Z",
+  "commandResults": [
+    {
+      "commandId": "test",
+      "exitCode": 1,
+      "stdout": "Scope: 7 of 8 workspace projects\npackages/core test:run$ vitest run\npackages/image-core test:run$ vitest run\npackages/music-video-domain test:run$ vitest run\npackages/image-core test:run: sh: vitest: command not found\npackages/core test:run: sh: vitest: command not found\npackages/music-video-domain test:run: sh: vitest: command not found\n/Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge/packages/music-video-domain:\n ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @openreel/music-video-domain@0.1.0 test:run: `vitest run`\nspawn ENOENT\n WARN   Local package.json exists, but node_modules missing, did you mean to install?\n WARN   Local package.json exists, but node_modules missing, did you mean to install?\n WARN   Local package.json exists, but node_modules missing, did you mean to install?\n",
+      "stderr": "",
+      "durationMs": 572,
+      "error": null
+    },
+    {
+      "commandId": "lint",
+      "exitCode": 1,
+      "stdout": "Scope: 7 of 8 workspace projects\napps/web lint$ eslint src\napps/image lint$ eslint src\napps/web lint: sh: eslint: command not found\napps/image lint: sh: eslint: command not found\n/Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge/apps/web:\n ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @openreel/web@0.1.0 lint: `eslint src`\nspawn ENOENT\n WARN   Local package.json exists, but node_modules missing, did you mean to install?\n WARN   Local package.json exists, but node_modules missing, did you mean to install?\n",
+      "stderr": "",
+      "durationMs": 381,
+      "error": null
+    },
+    {
+      "commandId": "typecheck",
+      "exitCode": 1,
+      "stdout": "Scope: 7 of 8 workspace projects\npackages/core typecheck$ tsc --noEmit\npackages/image-core typecheck$ tsc --noEmit\npackages/music-video-domain typecheck$ tsc --noEmit\npackages/ui typecheck$ tsc --noEmit\npackages/image-core typecheck: sh: tsc: command not found\npackages/core typecheck: sh: tsc: command not found\npackages/music-video-domain typecheck: sh: tsc: command not found\n/Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge/packages/core:\n ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @openreel/core@0.1.0 typecheck: `tsc --noEmit`\nspawn ENOENT\n WARN   Local package.json exists, but node_modules missing, did you mean to install?\n WARN   Local package.json exists, but node_modules missing, did you mean to install?\npackages/ui typecheck: sh: tsc: command not found\n WARN   Local package.json exists, but node_modules missing, did you mean to install?\n WARN   Local package.json exists, but node_modules missing, did you mean to install?\n",
+      "stderr": "",
+      "durationMs": 376,
+      "error": null
+    },
+    {
+      "commandId": "build",
+      "exitCode": 1,
+      "stdout": "\n> openreel@0.1.0 build /Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge\n> pnpm build:wasm && pnpm --filter @openreel/web build\n\n\n> openreel@0.1.0 build:wasm /Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge\n> pnpm --filter @openreel/core build:wasm\n\n\n> @openreel/core@0.1.0 build:wasm /Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge/packages/core\n> npm run build:wasm:fft && npm run build:wasm:wav && npm run build:wasm:beat\n\n\n> @openreel/core@0.1.0 build:wasm:fft\n> asc src/wasm/fft/assembly/index.ts -o src/wasm/fft/build/fft.wasm --optimize --runtime stub\n\n/Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge/packages/core:\n ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL  @openreel/core@0.1.0 build:wasm: `npm run build:wasm:fft && npm run build:wasm:wav && npm run build:wasm:beat`\nspawn ENOENT\n WARN   Local package.json exists, but node_modules missing, did you mean to install?\n ELIFECYCLE  Command failed with exit code 1.\n WARN   Local package.json exists, but node_modules missing, did you mean to install?\n ELIFECYCLE  Command failed with exit code 1.\n WARN   Local package.json exists, but node_modules missing, did you mean to install?\n",
+      "stderr": "npm warn Unknown env config \"recursive\". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options.\nsh: asc: command not found\nnpm error Lifecycle script `build:wasm:fft` failed with error:\nnpm error code 127\nnpm error path /Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge/packages/core\nnpm error workspace @openreel/core@0.1.0\nnpm error location /Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge/packages/core\nnpm error command failed\nnpm error command sh -c asc src/wasm/fft/assembly/index.ts -o src/wasm/fft/build/fft.wasm --optimize --runtime stub\n",
+      "durationMs": 999,
+      "error": null
+    }
+  ],
+  "fingerprints": [
+    {
+      "commandId": "test",
+      "file": "",
+      "case": "",
+      "kind": "command_error",
+      "messageNorm": "Scope: 7 of 8 workspace projects packages/core test:run$ vitest run packages/image-core test:run$ vitest run packages/music-video-domain test:run$ vitest run packages/image-core test:run: sh: vitest: command not found packages/core test:run: sh: vitest: command not found packages/music-video-domain test:run: sh: vitest: command not found /Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge/packages/music-video-domain: ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL @openreel/music-vi"
+    },
+    {
+      "commandId": "lint",
+      "file": "",
+      "case": "",
+      "kind": "command_error",
+      "messageNorm": "Scope: 7 of 8 workspace projects apps/web lint$ eslint src apps/image lint$ eslint src apps/web lint: sh: eslint: command not found apps/image lint: sh: eslint: command not found /Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge/apps/web: ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL @openreel/web@0.1.0 lint: `eslint src` spawn ENOENT WARN Local package.json exists, but node_modules missing, did you mean to install? WARN Local package.json exists, but node_modules missing, did y"
+    },
+    {
+      "commandId": "typecheck",
+      "file": "",
+      "case": "",
+      "kind": "command_error",
+      "messageNorm": "Scope: 7 of 8 workspace projects packages/core typecheck$ tsc --noEmit packages/image-core typecheck$ tsc --noEmit packages/music-video-domain typecheck$ tsc --noEmit packages/ui typecheck$ tsc --noEmit packages/image-core typecheck: sh: tsc: command not found packages/core typecheck: sh: tsc: command not found packages/music-video-domain typecheck: sh: tsc: command not found /Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge/packages/core: ERR_PNPM_RECURSIVE_RUN_FIRS"
+    },
+    {
+      "commandId": "build",
+      "file": "",
+      "case": "",
+      "kind": "command_error",
+      "messageNorm": "npm warn Unknown env config \"recursive\". This will stop working in the next major version of npm. See `npm help npmrc` for supported config options. sh: asc: command not found npm error Lifecycle script `build:wasm:fft` failed with error: npm error code 127 npm error path /Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge/packages/core npm error workspace @openreel/core@0.1.0 npm error location /Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260"
+    }
+  ]
+}

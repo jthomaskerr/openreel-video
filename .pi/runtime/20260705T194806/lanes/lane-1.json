@@ -1,0 +1,31 @@
+{
+  "batchId": "20260705T194806",
+  "laneNumber": 1,
+  "laneId": "lane-1",
+  "repoId": "default",
+  "taskId": "DOC-001",
+  "segmentId": "DOC-001::default",
+  "status": "complete",
+  "worker": {
+    "agentId": "orch-joseph-lane-1-worker",
+    "status": "exited",
+    "elapsedMs": 268357,
+    "toolCalls": 40,
+    "contextPct": 6.839179992675781,
+    "costUsd": 0.035467848,
+    "lastTool": "edit: /Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/lane-1/docs/tasks/DOC-001-spec-gap-analysis/STATUS.md",
+    "inputTokens": 263382,
+    "outputTokens": 12487,
+    "cacheReadTokens": 360448,
+    "cacheWriteTokens": 0
+  },
+  "reviewer": null,
+  "progress": {
+    "currentStep": "Step 5: Delivery",
+    "checked": 31,
+    "total": 49,
+    "iteration": 2,
+    "reviews": 0
+  },
+  "updatedAt": 1783245532164
+}

@@ -1,0 +1,21 @@
+{
+  "batchId": "20260705T194806",
+  "mergeNumber": 1,
+  "sessionName": "orch-joseph-merge-1",
+  "waveIndex": 1,
+  "status": "failed",
+  "agent": {
+    "agentId": "orch-joseph-merge-1",
+    "status": "crashed",
+    "elapsedMs": 183488,
+    "toolCalls": 36,
+    "contextPct": 9.790000000000001,
+    "costUsd": 0.14604114999999995,
+    "lastTool": "write: /Volumes/Joseph/Projects1/ai-agents/openreel-video/.pi/merge-result-w1-lane1-joseph-20260705T194806.json",
+    "inputTokens": 6420,
+    "outputTokens": 5737,
+    "cacheReadTokens": 385524,
+    "cacheWriteTokens": 57907
+  },
+  "updatedAt": 1783245719796
+}

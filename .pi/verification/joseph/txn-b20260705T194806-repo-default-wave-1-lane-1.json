@@ -1,0 +1,16 @@
+{
+  "opId": "joseph",
+  "batchId": "20260705T194806",
+  "waveIndex": 1,
+  "laneNumber": 1,
+  "repoId": null,
+  "baseHEAD": "77aa488ca1781e2e98fba919c1ad724b09c5fea5",
+  "laneHEAD": "2ebca887e595eb17bcf74bf0138e59338d16de6c",
+  "mergedHEAD": "46c2a698a3c7432d907a38d15b9e42d816afcd4b",
+  "status": "committed",
+  "rollbackAttempted": false,
+  "rollbackResult": null,
+  "recoveryCommands": [],
+  "startedAt": "2026-07-05T09:58:56.272Z",
+  "completedAt": "2026-07-05T10:01:56.053Z"
+}

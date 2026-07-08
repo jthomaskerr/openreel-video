@@ -1,0 +1,162 @@
+{
+  "configVersion": 1,
+  "taskRunner": {
+    "project": {
+      "name": "OpenReel Video",
+      "description": "Professional, fully browser-based video/audio/photo editor (React, TypeScript, WebCodecs, WebGPU). pnpm monorepo: apps/{web,orchestrator,image}, packages/{core,image-core,music-video-domain,ui}."
+    },
+    "paths": {
+      "tasks": "tasks",
+      "architecture": "docs/spec"
+    },
+    "testing": {
+      "commands": {
+        "test": "pnpm -r test:run",
+        "lint": "pnpm -r lint",
+        "typecheck": "pnpm -r typecheck",
+        "build": "pnpm build"
+      }
+    },
+    "standards": {
+      "docs": [
+        "CONTRIBUTING.md",
+        "docs/spec"
+      ],
+      "rules": [
+        "Use pnpm (not npm/yarn) for all install and script commands.",
+        "Each package/app has its own typecheck (tsc --noEmit) and lint (eslint) — run the scoped script for the package you touched, not just the root aggregate.",
+        "packages/core includes AssemblyScript WASM modules (build:wasm:*) — do not hand-edit generated .wasm output.",
+        "Client-side only architecture: no server-side processing of user media in apps/web or apps/image.",
+        "Cross-package changes must respect the dependency graph: web/image/orchestrator depend on core, image-core, music-video-domain, ui — not the reverse."
+      ]
+    },
+    "worker": {
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "tools": "read,write,edit,bash,grep,find,ls",
+      "thinking": ""
+    },
+    "reviewer": {
+      "model": "openrouter/deepseek/deepseek-v4-flash",
+      "tools": "read,bash,grep,find,ls",
+      "thinking": "high"
+    },
+    "context": {
+      "workerContextWindow": 0,
+      "warnPercent": 85,
+      "killPercent": 95,
+      "maxWorkerIterations": 20,
+      "maxReviewCycles": 2,
+      "noProgressLimit": 3
+    },
+    "taskAreas": {
+      "web": {
+        "path": "apps/web/tasks",
+        "prefix": "WEB",
+        "context": "apps/web/tasks/CONTEXT.md"
+      },
+      "orchestrator": {
+        "path": "apps/orchestrator/tasks",
+        "prefix": "ORC",
+        "context": "apps/orchestrator/tasks/CONTEXT.md"
+      },
+      "image": {
+        "path": "apps/image/tasks",
+        "prefix": "IMG",
+        "context": "apps/image/tasks/CONTEXT.md"
+      },
+      "core": {
+        "path": "packages/core/tasks",
+        "prefix": "COR",
+        "context": "packages/core/tasks/CONTEXT.md"
+      },
+      "image-core": {
+        "path": "packages/image-core/tasks",
+        "prefix": "ICR",
+        "context": "packages/image-core/tasks/CONTEXT.md"
+      },
+      "music-video-domain": {
+        "path": "packages/music-video-domain/tasks",
+        "prefix": "MVD",
+        "context": "packages/music-video-domain/tasks/CONTEXT.md"
+      },
+      "ui": {
+        "path": "packages/ui/tasks",
+        "prefix": "UI",
+        "context": "packages/ui/tasks/CONTEXT.md"
+      },
+      "docs": {
+        "path": "docs/tasks",
+        "prefix": "DOC",
+        "context": "docs/tasks/CONTEXT.md"
+      }
+    },
+    "neverLoad": [],
+    "protectedDocs": [],
+    "qualityGate": {
+      "enabled": false,
+      "reviewModel": "",
+      "maxReviewCycles": 2,
+      "maxFixCycles": 1,
+      "passThreshold": "no_critical"
+    },
+    "modelFallback": "inherit"
+  },
+  "orchestrator": {
+    "orchestrator": {
+      "maxLanes": 3,
+      "worktreeLocation": "subdirectory",
+      "worktreePrefix": "orchid-wt",
+      "batchIdFormat": "timestamp",
+      "spawnMode": "subprocess",
+      "sessionPrefix": "orch",
+      "operatorId": "",
+      "integration": "manual"
+    },
+    "dependencies": {
+      "source": "prompt",
+      "cache": true
+    },
+    "assignment": {
+      "strategy": "affinity-first",
+      "sizeWeights": {
+        "S": 1,
+        "M": 2,
+        "L": 4
+      }
+    },
+    "preWarm": {
+      "autoDetect": false,
+      "always": []
+    },
+    "merge": {
+      "model": "claude-code/claude-haiku-4-5",
+      "tools": "read,write,edit,bash,grep,find,ls",
+      "thinking": "off",
+      "verify": [
+        "typecheck",
+        "lint"
+      ],
+      "order": "fewest-files-first",
+      "timeoutMinutes": 90
+    },
+    "failure": {
+      "onTaskFailure": "skip-dependents",
+      "onMergeFailure": "pause",
+      "stallTimeout": 60,
+      "maxWorkerMinutes": 120,
+      "abortGracePeriod": 60
+    },
+    "monitoring": {
+      "pollInterval": 5
+    },
+    "verification": {
+      "enabled": true,
+      "mode": "permissive",
+      "flakyReruns": 1
+    },
+    "supervisor": {
+      "model": "",
+      "autonomy": "supervised"
+    }
+  }
+}

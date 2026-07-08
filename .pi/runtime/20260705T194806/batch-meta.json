@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "batchId": "20260705T194806",
+  "wavePlan": [
+    [
+      "DOC-001"
+    ]
+  ],
+  "baseBranch": "feature/copilot-chat-tool-layer",
+  "orchBranch": "orch/joseph-20260705T194806",
+  "mode": "repo",
+  "startedAt": 1783244886904,
+  "totalWaves": 1
+}

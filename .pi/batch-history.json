@@ -1,0 +1,57 @@
+[
+  {
+    "batchId": "20260705T194806",
+    "status": "completed",
+    "startedAt": 1783244886904,
+    "endedAt": 1783245720342,
+    "durationMs": 833438,
+    "totalWaves": 1,
+    "totalTasks": 1,
+    "succeededTasks": 1,
+    "failedTasks": 0,
+    "skippedTasks": 0,
+    "blockedTasks": 0,
+    "tokens": {
+      "input": 263382,
+      "output": 12487,
+      "cacheRead": 360448,
+      "cacheWrite": 0,
+      "costUsd": 0.035467848
+    },
+    "tasks": [
+      {
+        "taskId": "DOC-001",
+        "taskName": "DOC-001",
+        "status": "succeeded",
+        "wave": 1,
+        "lane": 1,
+        "durationMs": 636630,
+        "tokens": {
+          "input": 263382,
+          "output": 12487,
+          "cacheRead": 360448,
+          "cacheWrite": 0,
+          "costUsd": 0.035467848
+        },
+        "exitReason": ".DONE file created by lane-runner"
+      }
+    ],
+    "waves": [
+      {
+        "wave": 1,
+        "tasks": [
+          "DOC-001"
+        ],
+        "mergeStatus": "succeeded",
+        "durationMs": 636630,
+        "tokens": {
+          "input": 263382,
+          "output": 12487,
+          "cacheRead": 360448,
+          "cacheWrite": 0,
+          "costUsd": 0.035467848
+        }
+      }
+    ]
+  }
+]

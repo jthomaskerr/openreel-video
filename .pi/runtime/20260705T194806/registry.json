@@ -1,0 +1,40 @@
+{
+  "batchId": "20260705T194806",
+  "updatedAt": 1783245719796,
+  "agents": {
+    "orch-joseph-lane-1-worker": {
+      "batchId": "20260705T194806",
+      "agentId": "orch-joseph-lane-1-worker",
+      "role": "worker",
+      "laneNumber": 1,
+      "taskId": "DOC-001",
+      "repoId": "default",
+      "pid": 57101,
+      "parentPid": 51829,
+      "startedAt": 1783245263789,
+      "status": "exited",
+      "cwd": "/Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/lane-1",
+      "packet": {
+        "promptPath": "/Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/lane-1/docs/tasks/DOC-001-spec-gap-analysis/PROMPT.md",
+        "statusPath": "/Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/lane-1/docs/tasks/DOC-001-spec-gap-analysis/STATUS.md",
+        "donePath": "/Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/lane-1/docs/tasks/DOC-001-spec-gap-analysis/.DONE",
+        "reviewsDir": "/Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/lane-1/docs/tasks/DOC-001-spec-gap-analysis/.reviews",
+        "taskFolder": "/Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/lane-1/docs/tasks/DOC-001-spec-gap-analysis"
+      }
+    },
+    "orch-joseph-merge-1": {
+      "batchId": "20260705T194806",
+      "agentId": "orch-joseph-merge-1",
+      "role": "merger",
+      "laneNumber": null,
+      "taskId": null,
+      "repoId": "default",
+      "pid": 60643,
+      "parentPid": 51829,
+      "startedAt": 1783245536306,
+      "status": "killed",
+      "cwd": "/Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge",
+      "packet": null
+    }
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "exitCode": 0,
+  "exitSignal": null,
+  "tokens": {
+    "input": 263382,
+    "output": 12487,
+    "cacheRead": 360448,
+    "cacheWrite": 0
+  },
+  "cost": 0.035467848,
+  "toolCalls": 40,
+  "retries": 0,
+  "compactions": 0,
+  "durationSec": 268,
+  "lastToolCall": "edit: /Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/lane-1/docs/tasks/DOC-001-spec-gap-analysis/STATUS.md",
+  "error": null,
+  "contextUsage": {
+    "tokens": 71714,
+    "contextWindow": 1048576,
+    "percent": 6.839179992675781
+  }
+}

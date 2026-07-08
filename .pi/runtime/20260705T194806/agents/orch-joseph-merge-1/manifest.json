@@ -1,0 +1,14 @@
+{
+  "batchId": "20260705T194806",
+  "agentId": "orch-joseph-merge-1",
+  "role": "merger",
+  "laneNumber": null,
+  "taskId": null,
+  "repoId": "default",
+  "pid": 60643,
+  "parentPid": 51829,
+  "startedAt": 1783245536306,
+  "status": "killed",
+  "cwd": "/Volumes/Joseph/Projects1/ai-agents/openreel-video/.worktrees/joseph-20260705T194806/merge",
+  "packet": null
+}
