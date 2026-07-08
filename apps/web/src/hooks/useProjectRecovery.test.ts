@@ -333,8 +333,7 @@ describe("useProjectRecovery hook", () => {
     });
     expect(result.current.showDialog).toBe(false);
   });
-  it("restores from backend first and hydrates media blobs before loading project", async () => {
-    const storedBlob = new Blob(["backend-audio"], { type: "audio/mpeg" });
+  it("restores from backend without IndexedDB media hydration", async () => {
     const backendProject = makeProject({
       name: "Backend Cut",
       mediaItems: [makeMediaItem()]
@@ -342,14 +341,6 @@ describe("useProjectRecovery hook", () => {
 
     mockCheckForRecovery.mockResolvedValue([]);
     mockBackendLoad.mockResolvedValue(backendProject);
-    mockLoadProjectMedia.mockResolvedValue([
-      {
-        id: "media-1",
-        projectId: backendProject.id,
-        blob: storedBlob,
-        metadata: {}
-      },
-    ]);
 
     const { result } = renderHook(() => useProjectRecovery(backendProject.id));
 
@@ -358,15 +349,15 @@ describe("useProjectRecovery hook", () => {
     });
 
     expect(mockBackendLoad).toHaveBeenCalledWith(backendProject.id);
-    expect(mockLoadProjectMedia).toHaveBeenCalledWith(backendProject.id);
+    expect(mockLoadProjectMedia).not.toHaveBeenCalled();
     expect(mockAutoSaveRecover).not.toHaveBeenCalled();
     expect(useProjectStore.getState().project.name).toBe("Backend Cut");
-    expect(useProjectStore.getState().project.mediaLibrary.items[0]?.blob).toBe(storedBlob);
+    expect(useProjectStore.getState().project.mediaLibrary.items[0]?.blob).toBeNull();
     expect(result.current.showDialog).toBe(false);
     expect(result.current.error).toBeNull();
   });
 
-  it("falls back to IDB auto-saves when backend restore is unavailable", async () => {
+  it("does not fall back to IDB auto-saves when backend restore is unavailable", async () => {
     mockCheckForRecovery.mockResolvedValue([makeSave()]);
     mockBackendLoad.mockResolvedValue(null);
     mockAutoSaveRecover.mockResolvedValue(makeProject({ name: "Fallback Cut" }));
@@ -378,10 +369,11 @@ describe("useProjectRecovery hook", () => {
     });
 
     expect(mockBackendLoad).toHaveBeenCalledWith("test-project-id");
-    expect(mockAutoSaveRecover).toHaveBeenCalledWith("save-1");
-    expect(useProjectStore.getState().project.name).toBe("Fallback Cut");
+    expect(mockAutoSaveRecover).not.toHaveBeenCalled();
+    expect(mockLoadProjectMedia).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().project.name).not.toBe("Fallback Cut");
     expect(result.current.showDialog).toBe(false);
-    expect(result.current.error).toBeNull();
+    expect(result.current.error).toMatch(/project server/i);
   });
 
   it("hides dialog and clears error after successful recovery", async () => {

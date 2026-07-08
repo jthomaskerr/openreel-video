@@ -1,5 +1,5 @@
 import { Router } from "express";
-import type { Request, Response } from "express";
+import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
 import { mkdirSync } from "node:fs";
 import { join, extname } from "node:path";
@@ -155,7 +155,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         res.status(404).json({ error: "Project not found" });
         return;
       }
-      gitStore.commitAsync(req.params.id, `rename → "${project.name}"`);
+      gitStore.commitAsync(project.id, `rename → "${project.name}"`);
       res.json(project);
     } catch (err) {
       res.status(500).json({ error: "Failed to rename project", detail: String(err) });
@@ -179,21 +179,33 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
   // ═══ Media ════════════════════════════════════════════════════════════════
 
   // POST /api/projects/:id/media/:mediaId — upload one media file
-  router.post("/:id/media/:mediaId", upload.single("file"), async (req: Request, res: Response) => {
-    try {
-      if (!req.file) {
-        res.status(400).json({ error: "No file uploaded" });
-        return;
+  router.post(
+    "/:id/media/:mediaId",
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        await store.ensureProjectWorktree(req.params.id);
+        next();
+      } catch (err) {
+        res.status(500).json({ error: "Failed to prepare project media directory", detail: String(err) });
       }
-      gitStore.commitAsync(
-        req.params.id,
-        `media: add ${req.file.originalname} (${req.params.mediaId})`,
-      );
-      res.json({ filename: req.file.filename });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to upload media", detail: String(err) });
-    }
-  });
+    },
+    upload.single("file"),
+    async (req: Request, res: Response) => {
+      try {
+        if (!req.file) {
+          res.status(400).json({ error: "No file uploaded" });
+          return;
+        }
+        gitStore.commitAsync(
+          req.params.id,
+          `media: add ${req.file.originalname} (${req.params.mediaId})`,
+        );
+        res.json({ filename: req.file.filename });
+      } catch (err) {
+        res.status(500).json({ error: "Failed to upload media", detail: String(err) });
+      }
+    },
+  );
 
   // GET /api/projects/:id/media/:filename — serve a media file
   router.get("/:id/media/:filename", (req: Request, res: Response) => {

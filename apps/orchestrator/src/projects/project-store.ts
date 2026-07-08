@@ -71,8 +71,12 @@ export class ProjectStore {
     return join(this.projectDir(id), "media");
   }
 
-  private async ensureProjectDir(id: string): Promise<void> {
+  async ensureProjectWorktree(id: string): Promise<void> {
     await this.gitStore.ensureWorktree(id);
+  }
+
+  private async ensureProjectDir(id: string): Promise<void> {
+    await this.ensureProjectWorktree(id);
   }
 
   // ── CRUD ─────────────────────────────────────────────────────────────────
@@ -180,47 +184,60 @@ export class ProjectStore {
    */
   async migrateUuidDirs(): Promise<void> {
     await this.gitStore.ensureSharedRepo();
-    const entries = await readdir(this.gitStore["repoDir"], { withFileTypes: true });
+    const repoDir = this.gitStore["repoDir"];
     const isUuid = uuidPattern();
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const oldName = entry.name;
-      if (!isUuid.test(oldName)) continue;
 
-      const jsonPath = join(this.gitStore["repoDir"], oldName, "project.json");
+    const migrateCandidate = async (parentDir: string, oldName: string): Promise<void> => {
+      if (!isUuid.test(oldName)) return;
+
+      const oldDir = join(parentDir, oldName);
+      const jsonPath = join(oldDir, "project.json");
       let raw: string;
       try {
         raw = await readFile(jsonPath, "utf-8");
       } catch {
-        continue;
+        return;
       }
 
       let project: Project;
       try {
         project = JSON.parse(raw) as Project;
       } catch {
-        continue;
+        return;
       }
 
       const newSlug = toSlug(project.name);
-      const newDir = join(this.gitStore["repoDir"], newSlug);
-      if (existsSync(newDir)) continue; // already migrated (or slug clash)
+      const newDir = join(repoDir, newSlug);
+      if (existsSync(newDir)) return; // already migrated (or slug clash)
 
-      // Update project id to the slug
+      // Update project id to the slug and promote nested legacy dirs into the
+      // root worktree layout used by the current backend.
       project = { ...project, id: newSlug, modifiedAt: Date.now() };
+      await rename(oldDir, newDir);
 
-      // Rename directory
-      await rename(join(this.gitStore["repoDir"], oldName), newDir);
-
-      // Rename the git branch
+      // Rename the git branch.
       try {
         await this.gitStore["git"](["branch", "-m", `project/${oldName}`, `project/${newSlug}`], newDir);
       } catch {
         // branch rename is best-effort; old name may not exist
       }
 
-      // Write updated project.json with new id
-      await writeFile(jsonPath, JSON.stringify(project, null, 2), "utf-8");
+      // Write updated project.json with new id in the migrated directory.
+      await writeFile(join(newDir, "project.json"), JSON.stringify(project, null, 2), "utf-8");
+    };
+
+    const entries = await readdir(repoDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      await migrateCandidate(repoDir, entry.name);
+    }
+
+    const nestedProjectsDir = join(repoDir, "projects");
+    if (!existsSync(nestedProjectsDir)) return;
+    const nestedEntries = await readdir(nestedProjectsDir, { withFileTypes: true });
+    for (const entry of nestedEntries) {
+      if (!entry.isDirectory()) continue;
+      await migrateCandidate(nestedProjectsDir, entry.name);
     }
   }
 

@@ -9,6 +9,9 @@ import { mkdirSync } from "node:fs";
 export function createApp(): Express {
   const gitStore = new GitStore(config.projectsRepo);
   const projectStore = new ProjectStore(gitStore);
+  void projectStore.migrateUuidDirs().catch((err) => {
+    console.error("[ProjectStore] failed to migrate legacy project directories:", err);
+  });
   const app = express();
 
   app.use(cors());

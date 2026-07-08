@@ -1,6 +1,6 @@
 # Backend Auto-Save with Git LFS Implementation Plan
 
-> Status: spec synced to the current advanced implementation. The implementation intentionally goes beyond the original flat per-project-repo plan by using a shared git repository with project worktrees/branches.
+> Status: backend autosave/git-lfs gap pass implemented and verified on 2026-07-08. The implementation intentionally goes beyond the original flat per-project-repo plan by using a shared git repository with project worktrees/branches.
 
 ## Goal
 
@@ -11,7 +11,7 @@ Every explicitly-created project is saved to the backend filesystem and versione
 - Project storage root: `MV_PROJECTS_REPO`, defaulting to `~/openreel-projects`.
 - Storage model: one shared git repository at `projectsRepo`.
 - Project model: each project has a git worktree at `<projectsRepo>/<projectSlug>/` on branch `project/<projectSlug>`.
-- Project identity: new projects use slug IDs derived from project names, not random UUIDs.
+- Project identity: backend-created projects use slug IDs derived from project names. Current web-created projects still use client UUIDs and are persisted by backend `PUT` upsert; switching the synchronous web creation flow to backend `POST` remains a follow-up.
 - Project file: `<projectsRepo>/<projectSlug>/project.json`.
 - Media files: `<projectsRepo>/<projectSlug>/media/<mediaId><ext>`.
 - Git LFS: shared `.gitattributes` tracks `media/**`.
@@ -57,7 +57,7 @@ Each `MediaItem.id` is unique to one media version. Versions of the same logical
 - `GET /api/projects` → list projects visible at `projectsRepo/*/project.json`
 - `POST /api/projects` → create project worktree and initial project
 - `GET /api/projects/:id` → load project and media filename map
-- `PUT /api/projects/:id` → upsert `project.json` and async commit
+- `PUT /api/projects/:id` → upsert `project.json` using the supplied client/backend ID and async commit
 - `PATCH /api/projects/:id` → rename project/slug/worktree
 - `DELETE /api/projects/:id` → remove worktree/project dir
 - `POST /api/projects/:id/media/:mediaId` → upload media file to `media/<mediaId><ext>` and async commit
@@ -71,6 +71,7 @@ Each `MediaItem.id` is unique to one media version. Versions of the same logical
 - Backend returns `{ project, mediaFiles }`.
 - Web populates each media item's `remoteUrl` from `mediaFiles`.
 - Web calls `loadProject(backendProject)` directly.
+- Auto-restore does **not** call `loadProjectMedia`; backend-served `remoteUrl` values are the media hydration path.
 - If backend load fails or returns non-OK, recovery does **not** consult IndexedDB; it shows a project-server error.
 
 ## Cleanup / migration notes
@@ -82,13 +83,13 @@ Current filesystem cleanup retained only the two non-trivial `Just down-1 (Maste
 
 Other empty/test project dirs were moved to quarantine under `~/openreel-projects/.deleted-projects-*`.
 
-Open migration issue: the current code's `migrateUuidDirs()` scans `projectsRepo/*` only. It does not migrate old nested `projectsRepo/projects/*` projects. If the nested copy is the source of truth, migration should promote it into the worktree layout before deleting the duplicate root copy.
+Migration update: `migrateUuidDirs()` now scans both `projectsRepo/*` and legacy nested `projectsRepo/projects/*` UUID project directories, promotes migrated projects into the root worktree layout, and writes the updated slug-id `project.json` in the migrated directory. `createApp()` starts the migration best-effort at orchestrator startup.
 
 ## Validation checklist
 
-- [ ] `git lfs version` succeeds.
-- [ ] `pnpm --filter @openreel/orchestrator typecheck` or orchestrator `tsc --noEmit` passes.
-- [ ] `pnpm --filter @openreel/web typecheck` or web `tsc --noEmit` passes.
+- [x] `git lfs version` succeeds.
+- [x] `pnpm --filter @openreel/orchestrator typecheck` or orchestrator `tsc --noEmit` passes.
+- [x] `pnpm --filter @openreel/web typecheck` or web `tsc --noEmit` passes.
 - [ ] Start orchestrator on port `4041`.
 - [ ] Start web app.
 - [ ] Create a project with a unique name; verify `<projectsRepo>/<slug>/project.json` exists.
@@ -96,7 +97,7 @@ Open migration issue: the current code's `migrateUuidDirs()` scans `projectsRepo
 - [ ] Verify `git -C <projectsRepo>/<slug> log --oneline` contains project/media commits.
 - [ ] Verify `git -C <projectsRepo>/<slug> lfs ls-files` lists media files.
 - [ ] Reload web with `autoRestoreProjectId`; verify backend restore works with media via `remoteUrl`.
-- [ ] Stop orchestrator and reload; verify the app shows the backend/project-server error instead of falling back to IDB.
+- [x] Stop orchestrator and reload; verify the app shows the backend/project-server error instead of falling back to IDB. (covered by `useProjectRecovery` test; browser verification not run because this lane changed backend/test behavior only)
 - [ ] Switch active asset version; verify only `project.json` changes and all media files remain present.
 
 ## Commit plan

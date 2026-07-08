@@ -56,17 +56,47 @@ export class GitStore {
   async ensureSharedRepo(): Promise<void> {
     await mkdir(this.repoDir, { recursive: true });
 
-    if (existsSync(join(this.repoDir, ".git"))) return;
+    const alreadyRepo = existsSync(join(this.repoDir, ".git"));
+    if (!alreadyRepo) {
+      await this.git(["init"], this.repoDir);
+    }
 
-    await this.git(["init"], this.repoDir);
     await this.git(["lfs", "install"], this.repoDir);
 
-    await writeFile(join(this.repoDir, ".gitattributes"), GITATTRIBUTES, "utf-8");
+    const attributesPath = join(this.repoDir, ".gitattributes");
+    let attributes = "";
+    if (existsSync(attributesPath)) {
+      try {
+        attributes = await readFile(attributesPath, "utf-8");
+      } catch {
+        attributes = "";
+      }
+    }
+
+    const lfsRule = "media/** filter=lfs diff=lfs merge=lfs -text";
+    if (attributes.includes(lfsRule)) return;
+
+    const repairedAttributes = attributes.trim().length > 0
+      ? `${attributes.trimEnd()}\n${GITATTRIBUTES}`
+      : GITATTRIBUTES;
+    await writeFile(attributesPath, repairedAttributes, "utf-8");
     await this.git(["add", ".gitattributes"], this.repoDir);
-    await this.git(
-      ["commit", "-m", "init: openreel shared project repository with git-lfs"],
-      this.repoDir,
-    );
+    try {
+      await this.git(
+        [
+          "commit",
+          "-m",
+          alreadyRepo
+            ? "chore: repair openreel git-lfs attributes"
+            : "init: openreel shared project repository with git-lfs",
+        ],
+        this.repoDir,
+      );
+    } catch (err: unknown) {
+      const execErr = err as ExecException & { stdout?: string; stderr?: string };
+      const output = `${execErr.message ?? ""} ${execErr.stdout ?? ""} ${execErr.stderr ?? ""}`;
+      if (!output.includes("nothing to commit")) throw err;
+    }
   }
 
   // ── Worktrees ────────────────────────────────────────────────────────────
