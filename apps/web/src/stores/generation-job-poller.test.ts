@@ -12,7 +12,6 @@ function makeMedia(id: string): MediaItem {
     blob: new Blob([id], { type: "image/png" }),
     metadata: { duration: 0, width: 16, height: 16, frameRate: 0, codec: "png", sampleRate: 0, channels: 0, fileSize: 1 },
     thumbnailUrl: null,
-    waveformData: null,
     assetGroupId: id,
     isCurrent: true,
   };

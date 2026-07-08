@@ -33,7 +33,6 @@ const makeProject = (): Project => ({
           fileSize: 100,
         },
         thumbnailUrl: null,
-        waveformData: null,
       },
       {
         id: "media-2",
@@ -52,7 +51,6 @@ const makeProject = (): Project => ({
           fileSize: 50,
         },
         thumbnailUrl: null,
-        waveformData: null,
       },
     ],
   },

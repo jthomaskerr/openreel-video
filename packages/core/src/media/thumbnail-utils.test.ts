@@ -24,7 +24,6 @@ function makeItem(overrides: Partial<MediaItem> = {}): MediaItem {
     blob: null,
     metadata: BASE_METADATA,
     thumbnailUrl: null,
-    waveformData: null,
     ...overrides,
   };
 }
@@ -38,7 +37,6 @@ function makeImageItem(id: string, thumbnailUrl: string | null = null): MediaIte
     blob: null,
     metadata: { ...BASE_METADATA, duration: 0 },
     thumbnailUrl,
-    waveformData: null,
   };
 }
 

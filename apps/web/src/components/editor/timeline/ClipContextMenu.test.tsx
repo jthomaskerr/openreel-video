@@ -37,7 +37,6 @@ function missingMedia(): MediaItem {
     blob: null,
     metadata: { duration: 5, width: 0, height: 0, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 0 },
     thumbnailUrl: null,
-    waveformData: null
   };
 }
 

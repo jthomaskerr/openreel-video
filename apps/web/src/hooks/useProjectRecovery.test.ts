@@ -123,7 +123,6 @@ function makeMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
       fileSize: 1000
     },
     thumbnailUrl: null,
-    waveformData: null,
 
     ...overrides
   };

@@ -80,8 +80,7 @@ function media(
       audioTrackCount: overrides.audioTrackCount,
       fileSize: 1,
     },
-    thumbnailUrl: null,
-    waveformData: null,
+    thumbnailUrl: null
   };
 }
 

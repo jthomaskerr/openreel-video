@@ -44,7 +44,6 @@ function makeAudioItem(overrides: Partial<MediaItem> = {}): MediaItem {
       has_lyrics: true,
     } as MediaItem["metadata"],
     thumbnailUrl: null,
-    waveformData: new Float32Array([0.1, 0.4, 0.8, 0.2]),
     ...overrides,
   };
 }

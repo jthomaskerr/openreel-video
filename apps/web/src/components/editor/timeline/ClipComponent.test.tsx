@@ -32,8 +32,7 @@ function mediaItem(id: string): MediaItem {
       channels: 0,
       fileSize: 100,
     },
-    thumbnailUrl: "data:image/png;base64,thumb",
-    waveformData: null,
+    thumbnailUrl: "data:image/png;base64,thumb"
   };
 }
 

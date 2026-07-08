@@ -21,7 +21,6 @@ function makeVideoItem(overrides: Partial<MediaItem> = {}): MediaItem {
       fileSize: 1024
     },
     thumbnailUrl: null,
-    waveformData: null,
     ...overrides
   };
 }

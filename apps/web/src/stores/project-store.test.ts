@@ -292,9 +292,7 @@ describe("ProjectStore", () => {
           channels: 2,
           fileSize: 1000000
         },
-        thumbnailUrl: null,
-        waveformData: null
-        };
+        thumbnailUrl: null};
 
       const projectWithMedia: Project = {
         id: "project-with-media",
@@ -356,9 +354,7 @@ describe("ProjectStore", () => {
           channels: 0,
           fileSize: blob.size
         },
-        thumbnailUrl: "data:image/png;base64,abc",
-        waveformData: null
-        };
+        thumbnailUrl: "data:image/png;base64,abc"};
 
       const result = await useProjectStore.getState().addGeneratedMedia(item, blob);
 
@@ -397,7 +393,6 @@ describe("ProjectStore", () => {
           fileSize: originalBlob.size
         },
         thumbnailUrl: null,
-        waveformData: null,
         isCurrent: true
         };
       await useProjectStore.getState().addGeneratedMedia(original, originalBlob);
@@ -461,7 +456,6 @@ describe("ProjectStore", () => {
           fileSize: originalBlob.size
         },
         thumbnailUrl: null,
-        waveformData: null,
         title: "Hero shot",
         group: "B-roll",
         isCurrent: true
@@ -523,7 +517,6 @@ describe("ProjectStore", () => {
           fileSize: blob.size
         },
         thumbnailUrl: null,
-        waveformData: null,
         assetGroupId,
         isCurrent
         });
@@ -741,9 +734,7 @@ describe("ProjectStore", () => {
                 channels: 2,
                 fileSize: 500000
         },
-              thumbnailUrl: null,
-              waveformData: null
-        },
+              thumbnailUrl: null},
           ]
         },
         timeline: {
@@ -986,9 +977,7 @@ describe("ProjectStore", () => {
           channels: 2,
           fileSize: 1000000
         },
-        thumbnailUrl: null,
-        waveformData: null
-        };
+        thumbnailUrl: null};
 
       const clip: Clip = {
         id: "video-clip-1",
@@ -1560,9 +1549,7 @@ describe("ProjectStore", () => {
           fileSize: 1000000,
           audioTrackCount
         },
-        thumbnailUrl: null,
-        waveformData: null
-        };
+        thumbnailUrl: null};
 
       const videoClip: Clip = {
         id: "video-clip-1",

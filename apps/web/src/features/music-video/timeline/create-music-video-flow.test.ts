@@ -63,7 +63,6 @@ function makeStore(initialProject = makeProject()) {
           fileSize: file.size,
         },
         thumbnailUrl: null,
-        waveformData: null,
         sourceFile: { name: file.name, size: file.size, lastModified: 0 },
       };
       project = {
@@ -314,7 +313,6 @@ describe("createMusicVideoFlow", () => {
           fileSize: file.size,
         },
         thumbnailUrl: null,
-        waveformData: null,
         sourceFile: { name: file.name, size: file.size, lastModified: 0 },
       };
       // Route through addGeneratedMedia — the only way to write into the shared

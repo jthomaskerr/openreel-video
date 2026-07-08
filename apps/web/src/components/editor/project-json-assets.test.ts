@@ -37,7 +37,6 @@ function projectWithMedia(sourceFile: {
             fileSize: sourceFile.size
           },
           thumbnailUrl: null,
-          waveformData: null,
 
           sourceFile
         },

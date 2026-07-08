@@ -81,7 +81,6 @@ describe("MediaBridge - Import Validation", () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toBe("MediaBridge not initialized");
-    expect(result.hasWaveform).toBe(false);
   });
 
   it("should pass file to import service when initialized", async () => {
@@ -101,8 +100,7 @@ describe("MediaBridge - Import Validation", () => {
           channels: 2,
           fileSize: 1000000,
         },
-        thumbnails: [],
-        waveformData: null,
+        thumbnails: []
       },
       warnings: [],
     });
@@ -156,8 +154,7 @@ describe("MediaBridge - Import Validation", () => {
           channels: 2,
           fileSize: 1000000,
         },
-        thumbnails: [],
-        waveformData: null,
+        thumbnails: []
       },
       warnings: ["Variable frame rate detected", "Audio track missing"],
     });
@@ -189,8 +186,7 @@ describe("MediaBridge - Import Validation", () => {
           channels: 2,
           fileSize: 500000,
         },
-        thumbnails: [],
-        waveformData: null,
+        thumbnails: []
       },
     });
 
@@ -233,8 +229,7 @@ describe("MediaBridge - Metadata Extraction", () => {
           channels: 2,
           fileSize: 50000000,
         },
-        thumbnails: [],
-        waveformData: null,
+        thumbnails: []
       },
     });
 
@@ -268,8 +263,7 @@ describe("MediaBridge - Metadata Extraction", () => {
           channels: 2,
           fileSize: 100000000,
         },
-        thumbnails: [],
-        waveformData: new Float32Array(100),
+        thumbnails: []
       },
     });
 
@@ -346,8 +340,7 @@ describe("MediaBridge - Quick Mode Import", () => {
           channels: 2,
           fileSize: 100000000,
         },
-        thumbnails: [],
-        waveformData: null,
+        thumbnails: []
       },
     });
 
@@ -384,8 +377,7 @@ describe("MediaBridge - Quick Mode Import", () => {
           channels: 2,
           fileSize: 1000000,
         },
-        thumbnails: [{ timestamp: 0, dataUrl: "data:image/jpeg;base64,abc" }],
-        waveformData: null,
+        thumbnails: [{ timestamp: 0, dataUrl: "data:image/jpeg;base64,abc" }]
       },
     });
 
@@ -422,8 +414,7 @@ describe("MediaBridge - Quick Mode Import", () => {
           channels: 2,
           fileSize: 500000000,
         },
-        thumbnails: [],
-        waveformData: null,
+        thumbnails: []
       },
     });
 
@@ -434,6 +425,5 @@ describe("MediaBridge - Quick Mode Import", () => {
 
     expect(result.success).toBe(true);
     expect(result.media?.thumbnails).toEqual([]);
-    expect(result.hasWaveform).toBe(false);
   });
 });

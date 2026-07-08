@@ -23,7 +23,6 @@ function makeMedia(id: string, type: "image" | "video", assetGroupId = "group-1"
     blob: new Blob([id]),
     metadata: { duration: 0, width: 16, height: 16, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 1 },
     thumbnailUrl: null,
-    waveformData: null,
     assetGroupId,
     isCurrent: true,
   };

@@ -147,7 +147,6 @@ function addMediaItem(
             fileSize: 1024,
           },
           thumbnailUrl: null,
-          waveformData: null,
         },
       ],
     },

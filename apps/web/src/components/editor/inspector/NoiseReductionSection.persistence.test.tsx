@@ -126,8 +126,7 @@ const createProjectForAnalysis = (): Project => {
             channels: 2,
             fileSize: 5,
           },
-          thumbnailUrl: null,
-          waveformData: null,
+          thumbnailUrl: null
         },
       ],
     },

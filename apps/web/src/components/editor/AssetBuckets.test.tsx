@@ -25,7 +25,6 @@ function media(overrides: Partial<MediaItem> & Pick<MediaItem, "id" | "name" | "
       fileSize: 0
         },
     thumbnailUrl: null,
-    waveformData: null,
     ...overrides
         };
 }
