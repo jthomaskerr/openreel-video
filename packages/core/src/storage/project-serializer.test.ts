@@ -60,6 +60,7 @@ function projectWithMissingClip(): Project {
           clips: [
             {
               id: "clip-missing",
+              type: "video",
               mediaId: "missing-video-id",
               trackId: "track-video",
               startTime: 0,

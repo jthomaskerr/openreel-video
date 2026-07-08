@@ -50,6 +50,10 @@ export default [
       "no-case-declarations": "warn",
       "react-hooks/rules-of-hooks": "warn",
       "react-hooks/exhaustive-deps": "warn",
+      // TypeScript's own compiler already validates global type references
+      // (e.g. lib.dom.d.ts types like HeadersInit); no-undef produces false
+      // positives for these since ESLint doesn't understand TS type space.
+      "no-undef": "off",
     },
     linterOptions: {
       reportUnusedDisableDirectives: false,

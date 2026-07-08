@@ -56,9 +56,11 @@ function readTextFile(file: File): Promise<string> {
     const reader = new FileReader();
     reader.onload = (event) => {
       const content = event.target?.result;
-      typeof content === "string"
-        ? resolve(content)
-        : reject(new Error("Selected project file could not be read as text"));
+      if (typeof content === "string") {
+        resolve(content);
+      } else {
+        reject(new Error("Selected project file could not be read as text"));
+      }
     };
     reader.onerror = () => reject(reader.error ?? new Error("Failed to read project file"));
     reader.readAsText(file);
