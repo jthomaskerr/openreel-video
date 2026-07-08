@@ -422,17 +422,35 @@ export class VideoEngine {
       video.playsInline = true;
       video.preload = "auto";
 
-      await new Promise<void>((resolve, reject) => {
-        video.onloadedmetadata = () => resolve();
-        video.onerror = () => reject(new Error("Video load failed"));
-        setTimeout(() => reject(new Error("Video load timeout")), 10000);
-      });
+      try {
+        await new Promise<void>((resolve, reject) => {
+          video.onloadedmetadata = () => resolve();
+          video.onerror = () => reject(new Error("Video load failed"));
+          setTimeout(() => reject(new Error("Video load timeout")), 10000);
+        });
+      } catch {
+        URL.revokeObjectURL(url);
+        return null;
+      }
+
+      // Guard against non-video blobs (e.g. images placed on a video track)
+      // that may trigger onloadedmetadata without valid video dimensions.
+      if (video.videoWidth === 0 || video.videoHeight === 0) {
+        URL.revokeObjectURL(url);
+        return null;
+      }
 
       cached = { video, url };
       this.videoElementCache.set(mediaId, cached);
     }
 
     const { video } = cached;
+
+    // Double-check dimensions on cached entries too, since the blob may
+    // have been stale or the element may have entered an error state.
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      return null;
+    }
 
     video.currentTime = time;
 
@@ -456,6 +474,11 @@ export class VideoEngine {
         }
       }, 3000);
     });
+
+    // If the seek also left us with no valid video data, bail.
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+      return null;
+    }
 
     if (
       !this.decodeCanvas ||
