@@ -1,6 +1,7 @@
-import { readFile, writeFile, readdir, mkdir, rm, rename } from "node:fs/promises";
+import { readFile, writeFile, readdir, rm, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, extname, basename } from "node:path";
+import crypto from "node:crypto";
 import type { Project, ProjectSettings } from "@openreel/core";
 import type { GitStore } from "./git-store";
 
@@ -38,6 +39,21 @@ function defaultProject(overrides: {
   };
 }
 
+/** Slugify a project name for use as a directory/URL token. */
+function toSlug(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+/, "")
+    .replace(/-+$/, "")
+    .replace(/-{2,}/g, "-")
+    || "untitled";
+}
+
+function uuidPattern(): RegExp {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+}
+
 export class ProjectStore {
   constructor(private readonly gitStore: GitStore) {}
 
@@ -63,14 +79,14 @@ export class ProjectStore {
 
   async listProjects(): Promise<ProjectSummary[]> {
     await this.gitStore.ensureSharedRepo();
-    const projectsParent = join(this.projectDir("_"), "..");
-    await mkdir(projectsParent, { recursive: true });
-    const entries = await readdir(projectsParent, { withFileTypes: true });
-    const dirs = entries.filter((entry) => entry.isDirectory());
+    const entries = await readdir(this.gitStore["repoDir"], { withFileTypes: true });
+    const dirs = entries.filter(
+      (entry) => entry.isDirectory() && entry.name !== ".git",
+    );
     const summaries = (
       await Promise.all(
         dirs.map(async (dir) => {
-          const jsonPath = this.projectJsonPath(dir.name);
+          const jsonPath = join(this.gitStore["repoDir"], dir.name, "project.json");
           try {
             const raw = await readFile(jsonPath, "utf-8");
             const project = JSON.parse(raw) as Project;
@@ -104,22 +120,41 @@ export class ProjectStore {
     await this.ensureProjectDir(project.id);
     const updated: Project = { ...project, modifiedAt: Date.now() };
     const finalPath = this.projectJsonPath(project.id);
-    const tmpPath = `${finalPath}.tmp`;
+    const tmpPath = `${finalPath}.${crypto.randomUUID()}.tmp`;
     await writeFile(tmpPath, JSON.stringify(updated, null, 2), "utf-8");
     await rename(tmpPath, finalPath);
     return updated;
   }
 
   async createProject(name: string, settings?: Partial<ProjectSettings>): Promise<Project> {
-    const id = crypto.randomUUID();
-    const project = defaultProject({ id, name, settings });
+    const slug = toSlug(name);
+    const project = defaultProject({ id: slug, name, settings });
     return this.saveProject(project);
   }
 
   async renameProject(id: string, name: string): Promise<Project | null> {
     const project = await this.loadProject(id);
     if (!project) return null;
-    const renamed: Project = { ...project, name };
+
+    const newSlug = toSlug(name);
+    const renamed: Project = { ...project, name, id: newSlug, modifiedAt: Date.now() };
+
+    // Move worktree if slug changed
+    if (newSlug !== id) {
+      const oldDir = this.projectDir(id);
+      const oldExists = existsSync(oldDir);
+
+      // First save under new slug (creates the new worktree)
+      await this.saveProject(renamed);
+
+      if (oldExists) {
+        await this.gitStore.deleteWorktree(id);
+        try { await rm(oldDir, { recursive: true, force: true }); } catch { /* gone */ }
+      }
+
+      return renamed;
+    }
+
     return this.saveProject(renamed);
   }
 
@@ -128,7 +163,6 @@ export class ProjectStore {
     const existed = existsSync(dir);
     if (existed) {
       await this.gitStore.deleteWorktree(id);
-      // deleteWorktree should have cleaned up, but rm as safety net
       try {
         await rm(dir, { recursive: true, force: true });
       } catch {
@@ -136,6 +170,58 @@ export class ProjectStore {
       }
     }
     return existed;
+  }
+
+  // ── Migration ───────────────────────────────────────────────────────────
+
+  /**
+   * One-time migration: rename any UUID-named project dirs to slug names.
+   * Safe to call on every startup — skips already-migrated dirs.
+   */
+  async migrateUuidDirs(): Promise<void> {
+    await this.gitStore.ensureSharedRepo();
+    const entries = await readdir(this.gitStore["repoDir"], { withFileTypes: true });
+    const isUuid = uuidPattern();
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const oldName = entry.name;
+      if (!isUuid.test(oldName)) continue;
+
+      const jsonPath = join(this.gitStore["repoDir"], oldName, "project.json");
+      let raw: string;
+      try {
+        raw = await readFile(jsonPath, "utf-8");
+      } catch {
+        continue;
+      }
+
+      let project: Project;
+      try {
+        project = JSON.parse(raw) as Project;
+      } catch {
+        continue;
+      }
+
+      const newSlug = toSlug(project.name);
+      const newDir = join(this.gitStore["repoDir"], newSlug);
+      if (existsSync(newDir)) continue; // already migrated (or slug clash)
+
+      // Update project id to the slug
+      project = { ...project, id: newSlug, modifiedAt: Date.now() };
+
+      // Rename directory
+      await rename(join(this.gitStore["repoDir"], oldName), newDir);
+
+      // Rename the git branch
+      try {
+        await this.gitStore["git"](["branch", "-m", `project/${oldName}`, `project/${newSlug}`], newDir);
+      } catch {
+        // branch rename is best-effort; old name may not exist
+      }
+
+      // Write updated project.json with new id
+      await writeFile(jsonPath, JSON.stringify(project, null, 2), "utf-8");
+    }
   }
 
   // ── Media files ──────────────────────────────────────────────────────────

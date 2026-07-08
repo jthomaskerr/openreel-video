@@ -22,9 +22,9 @@ export class GitStore {
 
   constructor(private readonly repoDir: string) {}
 
-  /** Filesystem path to a project's git worktree. */
+  /** Filesystem path to a project's git worktree (slug-based directory directly under repoDir). */
   worktreePath(projectId: string): string {
-    return join(this.repoDir, "projects", projectId);
+    return join(this.repoDir, projectId);
   }
 
   // ── Locking ──────────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ export class GitStore {
   // ── Worktrees ────────────────────────────────────────────────────────────
 
   /**
-   * Ensure a git worktree exists at projects/<id> on branch project/<id>.
+   * Ensure a git worktree exists at <repoDir>/<slug> on branch project/<slug>.
    * Idempotent — safe to call on every save.
    */
   async ensureWorktree(projectId: string): Promise<void> {
