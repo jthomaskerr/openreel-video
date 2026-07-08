@@ -190,6 +190,12 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       .substring(0, 60) || "unnamed-project";
   }
 
+  function canonicalProjectId(project: Pick<Project, "id" | "name">): string {
+    const id = project.id?.trim();
+    if (id && !isUuid(id)) return id;
+    return toSlug(project.name.trim());
+  }
+
   // POST /api/projects/import — create project from full JSON payload (file import)
   router.post("/import", async (req: Request, res: Response) => {
     try {
@@ -198,8 +204,10 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         res.status(400).json({ error: "Project name is required" });
         return;
       }
-      // Use existing ID if present, otherwise derive a slug from name
-      const id = project.id || toSlug(project.name.trim());
+      // Imported project JSON often contains legacy/client-generated UUIDs.
+      // The backend git store uses stable slug IDs for project worktrees, so
+      // convert UUIDs to the same slug assigned by POST /api/projects.
+      const id = canonicalProjectId(project);
       const saved = await store.saveProject({ ...project, id });
       gitStore.commitAsync(saved.id, `import: create from file "${saved.name}"`);
       res.status(201).json(saved);
@@ -214,18 +222,20 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
     if (rejectInvalidProjectId(req, res)) return;
     try {
       const incoming = req.body as Project;
-      if (!incoming?.id || incoming.id !== req.params.id) {
+      if (!incoming?.id || incoming.id !== req.params.id || !incoming.name?.trim()) {
         res.status(400).json({ error: "Invalid project payload" });
         return;
       }
-      if (isUuid(incoming.id)) {
-        res.status(400).json({ error: "UUID project ids are not allowed — use the slug assigned by POST /api/projects" });
-        return;
-      }
-      const prev = await store.loadProject(req.params.id);
-      const saved = await store.saveProject(incoming);
-      gitStore.commitAsync(req.params.id, generateCommitMessage(prev, saved));
-      res.json({ saved: true });
+
+      // Be tolerant of projects already loaded in the browser with a legacy
+      // client UUID. Save them under the canonical slug worktree instead of
+      // rejecting the autosave, so edits land in ~/openreel-projects/<slug>.
+      const canonicalId = canonicalProjectId(incoming);
+      const projectToSave = canonicalId === incoming.id ? incoming : { ...incoming, id: canonicalId };
+      const prev = await store.loadProject(canonicalId);
+      const saved = await store.saveProject(projectToSave);
+      gitStore.commitAsync(canonicalId, generateCommitMessage(prev, saved));
+      res.json({ saved: true, projectId: saved.id });
     } catch (err) {
       console.error("[PUT /api/projects/:id] save failed:", err);
       res.status(500).json({ error: "Failed to save project", detail: String(err) });
