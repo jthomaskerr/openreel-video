@@ -54,25 +54,78 @@ const DropdownMenuSubContent = React.forwardRef<
 ))
 DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName
 
-// Re-export the styled DropdownMenuContent that uses a simplified
-// Floating UI setup (offset-only, no size/shift/flip) to avoid
-// NaN available-width in the size middleware.
+// Re-export the styled DropdownMenuContent. Radix Popper is patched to avoid
+// the NaN-producing size middleware; this component also has a defensive
+// fallback for environments where the wrapper remains at translate(0, 0).
 const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
-  <DropdownMenuPrimitive.Portal>
-    <DropdownMenuPrimitive.Content
-      ref={ref}
-      sideOffset={sideOffset}
-      className={cn(
-        "z-[9999] max-h-[80vh] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
-        className
-      )}
-      {...props}
-    />
-  </DropdownMenuPrimitive.Portal>
-))
+>(({ className, sideOffset = 4, align = "center", ...props }, ref) => {
+  const positionFallback = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      if (!node) return;
+
+      const applyFallbackPosition = () => {
+        const wrapper = node.closest(
+          "[data-radix-popper-content-wrapper]",
+        ) as HTMLDivElement | null;
+        if (!wrapper) return;
+
+        const wrapperRect = wrapper.getBoundingClientRect();
+        const transform = wrapper.style.transform;
+        const stuckAtOrigin =
+          transform === "" ||
+          transform === "translate(0px, 0px)" ||
+          (Math.abs(wrapperRect.x) < 1 && Math.abs(wrapperRect.y) < 1);
+        if (!stuckAtOrigin) return;
+
+        const triggerId = node.getAttribute("aria-labelledby");
+        const trigger = triggerId ? document.getElementById(triggerId) : null;
+        if (!trigger) return;
+
+        const triggerRect = trigger.getBoundingClientRect();
+        const menuWidth = node.offsetWidth || wrapper.offsetWidth || 200;
+        let x =
+          align === "end"
+            ? triggerRect.right - menuWidth
+            : align === "start"
+              ? triggerRect.left
+              : triggerRect.left + triggerRect.width / 2 - menuWidth / 2;
+        x = Math.max(8, Math.min(x, window.innerWidth - menuWidth - 8));
+
+        wrapper.style.minWidth = "0";
+        wrapper.style.setProperty("--radix-popper-available-width", `${window.innerWidth}px`);
+        wrapper.style.setProperty("--radix-popper-available-height", `${window.innerHeight}px`);
+        wrapper.style.transform = `translate(${Math.round(x)}px, ${Math.round(
+          triggerRect.bottom + sideOffset,
+        )}px)`;
+      };
+
+      requestAnimationFrame(applyFallbackPosition);
+      window.setTimeout(applyFallbackPosition, 0);
+      window.setTimeout(applyFallbackPosition, 50);
+    },
+    [align, sideOffset],
+  );
+
+  return (
+    <DropdownMenuPrimitive.Portal>
+      <DropdownMenuPrimitive.Content
+        ref={(node) => {
+          positionFallback(node);
+          if (typeof ref === "function") ref(node);
+          else if (ref) (ref as React.MutableRefObject<HTMLDivElement | null>).current = node;
+        }}
+        sideOffset={sideOffset}
+        className={cn(
+          "z-[9999] max-h-[80vh] min-w-[8rem] overflow-y-auto overflow-x-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+          className
+        )}
+        {...props}
+      />
+    </DropdownMenuPrimitive.Portal>
+  );
+})
 DropdownMenuContent.displayName = DropdownMenuPrimitive.Content.displayName
 
 const DropdownMenuItem = React.forwardRef<
