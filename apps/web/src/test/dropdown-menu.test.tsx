@@ -5,9 +5,10 @@
  * Ensures the menu renders with correct data-state, animation
  * classes, and that the Radix Popper wrapper exists.
  *
- * The NaN available-width bug is fixed by pnpm patches:
- * - patches/@radix-ui__react-popper@1.2.8.patch
- * - patches/@floating-ui__core@1.7.3.patch
+ * The NaN available-width bug is fixed by:
+ * 1. pnpm patches on @radix-ui/react-popper and @floating-ui/core
+ * 2. avoidCollisions={false} on DropdownMenuContent (skips size middleware)
+ * 3. fixed max-h-[80vh] fallback
  */
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -70,11 +71,12 @@ describe("DropdownMenuContent", () => {
     expect(menu.className).toContain("slide-in-from-top-2");
   });
 
-  it("max-height uses the Radix CSS variable (set by size middleware)", () => {
+  it("uses a fixed max-h[80vh] (size middleware is disabled)", () => {
     renderOpenDropdown();
     const menu = screen.getByRole("menu");
-    expect(menu.className).toContain(
-      "max-h-[var(--radix-dropdown-menu-content-available-height)]"
+    expect(menu.className).toContain("max-h-[80vh]");
+    expect(menu.className).not.toContain(
+      "radix-dropdown-menu-content-available-height"
     );
   });
 
