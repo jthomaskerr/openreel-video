@@ -1,5 +1,5 @@
 // apps/web/src/services/backend-save.ts
-import type { Project, MediaItem } from "@openreel/core";
+import type { Project, MediaItem, ProjectSettings } from "@openreel/core";
 
 const BASE_URL: string =
   (import.meta.env["VITE_ORCHESTRATOR_URL"] as string | undefined) ?? "http://localhost:4041";
@@ -69,6 +69,31 @@ class BackendSaveService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * POST to backend to create a new project. The orchestrator assigns the
+   * canonical id (a slug derived from `name`), not a client-generated UUID.
+   * Throws on failure — callers should fall back to local-only creation
+   * (e.g. when the orchestrator is unreachable).
+   */
+  async create(name: string, settings?: Partial<ProjectSettings>): Promise<Project> {
+    const res = await fetch(`${BASE_URL}/api/projects`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, settings }),
+    });
+    if (!res.ok) {
+      let detail = "";
+      try {
+        const body = await res.json() as { error?: string; detail?: string };
+        detail = body.detail ?? body.error ?? "";
+      } catch {
+        // ignore parse errors
+      }
+      throw new Error(`Backend create failed: HTTP ${res.status}${detail ? ` — ${detail}` : ""}`);
+    }
+    return (await res.json()) as Project;
   }
 
   /**

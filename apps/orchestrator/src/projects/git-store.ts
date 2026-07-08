@@ -84,7 +84,21 @@ export class GitStore {
       await this.git(["worktree", "add", wtPath, branch], this.repoDir);
       return;
     }
-    await this.git(["worktree", "add", "-b", branch, wtPath, "HEAD"], this.repoDir);
+    try {
+      await this.git(["worktree", "add", "-b", branch, wtPath, "HEAD"], this.repoDir);
+    } catch (err: unknown) {
+      // Defensive fallback for a lost race outside this process's own lock
+      // (e.g. a concurrent orchestrator process): if another writer created
+      // the branch between our branchExists() check and this git call,
+      // attach to it instead of failing the whole request.
+      const execErr = err as ExecException & { stdout?: string; stderr?: string };
+      const output = `${execErr.message ?? ""} ${execErr.stdout ?? ""} ${execErr.stderr ?? ""}`;
+      if (output.includes("already exists") && (await this.branchExists(branch))) {
+        await this.git(["worktree", "add", wtPath, branch], this.repoDir);
+        return;
+      }
+      throw err;
+    }
   }
 
   private async promoteExistingDirectoryToWorktree(projectId: string, wtPath: string): Promise<void> {
@@ -167,10 +181,23 @@ export class GitStore {
 
   /**
    * Ensure a git worktree exists at <repoDir>/<slug> on branch project/<slug>.
-   * Idempotent — safe to call on every save.
+   * Idempotent — safe to call on every save. Serialised per-project so
+   * concurrent callers (e.g. two overlapping autosave pushes for a brand
+   * new project) cannot both reach `git worktree add -b` for the same
+   * not-yet-existing branch.
    */
   async ensureWorktree(projectId: string): Promise<void> {
     assertValidProjectId(projectId);
+    await this.#withLock(projectId, () => this.#ensureWorktreeInner(projectId));
+  }
+
+  /**
+   * Unlocked worktree-creation body. Only call this directly from within a
+   * function already holding this project's lock (e.g. `#commitInner`) —
+   * calling it re-entrantly through `ensureWorktree()`'s lock would deadlock
+   * the per-project promise chain in `#withLock`.
+   */
+  async #ensureWorktreeInner(projectId: string): Promise<void> {
     await this.ensureSharedRepo();
 
     const wtPath = this.worktreePath(projectId);
@@ -235,9 +262,11 @@ export class GitStore {
     assertValidProjectId(projectId);
     const wtPath = this.worktreePath(projectId);
 
-    // ensureWorktree is idempotent — only initialises if needed
+    // ensureWorktree is idempotent — only initialises if needed. #commitInner
+    // already runs inside #withLock(projectId, ...) via commit(), so we call
+    // the unlocked inner form directly to avoid deadlocking on our own lock.
     if (!existsSync(join(wtPath, ".git"))) {
-      await this.ensureWorktree(projectId);
+      await this.#ensureWorktreeInner(projectId);
     } else {
       await this.ensureWorktreeAttributes(projectId);
     }

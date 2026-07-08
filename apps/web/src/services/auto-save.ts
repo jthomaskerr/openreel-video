@@ -124,6 +124,11 @@ class AutoSaveManager {
     }, this.config.interval);
   }
 
+  /** Whether auto-save has been started (getProjectFn is non-null). */
+  isStarted(): boolean {
+    return this.getProjectFn !== null;
+  }
+
   stop(): void {
     if (this.intervalId) {
       clearInterval(this.intervalId);

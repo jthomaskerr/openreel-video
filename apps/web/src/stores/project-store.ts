@@ -1533,6 +1533,32 @@ export const useProjectStore = create<ProjectState>()(
           explicitlyCreated: true,
         });
         backendSaveService.resetForProject();
+
+        // Fire-and-forget: if the orchestrator is reachable, create the
+        // project on the backend and swap the client-generated UUID for
+        // the orchestrator-issued slug. Store a guard hash so we only
+        // apply the replacement if the user hasn't navigated away in the
+        // meantime (idempotent after-the-fact gating).
+        const snapshotId = nextProject.id;
+        const projectName = name ?? nextProject.name;
+        backendSaveService
+          .isReachable()
+          .then((reachable) => {
+            if (!reachable) return;
+            return backendSaveService.create(projectName, settings).then((backendProject) => {
+              const current = get();
+              if (current.project.id === snapshotId) {
+                const merged = { ...backendProject, modifiedAt: Date.now() };
+                syncProjectEffectsBridge(merged, previousProject);
+                syncProjectTransitionsBridge(merged, previousProject);
+                set({ project: merged });
+                backendSaveService.resetForProject();
+              }
+            });
+          })
+          .catch((err) => {
+            console.error("[BackendSave] create new project failed, using local id:", err);
+          });
       },
 
       loadProject: (project: Project) => {
@@ -4598,6 +4624,9 @@ export const useProjectStore = create<ProjectState>()(
 
       // Auto-save methods
       initializeAutoSave: async () => {
+        // Guard against double-initialisation (e.g. React StrictMode
+        // double-invoking effects with no cleanup, or multiple mounts).
+        if (autoSaveManager.isStarted()) return;
         await initializeAutoSave();
         autoSaveManager.start(() => {
           const { project } = get();

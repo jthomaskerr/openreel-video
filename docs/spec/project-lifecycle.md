@@ -35,11 +35,21 @@ On creation, the orchestrator SHALL:
 
 1. Accept a `POST /api/projects` with `{ name, settings? }`.
 2. Validate that `name` is a non-empty trimmed string; return `400` otherwise.
-3. Generate a UUID project ID.
-4. Create the per-project directory at `<projectsDir>/<projectId>/`.
-5. Write `project.json` with default settings, an empty media library, and an empty timeline.
-6. Initialize a git repository in the project directory with git-lfs enabled and a `.gitattributes` tracking `media/**`.
+3. Generate a slug project ID by lowercasing the name and replacing non-alphanumeric
+   characters with hyphens (e.g. `"My Project"` → `"my-project"`).
+4. Create a git worktree at `<projectsDir>/<projectId>/` on a new branch
+   `project/<projectId>` (see §9.4.1 for the git-backed storage model).
+5. Write `project.json` with the caller's settings (or defaults), an empty media
+   library, and an empty timeline.
+6. Ensure the worktree has git-lfs enabled and a `.gitattributes` tracking
+   `media/**`.
 7. Return the full `Project` object with status `201`.
+
+The web app SHALL call `POST /api/projects` when creating a new project while the
+orchestrator is reachable. When unreachable, the web app falls back to a
+client-generated UUID id and creates the backend record lazily on the first
+autosave `PUT` — this is transitional and SHALL NOT be relied upon for canonical
+project identity.
 
 ---
 

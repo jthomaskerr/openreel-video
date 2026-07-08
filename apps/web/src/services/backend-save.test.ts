@@ -84,3 +84,85 @@ describe("backendSaveService.load", () => {
     expect(project?.mediaLibrary.items[1]?.remoteUrl).toBeUndefined();
   });
 });
+
+describe("backendSaveService.create", () => {
+  it("creates a project on the backend and returns the orchestrator-assigned project", async () => {
+    const returned: Project = {
+      ...makeProject(),
+      id: "my-new-project", // slug, not a UUID
+      name: "My New Project",
+    };
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => returned,
+      }),
+    );
+
+    const project = await backendSaveService.create("My New Project");
+
+    expect(project.id).toBe("my-new-project");
+    expect(project.name).toBe("My New Project");
+  });
+
+  it("passes settings through to POST body", async () => {
+    const returned: Project = {
+      ...makeProject(),
+      id: "widescreen-project",
+      name: "Widescreen",
+      settings: { ...makeProject().settings, width: 2560, height: 1440 },
+    };
+
+    let capturedBody: string | null = null;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+        capturedBody = init?.body as string;
+        return {
+          ok: true,
+          json: async () => returned,
+        };
+      }),
+    );
+
+    await backendSaveService.create("Widescreen", { width: 2560, height: 1440 });
+
+    const parsed = JSON.parse(capturedBody!);
+    expect(parsed.name).toBe("Widescreen");
+    expect(parsed.settings).toEqual({ width: 2560, height: 1440 });
+  });
+
+  it("throws with a descriptive error on HTTP failure", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: async () => ({ error: "Failed to create", detail: "branch collision" }),
+      }),
+    );
+
+    await expect(backendSaveService.create("Doomed")).rejects.toThrow(
+      "Backend create failed: HTTP 500 — branch collision",
+    );
+  });
+
+  it("throws even when the error body is not JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 502,
+        json: async () => {
+          throw new Error("not json");
+        },
+      }),
+    );
+
+    await expect(backendSaveService.create("Doomed")).rejects.toThrow(
+      "Backend create failed: HTTP 502",
+    );
+  });
+});

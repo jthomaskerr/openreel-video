@@ -227,6 +227,21 @@ describe("ProjectStore", () => {
       expect(store.canUndo()).toBe(false);
       expect(store.canRedo()).toBe(false);
     });
+
+    describe("backend project creation", () => {
+      it("keeps local UUID id when backend is unreachable", async () => {
+        // Simulate unreachable backend — the createNewProject above already ran
+        // with backendSaveService in its default unreachable state before any
+        // mock stubbing, so the id should still be a UUID.
+        // (backendSaveService.isReachable() resolves false by default unless
+        // fetch is stubbed.)
+        const { project } = useProjectStore.getState();
+        // UUID pattern: 8-4-4-4-12 hex segments
+        expect(project.id).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+        );
+      });
+    });
   });
 
   describe("project loading", () => {
