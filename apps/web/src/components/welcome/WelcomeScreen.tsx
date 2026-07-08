@@ -223,7 +223,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ initialTab, initia
             Back
           </Button>
           <h2 className="text-sm font-medium text-text-primary">
-            Recent Projects
+            Projects
           </h2>
           <div className="w-16" />
         </header>
@@ -374,7 +374,7 @@ export const WelcomeScreen: React.FC<WelcomeScreenProps> = ({ initialTab, initia
               className="rounded-xl"
             >
               <Clock size={16} />
-              Recent projects
+              Projects
             </Button>
             <Button
               variant="outline"

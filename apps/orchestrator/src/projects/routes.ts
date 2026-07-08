@@ -13,6 +13,11 @@ import {
   resolveContainedPath,
 } from "./storage-validation";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isUuid(value: string): boolean {
+  return UUID_RE.test(value);
+}
+
 // ── Commit message helpers ───────────────────────────────────────────────────
 
 function generateCommitMessage(prev: Project | null, next: Project): string {
@@ -211,6 +216,10 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       const incoming = req.body as Project;
       if (!incoming?.id || incoming.id !== req.params.id) {
         res.status(400).json({ error: "Invalid project payload" });
+        return;
+      }
+      if (isUuid(incoming.id)) {
+        res.status(400).json({ error: "UUID project ids are not allowed — use the slug assigned by POST /api/projects" });
         return;
       }
       const prev = await store.loadProject(req.params.id);

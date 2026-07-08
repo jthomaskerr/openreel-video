@@ -4,10 +4,11 @@ import {
   checkForRecovery,
   type AutoSaveMetadata,
 } from "../../services/auto-save";
+import { backendSaveService } from "../../services/backend-save";
 import { useProjectStore } from "../../stores/project-store";
 import { useAnalytics, AnalyticsEvents } from "../../hooks/useAnalytics";
 
-interface RecentProject {
+interface ProjectEntry {
   id: string;
   saveId: string;
   name: string;
@@ -21,7 +22,7 @@ interface RecentProjectsProps {
 export const RecentProjects: React.FC<RecentProjectsProps> = ({
   onProjectSelected,
 }) => {
-  const [recentProjects, setRecentProjects] = useState<RecentProject[]>([]);
+  const [projects, setProjects] = useState<ProjectEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadingProjectId, setLoadingProjectId] = useState<string | null>(null);
   const recoverFromAutoSave = useProjectStore(
@@ -32,28 +33,58 @@ export const RecentProjects: React.FC<RecentProjectsProps> = ({
   useEffect(() => {
     async function loadProjects() {
       try {
-        const saves = await checkForRecovery();
-        const projectMap = new Map<string, AutoSaveMetadata>();
+        // 1. Fetch canonical project list from backend repo (source of truth)
+        const backendProjects = await backendSaveService.listProjects();
 
-        for (const save of saves) {
-          if (!projectMap.has(save.projectId)) {
-            projectMap.set(save.projectId, save);
+        if (backendProjects && backendProjects.length > 0) {
+          // Build a lookup of auto-save timestamps for sort ordering
+          const saves = await checkForRecovery();
+          const saveMap = new Map<string, AutoSaveMetadata>();
+          for (const save of saves) {
+            const existing = saveMap.get(save.projectId);
+            if (!existing || save.timestamp > existing.timestamp) {
+              saveMap.set(save.projectId, save);
+            }
           }
+
+          const entries: ProjectEntry[] = backendProjects
+            .map((bp) => {
+              const save = saveMap.get(bp.id);
+              return {
+                id: bp.id,
+                saveId: save?.id ?? bp.id,
+                name: bp.name,
+                lastModified: save?.timestamp ?? bp.modifiedAt,
+              };
+            })
+            .sort((a, b) => b.lastModified - a.lastModified)
+            .slice(0, 10);
+
+          setProjects(entries);
+        } else {
+          // 2. Fallback: backend unreachable or empty — show local auto-saves
+          const saves = await checkForRecovery();
+          const projectMap = new Map<string, AutoSaveMetadata>();
+          for (const save of saves) {
+            if (!projectMap.has(save.projectId)) {
+              projectMap.set(save.projectId, save);
+            }
+          }
+
+          const entries: ProjectEntry[] = Array.from(projectMap.values())
+            .sort((a, b) => b.timestamp - a.timestamp)
+            .slice(0, 10)
+            .map((save) => ({
+              id: save.projectId,
+              saveId: save.id,
+              name: save.projectName,
+              lastModified: save.timestamp,
+            }));
+
+          setProjects(entries);
         }
-
-        const projects: RecentProject[] = Array.from(projectMap.values())
-          .sort((a, b) => b.timestamp - a.timestamp)
-          .slice(0, 10)
-          .map((save) => ({
-            id: save.projectId,
-            saveId: save.id,
-            name: save.projectName,
-            lastModified: save.timestamp,
-          }));
-
-        setRecentProjects(projects);
       } catch (error) {
-        console.error("Failed to load recent projects:", error);
+        console.error("Failed to load projects:", error);
       } finally {
         setIsLoading(false);
       }
@@ -63,7 +94,7 @@ export const RecentProjects: React.FC<RecentProjectsProps> = ({
   }, []);
 
   const handleSelectProject = useCallback(
-    async (project: RecentProject) => {
+    async (project: ProjectEntry) => {
       setLoadingProjectId(project.id);
       try {
         const success = await recoverFromAutoSave(project.saveId);
@@ -85,7 +116,7 @@ export const RecentProjects: React.FC<RecentProjectsProps> = ({
   const handleRemoveProject = useCallback(
     (projectId: string, event: React.MouseEvent) => {
       event.stopPropagation();
-      setRecentProjects((prev) => prev.filter((p) => p.id !== projectId));
+      setProjects((prev) => prev.filter((p) => p.id !== projectId));
     },
     [],
   );
@@ -110,24 +141,24 @@ export const RecentProjects: React.FC<RecentProjectsProps> = ({
       <div className="flex flex-col items-center justify-center py-20">
         <div className="w-8 h-8 border-2 border-primary/30 border-t-primary rounded-full animate-spin mb-4" />
         <p className="text-sm text-text-secondary">
-          Loading recent projects...
+          Loading projects...
         </p>
       </div>
     );
   }
 
-  if (recentProjects.length === 0) {
+  if (projects.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-16">
         <div className="w-14 h-14 rounded-2xl bg-background-tertiary flex items-center justify-center mb-4">
           <Clock size={24} className="text-text-muted" />
         </div>
         <h3 className="text-base font-medium text-text-primary mb-2">
-          No Recent Projects
+          No Projects
         </h3>
         <p className="text-sm text-text-muted text-center max-w-md">
-          Your recently opened projects will appear here. Start a new project or
-          use a template to get started.
+          Your projects will appear here. Start a new project or use a template
+          to get started.
         </p>
       </div>
     );
@@ -137,12 +168,12 @@ export const RecentProjects: React.FC<RecentProjectsProps> = ({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-medium text-text-primary">
-          Recent Projects ({recentProjects.length})
+          Projects ({projects.length})
         </h3>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
-        {recentProjects.map((project) => {
+        {projects.map((project) => {
           const isLoadingThis = loadingProjectId === project.id;
           return (
             <div
@@ -176,7 +207,7 @@ export const RecentProjects: React.FC<RecentProjectsProps> = ({
               <button
                 onClick={(e) => handleRemoveProject(project.id, e)}
                 className="absolute top-2 right-2 p-1.5 text-text-muted hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all rounded-lg bg-background/80 hover:bg-red-500/10 backdrop-blur-sm"
-                title="Remove from recent"
+                title="Remove from projects"
               >
                 <Trash2 size={14} />
               </button>
@@ -186,7 +217,7 @@ export const RecentProjects: React.FC<RecentProjectsProps> = ({
       </div>
 
       <p className="text-xs text-text-muted text-center">
-        Recent projects are stored locally in your browser
+        Projects are synced with your backend repository
       </p>
     </div>
   );

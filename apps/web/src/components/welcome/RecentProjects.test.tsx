@@ -4,9 +4,16 @@ import { RecentProjects } from "./RecentProjects";
 
 const mockCheckForRecovery = vi.fn();
 const mockRecoverFromAutoSave = vi.fn();
+const mockListProjects = vi.fn();
 
 vi.mock("../../services/auto-save", () => ({
   checkForRecovery: () => mockCheckForRecovery(),
+}));
+
+vi.mock("../../services/backend-save", () => ({
+  backendSaveService: {
+    listProjects: () => mockListProjects(),
+  },
 }));
 
 vi.mock("../../stores/project-store", () => ({
@@ -17,42 +24,32 @@ vi.mock("../../stores/project-store", () => ({
 describe("RecentProjects", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: backend unreachable → fallback to IndexedDB
+    mockListProjects.mockResolvedValue(null);
   });
 
   it("shows loading state initially", () => {
-    mockCheckForRecovery.mockReturnValue(new Promise(() => {}));
+    mockListProjects.mockReturnValue(new Promise(() => {}));
     render(<RecentProjects />);
-    expect(screen.getByText("Loading recent projects...")).toBeInTheDocument();
+    expect(screen.getByText("Loading projects...")).toBeInTheDocument();
   });
 
   it("shows empty state when no projects", async () => {
+    mockListProjects.mockResolvedValue([]);
     mockCheckForRecovery.mockResolvedValue([]);
     render(<RecentProjects />);
 
     await waitFor(() => {
-      expect(screen.getByText("No Recent Projects")).toBeInTheDocument();
+      expect(screen.getByText("No Projects")).toBeInTheDocument();
     });
   });
 
-  it("displays recent projects from auto-save", async () => {
-    mockCheckForRecovery.mockResolvedValue([
-      {
-        id: "project-1-slot-0",
-        projectId: "project-1",
-        projectName: "My Video Project",
-        timestamp: Date.now() - 3600000,
-        slot: 0,
-        isRecovery: true,
-      },
-      {
-        id: "project-2-slot-0",
-        projectId: "project-2",
-        projectName: "Another Project",
-        timestamp: Date.now() - 7200000,
-        slot: 0,
-        isRecovery: true,
-      },
+  it("displays projects from backend (source of truth)", async () => {
+    mockListProjects.mockResolvedValue([
+      { id: "project-1", name: "My Video Project", createdAt: 1000, modifiedAt: Date.now() - 3600000 },
+      { id: "project-2", name: "Another Project", createdAt: 1000, modifiedAt: Date.now() - 7200000 },
     ]);
+    mockCheckForRecovery.mockResolvedValue([]);
 
     render(<RecentProjects />);
 
@@ -62,7 +59,51 @@ describe("RecentProjects", () => {
     });
   });
 
-  it("deduplicates projects by projectId showing most recent", async () => {
+  it("falls back to auto-save when backend is unreachable", async () => {
+    mockListProjects.mockResolvedValue(null);
+    mockCheckForRecovery.mockResolvedValue([
+      {
+        id: "project-1-slot-0",
+        projectId: "project-1",
+        projectName: "Local Project",
+        timestamp: Date.now() - 3600000,
+        slot: 0,
+        isRecovery: true,
+      },
+    ]);
+
+    render(<RecentProjects />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Local Project")).toBeInTheDocument();
+    });
+  });
+
+  it("merges backend projects with auto-save timestamps", async () => {
+    mockListProjects.mockResolvedValue([
+      { id: "project-1", name: "Project v1", createdAt: 1000, modifiedAt: Date.now() - 7200000 },
+    ]);
+    mockCheckForRecovery.mockResolvedValue([
+      {
+        id: "project-1-slot-0",
+        projectId: "project-1",
+        projectName: "Project v1",
+        timestamp: Date.now() - 1000,
+        slot: 0,
+        isRecovery: true,
+      },
+    ]);
+
+    render(<RecentProjects />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Projects (1)")).toBeInTheDocument();
+      expect(screen.getByText("Project v1")).toBeInTheDocument();
+    });
+  });
+
+  it("deduplicates by project ID showing most recent auto-save name", async () => {
+    mockListProjects.mockResolvedValue(null);
     mockCheckForRecovery.mockResolvedValue([
       {
         id: "project-1-slot-1",
@@ -85,13 +126,14 @@ describe("RecentProjects", () => {
     render(<RecentProjects />);
 
     await waitFor(() => {
-      expect(screen.getByText("Recent Projects (1)")).toBeInTheDocument();
+      expect(screen.getByText("Projects (1)")).toBeInTheDocument();
       expect(screen.getByText("Project v2")).toBeInTheDocument();
       expect(screen.queryByText("Project v1")).not.toBeInTheDocument();
     });
   });
 
-  it("calls recoverFromAutoSave when project is selected", async () => {
+  it("calls recoverFromAutoSave when fallback project is selected", async () => {
+    mockListProjects.mockResolvedValue(null);
     mockCheckForRecovery.mockResolvedValue([
       {
         id: "project-1-slot-0",
@@ -120,6 +162,7 @@ describe("RecentProjects", () => {
   });
 
   it("removes project from list when delete is clicked", async () => {
+    mockListProjects.mockResolvedValue(null);
     mockCheckForRecovery.mockResolvedValue([
       {
         id: "project-1-slot-0",
@@ -137,16 +180,17 @@ describe("RecentProjects", () => {
       expect(screen.getByText("Project to Remove")).toBeInTheDocument();
     });
 
-    const removeButton = screen.getByTitle("Remove from recent");
+    const removeButton = screen.getByTitle("Remove from projects");
     fireEvent.click(removeButton);
 
     await waitFor(() => {
       expect(screen.queryByText("Project to Remove")).not.toBeInTheDocument();
-      expect(screen.getByText("No Recent Projects")).toBeInTheDocument();
+      expect(screen.getByText("No Projects")).toBeInTheDocument();
     });
   });
 
   it("shows relative dates for timestamps", async () => {
+    mockListProjects.mockResolvedValue(null);
     mockCheckForRecovery.mockResolvedValue([
       {
         id: "project-1-slot-0",
