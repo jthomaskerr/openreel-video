@@ -22,7 +22,11 @@ vi.mock("wavesurfer.js", () => ({
 
 import { AssetInspectorWithTabs } from "./AssetInspectorWithTabs";
 
-function makeAudioItem(overrides: Partial<MediaItem> = {}): MediaItem {
+type AudioFixtureItem = MediaItem & {
+  waveformData?: Float32Array;
+};
+
+function makeAudioItem(overrides: Partial<AudioFixtureItem> = {}): AudioFixtureItem {
   return {
     id: "audio-1",
     name: "song.wav",
@@ -44,6 +48,7 @@ function makeAudioItem(overrides: Partial<MediaItem> = {}): MediaItem {
       has_lyrics: true,
     } as MediaItem["metadata"],
     thumbnailUrl: null,
+    waveformData: new Float32Array([0.1, 0.4, 0.8, 0.2]),
     ...overrides,
   };
 }
