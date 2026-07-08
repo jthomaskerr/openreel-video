@@ -135,13 +135,39 @@ export class ProjectStore {
 
   async saveProject(project: Project): Promise<Project> {
     assertValidProjectId(project.id);
-    await this.ensureProjectDir(project.id);
-    const updated: Project = { ...project, modifiedAt: Date.now() };
-    const finalPath = this.projectJsonPath(project.id);
-    const tmpPath = `${finalPath}.${crypto.randomUUID()}.tmp`;
-    await writeFile(tmpPath, JSON.stringify(updated, null, 2), "utf-8");
-    await rename(tmpPath, finalPath);
-    return updated;
+
+    // Track whether we created a brand-new worktree so we can roll it back
+    // if the file write fails — prevents zombie worktrees.
+    let worktreeWasNew = false;
+    const dir = this.projectDir(project.id);
+    if (!existsSync(join(dir, ".git")) && !existsSync(join(dir, "project.json"))) {
+      worktreeWasNew = true;
+    }
+
+    try {
+      await this.ensureProjectDir(project.id);
+      const updated: Project = { ...project, modifiedAt: Date.now() };
+      const finalPath = this.projectJsonPath(project.id);
+      const tmpPath = `${finalPath}.${crypto.randomUUID()}.tmp`;
+      await writeFile(tmpPath, JSON.stringify(updated, null, 2), "utf-8");
+      await rename(tmpPath, finalPath);
+      return updated;
+    } catch (err) {
+      // Roll back the worktree if we created it and project.json was never written.
+      if (worktreeWasNew && !existsSync(this.projectJsonPath(project.id))) {
+        try {
+          await this.gitStore.deleteWorktree(project.id);
+        } catch {
+          // best-effort — the worktree may have been partially created
+        }
+        try {
+          await rm(dir, { recursive: true, force: true });
+        } catch {
+          // already gone
+        }
+      }
+      throw err;
+    }
   }
 
   async createProject(name: string, settings?: Partial<ProjectSettings>): Promise<Project> {
@@ -197,10 +223,55 @@ export class ProjectStore {
   // ── Migration ───────────────────────────────────────────────────────────
 
   /**
+   * Delete zombie worktrees: directories that have a .git marker (meaning
+   * ensureWorktree succeeded) but no project.json (meaning saveProject never
+   * completed). These are unrecoverable — the project data was never persisted.
+   */
+  async cleanupZombieWorktrees(): Promise<void> {
+    await this.gitStore.ensureSharedRepo();
+    const repoDir = this.gitStore["repoDir"];
+    const entries = await readdir(repoDir, { withFileTypes: true });
+    let cleaned = 0;
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const name = entry.name;
+      if (name === ".git" || name === "projects" || name.startsWith(".")) continue;
+      if (!isValidProjectId(name)) continue;
+
+      const dir = join(repoDir, name);
+      const hasGit = existsSync(join(dir, ".git"));
+      const hasProjectJson = existsSync(join(dir, "project.json"));
+
+      // Zombie: worktree exists but project.json was never written.
+      if (hasGit && !hasProjectJson) {
+        try {
+          await this.gitStore.deleteWorktree(name);
+        } catch {
+          // best-effort — worktree may already be partially removed
+        }
+        try {
+          await rm(dir, { recursive: true, force: true });
+        } catch {
+          // already gone
+        }
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      console.log(`[ProjectStore] cleaned up ${cleaned} zombie worktree(s)`);
+    }
+  }
+
+  /**
    * One-time migration: rename any UUID-named project dirs to slug names.
    * Safe to call on every startup — skips already-migrated dirs.
+   * Also cleans up zombie worktrees (directories with a worktree but no
+   * project.json) left behind by a failed saveProject.
    */
   async migrateUuidDirs(): Promise<void> {
+    // Clean zombies first so they don't interfere with migration scanning.
+    await this.cleanupZombieWorktrees();
+
     await this.gitStore.ensureSharedRepo();
     const repoDir = this.gitStore["repoDir"];
     const isUuid = uuidPattern();

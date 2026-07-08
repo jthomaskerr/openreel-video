@@ -1554,6 +1554,13 @@ export const useProjectStore = create<ProjectState>()(
                 syncProjectTransitionsBridge(merged, previousProject);
                 set({ project: merged });
                 backendSaveService.resetForProject();
+                // Push the full current project state (tracks, clips, media
+                // items) to the backend now instead of waiting for the next
+                // autosave cycle. This prevents skeleton-only projects from
+                // being persisted when the user closes before autosave fires.
+                backendSaveService.save(merged).catch((saveErr) => {
+                  console.error("[BackendSave] initial full save failed:", saveErr);
+                });
               }
             });
           })
@@ -4912,6 +4919,12 @@ export const useProjectStore = create<ProjectState>()(
           stickerClips: graphicsEngine?.getAllStickerClips() || [],
         };
         await autoSaveManager.forceSave(fullProject);
+
+        // Also push to the backend orchestrator so the server-side project
+        // stays in sync (not just the IndexedDB local autosave).
+        backendSaveService.save(project).catch((err) => {
+          console.error("[BackendSave] forceSave push failed:", err);
+        });
       },
 
       getFullProject: (): Project => {
