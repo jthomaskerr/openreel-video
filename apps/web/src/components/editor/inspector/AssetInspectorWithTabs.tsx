@@ -631,7 +631,7 @@ function AssetInspectorHeader({ item, onClose }: { item: MediaItem; onClose: () 
 // ── Asset Inspector Toolbar ────────────────────────────────────────
 
 function AssetInspectorToolbar({ item }: { item: MediaItem }) {
-  const replaceMediaAsset = useProjectStore((s) => s.replaceMediaAsset);
+  const addAssetVersionFromFile = useProjectStore((s) => s.addAssetVersionFromFile);
   const deleteMediaFn = useProjectStore((s) => s.deleteMedia);
   const setInspectedAsset = useUIStore((s) => s.setInspectedAsset);
   const handleReplace = useCallback(() => {
@@ -644,21 +644,28 @@ function AssetInspectorToolbar({ item }: { item: MediaItem }) {
         const target = event.target;
         const file = target instanceof HTMLInputElement ? target.files?.[0] : undefined;
         if (!file) return;
-        const result = await replaceMediaAsset(item.id, file);
+        const result = await addAssetVersionFromFile(item.id, file);
         if (result.success) {
-          toast.success("File replaced", `Replaced with ${file.name}`);
+          const versionId = result.actionId;
+          const createdVersion = versionId
+            ? useProjectStore.getState().project.mediaLibrary.items.find((media) => media.id === versionId)
+            : undefined;
+          if (createdVersion) {
+            setInspectedAsset(createdVersion);
+          }
+          toast.success("Version created", `Added ${file.name} as the current version`);
         } else {
-          toast.error("Replace failed", result.error?.message || "Could not replace file");
+          toast.error("Version failed", result.error?.message || "Could not create asset version");
         }
       } catch (err) {
-        toast.error("Replace failed", err instanceof Error ? err.message : "Unknown error");
+        toast.error("Version failed", err instanceof Error ? err.message : "Unknown error");
       } finally {
         input.remove();
       }
     };
     document.body.appendChild(input);
     input.click();
-  }, [item.id, item.type, replaceMediaAsset]);
+  }, [item.id, item.type, addAssetVersionFromFile, setInspectedAsset]);
 
   const handleDelete = useCallback(async () => {
     await deleteMediaFn(item.id);
@@ -680,10 +687,10 @@ function AssetInspectorToolbar({ item }: { item: MediaItem }) {
       <button
         onClick={handleReplace}
         className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-text-secondary hover:text-text hover:bg-hover transition-colors"
-        title="Replace file"
+        title="Create a new current version from a local file"
       >
         <RefreshCw size={11} />
-        Replace
+        New Version
       </button>
       {item.blob && (
         <button
