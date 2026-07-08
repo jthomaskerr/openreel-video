@@ -44,10 +44,6 @@ interface PickedProjectJsonAssetFile extends ProjectJsonAssetFile {
 
 type FileWithRelativePath = File & { readonly webkitRelativePath?: string };
 
-function isProjectJsonFile(file: File): boolean {
-  return file.type === "application/json" || file.name.toLowerCase().endsWith(".json");
-}
-
 function fileRelativePath(file: File): string | undefined {
   return (file as FileWithRelativePath).webkitRelativePath || undefined;
 }
@@ -237,7 +233,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
   const handleFileInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = Array.from(e.target.files ?? []);
-      const projectFile = files.find(isProjectJsonFile);
+      const projectFile = files.length > 0 ? files[0] : undefined;
       if (projectFile) {
         void handleFileUpload(
           projectFile,
@@ -264,18 +260,12 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
       e.preventDefault();
       setIsDragging(false);
       const files = Array.from(e.dataTransfer.files ?? []);
-      const projectFile = files.find(isProjectJsonFile);
+      const projectFile = files.length > 0 ? files[0] : undefined;
       if (projectFile) {
         void handleFileUpload(
           projectFile,
           files.filter((file) => file !== projectFile),
         );
-      } else if (files.length > 0) {
-        setValidation({
-          valid: false,
-          errors: ["Please upload a .json file"],
-          warnings: []
-        });
       }
     },
     [handleFileUpload],
@@ -489,7 +479,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".json,application/json"
+                accept="*"
                 multiple
                 onChange={handleFileInputChange}
                 className="hidden"
