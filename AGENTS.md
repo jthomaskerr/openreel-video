@@ -35,6 +35,10 @@ This is a browser-based video editor. Typechecking and unit tests alone CANNOT p
 - Verify the exact behavior changed — not just that the page loads or tests pass.
 - Use `browser` tool: start dev server (`pnpm dev` on port 5173), open the app, reproduce the bug, apply fix, confirm it's resolved.
 
+## Error Handling / Missing Data
+- NEVER skip anything silently. If a file, media blob, import, decode, network request, or fallback path fails or is unavailable, surface it explicitly with actionable UI feedback and/or structured logs that include the relevant identifiers.
+- Do not use empty `catch {}` blocks or silent `return null` / `continue` paths for user-visible workflows. If continuing is safe, explain why in code and emit a warning/error that can be diagnosed.
+
 ## Commits
 - Commit small, atomic changes. One logical change per commit.
 - Write detailed commit messages: what was changed, why, and how it was verified.
