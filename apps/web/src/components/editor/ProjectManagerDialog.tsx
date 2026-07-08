@@ -21,13 +21,14 @@ import { useProjectStore } from "../../stores/project-store";
 import { useRouter } from "../../hooks/use-router";
 import { autoSaveManager } from "../../services/auto-save";
 import { projectManager, type RecentProject } from "../../services/project-manager";
+import { backendSaveService } from "../../services/backend-save";
 import { useUIStore } from "../../stores/ui-store";
 
 interface ManagedProject {
   id: string;
   name: string;
   lastModified: number;
-  source: "autosave" | "recent";
+  source: "backend" | "autosave" | "recent";
   saveId?: string; // for autosave recovery
   fileHandle?: FileSystemFileHandle;
   duration?: number;
@@ -111,6 +112,26 @@ export const ProjectManagerDialog: React.FC = () => {
         // silently ignore
       }
 
+      // Backend orchestrator projects (authoritative source)
+      try {
+        const backendProjects = await backendSaveService.listProjects();
+        if (backendProjects) {
+          for (const bp of backendProjects) {
+            const existing = map.get(bp.id);
+            if (!existing || bp.modifiedAt > existing.lastModified) {
+              map.set(bp.id, {
+                id: bp.id,
+                name: bp.name,
+                lastModified: bp.modifiedAt,
+                source: "backend",
+              });
+            }
+          }
+        }
+      } catch {
+        // silently ignore
+      }
+
       setProjects(
         Array.from(map.values()).sort((a, b) => b.lastModified - a.lastModified),
       );
@@ -142,6 +163,10 @@ export const ProjectManagerDialog: React.FC = () => {
       try {
         if (p.saveId) {
           await recoverFromAutoSave(p.saveId);
+        } else if (p.source === "backend") {
+          // Load from orchestrator backend (authoritative server-side copy)
+          const project = await backendSaveService.load(p.id);
+          if (project) loadProject(project);
         } else if (p.fileHandle) {
           const recent: RecentProject = {
             id: p.id,
@@ -195,6 +220,9 @@ export const ProjectManagerDialog: React.FC = () => {
         await deleteCurrentProject();
         navigate("welcome");
       } else {
+        if (p.source === "backend") {
+          await backendSaveService.deleteProject(p.id);
+        }
         await projectManager.deleteProject(p.id);
         await autoSaveManager.clearProjectSaves(p.id);
       }

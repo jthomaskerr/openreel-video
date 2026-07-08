@@ -1,6 +1,13 @@
 // apps/web/src/services/backend-save.ts
 import type { Project, MediaItem, ProjectSettings } from "@openreel/core";
 
+interface ProjectSummary {
+  id: string;
+  name: string;
+  createdAt: number;
+  modifiedAt: number;
+}
+
 const BASE_URL: string =
   (import.meta.env["VITE_ORCHESTRATOR_URL"] as string | undefined) ?? "http://localhost:4041";
 
@@ -141,6 +148,32 @@ class BackendSaveService {
         this.uploadedIds.delete(mediaId);
         console.error(`[BackendSave] media upload failed (${mediaId}):`, err);
       });
+  }
+
+  /**
+   * List all projects from the backend orchestrator.
+   * Returns empty array if unreachable or the backend has no projects.
+   */
+  async listProjects(): Promise<ProjectSummary[] | null> {
+    try {
+      const res = await fetch(`${BASE_URL}/api/projects`);
+      if (!res.ok) return null;
+      return (await res.json()) as ProjectSummary[];
+    } catch {
+      return null;
+    }
+  }
+
+  /** Delete a project from the backend orchestrator. */
+  async deleteProject(projectId: string): Promise<boolean> {
+    try {
+      const res = await fetch(`${BASE_URL}/api/projects/${projectId}`, {
+        method: "DELETE",
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
   }
 
   /**
