@@ -37,8 +37,6 @@ export interface MediaBridgeImportResult {
   error?: string;
   /** Warnings during import */
   warnings?: string[];
-  /** Whether waveform was generated */
-  hasWaveform: boolean;
 }
 
 /**
@@ -198,7 +196,6 @@ export class MediaBridge {
       return {
         success: false,
         error: "MediaBridge not initialized",
-        hasWaveform: false,
       };
     }
 
@@ -220,7 +217,6 @@ export class MediaBridge {
           success: false,
           error: result.error || "Import failed",
           warnings: result.warnings,
-          hasWaveform: false,
         };
       }
 
@@ -229,7 +225,6 @@ export class MediaBridge {
         return {
           success: false,
           error: "Failed to extract valid metadata from media file",
-          hasWaveform: false,
         };
       }
 
@@ -237,7 +232,6 @@ export class MediaBridge {
         success: true,
         media: result.media,
         warnings: result.warnings,
-        hasWaveform: result.media.waveformData !== null,
       };
     } catch (error) {
       this.restoreProjectState(projectStateBefore);
@@ -247,7 +241,6 @@ export class MediaBridge {
       return {
         success: false,
         error: errorMessage,
-        hasWaveform: false,
       };
     }
   }
@@ -300,7 +293,6 @@ export class MediaBridge {
       return files.map(() => ({
         success: false,
         error: "MediaBridge not initialized",
-        hasWaveform: false,
       }));
     }
 
