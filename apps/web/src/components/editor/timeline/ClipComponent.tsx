@@ -140,7 +140,16 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   // metadata/subtitle tracks without real media don't render any media UI
   const mediaType = mediaItem?.type ?? (isAudio ? "audio" : isImage ? "image" : (isMetadata || isSubtitle) ? "none" : "video");
   const clipStyle = getClipStyle(track.type);
-  const isMissingMedia = mediaItem ? getMediaStatus(mediaItem) !== MediaStatus.OK : false;
+  const mediaStatus = mediaItem ? getMediaStatus(mediaItem) : null;
+  const isMissingMedia = mediaStatus === MediaStatus.MISSING;
+  const unavailableBadge =
+    mediaStatus === MediaStatus.UNREALIZED
+      ? { label: "Unrealized", className: "bg-zinc-700 text-zinc-100" }
+      : mediaStatus === MediaStatus.PENDING
+        ? { label: "Pending", className: "bg-blue-500 text-white" }
+        : mediaStatus === MediaStatus.ERROR
+          ? { label: "Error", className: "bg-red-600 text-white" }
+          : null;
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -854,6 +863,18 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
               <div className="sticky left-1 w-fit">
                 <div className="rounded bg-yellow-500 px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none text-black">
                   Link file
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Left: non-link unavailable status badge */}
+          {unavailableBadge && (
+            <div className="absolute inset-x-0 top-1 z-20 pointer-events-none" style={{ overflow: "clip" }}>
+              <div className="sticky left-1 w-fit">
+                <div className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none ${unavailableBadge.className}`}>
+                  {mediaStatus === MediaStatus.ERROR && <AlertTriangle size={9} />}
+                  {unavailableBadge.label}
                 </div>
               </div>
             </div>
