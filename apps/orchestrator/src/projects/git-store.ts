@@ -56,6 +56,29 @@ export class GitStore {
     return stdout.trim().length > 0;
   }
 
+  private execErrorOutput(err: unknown): string {
+    const execErr = err as ExecException & { stdout?: string; stderr?: string };
+    return `${execErr.message ?? ""} ${execErr.stdout ?? ""} ${execErr.stderr ?? ""}`;
+  }
+
+  private isMissingRegisteredWorktreeError(err: unknown): boolean {
+    return this.execErrorOutput(err).includes("missing but already registered worktree");
+  }
+
+  private async pruneStaleWorktreeRegistration(wtPath: string): Promise<void> {
+    await this.git(["worktree", "prune", "--expire", "now"], this.repoDir).catch(() => undefined);
+    await this.git(["worktree", "remove", wtPath, "--force"], this.repoDir).catch(() => undefined);
+  }
+
+  private async isUsableWorktree(wtPath: string): Promise<boolean> {
+    try {
+      await this.git(["status", "--short"], wtPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   private async ensureWorktreeAttributes(projectId: string): Promise<void> {
     assertValidProjectId(projectId);
     const attributesPath = join(this.worktreePath(projectId), ".gitattributes");
@@ -77,11 +100,21 @@ export class GitStore {
     await writeFile(attributesPath, repairedAttributes, "utf-8");
   }
 
+  private async addExistingBranchWorktree(wtPath: string, branch: string): Promise<void> {
+    try {
+      await this.git(["worktree", "add", wtPath, branch], this.repoDir);
+    } catch (err: unknown) {
+      if (!this.isMissingRegisteredWorktreeError(err)) throw err;
+      await this.pruneStaleWorktreeRegistration(wtPath);
+      await this.git(["worktree", "add", wtPath, branch], this.repoDir);
+    }
+  }
+
   private async addWorktree(projectId: string, wtPath: string): Promise<void> {
     assertValidProjectId(projectId);
     const branch = `project/${projectId}`;
     if (await this.branchExists(branch)) {
-      await this.git(["worktree", "add", wtPath, branch], this.repoDir);
+      await this.addExistingBranchWorktree(wtPath, branch);
       return;
     }
     try {
@@ -91,10 +124,14 @@ export class GitStore {
       // (e.g. a concurrent orchestrator process): if another writer created
       // the branch between our branchExists() check and this git call,
       // attach to it instead of failing the whole request.
-      const execErr = err as ExecException & { stdout?: string; stderr?: string };
-      const output = `${execErr.message ?? ""} ${execErr.stdout ?? ""} ${execErr.stderr ?? ""}`;
+      const output = this.execErrorOutput(err);
       if (output.includes("already exists") && (await this.branchExists(branch))) {
-        await this.git(["worktree", "add", wtPath, branch], this.repoDir);
+        await this.addExistingBranchWorktree(wtPath, branch);
+        return;
+      }
+      if (this.isMissingRegisteredWorktreeError(err)) {
+        await this.pruneStaleWorktreeRegistration(wtPath);
+        await this.git(["worktree", "add", "-b", branch, wtPath, "HEAD"], this.repoDir);
         return;
       }
       throw err;
@@ -202,12 +239,13 @@ export class GitStore {
 
     const wtPath = this.worktreePath(projectId);
     if (existsSync(join(wtPath, ".git"))) {
-      await mkdir(join(wtPath, "media"), { recursive: true });
-      await this.ensureWorktreeAttributes(projectId);
-      return;
-    }
-
-    if (existsSync(wtPath)) {
+      if (await this.isUsableWorktree(wtPath)) {
+        await mkdir(join(wtPath, "media"), { recursive: true });
+        await this.ensureWorktreeAttributes(projectId);
+        return;
+      }
+      await this.promoteExistingDirectoryToWorktree(projectId, wtPath);
+    } else if (existsSync(wtPath)) {
       await this.promoteExistingDirectoryToWorktree(projectId, wtPath);
     } else {
       await this.addWorktree(projectId, wtPath);

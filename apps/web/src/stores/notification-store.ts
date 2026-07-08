@@ -57,6 +57,39 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   },
 }));
 
+const recentRuntimeErrors = new Map<string, number>();
+const RUNTIME_ERROR_DEDUPE_MS = 10_000;
+
+function toRuntimeErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return "Unknown runtime error";
+  }
+}
+
+export function reportRuntimeError(title: string, error: unknown, source: string): void {
+  const message = toRuntimeErrorMessage(error);
+  logBus.entry({
+    kind: "runtime_error",
+    label: title,
+    message,
+    source,
+  });
+
+  const key = `${source}:${title}:${message}`;
+  const now = Date.now();
+  const lastShown = recentRuntimeErrors.get(key) ?? 0;
+  if (now - lastShown < RUNTIME_ERROR_DEDUPE_MS) return;
+  recentRuntimeErrors.set(key, now);
+
+  useNotificationStore
+    .getState()
+    .addNotification({ type: "error", title, message, duration: 10000 });
+}
+
 export const toast = {
   success: (title: string, message?: string, duration?: number) => {
     logBus.entry({

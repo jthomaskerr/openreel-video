@@ -80,6 +80,50 @@ test("migrated root and nested UUID projects are promoted to commit-capable work
   }
 });
 
+test("missing registered slug worktrees are pruned and recreated", async () => {
+  const { repoDir, gitStore, projectStore } = await makeStore();
+  try {
+    const project = await projectStore.createProject("Vintage Tokyo");
+    await gitStore.commit(project.id, "test: create project");
+
+    const worktreeDir = join(repoDir, project.id);
+    await rm(worktreeDir, { recursive: true, force: true });
+
+    await gitStore.ensureWorktree(project.id);
+
+    assert.equal(existsSync(join(worktreeDir, ".git")), true);
+    await projectStore.saveProject({ ...project, name: "Vintage Tokyo Repaired" });
+    await gitStore.commit(project.id, "test: commit after stale worktree repair");
+    const { stdout } = await execFileAsync("git", ["log", "--oneline", "-1"], { cwd: worktreeDir });
+    assert.match(stdout, /commit after stale worktree repair/);
+  } finally {
+    await rm(repoDir, { recursive: true, force: true });
+  }
+});
+
+test("broken slug worktree git files are promoted to valid worktrees", async () => {
+  const { repoDir, gitStore, projectStore } = await makeStore();
+  try {
+    const project = await projectStore.createProject("Broken Tokyo");
+    await gitStore.commit(project.id, "test: create project");
+
+    const worktreeDir = join(repoDir, project.id);
+    await writeFile(join(worktreeDir, "project.json"), JSON.stringify({ ...project, name: "Broken Tokyo Updated" }, null, 2), "utf-8");
+    await rm(join(repoDir, ".git", "worktrees", project.id), { recursive: true, force: true });
+
+    await gitStore.ensureWorktree(project.id);
+
+    const repaired = await projectStore.loadProject(project.id);
+    assert.ok(repaired);
+    assert.equal(repaired.name, "Broken Tokyo Updated");
+    await gitStore.commit(project.id, "test: commit after broken git repair");
+    const { stdout } = await execFileAsync("git", ["log", "--oneline", "-1"], { cwd: worktreeDir });
+    assert.match(stdout, /commit after broken git repair/);
+  } finally {
+    await rm(repoDir, { recursive: true, force: true });
+  }
+});
+
 test("existing project worktrees repair the Git LFS media rule before commits", async () => {
   const { repoDir, gitStore, projectStore } = await makeStore();
   try {

@@ -79,7 +79,7 @@ import { parseSRT } from "./project/subtitle-helpers";
 import { backendSaveService } from "../services/backend-save";
 import { restoreMediaItem } from "../utils/media-recovery";
 import { projectManager } from "../services/project-manager";
-import { toast } from "./notification-store";
+import { reportRuntimeError, toast } from "./notification-store";
 
 /**
  * ProjectState - Complete state interface for project management
@@ -1562,12 +1562,14 @@ export const useProjectStore = create<ProjectState>()(
                 // being persisted when the user closes before autosave fires.
                 backendSaveService.save(merged).catch((saveErr) => {
                   console.error("[BackendSave] initial full save failed:", saveErr);
+                  reportRuntimeError("Backend save failed", saveErr, "backend-save.initial-full-save");
                 });
               }
             });
           })
           .catch((err) => {
             console.error("[BackendSave] create new project failed, using local id:", err);
+            reportRuntimeError("Backend project creation failed", err, "backend-save.create-project");
           });
       },
 
@@ -4782,6 +4784,7 @@ export const useProjectStore = create<ProjectState>()(
           if (!project) return;
           backendSaveService.save(project).catch((err) => {
             console.error("[BackendSave] auto-save push failed:", err);
+            reportRuntimeError("Backend auto-save failed", err, "backend-save.auto-save");
           });
         });
 
@@ -4936,6 +4939,7 @@ export const useProjectStore = create<ProjectState>()(
         // stays in sync (not just the IndexedDB local autosave).
         backendSaveService.save(project).catch((err) => {
           console.error("[BackendSave] forceSave push failed:", err);
+          reportRuntimeError("Backend force-save failed", err, "backend-save.force-save");
         });
       },
 

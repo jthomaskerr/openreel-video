@@ -1,5 +1,6 @@
 // apps/web/src/services/backend-save.ts
 import type { Project, MediaItem, ProjectSettings } from "@openreel/core";
+import { reportRuntimeError } from "../stores/notification-store";
 
 interface ProjectSummary {
   id: string;
@@ -159,6 +160,7 @@ class BackendSaveService {
       .catch((err) => {
         this.uploadedIds.delete(mediaId);
         console.error(`[BackendSave] media upload failed (${mediaId}):`, err);
+        reportRuntimeError("Backend media upload failed", err, "backend-save.media-upload");
       });
   }
 
