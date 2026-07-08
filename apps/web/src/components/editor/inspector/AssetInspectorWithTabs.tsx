@@ -2,6 +2,7 @@ import React, { useCallback, useMemo, useState } from "react";
 import { WaveformPreview } from "./WaveformPreview";
 import { Film, Music, ImageIcon, FileText, Layers, Sparkles, GitBranch, Link2, RefreshCw, Trash2, Download, X as XIcon } from "lucide-react";
 import type { MediaItem } from "@openreel/core";
+import { getMediaStatus, MediaStatus } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
@@ -145,7 +146,7 @@ function AssetPreview({ item }: { item: MediaItem }) {
         <div className="p-3">
           <WaveformPreview item={item} />
         </div>
-        {item.isPlaceholder && (
+        {getMediaStatus(item) === MediaStatus.MISSING && (
           <div className="px-3 py-1 bg-yellow-500/10 border-t border-yellow-500/20">
             <span className="text-[10px] text-yellow-400 font-medium">⚠ Missing file</span>
           </div>
@@ -169,12 +170,12 @@ function AssetPreview({ item }: { item: MediaItem }) {
           }
         </div>
       )}
-      {item.isPlaceholder && (
+      {getMediaStatus(item) === MediaStatus.MISSING && (
         <div className="px-3 py-1 bg-yellow-500/10 border-t border-yellow-500/20">
           <span className="text-[10px] text-yellow-400 font-medium">⚠ Missing file — placeholder</span>
         </div>
       )}
-      {item.isPending && !item.isPlaceholder && (
+      {getMediaStatus(item) === MediaStatus.PENDING && getMediaStatus(item) !== MediaStatus.MISSING && (
         <div className="px-3 py-1 bg-blue-500/10 border-t border-blue-500/20">
           <span className="text-[10px] text-blue-400 font-medium">⏳ Generating…</span>
         </div>

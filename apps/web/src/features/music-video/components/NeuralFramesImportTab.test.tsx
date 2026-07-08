@@ -12,23 +12,23 @@ const storeState = vi.hoisted(() => ({
   addClip: vi.fn(),
   addPlaceholderMedia: vi.fn(),
   replacePlaceholderMedia: vi.fn(),
-  renameProject: vi.fn(),
-}));
+  renameProject: vi.fn()
+        }));
 const musicVideoStoreState = vi.hoisted(() => ({
   applyNeuralFramesImport: vi.fn(),
   createProject: vi.fn(),
-  getProject: vi.fn(() => ({ id: "mv-1" })),
-}));
+  getProject: vi.fn(() => ({ id: "mv-1" }))
+        }));
 
 vi.mock("../../../stores/music-video-store", () => ({
   useMusicVideoStore: {
     getState: () => ({
       applyNeuralFramesImport: musicVideoStoreState.applyNeuralFramesImport,
       createProject: musicVideoStoreState.createProject,
-      getProject: musicVideoStoreState.getProject,
-    }),
-  },
-}));
+      getProject: musicVideoStoreState.getProject
+        })
+        }
+        }));
 
 
 vi.mock("../../../stores/project-store", () => {
@@ -38,8 +38,8 @@ vi.mock("../../../stores/project-store", () => {
     addPlaceholderMedia: storeState.addPlaceholderMedia,
     replacePlaceholderMedia: storeState.replacePlaceholderMedia,
     addGeneratedMedia: storeState.addGeneratedMedia,
-    renameTrack: storeState.renameTrack,
-  }));
+    renameTrack: storeState.renameTrack
+        }));
   Object.assign(useProjectStore, {
     getState: () => ({
       project: storeState.project,
@@ -50,9 +50,9 @@ vi.mock("../../../stores/project-store", () => {
       addPlaceholderMedia: storeState.addPlaceholderMedia,
       replacePlaceholderMedia: storeState.replacePlaceholderMedia,
       getTimelineDuration: () => storeState.project?.timeline.duration ?? 0,
-      renameProject: storeState.renameProject,
-    }),
-  });
+      renameProject: storeState.renameProject
+        })
+        });
   return { useProjectStore };
 });
 
@@ -61,15 +61,15 @@ vi.mock("../../../stores/notification-store", () => {
     info: vi.fn(),
     success: vi.fn(),
     error: vi.fn(),
-    warning: vi.fn(),
-  };
+    warning: vi.fn()
+        };
   const useNotificationStore = {
     getState: () => ({
       addNotification: vi.fn(),
       removeNotification: vi.fn(),
-      notifications: [],
-    }),
-  };
+      notifications: []
+        })
+        };
   return { useNotificationStore, toast: toastFns };
 });
 
@@ -84,16 +84,16 @@ function makeProject(): Project {
       height: 1080,
       frameRate: 30,
       sampleRate: 48000,
-      channels: 2,
-    },
+      channels: 2
+        },
     mediaLibrary: { items: [] },
     timeline: {
       tracks: [],
       duration: 0,
       markers: [],
-      subtitles: [],
-    },
-  };
+      subtitles: []
+        }
+        };
 }
 
 function installMutableStore() {
@@ -109,12 +109,12 @@ function installMutableStore() {
       locked: false,
       hidden: false,
       muted: false,
-      solo: false,
-    };
+      solo: false
+        };
     storeState.project = {
       ...project,
-      timeline: { ...project.timeline, tracks: [...project.timeline.tracks, track] },
-    };
+      timeline: { ...project.timeline, tracks: [...project.timeline.tracks, track] }
+        };
     return { success: true, actionId: "track-action" };
   });
   storeState.renameTrack.mockImplementation((trackId: string, name: string) => {
@@ -125,24 +125,24 @@ function installMutableStore() {
         ...project.timeline,
         tracks: project.timeline.tracks.map((track) =>
           track.id === trackId ? { ...track, name } : track,
-        ),
-      },
-    };
+        )
+        }
+        };
   });
   storeState.addGeneratedMedia.mockImplementation(async (item: MediaItem) => {
     const project = storeState.project!;
     storeState.project = {
       ...project,
-      mediaLibrary: { items: [...project.mediaLibrary.items, item] },
-    };
+      mediaLibrary: { items: [...project.mediaLibrary.items, item] }
+        };
     return { success: true, actionId: "media-action" };
   });
   storeState.addPlaceholderMedia.mockImplementation((item: MediaItem) => {
     const project = storeState.project!;
     storeState.project = {
       ...project,
-      mediaLibrary: { items: [...project.mediaLibrary.items, item] },
-    };
+      mediaLibrary: { items: [...project.mediaLibrary.items, item] }
+        };
   });
   storeState.addClip.mockImplementation(
     async (
@@ -180,14 +180,14 @@ function installMutableStore() {
                       effects: [],
                       transitions: [],
                       keyframes: [],
-                      metadata: options?.metadata ?? {},
-                    } as any,
-                  ],
-                }
+                      metadata: options?.metadata ?? {}
+        } as any,
+                  ]
+        }
               : track,
-          ),
-        },
-      };
+          )
+        }
+        };
       return { success: true, actionId: "clip-action" };
     },
   );
@@ -239,10 +239,10 @@ describe("NeuralFramesImportTab metadata import", () => {
                   linkedGeneratedAssetIds: [],
                   source: "llm",
                   importSource: "neuralframes",
-                  importId: "nf-scene-1",
-                },
-              ],
-            },
+                  importId: "nf-scene-1"
+        },
+              ]
+        },
             {
               id: "track-characters",
               label: "Characters",
@@ -262,10 +262,10 @@ describe("NeuralFramesImportTab metadata import", () => {
                   linkedGeneratedAssetIds: [],
                   source: "llm",
                   importSource: "neuralframes",
-                  importId: "nf-char-1",
-                },
-              ],
-            },
+                  importId: "nf-char-1"
+        },
+              ]
+        },
             {
               id: "track-styles",
               label: "Styles",
@@ -285,13 +285,13 @@ describe("NeuralFramesImportTab metadata import", () => {
                   linkedGeneratedAssetIds: [],
                   source: "llm",
                   importSource: "neuralframes",
-                  importId: "nf-style-1",
-                },
-              ],
-            },
-          ],
-        }),
-      })),
+                  importId: "nf-style-1"
+        },
+              ]
+        },
+          ]
+        })
+        })),
     );
 
     const { container } = render(
@@ -299,11 +299,11 @@ describe("NeuralFramesImportTab metadata import", () => {
     );
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     const file = new File([JSON.stringify({ title: "raw" })], "storyboard.json", {
-      type: "application/json",
-    });
+      type: "application/json"
+        });
     Object.defineProperty(file, "text", {
-      value: vi.fn().mockResolvedValue(JSON.stringify({ title: "raw" })),
-    });
+      value: vi.fn().mockResolvedValue(JSON.stringify({ title: "raw" }))
+        });
 
     fireEvent.change(input, { target: { files: [file] } });
 
@@ -356,13 +356,13 @@ describe("NeuralFramesImportTab metadata import", () => {
                   linkedGeneratedAssetIds: [],
                   source: "llm",
                   importSource: "neuralframes",
-                  importId: "nf-char-1",
-                },
-              ],
-            },
-          ],
-        }),
-      })),
+                  importId: "nf-char-1"
+        },
+              ]
+        },
+          ]
+        })
+        })),
     );
 
     const { container } = render(
@@ -370,11 +370,11 @@ describe("NeuralFramesImportTab metadata import", () => {
     );
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     const file = new File([JSON.stringify({ title: "raw" })], "storyboard.json", {
-      type: "application/json",
-    });
+      type: "application/json"
+        });
     Object.defineProperty(file, "text", {
-      value: vi.fn().mockResolvedValue(JSON.stringify({ title: "raw" })),
-    });
+      value: vi.fn().mockResolvedValue(JSON.stringify({ title: "raw" }))
+        });
 
     fireEvent.change(input, { target: { files: [file] } });
 
@@ -413,8 +413,8 @@ describe("NeuralFramesImportTab metadata import", () => {
                   sourceAssets: [],
                   sourceMetadataBlockIds: [],
                   validation: { valid: true, warnings: [], errors: [] },
-                  attempts: [],
-                },
+                  attempts: []
+        },
                 {
                   id: "asset-2",
                   label: "Ocean keyframe",
@@ -426,14 +426,14 @@ describe("NeuralFramesImportTab metadata import", () => {
                   sourceAssets: [],
                   sourceMetadataBlockIds: [],
                   validation: { valid: false, warnings: [], errors: [] },
-                  attempts: [],
-                },
-              ],
-            }),
-          };
+                  attempts: []
+        },
+              ]
+        })
+        };
         }
         return {
-          blob: async () => new Blob([String(url)], { type: "image/png" }),
+          blob: async () => new Blob([String(url)], { type: "image/png" })
         };
       }),
     );
@@ -443,11 +443,11 @@ describe("NeuralFramesImportTab metadata import", () => {
     );
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     const file = new File([JSON.stringify({ title: "raw" })], "storyboard.json", {
-      type: "application/json",
-    });
+      type: "application/json"
+        });
     Object.defineProperty(file, "text", {
-      value: vi.fn().mockResolvedValue(JSON.stringify({ title: "raw" })),
-    });
+      value: vi.fn().mockResolvedValue(JSON.stringify({ title: "raw" }))
+        });
 
     fireEvent.change(input, { target: { files: [file] } });
 
@@ -467,15 +467,15 @@ describe("NeuralFramesImportTab metadata import", () => {
         name: "Desert keyframe",
         title: "Desert keyframe",
         description: "Wide desert at sunrise",
-        isPlaceholder: false,
+
         generationMeta: expect.objectContaining({
           provider: "neuralframes",
           model: "nf",
           prompt: "Wide desert at sunrise",
           status: "realized",
-          jobId: "asset-1",
+          jobId: "asset-1"
+        })
         }),
-      }),
     );
     expect(storeState.addPlaceholderMedia).toHaveBeenNthCalledWith(
       2,
@@ -484,10 +484,9 @@ describe("NeuralFramesImportTab metadata import", () => {
         name: "Ocean keyframe",
         title: "Ocean keyframe",
         description: "Stormy ocean at night",
-        isPlaceholder: true,
-        kieaiError: true,
-        generationMeta: expect.objectContaining({ status: "failed" }),
-      }),
+
+        generationMeta: expect.objectContaining({ status: "failed" })
+        }),
     );
   });
 
@@ -522,10 +521,10 @@ describe("NeuralFramesImportTab metadata import", () => {
                       linkedGeneratedAssetIds: [],
                       source: "neuralframes",
                       importSource: "neuralframes",
-                      importId: "char-1",
-                    },
-                  ],
-                },
+                      importId: "char-1"
+        },
+                  ]
+        },
                 {
                   id: "track-styles",
                   label: "Style / LoRAs",
@@ -545,17 +544,17 @@ describe("NeuralFramesImportTab metadata import", () => {
                       linkedGeneratedAssetIds: [],
                       source: "neuralframes",
                       importSource: "neuralframes",
-                      importId: "style-1",
-                    },
-                  ],
-                },
-              ],
-            }),
-          };
+                      importId: "style-1"
+        },
+                  ]
+        },
+              ]
+        })
+        };
         }
         return {
           ok: true,
-          blob: async () => new Blob([url], { type: "image/png" }),
+          blob: async () => new Blob([url], { type: "image/png" })
         };
       }),
     );
@@ -569,13 +568,13 @@ describe("NeuralFramesImportTab metadata import", () => {
             id: "char-1",
             name: "Lead",
             image_job: {
-              assets: JSON.stringify(["http://localhost/lead-a.png", "http://localhost/lead-b.png"]),
-            },
+              assets: JSON.stringify(["http://localhost/lead-a.png", "http://localhost/lead-b.png"])
+        },
             physical_identity: "silver hair",
             reference_wardrobe: "red jacket",
             description: "confident vocalist",
-            reference_phrase: "lead singer portrait",
-          },
+            reference_phrase: "lead singer portrait"
+        },
         ],
         loras: [
           {
@@ -584,22 +583,22 @@ describe("NeuralFramesImportTab metadata import", () => {
             training_image_urls: ["http://localhost/style-a.png", "http://localhost/style-b.png"],
             visual_style: "soft neon haze",
             trigger_word: "dream-pop",
-            base_model: "flux-dev",
-          },
-        ],
-      },
-    };
+            base_model: "flux-dev"
+        },
+        ]
+        }
+        };
 
     const { container } = render(
       <NeuralFramesImportTab openreelProjectId="project-1" orchestratorUrl="http://localhost:4041" />,
     );
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     const file = new File([JSON.stringify(raw)], "storyboard.json", {
-      type: "application/json",
-    });
+      type: "application/json"
+        });
     Object.defineProperty(file, "text", {
-      value: vi.fn().mockResolvedValue(JSON.stringify(raw)),
-    });
+      value: vi.fn().mockResolvedValue(JSON.stringify(raw))
+        });
 
     fireEvent.change(input, { target: { files: [file] } });
 
@@ -617,10 +616,10 @@ describe("NeuralFramesImportTab metadata import", () => {
             physical_identity: "silver hair",
             reference_wardrobe: "red jacket",
             description: "confident vocalist",
-            reference_phrase: "lead singer portrait",
-          }),
+            reference_phrase: "lead singer portrait"
+        })
+        })
         }),
-      }),
       expect.any(Blob),
     );
     expect(storeState.addGeneratedMedia).toHaveBeenCalledWith(
@@ -635,10 +634,10 @@ describe("NeuralFramesImportTab metadata import", () => {
           inputs: expect.objectContaining({
             visual_style: "soft neon haze",
             trigger_word: "dream-pop",
-            base_model: "flux-dev",
-          }),
+            base_model: "flux-dev"
+        })
+        })
         }),
-      }),
       expect.any(Blob),
     );
     expect(storeState.addPlaceholderMedia).toHaveBeenCalledWith(
@@ -646,9 +645,9 @@ describe("NeuralFramesImportTab metadata import", () => {
         thumbnailUrl: "http://localhost/lead-b.png",
         group: "Generated",
         generationMeta: expect.objectContaining({
-          inputs: expect.objectContaining({ reference_phrase: "lead singer portrait" }),
+          inputs: expect.objectContaining({ reference_phrase: "lead singer portrait" })
+        })
         }),
-      }),
     );
     expect(storeState.addPlaceholderMedia).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -656,9 +655,9 @@ describe("NeuralFramesImportTab metadata import", () => {
         description: "soft neon haze",
         group: "Reference Images",
         generationMeta: expect.objectContaining({
-          inputs: expect.objectContaining({ trigger_word: "dream-pop" }),
+          inputs: expect.objectContaining({ trigger_word: "dream-pop" })
+        })
         }),
-      }),
     );
   });
 
@@ -681,14 +680,14 @@ describe("NeuralFramesImportTab metadata import", () => {
                 scale: "minor",
                 hasLyrics: true,
                 videoIdea: "nocturnal performance",
-                audioUrl: "main-song.wav",
-              },
-            }),
-          };
+                audioUrl: "main-song.wav"
+        }
+        })
+        };
         }
         return {
           ok: true,
-          blob: async () => new Blob(["audio-bytes"], { type: "audio/wav" }),
+          blob: async () => new Blob(["audio-bytes"], { type: "audio/wav" })
         };
       }),
     );
@@ -697,19 +696,19 @@ describe("NeuralFramesImportTab metadata import", () => {
       audio: {
         duration: 42,
         trimmed_audio_path: "main-song.wav",
-        audio_analysis: { bpm: 88, key: "C", scale: "minor", has_lyrics: true, video_idea: "nocturnal performance" },
-      },
-    };
+        audio_analysis: { bpm: 88, key: "C", scale: "minor", has_lyrics: true, video_idea: "nocturnal performance" }
+        }
+        };
     const { container } = render(
       <NeuralFramesImportTab openreelProjectId="project-1" orchestratorUrl="http://localhost:4041" />,
     );
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     const file = new File([JSON.stringify(raw)], "storyboard.json", {
-      type: "application/json",
-    });
+      type: "application/json"
+        });
     Object.defineProperty(file, "text", {
-      value: vi.fn().mockResolvedValue(JSON.stringify(raw)),
-    });
+      value: vi.fn().mockResolvedValue(JSON.stringify(raw))
+        });
 
     fireEvent.change(input, { target: { files: [file] } });
 
@@ -722,7 +721,7 @@ describe("NeuralFramesImportTab metadata import", () => {
         id: expect.stringMatching(/^audio-[0-9a-f-]{36}$/),
         name: "main-song.wav",
         type: "audio",
-        isPlaceholder: true,
+
         sourceFile: expect.objectContaining({ name: "main-song.wav" }),
         originalUrl: "main-song.wav",
         description: "nocturnal performance",
@@ -731,9 +730,9 @@ describe("NeuralFramesImportTab metadata import", () => {
           bpm: 88,
           key: "C",
           scale: "minor",
-          has_lyrics: true,
+          has_lyrics: true
+        })
         }),
-      }),
     );
     expect(storeState.addClip).toHaveBeenCalledWith(
       expect.any(String),
@@ -777,8 +776,8 @@ describe("NeuralFramesImportTab metadata import", () => {
                   generatedAssetIds: [],
                   validation: { valid: true, warnings: [], errors: [] },
                   outputs: [],
-                  selected: false,
-                },
+                  selected: false
+        },
               ],
               generatedAssets: [],
               metadataTracks: [
@@ -801,10 +800,10 @@ describe("NeuralFramesImportTab metadata import", () => {
                       linkedGeneratedAssetIds: [],
                       source: "neuralframes",
                       importSource: "neuralframes",
-                      importId: "style-1",
-                    },
-                  ],
-                },
+                      importId: "style-1"
+        },
+                  ]
+        },
                 {
                   id: "track-director",
                   label: "Director Notes",
@@ -823,22 +822,22 @@ describe("NeuralFramesImportTab metadata import", () => {
                       linkedShotIds: [],
                       linkedGeneratedAssetIds: [],
                       source: "neuralframes",
-                      importSource: "neuralframes",
-                    },
-                  ],
-                },
+                      importSource: "neuralframes"
+        },
+                  ]
+        },
               ],
               audio: {
                 duration: 0,
                 audioUrl: "main-song.wav",
-                videoIdea: "dream performance",
-              },
-            }),
-          };
+                videoIdea: "dream performance"
+        }
+        })
+        };
         }
         return {
           ok: true,
-          blob: async () => new Blob(["asset-bytes"], { type: "application/octet-stream" }),
+          blob: async () => new Blob(["asset-bytes"], { type: "application/octet-stream" })
         };
       }),
     );
@@ -851,8 +850,8 @@ describe("NeuralFramesImportTab metadata import", () => {
             scene_prompt: "performance",
             start_time: 0,
             end_time: 12,
-            status: "complete",
-          },
+            status: "complete"
+        },
         ],
         characters: [],
         loras: [
@@ -860,26 +859,26 @@ describe("NeuralFramesImportTab metadata import", () => {
             id: "style-1",
             name: "Dream Pop",
             training_image_urls: [],
-            visual_style: "soft neon haze",
-          },
-        ],
-      },
+            visual_style: "soft neon haze"
+        },
+        ]
+        },
       audio: {
         trimmed_audio_path: "main-song.wav",
-        audio_analysis: { video_idea: "dream performance" },
-      },
-    };
+        audio_analysis: { video_idea: "dream performance" }
+        }
+        };
 
     const { container } = render(
       <NeuralFramesImportTab openreelProjectId="project-1" orchestratorUrl="http://localhost:4041" />,
     );
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     const file = new File([JSON.stringify(raw)], "storyboard.json", {
-      type: "application/json",
-    });
+      type: "application/json"
+        });
     Object.defineProperty(file, "text", {
-      value: vi.fn().mockResolvedValue(JSON.stringify(raw)),
-    });
+      value: vi.fn().mockResolvedValue(JSON.stringify(raw))
+        });
 
     fireEvent.change(input, { target: { files: [file] } });
 
@@ -901,23 +900,23 @@ describe("NeuralFramesImportTab metadata import", () => {
       vi.fn(async () => ({
         ok: false,
         status: 500,
-        text: async () => "NF parser exploded: image_job.assets must be an array",
-      })),
+        text: async () => "NF parser exploded: image_job.assets must be an array"
+        })),
     );
     const raw = {
-      storyboard_props: { storyboard_prompt: "brief", scenes: [], characters: [], loras: [] },
-    };
+      storyboard_props: { storyboard_prompt: "brief", scenes: [], characters: [], loras: [] }
+        };
 
     const { container } = render(
       <NeuralFramesImportTab openreelProjectId="project-1" orchestratorUrl="http://localhost:4041" />,
     );
     const input = container.querySelector('input[type="file"]') as HTMLInputElement;
     const file = new File([JSON.stringify(raw)], "storyboard.json", {
-      type: "application/json",
-    });
+      type: "application/json"
+        });
     Object.defineProperty(file, "text", {
-      value: vi.fn().mockResolvedValue(JSON.stringify(raw)),
-    });
+      value: vi.fn().mockResolvedValue(JSON.stringify(raw))
+        });
 
     fireEvent.change(input, { target: { files: [file] } });
 

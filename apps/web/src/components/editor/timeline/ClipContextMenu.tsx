@@ -12,9 +12,10 @@ import {
   Image,
   ArrowLeftToLine,
   RefreshCw,
-  AlertTriangle,
+  AlertTriangle
 } from "lucide-react";
 import type { Clip, Track } from "@openreel/core";
+import { getMediaStatus, MediaStatus } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
 import {
@@ -25,7 +26,7 @@ import {
   ContextMenuSub,
   ContextMenuSubTrigger,
   ContextMenuSubContent,
-  ContextMenuLabel,
+  ContextMenuLabel
 } from "@openreel/ui";
 
 interface ClipContextMenuProps {
@@ -37,7 +38,7 @@ interface ClipContextMenuProps {
 export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
   clip,
   track,
-  onClose,
+  onClose
 }) => {
   const {
     copyClips,
@@ -51,7 +52,7 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
     pasteEffects,
     copiedEffects,
     closeGapBeforeClip,
-    replaceMediaAsset,
+    replaceMediaAsset
   } = useProjectStore();
   const { playheadPosition } = useTimelineStore();
 
@@ -175,7 +176,7 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
       </ContextMenuLabel>
       <ContextMenuSeparator />
 
-      {mediaItem?.isPlaceholder && (
+      {mediaItem && getMediaStatus(mediaItem) === MediaStatus.MISSING && (
         <>
           <ContextMenuItem onClick={handleLinkFile}>
             <RefreshCw className="mr-2 h-4 w-4 text-yellow-500" />

@@ -12,6 +12,7 @@ import {
   type BackgroundPreset,
 } from "../../services/background-generator";
 import type { ShapeType } from "@openreel/core";
+import { getMediaStatus, MediaStatus } from "@openreel/core";
 import { useProjectStore } from "../../stores/project-store";
 import { shallow } from "zustand/shallow";
 import { useUIStore } from "../../stores/ui-store";
@@ -197,11 +198,11 @@ const MediaThumbnail: React.FC<{
       ? "text-primary/50"
       : "text-status-info/50";
 
-  const borderClass = item.kieaiError
+  const borderClass = getMediaStatus(item) === MediaStatus.ERROR
     ? "border-red-500 ring-1 ring-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.3)]"
-    : item.isPending
+    : getMediaStatus(item) === MediaStatus.PENDING
     ? "border-purple-500 ring-1 ring-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.3)]"
-    : item.isPlaceholder
+    : getMediaStatus(item) === MediaStatus.MISSING
       ? "border-yellow-500 ring-1 ring-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.3)]"
       : isSelected
         ? "border-primary ring-1 ring-primary/50 shadow-[0_0_10px_rgba(34,197,94,0.2)]"
@@ -215,7 +216,7 @@ const MediaThumbnail: React.FC<{
     </div>
   ) : (
     <div className="absolute inset-0 bg-black/40 backdrop-blur-[1px] flex items-center justify-center gap-2 animate-in fade-in duration-200">
-      {item.kieaiError ? (
+      {getMediaStatus(item) === MediaStatus.ERROR ? (
         <button
           onClick={(e) => { e.stopPropagation(); onRetryKieAI?.(); }}
           title="Generation failed — click to retry"
@@ -223,11 +224,11 @@ const MediaThumbnail: React.FC<{
         >
           <RefreshCw size={14} className="text-red-400" />
         </button>
-      ) : item.isPending ? (
+      ) : getMediaStatus(item) === MediaStatus.PENDING ? (
         <div title="KieAI generation in progress…" className="p-2">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-400 border-t-transparent" />
         </div>
-      ) : item.isPlaceholder ? (
+      ) : getMediaStatus(item) === MediaStatus.MISSING ? (
         <>
           <button
             onClick={(e) => { e.stopPropagation(); onReplace(); }}
@@ -297,12 +298,12 @@ const MediaThumbnail: React.FC<{
               <Icon size={14} className={iconColor} />
             </div>
           )}
-          {item.kieaiError && (
+          {getMediaStatus(item) === MediaStatus.ERROR && (
             <div className="absolute inset-0 flex items-center justify-center bg-red-500/10">
               <AlertTriangle size={12} className="text-red-400" />
             </div>
           )}
-          {!item.kieaiError && item.isPending && (
+          {getMediaStatus(item) !== MediaStatus.ERROR && getMediaStatus(item) === MediaStatus.PENDING && (
             <div className="absolute inset-0 flex items-center justify-center bg-purple-500/10">
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-purple-400 border-t-transparent" />
             </div>
@@ -312,7 +313,7 @@ const MediaThumbnail: React.FC<{
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
             </div>
           )}
-          {!item.kieaiError && !item.isPending && item.isPlaceholder && (
+          {getMediaStatus(item) === MediaStatus.MISSING && (
             <div className="absolute inset-0 flex items-center justify-center bg-yellow-500/10">
               <AlertTriangle size={12} className="text-yellow-500/70" />
             </div>
@@ -339,7 +340,7 @@ const MediaThumbnail: React.FC<{
         {/* Hover actions */}
         {isHovered && (
           <div className="flex items-center gap-1 flex-shrink-0">
-            {item.kieaiError ? (
+            {getMediaStatus(item) === MediaStatus.ERROR ? (
               <button
                 onClick={(e) => { e.stopPropagation(); onRetryKieAI?.(); }}
                 title="Retry generation"
@@ -347,11 +348,11 @@ const MediaThumbnail: React.FC<{
               >
                 <RefreshCw size={12} className="text-red-400" />
               </button>
-            ) : item.isPending ? (
+            ) : getMediaStatus(item) === MediaStatus.PENDING ? (
               <div className="p-1" title="Generating…">
                 <div className="h-3 w-3 animate-spin rounded-full border-2 border-purple-400 border-t-transparent" />
               </div>
-            ) : item.isPlaceholder ? (
+            ) : getMediaStatus(item) === MediaStatus.MISSING ? (
               <>
                 <button
                   onClick={(e) => { e.stopPropagation(); onReplace(); }}
@@ -478,7 +479,7 @@ const MediaThumbnail: React.FC<{
         )}
 
         {/* KieAI Error Badge */}
-        {item.kieaiError && (
+        {getMediaStatus(item) === MediaStatus.ERROR && (
           <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-red-500 rounded text-[8px] text-white font-bold flex items-center gap-1">
             <AlertTriangle size={8} />
             Failed
@@ -486,7 +487,7 @@ const MediaThumbnail: React.FC<{
         )}
 
         {/* Pending KieAI Badge */}
-        {!item.kieaiError && item.isPending && (
+        {getMediaStatus(item) !== MediaStatus.ERROR && getMediaStatus(item) === MediaStatus.PENDING && (
           <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-purple-500 rounded text-[8px] text-white font-bold flex items-center gap-1">
             <div className="h-2 w-2 animate-spin rounded-full border border-white border-t-transparent" />
             AI
@@ -502,7 +503,7 @@ const MediaThumbnail: React.FC<{
 
 
         {/* Missing Asset Badge */}
-        {!item.kieaiError && !item.isPending && item.isPlaceholder && !effectiveThumbnailUrl && (
+        {getMediaStatus(item) !== MediaStatus.ERROR && getMediaStatus(item) !== MediaStatus.PENDING && getMediaStatus(item) === MediaStatus.MISSING && (
           <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-yellow-500 rounded text-[8px] text-black font-bold flex items-center gap-1">
             <AlertTriangle size={10} />
             Missing
@@ -517,21 +518,21 @@ const MediaThumbnail: React.FC<{
         )}
 
         {/* Error overlay */}
-        {item.kieaiError && !isHovered && (
+        {getMediaStatus(item) === MediaStatus.ERROR && !isHovered && (
           <div className="absolute inset-0 flex items-center justify-center bg-red-500/10">
             <AlertTriangle size={viewMode === "small" ? 20 : 32} className="text-red-400/60" />
           </div>
         )}
 
         {/* Pending overlay */}
-        {!item.kieaiError && item.isPending && !isHovered && (
+        {getMediaStatus(item) !== MediaStatus.ERROR && getMediaStatus(item) === MediaStatus.PENDING && !isHovered && (
           <div className="absolute inset-0 flex items-center justify-center bg-purple-500/10">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-purple-400 border-t-transparent" />
           </div>
         )}
 
         {/* Warning icon overlay for placeholders */}
-        {!item.kieaiError && !item.isPending && item.isPlaceholder && !isHovered && (
+        {getMediaStatus(item) === MediaStatus.MISSING && !isHovered && (
           <div className="absolute inset-0 flex items-center justify-center bg-yellow-500/10">
             <AlertTriangle size={viewMode === "small" ? 20 : 32} className="text-yellow-500/50" />
           </div>
@@ -639,9 +640,7 @@ function useStableMediaItems(items: MediaItem[]): MediaItem[] {
       a.name !== b.name ||
       a.title !== b.title ||
       a.type !== b.type ||
-      a.isPlaceholder !== b.isPlaceholder ||
-      a.isPending !== b.isPending ||
-      a.kieaiError !== b.kieaiError ||
+      getMediaStatus(a) !== getMediaStatus(b) ||
       a.kieaiTaskId !== b.kieaiTaskId ||
       a.thumbnailUrl !== b.thumbnailUrl ||
       a.metadata?.duration !== b.metadata?.duration ||
@@ -741,8 +740,8 @@ const MediaThumbnailRow = React.memo(
         onReplace={handleReplace}
         onDragStart={handleDragStart}
         onAddToTimeline={handleAddToTimeline}
-        onGenerate={item.type === "image" && !item.isPending && !item.kieaiError ? handleOpenGenerate : undefined}
-        onRetryKieAI={item.kieaiError && item.kieaiTaskId ? handleRetryKieAICb : undefined}
+        onGenerate={item.type === "image" && getMediaStatus(item) !== MediaStatus.PENDING && getMediaStatus(item) !== MediaStatus.ERROR ? handleOpenGenerate : undefined}
+        onRetryKieAI={getMediaStatus(item) === MediaStatus.ERROR && item.kieaiTaskId ? handleRetryKieAICb : undefined}
         onManage={handleManage}
         onRename={handleRename}
       />
@@ -758,9 +757,7 @@ const MediaThumbnailRow = React.memo(
     prev.item.group === next.item.group &&
     prev.item.description === next.item.description &&
     prev.item.type === next.item.type &&
-    prev.item.isPlaceholder === next.item.isPlaceholder &&
-    prev.item.isPending === next.item.isPending &&
-    prev.item.kieaiError === next.item.kieaiError &&
+    getMediaStatus(prev.item) === getMediaStatus(next.item) &&
     prev.item.kieaiTaskId === next.item.kieaiTaskId &&
     prev.item.thumbnailUrl === next.item.thumbnailUrl &&
     prev.item.metadata?.duration === next.item.metadata?.duration &&
@@ -846,7 +843,7 @@ export const AssetsPanel: React.FC = () => {
   const projectSettings = useProjectStore((s) => s.project.settings);
   const importMedia = useProjectStore((s) => s.importMedia);
   const updateSettings = useProjectStore((s) => s.updateSettings);
-  const setKieAIItemState = useProjectStore((s) => s.setKieAIItemState);
+  const setGenerationStatus = useProjectStore((s) => s.setGenerationStatus);
 
   // Selection tracking — stable Set derived from selectedItems array
   const selectedItems = useUIStore((s) => s.selectedItems, shallow);
@@ -863,14 +860,14 @@ export const AssetsPanel: React.FC = () => {
 
   // Count missing assets (memoized)
   const missingAssetsCount = useMemo(
-    () => mediaItems.filter((item) => item.isPlaceholder).length,
+    () => mediaItems.filter((item) => getMediaStatus(item) === MediaStatus.MISSING).length,
     [mediaItems],
   );
   // Filter media items by search query across all metadata fields (memoized)
   const filteredItems = useMemo(() => {
     const query = searchQuery.toLowerCase();
     return mediaItems.filter((item) => {
-      if (showOnlyMissing && !item.isPlaceholder) return false;
+      if (showOnlyMissing && getMediaStatus(item) !== MediaStatus.MISSING) return false;
       if (!query) return true;
       return (
         item.name.toLowerCase().includes(query) ||
@@ -960,7 +957,7 @@ export const AssetsPanel: React.FC = () => {
 
   const handleRelinkFromFolder = useCallback(async () => {
     const { project } = useProjectStore.getState();
-    const placeholders = project.mediaLibrary.items.filter((item) => item.isPlaceholder);
+    const placeholders = project.mediaLibrary.items.filter((item) => getMediaStatus(item) === MediaStatus.MISSING);
     if (placeholders.length === 0) return;
 
     // ── Path A: File System Access API (Chrome, secure context) ──────────
@@ -1168,9 +1165,9 @@ export const AssetsPanel: React.FC = () => {
   const handleRetryKieAI = useCallback((item: MediaItem) => {
     if (!item.kieaiTaskId) return;
     // Reset error state and re-activate polling
-    setKieAIItemState(item.id, true, false);
+    setGenerationStatus(item.id, "processing");
     retryTask(item.kieaiTaskId);
-  }, [retryTask, setKieAIItemState]);
+  }, [retryTask, setGenerationStatus]);
 
   // Stable refs for callbacks passed through MediaThumbnailRow (avoids re-render cascades)
   const onGenerateRef = useRef(handleOpenGenerate);

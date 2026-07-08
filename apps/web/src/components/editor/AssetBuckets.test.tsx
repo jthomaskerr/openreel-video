@@ -22,12 +22,12 @@ function media(overrides: Partial<MediaItem> & Pick<MediaItem, "id" | "name" | "
       codec: "",
       sampleRate: 0,
       channels: 0,
-      fileSize: 0,
-    },
+      fileSize: 0
+        },
     thumbnailUrl: null,
     waveformData: null,
-    ...overrides,
-  };
+    ...overrides
+        };
 }
 
 const Row = ({ item }: { item: MediaItem }) => (
@@ -39,8 +39,8 @@ const Row = ({ item }: { item: MediaItem }) => (
 function renderBuckets({
   items,
   groupBy,
-  ref,
-}: {
+  ref
+        }: {
   items: MediaItem[];
   groupBy: GroupBy;
   ref?: RefObject<AssetBucketsHandle>;
@@ -85,8 +85,8 @@ describe("AssetBuckets grouping and controls", () => {
         media({ id: "video-1", name: "intro.mov", type: "video" }),
         media({ id: "image-1", name: "still.png", type: "image" }),
         media({ id: "audio-1", name: "dialog.wav", type: "audio" }),
-      ],
-    });
+      ]
+        });
 
     expect(screen.queryAllByRole("button")).toHaveLength(0);
     expect(screen.getAllByRole("listitem")).toHaveLength(3);
@@ -104,8 +104,8 @@ describe("AssetBuckets grouping and controls", () => {
       items: [
         media({ id: "video-1", name: "intro.mov", type: "video" }),
         media({ id: "image-1", name: "still.png", type: "image" }),
-      ],
-    });
+      ]
+        });
 
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
     expect(screen.getByRole("listitem", { name: "intro.mov" })).toBeInTheDocument();
@@ -140,8 +140,8 @@ describe("AssetBuckets grouping and controls", () => {
         media({ id: "alpha", name: "alpha shot", type: "image", tags: ["alpha"] }),
         media({ id: "shared", name: "shared shot", type: "image", tags: ["alpha", "beta"] }),
         media({ id: "beta", name: "beta shot", type: "image", tags: ["beta"] }),
-      ],
-    });
+      ]
+        });
 
     expect(screen.getAllByRole("button")).toHaveLength(3);
     expect(bucketLabels()).toEqual(["Untagged 1", "#alpha 2", "#beta 2"]);
@@ -159,11 +159,11 @@ describe("AssetBuckets grouping and controls", () => {
       groupBy: "status",
       items: [
         media({ id: "normal", name: "normal clip", type: "video" }),
-        media({ id: "pending", name: "pending clip", type: "video", isPending: true }),
-        media({ id: "error", name: "error clip", type: "video", kieaiError: true }),
-        media({ id: "placeholder", name: "placeholder clip", type: "video", isPlaceholder: true }),
-      ],
-    });
+        media({ id: "pending", name: "pending clip", type: "video", generationMeta: { provider: "t", model: "t", status: "processing" } }),
+        media({ id: "error", name: "error clip", type: "video", generationMeta: { provider: "t", model: "t", status: "failed" } }),
+        media({ id: "placeholder", name: "placeholder clip", type: "video", blob: null, sourceFile: { name: "m.mp4", size: 0, lastModified: 0 } }),
+      ]
+        });
 
     expect(screen.getAllByRole("button")).toHaveLength(4);
     expect(bucketLabels()).toEqual(["Normal 1", "Pending 1", "Error 1", "Placeholder 1"]);
@@ -183,11 +183,11 @@ describe("AssetBuckets grouping and controls", () => {
       groupBy: "status",
       items: [
         media({ id: "normal", name: "normal clip", type: "video" }),
-        media({ id: "pending", name: "pending clip", type: "video", isPending: true }),
-        media({ id: "error", name: "error clip", type: "video", kieaiError: true }),
-        media({ id: "placeholder", name: "placeholder clip", type: "video", isPlaceholder: true }),
-      ],
-    });
+        media({ id: "pending", name: "pending clip", type: "video", generationMeta: { provider: "t", model: "t", status: "processing" } }),
+        media({ id: "error", name: "error clip", type: "video", generationMeta: { provider: "t", model: "t", status: "failed" } }),
+        media({ id: "placeholder", name: "placeholder clip", type: "video", blob: null, sourceFile: { name: "m.mp4", size: 0, lastModified: 0 } }),
+      ]
+        });
 
     expect(screen.getAllByRole("listitem")).toHaveLength(4);
 
@@ -226,14 +226,14 @@ describe("AssetBuckets grouping and controls", () => {
         name: "note: Director note",
         size: 68,
         lastModified: 1,
-        folder: JSON.stringify({ kind: "note", label: "Director note", color: "#94a3b8" }),
-      },
-    });
+        folder: JSON.stringify({ kind: "note", label: "Director note", color: "#94a3b8" })
+        }
+        });
 
     renderBuckets({
       groupBy: "type",
-      items: [realImage, note],
-    });
+      items: [realImage, note]
+        });
 
     expect(bucketScope(/^Images 1$/).getByRole("listitem", { name: "keyframe.png" })).toBeInTheDocument();
     expect(bucketScope(/^Images 1$/).queryByRole("listitem", { name: "note: Director note" })).toBeNull();

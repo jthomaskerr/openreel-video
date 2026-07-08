@@ -1,5 +1,6 @@
 import { useId, useState, useCallback, type KeyboardEvent, type ReactNode } from "react";
 import type { MediaItem } from "@openreel/core";
+import { getMediaStatus, MediaStatus } from "@openreel/core";
 import { Input, Button, Label } from "@openreel/ui";
 import { RefreshCw, X, Check, ImageIcon, Film, Music, Download, Trash2 } from "lucide-react";
 import { useProjectStore } from "../../../stores/project-store";
@@ -179,7 +180,7 @@ export function MetadataEditor({ item, onSaved }: MetadataEditorProps) {
       </div>
 
       {/* Missing file banner */}
-      {freshItem.isPlaceholder && (
+      {getMediaStatus(freshItem) === MediaStatus.MISSING && (
         <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3 space-y-2">
           <div>
             <Label className="text-[11px] text-yellow-400">Missing File</Label>

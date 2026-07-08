@@ -34,21 +34,21 @@ function projectWithMedia(sourceFile: {
             codec: "",
             sampleRate: 0,
             channels: 0,
-            fileSize: sourceFile.size,
+            fileSize: sourceFile.size
           },
           thumbnailUrl: null,
           waveformData: null,
-          isPlaceholder: true,
-          sourceFile,
+
+          sourceFile
         },
-      ],
+      ]
     },
     timeline: {
       tracks: [],
       subtitles: [],
       duration: 0,
-      markers: [],
-    },
+      markers: []
+    }
   };
 }
 
@@ -66,7 +66,7 @@ describe("matchProjectJsonAssetFiles", () => {
       {
         mediaId: "media-1",
         file: clip,
-        sourceFolder: "projects/cut/media",
+        sourceFolder: "projects/cut/media"
       },
     ]);
   });

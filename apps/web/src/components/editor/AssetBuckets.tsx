@@ -1,5 +1,6 @@
 import { useMemo, useState, useCallback, forwardRef, useImperativeHandle } from "react";
 import type { MediaItem } from "@openreel/core";
+import { getMediaStatus, MediaStatus } from "@openreel/core";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 type MediaViewMode = "large" | "small" | "list";
@@ -85,9 +86,11 @@ function getMetadataKind(item: MediaItem): string | null {
 }
 
 function getStatusLabel(item: MediaItem): string {
-  if (item.kieaiError) return "Error";
-  if (item.isPending) return "Pending";
-  if (item.isPlaceholder) return "Placeholder";
+  const s = getMediaStatus(item);
+  if (s === MediaStatus.ERROR) return "Error";
+  if (s === MediaStatus.PENDING) return "Pending";
+  if (s === MediaStatus.MISSING) return "Missing";
+  if (s === MediaStatus.UNREALIZED) return "Unrealized";
   return "Normal";
 }
 

@@ -28,7 +28,7 @@ export function WaveformPreview({ item }: Props) {
     if (!container) return;
 
     let objectUrl: string | null = null;
-    let url = item.originalUrl ?? null;
+    let url = (item as { remoteUrl?: string }).remoteUrl ?? item.originalUrl ?? null;
     if (item.blob && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
       objectUrl = URL.createObjectURL(item.blob);
       url = objectUrl;
@@ -67,7 +67,7 @@ export function WaveformPreview({ item }: Props) {
       wavesurfer.destroy();
       if (objectUrl && typeof URL !== "undefined") URL.revokeObjectURL(objectUrl);
     };
-  }, [item.blob, item.id, item.metadata.duration, item.originalUrl, item.waveformData]);
+  }, [item.blob, item.id, item.metadata.duration, item.originalUrl, (item as { remoteUrl?: string }).remoteUrl, item.waveformData]);
 
   const handlePlayPause = useCallback(() => {
     void wavesurferRef.current?.playPause();
@@ -86,7 +86,7 @@ export function WaveformPreview({ item }: Props) {
           onClick={handlePlayPause}
           aria-label={isPlaying ? "Pause audio preview" : "Play audio preview"}
           className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-accent text-white hover:bg-accent/90 transition-colors"
-          disabled={!item.blob && !item.originalUrl}
+          disabled={!item.blob && !item.originalUrl && !(item as { remoteUrl?: string }).remoteUrl}
         >
           {isPlaying ? <Pause size={14} /> : <Play size={14} />}
         </button>

@@ -363,7 +363,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
         addPlaceholderMedia({
           id: mediaId, name, type: "image", fileHandle: null, blob: null,
           metadata: { duration: 0, width: 0, height: 0, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 0 },
-          thumbnailUrl: previewUrl ?? null, waveformData: null, isPlaceholder: true, isPending: true, kieaiTaskId: taskId,
+          thumbnailUrl: previewUrl ?? null, waveformData: null, kieaiTaskId: taskId,
           generationMeta: { provider: "kieai", model: model.kieaiModel, prompt: String(kinputs.prompt ?? ""), inputs: kinputs, jobId: taskId, status: "pending" },
         });
         enqueueJob({
@@ -382,7 +382,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
         addPlaceholderMedia({
           id: mediaId, name, type: isVideo ? "video" : "image", fileHandle: null, blob: null,
           metadata: { duration: 0, width: 0, height: 0, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 0 },
-          thumbnailUrl: previewUrl ?? null, waveformData: null, isPlaceholder: true, isPending: true,
+          thumbnailUrl: previewUrl ?? null, waveformData: null,
           generationMeta: { provider: "wavespeed", model: model.wsModel.model_id, prompt: String(wsInputs.prompt ?? ""), inputs: wsInputs, jobId, status: "pending" },
         });
         enqueueJob({

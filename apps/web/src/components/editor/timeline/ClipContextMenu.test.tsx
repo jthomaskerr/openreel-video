@@ -20,7 +20,7 @@ function makeClip(): Clip {
     audioEffects: [],
     transform: { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 }, rotation: 0, anchor: { x: 0.5, y: 0.5 }, opacity: 1 },
     volume: 1,
-    keyframes: [],
+    keyframes: []
   };
 }
 
@@ -37,8 +37,7 @@ function missingMedia(): MediaItem {
     blob: null,
     metadata: { duration: 5, width: 0, height: 0, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 0 },
     thumbnailUrl: null,
-    waveformData: null,
-    isPlaceholder: true,
+    waveformData: null
   };
 }
 
@@ -49,8 +48,8 @@ describe("ClipContextMenu missing media", () => {
       project: {
         ...state.project,
         mediaLibrary: { items: [missingMedia()] },
-        timeline: { ...state.project.timeline, tracks: [makeTrack(clip)] },
-      },
+        timeline: { ...state.project.timeline, tracks: [makeTrack(clip)] }
+      }
     }));
 
     render(

@@ -48,7 +48,7 @@ export function useKieAIPoller() {
   const markFailed       = useKieAIStore((s) => s.markFailed);
   const projectId        = useProjectStore((s) => s.project?.id);
   const replacePlaceholder = useProjectStore((s) => s.replacePlaceholderMedia);
-  const setKieAIItemState  = useProjectStore((s) => s.setKieAIItemState);
+  const setGenerationStatus  = useProjectStore((s) => s.setGenerationStatus);
 
   const timersRef   = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const inFlightRef = useRef<Set<string>>(new Set());
@@ -56,12 +56,12 @@ export function useKieAIPoller() {
   // Use refs for callbacks to avoid stale closures in recursive setTimeout
   const replacePlaceholderRef = useRef(replacePlaceholder);
   replacePlaceholderRef.current = replacePlaceholder;
-  const setKieAIItemStateRef = useRef(setKieAIItemState);
-  setKieAIItemStateRef.current = setKieAIItemState;
+  const setGenerationStatusRef = useRef(setGenerationStatus);
+  setGenerationStatusRef.current = setGenerationStatus;
 
   const handleExpiredTask = useCallback((taskId: string, mediaId: string, suggestedName: string, projectId: string) => {
     markFailed(taskId);
-    setKieAIItemStateRef.current(mediaId, false, true);
+    setGenerationStatusRef.current(mediaId, "failed");
     problemBus.report({ kind: "generation_failed", label: suggestedName, message: "Generation task expired", mediaId, projectId });
   }, [markFailed]);
 
@@ -121,13 +121,13 @@ export function useKieAIPoller() {
             } catch (downloadErr) {
               console.error(`[KieAIPoller] download failed for ${task.taskId}:`, downloadErr);
               markFailed(task.taskId);
-              setKieAIItemStateRef.current(task.mediaId, false, true);
+              setGenerationStatusRef.current(task.mediaId, "failed");
               problemBus.report({ kind: "generation_failed", label: task.suggestedName, message: "Failed to download generation result", mediaId: task.mediaId, projectId: task.projectId });
             }
 
           } else if (record.state === "fail") {
             console.warn(`[KieAIPoller] task ${task.taskId} failed: ${record.failMsg}`);
-            setKieAIItemStateRef.current(task.mediaId, false, true);
+            setGenerationStatusRef.current(task.mediaId, "failed");
             markFailed(task.taskId);
             problemBus.report({ kind: "generation_failed", label: task.suggestedName, message: record.failMsg ?? "Generation failed", mediaId: task.mediaId, projectId: task.projectId });
 
@@ -141,7 +141,7 @@ export function useKieAIPoller() {
           if (err instanceof KieAIError && err.code === 401) {
             console.warn("[KieAIPoller] auth error — stopping poll for", task.taskId);
             markFailed(task.taskId);
-            setKieAIItemStateRef.current(task.mediaId, false, true);
+            setGenerationStatusRef.current(task.mediaId, "failed");
             problemBus.report({ kind: "generation_failed", label: task.suggestedName, message: "Authentication error — check your API key", mediaId: task.mediaId, projectId: task.projectId });
             return;
           }
@@ -161,7 +161,7 @@ export function useKieAIPoller() {
               `[KieAIPoller] ${task.taskId} exhausted ${MAX_POLL_RETRIES} retries — marking failed`,
             );
             markFailed(task.taskId);
-            setKieAIItemStateRef.current(task.mediaId, false, true);
+            setGenerationStatusRef.current(task.mediaId, "failed");
             problemBus.report({ kind: "generation_failed", label: task.suggestedName, message: "Generation failed after too many retries", mediaId: task.mediaId, projectId: task.projectId });
           } else {
             const t = setTimeout(doPoll, interval);

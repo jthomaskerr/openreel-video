@@ -20,23 +20,23 @@ import { useKieAIStore } from "../../stores/kieai-store";
 import { useKeyboardShortcuts } from "../../hooks/useKeyboardShortcuts";
 import {
   initializePlaybackBridge,
-  disposePlaybackBridge,
+  disposePlaybackBridge
 } from "../../bridges/playback-bridge";
 import {
   initializeMediaBridge,
-  disposeMediaBridge,
+  disposeMediaBridge
 } from "../../bridges/media-bridge";
 import {
   initializeRenderBridge,
-  disposeRenderBridge,
+  disposeRenderBridge
 } from "../../bridges/render-bridge";
 import {
   initializeEffectsBridge,
-  disposeEffectsBridge,
+  disposeEffectsBridge
 } from "../../bridges/effects-bridge";
 import {
   initializeTransitionBridge,
-  disposeTransitionBridge,
+  disposeTransitionBridge
 } from "../../bridges/transition-bridge";
 
 // Timeline area (bottom band) is sized as a vh fraction so the
@@ -186,7 +186,7 @@ const useEngineInitialization = () => {
     initialized: initialized && bridgesReady,
     initializing: initializing || (!bridgesReady && initialized),
     initError: initError || localError,
-    initStatus,
+    initStatus
   };
 };
 
@@ -258,7 +258,7 @@ export const EditorInterface: React.FC = () => {
           const mediaItem = useProjectStore.getState().getMediaItem(mediaId);
           if (mediaItem?.kieaiTaskId) {
             const { retryTask } = useKieAIStore.getState();
-            useProjectStore.getState().setKieAIItemState(mediaId, true, false);
+            useProjectStore.getState().setGenerationStatus(mediaId, "processing");
             retryTask(mediaItem.kieaiTaskId);
             problemBus.resolve(problem.id);
           }
@@ -278,7 +278,7 @@ export const EditorInterface: React.FC = () => {
     panels,
     setPanelVisible,
     setPanelWidth,
-    timelineMaximized,
+    timelineMaximized
   } = useUIStore();
   const { project, updateClipKeyframes } = useProjectStore();
   const tracks = project.timeline.tracks;
@@ -345,7 +345,7 @@ export const EditorInterface: React.FC = () => {
       const newKeyframes = copiedKeyframes.map((kf) => ({
         ...kf,
         id: `kf-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-        time: kf.time + time,
+        time: kf.time + time
       }));
       updateClipKeyframes(clipId, [
         ...(targetClip.keyframes || []),
@@ -516,13 +516,13 @@ export const EditorInterface: React.FC = () => {
         gridTemplateColumns: `${mediaWidth}px ${RESIZE_HANDLE}px 1fr ${RESIZE_HANDLE}px ${inspectorWidth}px ${RESIZE_HANDLE}px ${chatWidth}px`,
         gridTemplateRows: `1fr ${RESIZE_HANDLE}px ${effectiveTimelineVh}vh`,
         gridTemplateAreas:
-          "'media mh stage ih inspector ch chat' 'th th th th th th th' 'timeline timeline timeline timeline timeline timeline timeline'",
+          "'media mh stage ih inspector ch chat' 'th th th th th th th' 'timeline timeline timeline timeline timeline timeline timeline'"
       }
     : {
         gridTemplateColumns: `${mediaWidth}px ${RESIZE_HANDLE}px 1fr ${RESIZE_HANDLE}px ${inspectorWidth}px`,
         gridTemplateRows: `1fr ${RESIZE_HANDLE}px ${effectiveTimelineVh}vh`,
         gridTemplateAreas:
-          "'media mh stage ih inspector' 'th th th th th' 'timeline timeline timeline timeline timeline'",
+          "'media mh stage ih inspector' 'th th th th th' 'timeline timeline timeline timeline timeline'"
       };
 
   return (

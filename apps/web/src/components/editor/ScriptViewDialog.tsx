@@ -6,7 +6,7 @@ import {
   Upload,
   CheckCircle2,
   AlertCircle,
-  AlertTriangle,
+  AlertTriangle
 } from "lucide-react";
 import { Light as SyntaxHighlighter } from "react-syntax-highlighter";
 import json from "react-syntax-highlighter/dist/esm/languages/hljs/json";
@@ -17,15 +17,16 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  Button,
+  Button
 } from "@openreel/ui";
 import { useProjectStore } from "../../stores/project-store";
 import { toast } from "../../stores/notification-store";
 import { createProjectSerializer, createStorageEngine } from "@openreel/core";
+import { getMediaStatus, MediaStatus } from "@openreel/core";
 import { saveFileHandle } from "../../services/media-storage";
 import {
   matchProjectJsonAssetFiles,
-  type ProjectJsonAssetFile,
+  type ProjectJsonAssetFile
 } from "./project-json-assets";
 import type { ValidationResult } from "@openreel/core/storage/schema-types";
 
@@ -84,12 +85,12 @@ async function scanDirectoryAssets(
         files.push({
           file: await fileHandle.getFile(),
           relativePath,
-          handle: fileHandle,
+          handle: fileHandle
         });
       } else if (handle.kind === "directory") {
         pending.push({
           handle: handle as FileSystemDirectoryHandle,
-          path: relativePath,
+          path: relativePath
         });
       }
     }
@@ -117,7 +118,7 @@ async function pickProjectFolderFiles(): Promise<PickedProjectJsonAssetFile[]> {
       resolve(
         Array.from(input.files ?? []).map((file) => ({
           file,
-          relativePath: fileRelativePath(file),
+          relativePath: fileRelativePath(file)
         })),
       );
       input.remove();
@@ -133,7 +134,7 @@ async function pickProjectFolderFiles(): Promise<PickedProjectJsonAssetFile[]> {
 export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
   isOpen,
   onClose,
-  initialTab = "export",
+  initialTab = "export"
 }) => {
   const { project } = useProjectStore();
   const [activeTab, setActiveTab] = useState<"export" | "import">(initialTab);
@@ -196,7 +197,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
       setAssetFiles(
         candidateFiles.map((file) => ({
           file,
-          relativePath: fileRelativePath(file),
+          relativePath: fileRelativePath(file)
         })),
       );
       setValidation(null);
@@ -209,7 +210,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
           errors: [
             `Validation error: ${error instanceof Error ? error.message : "Unknown error"}`,
           ],
-          warnings: [],
+          warnings: []
         });
       }
     },
@@ -226,7 +227,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
           errors: [
             `Import error: ${error instanceof Error ? error.message : "Unknown error"}`,
           ],
-          warnings: [],
+          warnings: []
         });
       }
     },
@@ -273,7 +274,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
         setValidation({
           valid: false,
           errors: ["Please upload a .json file"],
-          warnings: [],
+          warnings: []
         });
       }
     },
@@ -303,7 +304,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
         errors: [
           `Validation error: ${error instanceof Error ? error.message : "Unknown error"}`,
         ],
-        warnings: [],
+        warnings: []
       });
     } finally {
       setIsValidating(false);
@@ -326,7 +327,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
         jsonRelativePath,
       );
 
-      if (matches.length === 0 && importedProject.mediaLibrary.items.some((item) => item.isPlaceholder)) {
+      if (matches.length === 0 && importedProject.mediaLibrary.items.some((item) => getMediaStatus(item) === MediaStatus.MISSING)) {
         try {
           candidateFiles = await pickProjectFolderFiles();
           setAssetFiles(candidateFiles);
@@ -361,7 +362,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
 
       const missingCount = useProjectStore
         .getState()
-        .project.mediaLibrary.items.filter((item) => item.isPlaceholder).length;
+        .project.mediaLibrary.items.filter((item) => getMediaStatus(item) === MediaStatus.MISSING).length;
       if (importedAssetCount > 0) {
         toast.success(`Imported ${importedAssetCount} referenced asset${importedAssetCount !== 1 ? "s" : ""}`);
       }
@@ -377,7 +378,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
         errors: [
           `Import error: ${error instanceof Error ? error.message : "Unknown error"}`,
         ],
-        warnings: [],
+        warnings: []
       });
     } finally {
       setIsImportingProject(false);
@@ -463,7 +464,7 @@ export const ScriptViewDialog: React.FC<ScriptViewDialogProps> = ({
                           margin: 0,
                           padding: "1rem",
                           background: "#1e1e1e",
-                          fontSize: "12px",
+                          fontSize: "12px"
                         }}
                       >
                         {exportedJson}

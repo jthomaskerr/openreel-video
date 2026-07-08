@@ -18,11 +18,11 @@ function makeVideoItem(overrides: Partial<MediaItem> = {}): MediaItem {
       codec: "h264",
       sampleRate: 0,
       channels: 0,
-      fileSize: 1024,
+      fileSize: 1024
     },
     thumbnailUrl: null,
     waveformData: null,
-    ...overrides,
+    ...overrides
   };
 }
 
@@ -39,7 +39,7 @@ describe("AssetInspectorWithTabs preview", () => {
   });
 
   it("shows the missing-file placeholder when thumbnailUrl is absent", () => {
-    render(<AssetInspectorWithTabs item={makeVideoItem({ isPlaceholder: true })} />);
+    render(<AssetInspectorWithTabs item={makeVideoItem({ blob: null, sourceFile: { name: "missing.mp4", size: 0, lastModified: 0 } })} />);
 
     expect(screen.getByText(/Missing file/)).toBeInTheDocument();
   });

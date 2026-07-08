@@ -190,8 +190,6 @@ export function KieAIImageDialog({ open, onClose, sourceFile, previewUrl }: Prop
         },
         thumbnailUrl: previewUrl,
         waveformData: null,
-        isPlaceholder: true,
-        isPending: true,
         kieaiTaskId: taskId,
       };
 
