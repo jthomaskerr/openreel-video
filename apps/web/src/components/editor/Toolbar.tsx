@@ -11,6 +11,7 @@ import {
   X,
   Check,
   FileCode,
+  FolderOpen,
   Settings,
   Zap,
   Circle,
@@ -36,6 +37,8 @@ import {
   getExportEngine,
   getDeviceProfile,
   estimateExportTime,
+  createProjectSerializer,
+  createStorageEngine,
   type VideoExportSettings,
   type AudioExportSettings,
   type ExportResult,
@@ -157,6 +160,64 @@ export const Toolbar: React.FC = () => {
     localStorage.removeItem(MOGRAPH_TOUR_KEY);
     startMoGraphTour();
   }, []);
+
+  const fileImportRef = useRef<HTMLInputElement>(null);
+  const [isImportingFile, setIsImportingFile] = useState(false);
+
+  const handleOpenProjectFromFile = useCallback(() => {
+    fileImportRef.current?.click();
+  }, []);
+
+  const handleFileImportSelected = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      setIsImportingFile(true);
+      try {
+        const text = await file.text();
+        const serializer = createProjectSerializer(createStorageEngine());
+        const validation = serializer.validateProjectJson(text);
+        if (!validation.valid) {
+          toast.error("Invalid project file", validation.errors?.join(", "));
+          return;
+        }
+        const { project } = serializer.importFromJsonWithValidation(text);
+        if (!project) {
+          toast.error("Invalid project file", "Could not parse project data");
+          return;
+        }
+
+        // Create the project in the backend first
+        const response = await fetch("/api/projects/import", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(project),
+        });
+        if (!response.ok) {
+          const err = await response.json().catch(() => ({}));
+          toast.error("Failed to create project", err.error || "Unknown backend error");
+          return;
+        }
+        const savedProject = await response.json();
+
+        // Load into the store and update the URL so the editor is scoped to the new project
+        useProjectStore.getState().loadProject(savedProject);
+        navigate(`editor?projectId=${savedProject.id}`);
+        toast.success("Project opened", `Loaded "${savedProject.name}"`);
+      } catch (err) {
+        toast.error(
+          "Import failed",
+          err instanceof Error ? err.message : "Unknown error",
+        );
+      } finally {
+        setIsImportingFile(false);
+        // Reset the file input so the same file can be re-selected
+        e.target.value = "";
+      }
+    },
+    [navigate],
+  );
 
   const handleOpenProjectManager = useCallback(() => {
     setProjectManagerOpen(true);
@@ -868,12 +929,30 @@ export const Toolbar: React.FC = () => {
               <Upload size={14} />
               <span>Load Project JSON</span>
             </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={handleOpenProjectFromFile}
+              disabled={isImportingFile}
+              className="gap-2"
+            >
+              <FolderOpen size={14} />
+              <span>{isImportingFile ? "Opening..." : "Open Project from File"}</span>
+            </DropdownMenuItem>
             <DropdownMenuItem className="gap-2 text-fg-muted">
               <Command size={14} />
               <span>⌘K to search</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {/* Hidden file input for "Open Project from File" */}
+        <input
+          ref={fileImportRef}
+          type="file"
+          accept=".json,.openreel"
+          className="hidden"
+          onChange={handleFileImportSelected}
+        />
+      </div>
 
         {/* Export */}
         {exportState.isExporting ? (

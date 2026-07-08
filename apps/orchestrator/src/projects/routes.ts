@@ -176,6 +176,34 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
     }
   });
 
+  // Slugify a project name for use as a directory/URL token
+  function toSlug(name: string): string {
+    return name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "")
+      .substring(0, 60) || "unnamed-project";
+  }
+
+  // POST /api/projects/import — create project from full JSON payload (file import)
+  router.post("/import", async (req: Request, res: Response) => {
+    try {
+      const project = req.body as Project;
+      if (!project?.name?.trim()) {
+        res.status(400).json({ error: "Project name is required" });
+        return;
+      }
+      // Use existing ID if present, otherwise derive a slug from name
+      const id = project.id || toSlug(project.name.trim());
+      const saved = await store.saveProject({ ...project, id });
+      gitStore.commitAsync(saved.id, `import: create from file "${saved.name}"`);
+      res.status(201).json(saved);
+    } catch (err) {
+      console.error("[POST /api/projects/import] failed:", err);
+      res.status(500).json({ error: "Failed to import project", detail: String(err) });
+    }
+  });
+
   // PUT /api/projects/:id — upsert project.json + git commit
   router.put("/:id", async (req: Request, res: Response) => {
     if (rejectInvalidProjectId(req, res)) return;
