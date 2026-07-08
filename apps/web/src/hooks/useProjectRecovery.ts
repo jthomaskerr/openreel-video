@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { backendSaveService } from "../services/backend-save";
 import { autoSaveManager, type AutoSaveMetadata } from "../services/auto-save";
 import { clearAllStorage } from "../services/media-storage";
+import { projectManager } from "../services/project-manager";
 import { useProjectStore } from "../stores/project-store";
 
 interface RecoveryState {
@@ -23,26 +24,57 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
   const loadProject = useProjectStore((s) => s.loadProject);
 
   useEffect(() => {
+    let cancelled = false;
+
     const checkForRecovery = async () => {
       try {
+        if (!cancelled) {
+          setState((prev) => ({ ...prev, isChecking: true, error: null }));
+        }
+
         await autoSaveManager.initialize();
         const saves = await autoSaveManager.checkForRecovery();
 
         if (autoRestoreProjectId) {
-          // Backend is authoritative — no IndexedDB dependency.
+          // Prefer the backend copy when a URL project id is present, but do not
+          // strand fresh local work if the backend save has not completed yet
+          // (for example after HMR/page refresh shortly after an import).
           const backendProject = await backendSaveService.load(autoRestoreProjectId);
+          if (cancelled) return;
           if (backendProject) {
             loadProject(backendProject);
             setState({ isChecking: false, availableSaves: [], showDialog: false, error: null });
             return;
           }
 
-          // Backend unreachable — surface the error.
+          const matchingSave = saves
+            .filter((save) => save.projectId === autoRestoreProjectId)
+            .sort((a, b) => b.timestamp - a.timestamp)[0];
+
+          if (matchingSave) {
+            const recoveredProject = await autoSaveManager.recover(matchingSave.id);
+            if (cancelled) return;
+            if (recoveredProject) {
+              loadProject(recoveredProject);
+              await projectManager.addToRecent(recoveredProject);
+              if (cancelled) return;
+              setState({ isChecking: false, availableSaves: [], showDialog: false, error: null });
+            } else {
+              setState({
+                isChecking: false,
+                availableSaves: [],
+                showDialog: false,
+                error: "Could not restore the local autosave for this project.",
+              });
+            }
+            return;
+          }
+
           setState({
             isChecking: false,
             availableSaves: [],
             showDialog: false,
-            error: "Could not reach the project server. Please ensure the orchestrator is running and try again.",
+            error: "Could not reach the project server and no local autosave was found for this project.",
           });
           return;
         }
@@ -64,17 +96,23 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
         }
       } catch (error) {
         console.warn("[Recovery] Failed to check for saves:", error);
-        setState({
-          isChecking: false,
-          availableSaves: [],
-          showDialog: false,
-          error: null,
-        });
+        if (!cancelled) {
+          setState({
+            isChecking: false,
+            availableSaves: [],
+            showDialog: false,
+            error: null,
+          });
+        }
       }
     };
 
     checkForRecovery();
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [autoRestoreProjectId]);
 
   const recover = useCallback(
     async (saveId: string) => {

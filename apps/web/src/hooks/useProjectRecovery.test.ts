@@ -357,8 +357,11 @@ describe("useProjectRecovery hook", () => {
     expect(result.current.error).toBeNull();
   });
 
-  it("does not fall back to IDB auto-saves when backend restore is unavailable", async () => {
-    mockCheckForRecovery.mockResolvedValue([makeSave()]);
+  it("falls back to the matching IDB auto-save when backend restore is unavailable", async () => {
+    mockCheckForRecovery.mockResolvedValue([
+      makeSave({ id: "other-save", projectId: "other-project-id", timestamp: 1000 }),
+      makeSave({ id: "matching-save", projectId: "test-project-id", timestamp: 2000 }),
+    ]);
     mockBackendLoad.mockResolvedValue(null);
     mockAutoSaveRecover.mockResolvedValue(makeProject({ name: "Fallback Cut" }));
 
@@ -369,11 +372,10 @@ describe("useProjectRecovery hook", () => {
     });
 
     expect(mockBackendLoad).toHaveBeenCalledWith("test-project-id");
-    expect(mockAutoSaveRecover).not.toHaveBeenCalled();
-    expect(mockLoadProjectMedia).not.toHaveBeenCalled();
-    expect(useProjectStore.getState().project.name).not.toBe("Fallback Cut");
+    expect(mockAutoSaveRecover).toHaveBeenCalledWith("matching-save");
+    expect(useProjectStore.getState().project.name).toBe("Fallback Cut");
     expect(result.current.showDialog).toBe(false);
-    expect(result.current.error).toMatch(/project server/i);
+    expect(result.current.error).toBeNull();
   });
 
   it("hides dialog and clears error after successful recovery", async () => {

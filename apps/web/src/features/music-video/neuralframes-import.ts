@@ -433,6 +433,15 @@ export async function importNeuralFramesFile(
       useUIStore.getState().addImportErrors(errors);
     }
 
+    // Imports create a lot of project state in one burst. Force a save before
+    // reporting success so an HMR/page refresh immediately after import can
+    // recover the new timeline instead of falling back to an empty project.
+    try {
+      await useProjectStore.getState().forceSave();
+    } catch (error) {
+      console.warn("[NeuralFramesImport] Immediate post-import save failed:", error);
+    }
+
     clearProgress();
     const nonCharacterTrackNames = new Set(plan.metadataClips.map((s) => s.trackName));
     const trackCount =
