@@ -93,6 +93,8 @@ export interface Clip {
   readonly blendMode?: import("../video/types").BlendMode;
   readonly blendOpacity?: number;
   readonly volume: number;
+  /** Whether this clip's audio is muted. Defaults to false. */
+  readonly muted?: boolean;
   readonly fade?: { fadeIn: number; fadeOut: number };
   readonly automation?: {
     volume?: AutomationPoint[];

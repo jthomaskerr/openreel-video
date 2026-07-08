@@ -223,6 +223,8 @@ export class AudioEngine {
       if (this.isTrackMuted(trackInfo, hasSoloTracks)) continue;
 
       for (const clipInfo of trackInfo.clips) {
+        // Skip clips that are individually muted
+        if (clipInfo.muted) continue;
         const mediaItem = mediaLibrary.items.find(
           (m) => m.id === clipInfo.mediaId,
         );
@@ -347,6 +349,7 @@ export class AudioEngine {
       timelineStartTime: clipStart,
       duration: clipEnd - clipStart,
       volume: clip.volume,
+      muted: clip.muted ?? false,
       volumeAutomation: resolveClipVolumeAutomation(clip, timeline),
       pan,
       effects: clipAudioEffects,

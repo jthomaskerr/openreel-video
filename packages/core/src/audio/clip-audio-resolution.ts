@@ -105,12 +105,12 @@ export const resolveAudibleAudioTarget = (
   clip: Clip,
   timeline: TimelineWithTracks,
 ): Clip => {
-  if (clip.volume > 0) {
+  if (clip.volume > 0 && !clip.muted) {
     return clip;
   }
 
   const linkedAudioClip = getLinkedAudioClips(clip, timeline).find(
-    (entry) => entry.track.type === "audio" && entry.clip.volume > 0,
+    (entry) => entry.track.type === "audio" && entry.clip.volume > 0 && !entry.clip.muted,
   );
 
   return linkedAudioClip?.clip ?? clip;

@@ -204,6 +204,8 @@ export interface ProjectState {
   ) => Promise<ActionResult>;
   splitClip: (clipId: string, time: number) => Promise<ActionResult>;
   rippleDeleteClip: (clipId: string) => Promise<ActionResult>;
+  /** Mute/unmute a clip's audio without losing the original volume. */
+  setClipMuted: (clipId: string, muted: boolean) => Promise<ActionResult>;
   slipClip: (clipId: string, delta: number) => Promise<ActionResult>;
   slideClip: (clipId: string, delta: number) => Promise<ActionResult>;
   rollEdit: (
@@ -3367,6 +3369,21 @@ export const useProjectStore = create<ProjectState>()(
           id: uuidv4(),
           timestamp: Date.now(),
           params: { clipId },
+        };
+        const result = await actionExecutor.execute(action, project);
+        if (result.success) {
+          set({ project: { ...project } });
+        }
+        return result;
+      },
+
+      setClipMuted: async (clipId: string, muted: boolean) => {
+        const { project, actionExecutor } = get();
+        const action: Action = {
+          type: "audio/setMuted",
+          id: uuidv4(),
+          timestamp: Date.now(),
+          params: { clipId, muted },
         };
         const result = await actionExecutor.execute(action, project);
         if (result.success) {

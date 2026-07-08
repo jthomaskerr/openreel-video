@@ -37,6 +37,7 @@ export interface AudioClipRenderInfo {
   readonly timelineStartTime: number;
   readonly duration: number;
   readonly volume: number;
+  readonly muted: boolean;
   readonly volumeAutomation: AutomationPoint[];
   readonly pan: number;
   readonly effects: Effect[];
