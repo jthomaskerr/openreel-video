@@ -75,6 +75,7 @@ import {
   loadDirectoryHandle,
   scanDirectoryRecursive,
 } from "../services/media-storage";
+import { parseSRT } from "./project/subtitle-helpers";
 import { backendSaveService } from "../services/backend-save";
 import { restoreMediaItem } from "../utils/media-recovery";
 import { projectManager } from "../services/project-manager";
@@ -1752,6 +1753,92 @@ export const useProjectStore = create<ProjectState>()(
         const { project } = get();
 
         try {
+          // SRT subtitle files bypass MediaBunny (which lacks SRT codec support).
+          // Parse the text directly and create a subtitle media item.
+          const isSrt =
+            file.name.toLowerCase().endsWith(".srt") ||
+            file.type === "text/srt" ||
+            file.type === "application/x-subrip";
+
+          if (isSrt) {
+            const srtText = await file.text();
+            const { subtitles, errors } = parseSRT(srtText);
+
+            if (errors.length > 0) {
+              console.warn(
+                "[ProjectStore] SRT parse warnings:",
+                errors.slice(0, 3),
+              );
+            }
+
+            // Derive duration from the last subtitle's end time
+            const lastEnd =
+              subtitles.length > 0
+                ? subtitles[subtitles.length - 1].endTime
+                : 0;
+
+            const srtMediaId = uuidv4();
+            const newMediaItem: MediaItem = {
+              id: srtMediaId,
+              name: file.name,
+              type: "srt" as MediaItem["type"],
+              fileHandle: null,
+              blob: file,
+              metadata: {
+                duration: lastEnd,
+                width: 0,
+                height: 0,
+                frameRate: 0,
+                codec: "",
+                sampleRate: 0,
+                channels: 0,
+                fileSize: file.size,
+              },
+              thumbnailUrl: null,
+              waveformData: null,
+              sourceFile: {
+                name: file.name,
+                size: file.size,
+                lastModified: file.lastModified,
+              },
+            };
+
+            const updatedProject = {
+              ...project,
+              mediaLibrary: {
+                ...project.mediaLibrary,
+                items: [...project.mediaLibrary.items, newMediaItem],
+              },
+              modifiedAt: Date.now(),
+            };
+            set({ project: updatedProject });
+
+            try {
+              await saveMediaBlob(
+                updatedProject.id,
+                srtMediaId,
+                file,
+                newMediaItem.metadata,
+              );
+              backendSaveService.uploadMediaAsync(
+                updatedProject.id,
+                srtMediaId,
+                file,
+                file.name,
+              );
+            } catch (err) {
+              console.error(
+                "[ProjectStore] Failed to persist SRT blob:",
+                err,
+              );
+            }
+
+            return {
+              success: true,
+              actionId: srtMediaId,
+            };
+          }
+
           const mediaBridge = getMediaBridge();
           if (!mediaBridge.isInitialized()) {
             await initializeMediaBridge();
@@ -2887,13 +2974,15 @@ export const useProjectStore = create<ProjectState>()(
           };
         }
 
-        let trackType: "video" | "audio" | "image" | "text" | "graphics";
+        let trackType: "video" | "audio" | "image" | "text" | "graphics" | "subtitle";
         if (mediaItem.type === "video") {
           trackType = "video";
         } else if (mediaItem.type === "audio") {
           trackType = "audio";
         } else if (mediaItem.type === "image") {
           trackType = "image";
+        } else if (mediaItem.type === "srt") {
+          trackType = "subtitle";
         } else {
           trackType = "video";
         }
@@ -2924,6 +3013,12 @@ export const useProjectStore = create<ProjectState>()(
         }
 
         const projectCopy = structuredClone(updatedProject);
+        const clipType =
+          mediaItem.type === "audio"
+            ? "audio"
+            : mediaItem.type === "image"
+              ? "image"
+              : (mediaItem.type === "srt" ? "video" : "video");
         const action: Action = {
           type: "clip/add",
           id: uuidv4(),
@@ -2932,12 +3027,7 @@ export const useProjectStore = create<ProjectState>()(
             trackId: newTrack.id,
             mediaId,
             startTime: clipStartTime,
-            type:
-              mediaItem.type === "audio"
-                ? "audio"
-                : mediaItem.type === "image"
-                  ? "image"
-                  : "video",
+            type: clipType,
           },
         };
 
@@ -2949,6 +3039,31 @@ export const useProjectStore = create<ProjectState>()(
             modifiedAt: Date.now(),
           };
           set({ project: finalProject });
+
+          // For SRT files, parse the subtitle content and add subtitle entries
+          if (mediaItem.type === "srt" && mediaItem.blob) {
+            try {
+              const srtText = await mediaItem.blob.text();
+              const { subtitles, errors: parseErrors } = parseSRT(srtText);
+
+              if (parseErrors.length > 0) {
+                console.warn(
+                  "[ProjectStore] SRT parse warnings:",
+                  parseErrors.slice(0, 3),
+                );
+              }
+
+              const { addSubtitle } = get();
+              for (const subtitle of subtitles) {
+                await addSubtitle(subtitle);
+              }
+            } catch (err) {
+              console.error(
+                "[ProjectStore] Failed to parse SRT content:",
+                err,
+              );
+            }
+          }
         }
         return result;
       },
