@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import type { Clip, Track, TransitionType } from "@openreel/core";
+import { getMediaStatus, MediaStatus } from "@openreel/core";
 import { getEffectiveThumbnailUrl } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
@@ -12,8 +13,9 @@ import { getTransitionBridge } from "../../../bridges/transition-bridge";
 import type { VideoEffectType } from "../../../bridges/effects-bridge";
 import {
   EFFECT_DRAG_MIME,
-  TRANSITION_DRAG_MIME,
+  TRANSITION_DRAG_MIME
 } from "../panels/EffectsTransitionsPanel";
+import { AlertTriangle } from "lucide-react";
 
 interface ClipComponentProps {
   clip: Clip;
@@ -138,7 +140,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   // metadata/subtitle tracks without real media don't render any media UI
   const mediaType = mediaItem?.type ?? (isAudio ? "audio" : isImage ? "image" : (isMetadata || isSubtitle) ? "none" : "video");
   const clipStyle = getClipStyle(track.type);
-  const isMissingMedia = !!mediaItem?.isPlaceholder;
+  const isMissingMedia = mediaItem ? getMediaStatus(mediaItem) !== MediaStatus.OK : false;
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
