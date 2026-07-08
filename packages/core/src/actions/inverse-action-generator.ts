@@ -630,10 +630,7 @@ export class InverseActionGenerator {
       blob: item.blob,
       metadata: { ...item.metadata },
       thumbnailUrl: item.thumbnailUrl,
-      waveformData: item.waveformData
-        ? new Float32Array(item.waveformData)
-        : null,
-    };
+      };
   }
 
   private cloneTrack(track: Track): Record<string, unknown> {

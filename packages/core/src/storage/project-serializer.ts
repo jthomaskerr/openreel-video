@@ -251,7 +251,6 @@ export class ProjectSerializer {
         fileSize: sourceFile?.size ?? 0,
       },
       thumbnailUrl: null,
-      waveformData: null,
       sourceFile,
     };
   }
@@ -374,8 +373,7 @@ export class ProjectSerializer {
       (item) => ({
         ...item,
         blob: null,
-        fileHandle: null,
-        waveformData: null,
+        fileHandle: null
       }),
     );
 

@@ -209,22 +209,6 @@ export class MediaImportService {
           }
         }
       }
-      let waveformData: WaveformData | null = null;
-      if (opts.generateWaveform && metadata.hasAudio && !opts.quickMode) {
-        try {
-          waveformData = await this.mediaEngine.generateWaveform(
-            file,
-            opts.waveformSamplesPerSecond,
-          );
-        } catch (error) {
-          warnings.push(
-            `Waveform generation failed: ${
-              error instanceof Error ? error.message : "Unknown error"
-            }`,
-          );
-        }
-      }
-
       const processedMedia: ProcessedMedia = {
         id: uuidv4(),
         name: file.name,
@@ -232,7 +216,6 @@ export class MediaImportService {
         blob: file,
         metadata,
         thumbnails,
-        waveformData,
       };
 
       return {
@@ -344,18 +327,6 @@ export class MediaImportService {
       }
     }
 
-    let waveformData: WaveformData | null = null;
-    if (opts.generateWaveform && metadata.hasAudio) {
-      try {
-        waveformData = await this.mediaEngine.generateWaveform(
-          compatibleFile,
-          opts.waveformSamplesPerSecond,
-        );
-      } catch {
-        // Ignore waveform errors in fallback
-      }
-    }
-
     const processedMedia: ProcessedMedia = {
       id: uuidv4(),
       name: file.name,
@@ -363,7 +334,6 @@ export class MediaImportService {
       blob: compatibleFile,
       metadata,
       thumbnails,
-      waveformData,
     };
 
     return {
@@ -421,7 +391,6 @@ export class MediaImportService {
       blob: processedMedia.blob,
       metadata,
       thumbnailUrl: thumbnailUrl || null,
-      waveformData: processedMedia.waveformData?.peaks || null,
     };
   }
 

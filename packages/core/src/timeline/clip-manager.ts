@@ -667,7 +667,6 @@ export class ClipManager {
               fileSize: 1024,
             },
             thumbnailUrl: null,
-            waveformData: null,
           },
         ],
       },

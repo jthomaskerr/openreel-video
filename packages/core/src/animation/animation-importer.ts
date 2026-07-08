@@ -164,7 +164,6 @@ export class AnimationImporter {
             fileHandle: null,
             blob: null,
             thumbnailUrl: imageAsset.url,
-            waveformData: null,
             metadata: createDefaultMediaMetadata("image", {
               width: imageAsset.width || 1920,
               height: imageAsset.height || 1080,
@@ -182,7 +181,6 @@ export class AnimationImporter {
             fileHandle: null,
             blob: null,
             thumbnailUrl: videoAsset.url,
-            waveformData: null,
             metadata: createDefaultMediaMetadata("video", {
               duration: videoAsset.duration || 5,
             }),
@@ -199,7 +197,6 @@ export class AnimationImporter {
             fileHandle: null,
             blob: null,
             thumbnailUrl: null,
-            waveformData: null,
             metadata: createDefaultMediaMetadata("audio", {
               duration: audioAsset.duration || 5,
             }),

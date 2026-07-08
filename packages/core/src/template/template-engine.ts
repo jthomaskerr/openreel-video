@@ -1339,7 +1339,6 @@ export class TemplateEngine {
             fileSize: replacement.mediaBlob.size,
           },
           thumbnailUrl: null,
-          waveformData: null,
         });
       }
     }
@@ -1818,7 +1817,6 @@ export class TemplateEngine {
             fileSize: blob.size,
           },
           thumbnailUrl: null,
-          waveformData: null,
         });
       }
     }
