@@ -54,6 +54,9 @@ const DropdownMenuSubContent = React.forwardRef<
 ))
 DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName
 
+// Re-export the styled DropdownMenuContent that uses a simplified
+// Floating UI setup (offset-only, no size/shift/flip) to avoid
+// NaN available-width in the size middleware.
 const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>

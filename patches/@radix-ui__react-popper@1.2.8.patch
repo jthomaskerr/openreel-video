@@ -1,0 +1,21 @@
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 9f84984eab84e32d20d6c052217da0e3b8374b40..2c0bb79a46cf360c1aa716a3491d81db1b69dd18 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -110,13 +110,13 @@ var PopperContent = React.forwardRef(
+           ...detectOverflowOptions
+         }),
+         avoidCollisions && flip({ ...detectOverflowOptions }),
+-        size({
++        avoidCollisions && size({
+           ...detectOverflowOptions,
+           apply: ({ elements, rects, availableWidth, availableHeight }) => {
+             const { width: anchorWidth, height: anchorHeight } = rects.reference;
+             const contentStyle = elements.floating.style;
+-            contentStyle.setProperty("--radix-popper-available-width", `${availableWidth}px`);
+-            contentStyle.setProperty("--radix-popper-available-height", `${availableHeight}px`);
++            contentStyle.setProperty("--radix-popper-available-width", `${Number.isFinite(availableWidth) ? availableWidth : 0}px`);
++            contentStyle.setProperty("--radix-popper-available-height", `${Number.isFinite(availableHeight) ? availableHeight : 0}px`);
+             contentStyle.setProperty("--radix-popper-anchor-width", `${anchorWidth}px`);
+             contentStyle.setProperty("--radix-popper-anchor-height", `${anchorHeight}px`);
+           }

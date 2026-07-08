@@ -1,0 +1,17 @@
+diff --git a/dist/floating-ui.core.mjs b/dist/floating-ui.core.mjs
+index 14649462c7650bbe65cc715f4ad6a3f71b1ca9b2..3da0059b53c9996ad1faa11d42112ea47bd226b0 100644
+--- a/dist/floating-ui.core.mjs
++++ b/dist/floating-ui.core.mjs
+@@ -1028,6 +1028,12 @@ const size = function (options) {
+           availableHeight = height - 2 * (yMin !== 0 || yMax !== 0 ? yMin + yMax : max(overflow.top, overflow.bottom));
+         }
+       }
++      // Guard against NaN from detectOverflow in environments where
++      // the floating element's measurements are invalid (e.g., off-screen
++      // with min-width: max-content).  NaN cascades into CSS custom
++      // properties and triggers infinite dimension-change resets.
++      if (!Number.isFinite(availableWidth)) availableWidth = 0;
++      if (!Number.isFinite(availableHeight)) availableHeight = 0;
+       await apply({
+         ...state,
+         availableWidth,
