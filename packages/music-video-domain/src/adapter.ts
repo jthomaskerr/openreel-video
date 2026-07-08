@@ -35,7 +35,6 @@ export interface NeuralFramesMediaSpec {
   };
   thumbnailUrl: string | null;
   originalUrl?: string;
-  waveformData: null;
   assetGroupId?: string;
   group?: string;
   tags?: string[];
@@ -339,7 +338,6 @@ function buildGeneratedMediaSpec(result: NeuralFramesImportResult, asset: Genera
     blob: null,
     metadata: mediaMetadata(),
     thumbnailUrl: asset.outputPath ?? null,
-    waveformData: null,
 
     assetGroupId: asset.id,
     group: "Generated",
@@ -381,7 +379,6 @@ function buildGeneratedImageMediaSpec(input: {
     blob: null,
     metadata: mediaMetadata(),
     thumbnailUrl: input.thumbnailUrl,
-    waveformData: null,
     group: input.group,
     tags: input.tags,
     generationMeta: { ...input.generationMeta, jobId: input.id, status: "realized" },
@@ -410,7 +407,6 @@ function buildReferenceMediaSpec(input: {
     blob: null,
     metadata: mediaMetadata(),
     thumbnailUrl: input.thumbnailUrl,
-    waveformData: null,
     group: "Reference Images",
     tags: input.tags,
     generationMeta: {
@@ -450,7 +446,6 @@ function buildAudioMediaSpec(
     },
     thumbnailUrl: thumbnailUrl ?? null,
     originalUrl,
-    waveformData: null,
     group: "Imported Audio",
     tags: ["audio", "neuralframes"],
     sourceFile: { name, size: 0, lastModified: 0 },
@@ -492,7 +487,6 @@ function buildUnrealizedSceneMediaSpec(
     blob: null,
     metadata: mediaMetadata(),
     thumbnailUrl,
-    waveformData: null,
     assetGroupId: id,
     group: "Neural Frames Scenes",
     tags: ["scene", "neuralframes", "unrealized"],
@@ -525,7 +519,6 @@ function buildCharacterMediaSpec(
     blob: null,
     metadata: mediaMetadata(),
     thumbnailUrl: thumbnailUrl ?? null,
-    waveformData: null,
     group: "Characters",
     tags: ["character", "neuralframes"],
     generationMeta: { ...generationMeta, jobId: id },
