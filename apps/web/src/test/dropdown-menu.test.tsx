@@ -80,10 +80,12 @@ describe("DropdownMenuContent", () => {
     );
   });
 
-  it("renders via Radix Popper (data-radix-popper-content-wrapper exists)", () => {
+  it("renders via Radix Popper without the offscreen fallback wrapper styles", () => {
     renderOpenDropdown();
     const menu = screen.getByRole("menu");
-    const wrapper = menu.closest("[data-radix-popper-content-wrapper]");
+    const wrapper = menu.closest("[data-radix-popper-content-wrapper]") as HTMLElement | null;
     expect(wrapper).toBeInTheDocument();
+    expect(wrapper?.style.transform).not.toContain("-200%");
+    expect(wrapper?.style.minWidth).not.toBe("max-content");
   });
 });

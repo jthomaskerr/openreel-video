@@ -1,5 +1,5 @@
 diff --git a/dist/index.js b/dist/index.js
-index 5cb1fd007d32021ad950d961dd4a0868576a2c0d..e4b6d59039ccc2fbcf1a52a6afdc2b3e2e48608e 100644
+index 5cb1fd007d32021ad950d961dd4a0868576a2c0d..550913769dffcb40080dfd11206f7e10a1aa41e3 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -97,7 +97,7 @@ var PopperContent = React.forwardRef(
@@ -22,8 +22,21 @@ index 5cb1fd007d32021ad950d961dd4a0868576a2c0d..e4b6d59039ccc2fbcf1a52a6afdc2b3e
              contentStyle.setProperty("--radix-popper-anchor-width", `${anchorWidth}px`);
              contentStyle.setProperty("--radix-popper-anchor-height", `${anchorHeight}px`);
            }
+@@ -182,9 +182,9 @@ var PopperContent = React.forwardRef(
+         "data-radix-popper-content-wrapper": "",
+         style: {
+           ...floatingStyles,
+-          transform: isPositioned ? floatingStyles.transform : "translate(0, -200%)",
+-          // keep off the page when measuring
+-          minWidth: "max-content",
++          transform: floatingStyles.transform,
++          // Avoid off-screen/max-content measurement loops that can produce NaN
++          minWidth: 0,
+           zIndex: contentZIndex,
+           ["--radix-popper-transform-origin"]: [
+             middlewareData.transformOrigin?.x,
 diff --git a/dist/index.mjs b/dist/index.mjs
-index 9f84984eab84e32d20d6c052217da0e3b8374b40..962c370e04ae8baa0e700f4ab516f3042adbe72d 100644
+index 9f84984eab84e32d20d6c052217da0e3b8374b40..61c93f49dfedaaede884d65a20a43ee8ad4b44a7 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
 @@ -62,7 +62,7 @@ var PopperContent = React.forwardRef(
@@ -52,3 +65,16 @@ index 9f84984eab84e32d20d6c052217da0e3b8374b40..962c370e04ae8baa0e700f4ab516f304
              contentStyle.setProperty("--radix-popper-anchor-width", `${anchorWidth}px`);
              contentStyle.setProperty("--radix-popper-anchor-height", `${anchorHeight}px`);
            }
+@@ -147,9 +147,9 @@ var PopperContent = React.forwardRef(
+         "data-radix-popper-content-wrapper": "",
+         style: {
+           ...floatingStyles,
+-          transform: isPositioned ? floatingStyles.transform : "translate(0, -200%)",
+-          // keep off the page when measuring
+-          minWidth: "max-content",
++          transform: floatingStyles.transform,
++          // Avoid off-screen/max-content measurement loops that can produce NaN
++          minWidth: 0,
+           zIndex: contentZIndex,
+           ["--radix-popper-transform-origin"]: [
+             middlewareData.transformOrigin?.x,
