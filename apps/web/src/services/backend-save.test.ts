@@ -83,6 +83,49 @@ describe("backendSaveService.load", () => {
   });
 });
 
+describe("backendSaveService.save", () => {
+  it("does not PUT client-only UUID project ids to the backend", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await backendSaveService.save({
+      ...makeProject(),
+      id: "14aec9eb-469f-4db6-9652-00dee0d243fc",
+      name: "Vintage Tokyo",
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("PUTs slug project ids to the backend", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await backendSaveService.save({ ...makeProject(), id: "vintage-tokyo" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:4041/api/projects/vintage-tokyo",
+      expect.objectContaining({ method: "PUT" }),
+    );
+  });
+});
+
+describe("backendSaveService.uploadMediaAsync", () => {
+  it("does not upload media for client-only UUID project ids", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    backendSaveService.uploadMediaAsync(
+      "14aec9eb-469f-4db6-9652-00dee0d243fc",
+      "media-1",
+      new Blob(["clip"]),
+      "clip.mp4",
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
 describe("backendSaveService.create", () => {
   it("creates a project on the backend and returns the orchestrator-assigned project", async () => {
     const returned: Project = {

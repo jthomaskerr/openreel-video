@@ -43,6 +43,7 @@ import {
   type AudioExportSettings,
   type ExportResult,
   type DeviceProfile,
+  type Project,
   type TimeEstimate,
 } from "@openreel/core";
 import { ExportDialog } from "./ExportDialog";
@@ -199,11 +200,11 @@ export const Toolbar: React.FC = () => {
           toast.error("Failed to create project", err.error || "Unknown backend error");
           return;
         }
-        const savedProject = await response.json();
+        const savedProject = (await response.json()) as Project;
 
         // Load into the store and update the URL so the editor is scoped to the new project
         useProjectStore.getState().loadProject(savedProject);
-        navigate(`editor?projectId=${savedProject.id}`);
+        navigate("editor", { projectId: savedProject.id });
         toast.success("Project opened", `Loaded "${savedProject.name}"`);
       } catch (err) {
         toast.error(

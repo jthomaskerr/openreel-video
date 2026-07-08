@@ -227,15 +227,15 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         return;
       }
 
-      // Be tolerant of projects already loaded in the browser with a legacy
-      // client UUID. Save them under the canonical slug worktree instead of
-      // rejecting the autosave, so edits land in ~/openreel-projects/<slug>.
-      const canonicalId = canonicalProjectId(incoming);
-      const projectToSave = canonicalId === incoming.id ? incoming : { ...incoming, id: canonicalId };
-      const prev = await store.loadProject(canonicalId);
-      const saved = await store.saveProject(projectToSave);
-      gitStore.commitAsync(canonicalId, generateCommitMessage(prev, saved));
-      res.json({ saved: true, projectId: saved.id });
+      if (isUuid(incoming.id)) {
+        res.status(400).json({ error: "UUID project ids are not allowed — use the slug assigned by POST /api/projects" });
+        return;
+      }
+
+      const prev = await store.loadProject(req.params.id);
+      const saved = await store.saveProject(incoming);
+      gitStore.commitAsync(req.params.id, generateCommitMessage(prev, saved));
+      res.json({ saved: true });
     } catch (err) {
       console.error("[PUT /api/projects/:id] save failed:", err);
       res.status(500).json({ error: "Failed to save project", detail: String(err) });

@@ -79,19 +79,21 @@ test("project import canonicalizes client UUID ids to slug worktree ids", async 
   });
 });
 
-test("UUID PUT autosaves are accepted and written to the canonical slug project", async () => {
-  const savedProjects: Project[] = [];
-  const committedProjectIds: string[] = [];
+test("UUID PUT autosaves are rejected before any project worktree is touched", async () => {
+  let saveCalls = 0;
+  let commitCalls = 0;
   const store: Partial<ProjectStore> = {
-    loadProject: async () => null,
+    loadProject: async () => {
+      throw new Error("loadProject should not be called for UUID project ids");
+    },
     saveProject: async (project: Project) => {
-      savedProjects.push(project);
-      return { ...project, modifiedAt: 999 };
+      saveCalls += 1;
+      return project;
     },
   };
   const gitStore: Partial<GitStore> = {
-    commitAsync: (projectId: string) => {
-      committedProjectIds.push(projectId);
+    commitAsync: () => {
+      commitCalls += 1;
     },
   };
 
@@ -103,9 +105,9 @@ test("UUID PUT autosaves are accepted and written to the canonical slug project"
       body: JSON.stringify(projectFixture(uuid, "Vintage Tokyo")),
     });
 
-    assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { saved: true, projectId: "vintage-tokyo" });
-    assert.equal(savedProjects.at(-1)?.id, "vintage-tokyo");
-    assert.equal(committedProjectIds.at(-1), "vintage-tokyo");
+    assert.equal(response.status, 400);
+    assert.match((await response.json()).error, /UUID project ids are not allowed/);
+    assert.equal(saveCalls, 0);
+    assert.equal(commitCalls, 0);
   });
 });

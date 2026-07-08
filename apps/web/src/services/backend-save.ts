@@ -11,6 +11,12 @@ interface ProjectSummary {
 const BASE_URL: string =
   (import.meta.env["VITE_ORCHESTRATOR_URL"] as string | undefined) ?? "http://localhost:4041";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isClientOnlyProjectId(projectId: string): boolean {
+  return UUID_RE.test(projectId);
+}
+
 /** Strip non-serialisable / engine-only fields before sending to backend. */
 function sanitize(project: Project): object {
   return {
@@ -107,6 +113,12 @@ class BackendSaveService {
    * engine-only fields are stripped before sending.
    */
   async save(project: Project): Promise<void> {
+    if (isClientOnlyProjectId(project.id)) {
+      // Local/offline projects are born with UUIDs. Do not ever send those to
+      // the backend git store; wait until create/import returns the slug id.
+      return;
+    }
+
     const res = await fetch(`${BASE_URL}/api/projects/${project.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -129,6 +141,7 @@ class BackendSaveService {
    * already-uploaded mediaIds are skipped. Fire-and-forget.
    */
   uploadMediaAsync(projectId: string, mediaId: string, blob: Blob, filename: string): void {
+    if (isClientOnlyProjectId(projectId)) return;
     if (this.uploadedIds.has(mediaId)) return;
     this.uploadedIds.add(mediaId);
 
