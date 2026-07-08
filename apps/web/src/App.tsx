@@ -10,6 +10,7 @@ import { useUIStore } from "./stores/ui-store";
 import { useProjectStore } from "./stores/project-store";
 import { useRouter } from "./hooks/use-router";
 import { useProjectRecovery } from "./hooks/useProjectRecovery";
+import { reportRuntimeError } from "./stores/notification-store";
 import { useKieAIPoller } from "./hooks/useKieAIPoller";
 import { useGenerationJobPoller } from "./hooks/useGenerationJobPoller";
 import { SOCIAL_MEDIA_PRESETS, type SocialMediaCategory } from "@openreel/core";
@@ -54,6 +55,22 @@ function App() {
 
   useKieAIPoller();
   useGenerationJobPoller();
+
+  useEffect(() => {
+    const handleError = (event: ErrorEvent) => {
+      reportRuntimeError("Runtime error", event.error ?? event.message, "window.error");
+    };
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      reportRuntimeError("Unhandled promise rejection", event.reason, "window.unhandledrejection");
+    };
+
+    window.addEventListener("error", handleError);
+    window.addEventListener("unhandledrejection", handleUnhandledRejection);
+    return () => {
+      window.removeEventListener("error", handleError);
+      window.removeEventListener("unhandledrejection", handleUnhandledRejection);
+    };
+  }, []);
 
   const newProjectPreset = useMemo<SocialMediaCategory | undefined>(() => {
     if (route !== "new") return undefined;
