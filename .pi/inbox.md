@@ -22,7 +22,7 @@
 
 - [x] **#11** there are projects in the recent projects list in the frontend that do not exist in the backend git repo. The backend git repo (not the server, the repo itself) must be the single source of truth for the list of projects. And "recent projects" must be renamed to "Projects" ➕ 2026-07-08 🔗 Commit ✅ 2026-07-08 ^item-11
 
-- [ ] **#12** i have made many edits to the VintageTokyo project but none have appeared in the project git repo at ~/openreel-projects ➕ 2026-07-08 🔄 75759-9a9e99d8 ^item-12
+- [ ] **#12** i have made many edits to the VintageTokyo project but none have appeared in the project git repo at ~/openreel-projects ➕ 2026-07-08 ^item-12
 
 ## Archived
 
