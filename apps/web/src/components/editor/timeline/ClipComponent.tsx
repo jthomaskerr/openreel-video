@@ -5,7 +5,7 @@ import { getEffectiveThumbnailUrl } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
-import { calculateSnap, generateWaveformPath, getClipStyle, getMetadataBadge } from "./utils";
+import { calculateSnap, getClipStyle, getMetadataBadge } from "./utils";
 import { ClipContextMenu } from "./ClipContextMenu";
 import { ContextMenu, ContextMenuTrigger } from "@openreel/ui";
 import { toast } from "../../../stores/notification-store";
@@ -782,32 +782,14 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
               <MetadataSummary clip={clip} />
             )}
 
-            {/* Waveform — time-accurate: sliced to clip.inPoint … inPoint+duration */}
-            {(mediaType === "audio" || mediaType === "video") && mediaItem?.waveformData && (
-              <div className={`absolute inset-x-0 px-1 ${
+            {/* Waveform display — pending implementation */}
+            {(mediaType === "audio" || mediaType === "video") && (
+              <div className={`absolute inset-x-0 px-1 flex items-center justify-center ${
                 mediaType === "audio"
-                  ? "inset-y-0 flex items-center opacity-50"
-                  : "bottom-0 h-1/3 flex items-end opacity-30"
+                  ? "inset-y-0 opacity-40"
+                  : "bottom-0 h-1/3 opacity-20"
               }`}>
-                <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 40">
-                  <path
-                    d={generateWaveformPath(mediaItem.waveformData, 100, clip.inPoint, clip.duration)}
-                    stroke="currentColor"
-                    className={mediaType === "audio" ? "text-blue-400" : "text-green-300"}
-                    fill="none"
-                    strokeWidth="1"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                </svg>
-              </div>
-            )}
-
-            {/* Audio: placeholder waveform when no data yet */}
-            {mediaType === "audio" && !mediaItem?.waveformData && (
-              <div className="absolute inset-x-0 inset-y-0 px-1 flex items-center opacity-30">
-                <svg className="w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 40">
-                  <path d="M0,20 Q10,10 20,20 T40,20 T60,20 T80,20 T100,20" stroke="currentColor" className="text-blue-400" fill="none" vectorEffect="non-scaling-stroke" />
-                </svg>
+                <span className="text-[8px] text-text-muted font-mono">waveform pending</span>
               </div>
             )}
 

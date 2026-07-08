@@ -1804,7 +1804,6 @@ export const useProjectStore = create<ProjectState>()(
                 fileSize: file.size,
               },
               thumbnailUrl: null,
-              waveformData: null,
               sourceFile: {
                 name: file.name,
                 size: file.size,
@@ -1968,7 +1967,6 @@ export const useProjectStore = create<ProjectState>()(
               fileSize: file.size,
             },
             thumbnailUrl,
-            waveformData: processedMedia.waveformData?.peaks || null,
             filmstripThumbnails:
               filmstripThumbnails.length > 0 ? filmstripThumbnails : undefined,
             sourceFile: { name: file.name, size: file.size, lastModified: file.lastModified },
@@ -2188,7 +2186,6 @@ export const useProjectStore = create<ProjectState>()(
               fileSize: file.size,
             },
             thumbnailUrl,
-            waveformData: processedMedia.waveformData?.peaks || null,
             filmstripThumbnails:
               filmstripThumbnails.length > 0 ? filmstripThumbnails : undefined,
             // Preserve user-editable metadata — replace only the file, not the asset identity
@@ -2570,7 +2567,6 @@ export const useProjectStore = create<ProjectState>()(
               fileSize: file.size,
             },
             thumbnailUrl,
-            waveformData: processedMedia.waveformData?.peaks || null,
             filmstripThumbnails:
               filmstripThumbnails.length > 0 ? filmstripThumbnails : undefined,
             title: sourceItem.title,
@@ -2746,7 +2742,6 @@ export const useProjectStore = create<ProjectState>()(
             fileSize: file.size,
           },
           thumbnailUrl: thumbnailUrl ?? previousItem?.thumbnailUrl ?? null,
-          waveformData: previousItem?.waveformData ?? null,
           // Preserve user-editable metadata — replace only the file, not the asset identity
           title: previousItem?.title,
           description: previousItem?.description,

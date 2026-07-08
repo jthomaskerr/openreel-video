@@ -465,16 +465,10 @@ const MediaThumbnail: React.FC<{
           </div>
         )}
 
-        {/* Audio waveform placeholder */}
+        {/* Audio waveform placeholder — pending implementation */}
         {item.type === "audio" && (
-          <div className="absolute top-1/2 left-0 right-0 h-4 flex items-center gap-px px-2 -translate-y-1/2">
-            {[...Array(10)].map((_, i) => (
-              <div
-                key={i}
-                className="flex-1 bg-primary/30 rounded-full"
-                style={{ height: `${Math.random() * 100}%` }}
-              />
-            ))}
+          <div className="absolute top-1/2 left-0 right-0 flex items-center justify-center px-2 -translate-y-1/2">
+            <span className="text-[7px] text-text-muted font-mono">waveform pending</span>
           </div>
         )}
 

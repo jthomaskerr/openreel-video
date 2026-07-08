@@ -95,7 +95,6 @@ export function createMetadataMedia(
     blob,
     metadata,
     thumbnailUrl: options.thumbnailUrl ?? null,
-    waveformData: null,
     group: options.group,
     tags: options.tags,
     generationMeta: options.generationMeta,

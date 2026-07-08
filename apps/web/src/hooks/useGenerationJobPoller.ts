@@ -202,7 +202,6 @@ function createVersionMediaItem(
       fileSize: blob.size,
     },
     thumbnailUrl: type === "image" ? outputUrl : sourceMedia.thumbnailUrl,
-    waveformData: null,
     originalUrl: outputUrl,
     assetGroupId: sourceMedia.assetGroupId ?? sourceMedia.id,
     isCurrent: true,

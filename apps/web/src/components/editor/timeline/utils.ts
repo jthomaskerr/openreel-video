@@ -132,36 +132,6 @@ export function getMetadataBadge(kind: string | undefined) {
   };
 }
 
-/**
- * Generate an SVG path for a waveform, selecting only the samples that
- * correspond to [inPoint, inPoint + duration] in the source media.
- * waveformData is stored at `samplesPerSecond` (default 100).
- */
-export const generateWaveformPath = (
-  waveformData: Float32Array | number[],
-  svgWidth: number,
-  inPoint: number = 0,
-  duration: number = -1,
-  samplesPerSecond: number = 100,
-): string => {
-  if (!waveformData || waveformData.length === 0) return "M0,20 L100,20";
-
-  const startIdx = Math.max(0, Math.round(inPoint * samplesPerSecond));
-  const endIdx = duration > 0
-    ? Math.min(waveformData.length, Math.round((inPoint + duration) * samplesPerSecond))
-    : waveformData.length;
-  const sliceLen = Math.max(1, endIdx - startIdx);
-
-  const points: string[] = [];
-  for (let x = 0; x < svgWidth; x++) {
-    const sampleIdx = startIdx + Math.min(Math.floor((x / svgWidth) * sliceLen), sliceLen - 1);
-    const value = Math.abs((waveformData[sampleIdx] as number) || 0);
-    const y = 20 - value * 18;
-    points.push(`${x === 0 ? "M" : "L"}${x},${y}`);
-  }
-  return points.join(" ");
-};
-
 export const formatTimecode = (
   timeInSeconds: number,
   frameRate: number = 30,

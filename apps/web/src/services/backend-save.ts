@@ -22,7 +22,6 @@ function sanitize(project: Project): object {
         blob: undefined,
         fileHandle: undefined,
         remoteUrl: undefined,
-        waveformData: undefined,
         filmstripThumbnails: undefined,
       })),
     },
