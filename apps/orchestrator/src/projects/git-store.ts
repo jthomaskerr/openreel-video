@@ -2,7 +2,8 @@ import { execFile } from "node:child_process";
 import type { ExecException } from "node:child_process";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, mkdtemp, rename, rm, cp } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Project } from "@openreel/core";
 import { assertValidProjectId } from "./storage-validation";
@@ -48,6 +49,66 @@ export class GitStore {
 
   private async git(args: string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
     return execFileAsync("git", args, { cwd });
+  }
+
+  private async branchExists(branch: string): Promise<boolean> {
+    const { stdout } = await this.git(["branch", "--list", branch], this.repoDir);
+    return stdout.trim().length > 0;
+  }
+
+  private async ensureWorktreeAttributes(projectId: string): Promise<void> {
+    assertValidProjectId(projectId);
+    const attributesPath = join(this.worktreePath(projectId), ".gitattributes");
+    let attributes = "";
+    if (existsSync(attributesPath)) {
+      try {
+        attributes = await readFile(attributesPath, "utf-8");
+      } catch {
+        attributes = "";
+      }
+    }
+
+    const lfsRule = "media/** filter=lfs diff=lfs merge=lfs -text";
+    if (attributes.split(/\r?\n/).includes(lfsRule)) return;
+
+    const repairedAttributes = attributes.trim().length > 0
+      ? `${attributes.trimEnd()}\n${lfsRule}\n`
+      : GITATTRIBUTES;
+    await writeFile(attributesPath, repairedAttributes, "utf-8");
+  }
+
+  private async addWorktree(projectId: string, wtPath: string): Promise<void> {
+    assertValidProjectId(projectId);
+    const branch = `project/${projectId}`;
+    if (await this.branchExists(branch)) {
+      await this.git(["worktree", "add", wtPath, branch], this.repoDir);
+      return;
+    }
+    await this.git(["worktree", "add", "-b", branch, wtPath, "HEAD"], this.repoDir);
+  }
+
+  private async promoteExistingDirectoryToWorktree(projectId: string, wtPath: string): Promise<void> {
+    assertValidProjectId(projectId);
+    const tempParent = await mkdtemp(join(tmpdir(), "openreel-worktree-promote-"));
+    const tempContents = join(tempParent, projectId);
+
+    await rename(wtPath, tempContents);
+    try {
+      await this.addWorktree(projectId, wtPath);
+      await cp(tempContents, wtPath, {
+        recursive: true,
+        force: true,
+        filter: (source) => !source.endsWith("/.git") && !source.endsWith("\\.git"),
+      });
+    } catch (err) {
+      await rm(wtPath, { recursive: true, force: true }).catch(() => undefined);
+      if (!existsSync(wtPath)) {
+        await rename(tempContents, wtPath).catch(() => undefined);
+      }
+      throw err;
+    } finally {
+      await rm(tempParent, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 
   // ── Shared repo ──────────────────────────────────────────────────────────
@@ -113,14 +174,22 @@ export class GitStore {
     await this.ensureSharedRepo();
 
     const wtPath = this.worktreePath(projectId);
-    if (existsSync(join(wtPath, ".git"))) return;
+    if (existsSync(join(wtPath, ".git"))) {
+      await mkdir(join(wtPath, "media"), { recursive: true });
+      await this.ensureWorktreeAttributes(projectId);
+      return;
+    }
 
-    // Create worktree without checking out files, then make a new branch
-    await this.git(["worktree", "add", wtPath, "--no-checkout"], this.repoDir);
-    await this.git(["checkout", "-b", `project/${projectId}`], wtPath);
+    if (existsSync(wtPath)) {
+      await this.promoteExistingDirectoryToWorktree(projectId, wtPath);
+    } else {
+      await this.addWorktree(projectId, wtPath);
+    }
 
-    // Pre-create the media directory so multer doesn't race git
+    // Pre-create the media directory so multer doesn't race git and ensure
+    // media files remain tracked by Git LFS on every project branch/worktree.
     await mkdir(join(wtPath, "media"), { recursive: true });
+    await this.ensureWorktreeAttributes(projectId);
   }
 
   /** Remove a project's worktree and branch. */
@@ -147,12 +216,17 @@ export class GitStore {
 
   // ── Commits ──────────────────────────────────────────────────────────────
 
+  /** Stage all changes and commit in the worktree. */
+  async commit(projectId: string, message: string): Promise<void> {
+    assertValidProjectId(projectId);
+    await this.#withLock(projectId, () => this.#commitInner(projectId, message));
+  }
+
   /**
    * Stage all changes and commit in the worktree. Fire-and-forget — never throws to caller.
    */
   commitAsync(projectId: string, message: string): void {
-    assertValidProjectId(projectId);
-    this.#withLock(projectId, () => this.#commitInner(projectId, message)).catch((err) =>
+    this.commit(projectId, message).catch((err) =>
       console.error(`[GitStore] commit failed for ${projectId}:`, err),
     );
   }
@@ -164,6 +238,8 @@ export class GitStore {
     // ensureWorktree is idempotent — only initialises if needed
     if (!existsSync(join(wtPath, ".git"))) {
       await this.ensureWorktree(projectId);
+    } else {
+      await this.ensureWorktreeAttributes(projectId);
     }
 
     await this.git(["add", "-A"], wtPath);

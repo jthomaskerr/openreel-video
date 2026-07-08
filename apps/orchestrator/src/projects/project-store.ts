@@ -241,8 +241,12 @@ export class ProjectStore {
         // branch rename is best-effort; old name may not exist
       }
 
-      // Write updated project.json with new id in the migrated directory.
+      // Write updated project.json with new id, then promote the migrated
+      // directory into a real project worktree before any later save/media
+      // commit tries to operate on it.
       await writeFile(join(newDir, "project.json"), JSON.stringify(project, null, 2), "utf-8");
+      await this.gitStore.ensureWorktree(newSlug);
+      await this.gitStore.commit(newSlug, "chore: migrate legacy project worktree");
     };
 
     const entries = await readdir(repoDir, { withFileTypes: true });
