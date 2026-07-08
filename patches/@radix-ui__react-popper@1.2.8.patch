@@ -1,16 +1,7 @@
 diff --git a/dist/index.js b/dist/index.js
-index 5cb1fd007d32021ad950d961dd4a0868576a2c0d..550913769dffcb40080dfd11206f7e10a1aa41e3 100644
+index 5cb1fd007d32021ad950d961dd4a0868576a2c0d..bd2845a17586c31dcb7d5cf4213323f20ded51af 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -97,7 +97,7 @@ var PopperContent = React.forwardRef(
-       align = "center",
-       alignOffset = 0,
-       arrowPadding = 0,
--      avoidCollisions = true,
-+      avoidCollisions = false,
-       collisionBoundary = [],
-       collisionPadding: collisionPaddingProp = 0,
-       sticky = "partial",
 @@ -150,8 +150,8 @@ var PopperContent = React.forwardRef(
            apply: ({ elements, rects, availableWidth, availableHeight }) => {
              const { width: anchorWidth, height: anchorHeight } = rects.reference;
@@ -36,24 +27,15 @@ index 5cb1fd007d32021ad950d961dd4a0868576a2c0d..550913769dffcb40080dfd11206f7e10
            ["--radix-popper-transform-origin"]: [
              middlewareData.transformOrigin?.x,
 diff --git a/dist/index.mjs b/dist/index.mjs
-index 9f84984eab84e32d20d6c052217da0e3b8374b40..61c93f49dfedaaede884d65a20a43ee8ad4b44a7 100644
+index 9f84984eab84e32d20d6c052217da0e3b8374b40..2693c55e8326c38f289fe8521e6e17ba1b14915d 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
-@@ -62,7 +62,7 @@ var PopperContent = React.forwardRef(
-       align = "center",
-       alignOffset = 0,
-       arrowPadding = 0,
--      avoidCollisions = true,
-+      avoidCollisions = false,
-       collisionBoundary = [],
-       collisionPadding: collisionPaddingProp = 0,
-       sticky = "partial",
 @@ -110,13 +110,13 @@ var PopperContent = React.forwardRef(
            ...detectOverflowOptions
          }),
          avoidCollisions && flip({ ...detectOverflowOptions }),
 -        size({
-+        avoidCollisions && size({
++        false && size({
            ...detectOverflowOptions,
            apply: ({ elements, rects, availableWidth, availableHeight }) => {
              const { width: anchorWidth, height: anchorHeight } = rects.reference;

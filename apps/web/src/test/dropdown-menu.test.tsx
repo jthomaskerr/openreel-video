@@ -7,8 +7,8 @@
  *
  * The NaN available-width bug is fixed by:
  * 1. pnpm patches on @radix-ui/react-popper and @floating-ui/core
- * 2. avoidCollisions={false} on DropdownMenuContent (skips size middleware)
- * 3. fixed max-h-[80vh] fallback
+ * 2. disabling only the Popper size middleware (shift/flip remain active)
+ * 3. removing the offscreen translate(-200%) / min-width:max-content fallback
  */
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -71,7 +71,7 @@ describe("DropdownMenuContent", () => {
     expect(menu.className).toContain("slide-in-from-top-2");
   });
 
-  it("uses a fixed max-h[80vh] (size middleware is disabled)", () => {
+  it("uses a fixed max-h[80vh] because the size middleware is disabled", () => {
     renderOpenDropdown();
     const menu = screen.getByRole("menu");
     expect(menu.className).toContain("max-h-[80vh]");
