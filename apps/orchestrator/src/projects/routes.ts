@@ -137,6 +137,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       gitStore.commitAsync(req.params.id, generateCommitMessage(prev, saved));
       res.json({ saved: true });
     } catch (err) {
+      console.error("[PUT /api/projects/:id] save failed:", err);
       res.status(500).json({ error: "Failed to save project", detail: String(err) });
     }
   });

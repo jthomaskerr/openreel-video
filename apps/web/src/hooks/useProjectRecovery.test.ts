@@ -13,7 +13,7 @@ const {
   mockBackendLoad,
   mockCheckForRecovery,
   mockLoadProjectMedia,
-  mockSaveMediaBlob,
+  mockSaveMediaBlob
 } = vi.hoisted(() => ({
   mockAutoSaveRecover: vi.fn<[], Promise<Project | null>>(),
   mockBackendLoad: vi.fn<[string], Promise<Project | null>>().mockResolvedValue(null),
@@ -26,7 +26,7 @@ const {
       Promise<Array<{ id: string; projectId: string; blob: Blob; metadata: unknown }>>
     >()
     .mockResolvedValue([]),
-  mockSaveMediaBlob: vi.fn<unknown[], Promise<void>>().mockResolvedValue(undefined),
+  mockSaveMediaBlob: vi.fn<unknown[], Promise<void>>().mockResolvedValue(undefined)
 }));
 vi.mock("../services/backend-save", () => ({
   backendSaveService: {
@@ -34,8 +34,8 @@ vi.mock("../services/backend-save", () => ({
     uploadMediaAsync: vi.fn(),
     resetForProject: vi.fn(),
     save: vi.fn().mockResolvedValue(undefined),
-    isReachable: vi.fn().mockResolvedValue(true),
-  },
+    isReachable: vi.fn().mockResolvedValue(true)
+  }
 }));
 
 // ---------------------------------------------------------------------------
@@ -49,9 +49,9 @@ vi.mock("../services/auto-save", () => ({
     clearAllSaves: vi.fn().mockResolvedValue(undefined),
     start: vi.fn(),
     markDirty: vi.fn(),
-    forceSave: vi.fn().mockResolvedValue(undefined),
+    forceSave: vi.fn().mockResolvedValue(undefined)
   },
-  initializeAutoSave: vi.fn().mockResolvedValue(undefined),
+  initializeAutoSave: vi.fn().mockResolvedValue(undefined)
 }));
 
 vi.mock("../services/media-storage", () => ({
@@ -60,7 +60,7 @@ vi.mock("../services/media-storage", () => ({
   loadProjectMedia: (...args: unknown[]) => mockLoadProjectMedia(...(args as [string])),
   clearAllStorage: vi.fn().mockResolvedValue(undefined),
   loadFileHandle: vi.fn().mockResolvedValue(null),
-  loadDirectoryHandle: vi.fn().mockResolvedValue(null),
+  loadDirectoryHandle: vi.fn().mockResolvedValue(null)
 }));
 
 vi.mock("../bridges/effects-bridge", () => ({
@@ -73,33 +73,33 @@ vi.mock("../bridges/effects-bridge", () => ({
     applyVideoEffect: vi.fn(() => ({ success: false })),
     removeVideoEffect: vi.fn(),
     getEffect: vi.fn(() => null),
-    getEffects: vi.fn(() => []),
-  })),
+    getEffects: vi.fn(() => [])
+  }))
 }));
 
 vi.mock("../bridges/transition-bridge", () => ({
   getTransitionBridge: vi.fn(() => ({
     isInitialized: vi.fn(() => false),
     setTransitionsForTrack: vi.fn(),
-    clearTransitionsForTrack: vi.fn(),
-  })),
+    clearTransitionsForTrack: vi.fn()
+  }))
 }));
 
 vi.mock("../bridges/media-bridge", () => ({
   getMediaBridge: vi.fn(() => ({
     isInitialized: vi.fn().mockReturnValue(true),
     importFile: vi.fn().mockResolvedValue({ success: true, media: null }),
-    generateThumbnailsForMedia: vi.fn().mockResolvedValue([]),
+    generateThumbnailsForMedia: vi.fn().mockResolvedValue([])
   })),
-  initializeMediaBridge: vi.fn().mockResolvedValue(undefined),
+  initializeMediaBridge: vi.fn().mockResolvedValue(undefined)
 }));
 
 vi.mock("../services/project-manager", () => ({
   projectManager: {
     initialize: vi.fn().mockResolvedValue(undefined),
     addToRecent: vi.fn().mockResolvedValue(undefined),
-    getRecentProjects: vi.fn().mockResolvedValue([]),
-  },
+    getRecentProjects: vi.fn().mockResolvedValue([])
+  }
 }));
 
 // ---------------------------------------------------------------------------
@@ -120,12 +120,12 @@ function makeMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
       codec: "mp3",
       sampleRate: 44100,
       channels: 2,
-      fileSize: 1000,
+      fileSize: 1000
     },
     thumbnailUrl: null,
     waveformData: null,
-    isPlaceholder: false,
-    ...overrides,
+
+    ...overrides
   };
 }
 
@@ -143,15 +143,15 @@ function makeProject(overrides: {
       height: 1080,
       frameRate: 30,
       sampleRate: 48000,
-      channels: 2,
+      channels: 2
     },
     mediaLibrary: { items: overrides.mediaItems ?? [] },
     timeline: {
       tracks: [],
       subtitles: [],
       duration: 0,
-      markers: [],
-    },
+      markers: []
+    }
   };
 }
 
@@ -165,7 +165,7 @@ function makeSave(
     timestamp: Date.now(),
     slot: 0,
     isRecovery: true,
-    ...overrides,
+    ...overrides
   };
 }
 
@@ -192,7 +192,7 @@ describe("recoverFromAutoSave — store regression", () => {
         makeMediaItem({
           blob: {} as unknown as Blob, // simulates JSON.parse output for a File/Blob
         }),
-      ],
+      ]
     });
 
     mockAutoSaveRecover.mockResolvedValue(deserializedProject);
@@ -249,7 +249,7 @@ describe("recoverFromAutoSave — store regression", () => {
     const deserializedProject = makeProject({
       mediaItems: [
         makeMediaItem({ blob: {} as unknown as Blob }),
-      ],
+      ]
     });
 
     mockAutoSaveRecover.mockResolvedValue(deserializedProject);
@@ -258,7 +258,7 @@ describe("recoverFromAutoSave — store regression", () => {
         id: "media-1",
         projectId: deserializedProject.id,
         blob: storedBlob,
-        metadata: {},
+        metadata: {}
       },
     ]);
 
@@ -337,7 +337,7 @@ describe("useProjectRecovery hook", () => {
     const storedBlob = new Blob(["backend-audio"], { type: "audio/mpeg" });
     const backendProject = makeProject({
       name: "Backend Cut",
-      mediaItems: [makeMediaItem()],
+      mediaItems: [makeMediaItem()]
     });
 
     mockCheckForRecovery.mockResolvedValue([]);
@@ -347,7 +347,7 @@ describe("useProjectRecovery hook", () => {
         id: "media-1",
         projectId: backendProject.id,
         blob: storedBlob,
-        metadata: {},
+        metadata: {}
       },
     ]);
 

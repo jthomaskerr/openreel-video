@@ -39,6 +39,8 @@ import {
   getBuiltInEditingTemplates,
   resolveEditingTemplate,
   textAnimationEngine,
+  getMediaStatus,
+  MediaStatus,
 } from "@openreel/core";
 import { v4 as uuidv4 } from "uuid";
 import type {
@@ -67,11 +69,13 @@ import {
 import {
   saveMediaBlob,
   deleteMediaBlob,
+  deleteProjectMedia,
   loadProjectMedia,
   loadFileHandle,
   loadDirectoryHandle,
   scanDirectoryRecursive,
 } from "../services/media-storage";
+import { backendSaveService } from "../services/backend-save";
 import { restoreMediaItem } from "../utils/media-recovery";
 import { projectManager } from "../services/project-manager";
 import { toast } from "./notification-store";
@@ -141,12 +145,14 @@ export interface ProjectState {
   addGeneratedMedia: (item: MediaItem, blob: Blob) => Promise<ActionResult>;
   /** Add a distinct generated version to an existing asset group */
   addAssetVersion: (sourceMediaId: string, item: MediaItem, blob: Blob) => Promise<ActionResult>;
+  /** Import a local file as a distinct current version in an existing asset group */
+  addAssetVersionFromFile: (sourceMediaId: string, file: File, sourceFolder?: string) => Promise<ActionResult>;
   /** Mark one media item as the current version within its asset group */
   setCurrentAssetVersion: (mediaId: string) => boolean;
   /** Replace a pending placeholder with the actual result blob */
   replacePlaceholderMedia: (mediaId: string, blob: Blob, name: string) => Promise<void>;
-  /** Flip isPending / kieaiError flags on a placeholder without full replacement */
-  setKieAIItemState: (mediaId: string, isPending: boolean, kieaiError: boolean) => void;
+  /** Update generationMeta.status on a placeholder (e.g. "failed", "processing", "realized") */
+  setGenerationStatus: (mediaId: string, status: string) => void;
 
   // Track actions
   addTrack: (
@@ -1526,9 +1532,11 @@ export const useProjectStore = create<ProjectState>()(
           error: null,
           explicitlyCreated: true,
         });
+        backendSaveService.resetForProject();
       },
 
       loadProject: (project: Project) => {
+        backendSaveService.resetForProject();
         const previousProject = get().project;
         const titleEngine = useEngineStore.getState().getTitleEngine();
         const graphicsEngine = useEngineStore.getState().getGraphicsEngine();
@@ -1575,7 +1583,7 @@ export const useProjectStore = create<ProjectState>()(
 
         // Auto-restore placeholder assets from saved FileSystemFileHandles (same machine)
         const placeholders = fixedProject.mediaLibrary.items.filter(
-          (item) => item.isPlaceholder && item.sourceFile,
+          (item) => getMediaStatus(item) === MediaStatus.MISSING && item.sourceFile,
         );
         if (placeholders.length > 0 && "FileSystemFileHandle" in window) {
           (async () => {
@@ -1591,7 +1599,8 @@ export const useProjectStore = create<ProjectState>()(
                 const file = await handle.getFile();
                 await get().replaceMediaAsset(item.id, file, item.sourceFile.folder);
                 restored++;
-              } catch {
+              } catch (error) {
+                console.warn(`[ProjectStore] Failed to restore missing media ${item.id} from saved handle:`, error);
                 stillMissing.push(item); // stale handle
               }
             }
@@ -1614,11 +1623,15 @@ export const useProjectStore = create<ProjectState>()(
                       try {
                         await get().replaceMediaAsset(item.id, entry.file, entry.folder);
                         restored++;
-                      } catch { /* skip */ }
+                      } catch (error) {
+                        console.warn(`[ProjectStore] Failed to relink missing media ${item.id} from selected directory:`, error);
+                      }
                     }
                   }
                 }
-              } catch { /* dir handle stale or unavailable */ }
+              } catch (error) {
+                console.warn("[ProjectStore] Directory handle stale or unavailable during missing-media restore:", error);
+              }
             }
 
             if (restored > 0) {
@@ -1807,9 +1820,11 @@ export const useProjectStore = create<ProjectState>()(
                     url: thumb.dataUrl,
                   })),
                 );
+              } else {
+                console.warn(`[ProjectStore] No thumbnails generated for imported media ${file.name}`);
               }
-            } catch {
-              // Background retry below is best-effort.
+            } catch (error) {
+              console.warn(`[ProjectStore] Failed to generate initial thumbnails for ${file.name}:`, error);
             }
           }
 
@@ -1855,6 +1870,12 @@ export const useProjectStore = create<ProjectState>()(
               file,
               newMediaItem.metadata,
             );
+            backendSaveService.uploadMediaAsync(
+              updatedProject.id,
+              newMediaItem.id,
+              file,
+              file.name,
+            );
           } catch (err) {
             console.error("[ProjectStore] Failed to persist media blob:", err);
           }
@@ -1893,8 +1914,8 @@ export const useProjectStore = create<ProjectState>()(
                     });
                   }
                 }
-              } catch {
-                // Background thumbnail generation is best-effort
+              } catch (error) {
+                console.warn(`[ProjectStore] Background thumbnail generation failed for ${newMediaItem.id}:`, error);
               }
             }, 100);
           }
@@ -2018,9 +2039,11 @@ export const useProjectStore = create<ProjectState>()(
                     url: thumb.dataUrl,
                   })),
                 );
+              } else {
+                console.warn(`[ProjectStore] No thumbnails generated while replacing media ${mediaId}`);
               }
-            } catch {
-              // Background retry below is best-effort.
+            } catch (error) {
+              console.warn(`[ProjectStore] Failed to generate initial thumbnails while replacing ${mediaId}:`, error);
             }
           }
 
@@ -2051,9 +2074,6 @@ export const useProjectStore = create<ProjectState>()(
             description: previousItem?.description,
             tags: previousItem?.tags,
             group: previousItem?.group,
-            isPlaceholder: false,
-            isPending: false,
-            kieaiError: false,
             sourceFile: { name: file.name, size: file.size, lastModified: file.lastModified, folder: sourceFolder },
           };
 
@@ -2101,8 +2121,8 @@ export const useProjectStore = create<ProjectState>()(
                     },
                   });
                 }
-              } catch {
-                // Background thumbnail generation is best-effort
+              } catch (error) {
+                console.warn(`[ProjectStore] Background thumbnail generation failed while replacing ${mediaId}:`, error);
               }
             }, 100);
           }
@@ -2192,13 +2212,16 @@ export const useProjectStore = create<ProjectState>()(
         const generatedItem: MediaItem = {
           ...item,
           blob,
-          isPlaceholder: false,
-          isPending: false,
-          kieaiError: false,
         };
 
         try {
           await saveMediaBlob(project.id, generatedItem.id, blob, generatedItem.metadata);
+          backendSaveService.uploadMediaAsync(
+            project.id,
+            generatedItem.id,
+            blob,
+            generatedItem.name,
+          );
         } catch (error) {
           return {
             success: false,
@@ -2254,12 +2277,16 @@ export const useProjectStore = create<ProjectState>()(
           blob,
           assetGroupId,
           isCurrent: true,
-          isPlaceholder: false,
-          isPending: false,
         };
 
         try {
           await saveMediaBlob(project.id, versionItem.id, blob, versionItem.metadata);
+          backendSaveService.uploadMediaAsync(
+            project.id,
+            versionItem.id,
+            blob,
+            versionItem.name,
+          );
         } catch (error) {
           return {
             success: false,
@@ -2293,6 +2320,209 @@ export const useProjectStore = create<ProjectState>()(
         return { success: true, actionId: uuidv4() };
       },
 
+      addAssetVersionFromFile: async (sourceMediaId: string, file: File, sourceFolder?: string) => {
+        const { project } = get();
+        const sourceItem = project.mediaLibrary.items.find((existing) => existing.id === sourceMediaId);
+        if (!sourceItem) {
+          return {
+            success: false,
+            error: {
+              code: "MEDIA_NOT_FOUND" as const,
+              message: `Media with ID ${sourceMediaId} not found`,
+            },
+          };
+        }
+
+        set((s) => ({ replacingMediaIds: new Set([...s.replacingMediaIds, sourceMediaId]) }));
+
+        try {
+          const mediaBridge = getMediaBridge();
+          if (!mediaBridge.isInitialized()) {
+            await initializeMediaBridge();
+          }
+
+          const importResult = await mediaBridge.importFile(file, true);
+          if (!importResult.success || !importResult.media) {
+            return {
+              success: false,
+              error: {
+                code: "DECODE_ERROR" as const,
+                message: importResult.error || `Failed to import ${file.name}`,
+              },
+            };
+          }
+
+          const processedMedia = importResult.media;
+          const metadata = processedMedia.metadata;
+          if (!metadata) {
+            return {
+              success: false,
+              error: {
+                code: "DECODE_ERROR" as const,
+                message: `Imported media ${file.name} did not include decoded metadata`,
+              },
+            };
+          }
+
+          let thumbnailUrl: string | null = null;
+          const filmstripThumbnails: { timestamp: number; url: string }[] = [];
+
+          if (processedMedia.thumbnails && processedMedia.thumbnails.length > 0) {
+            for (const thumb of processedMedia.thumbnails) {
+              let thumbUrl: string | null = null;
+              if (thumb.dataUrl) {
+                thumbUrl = thumb.dataUrl;
+              } else if (thumb.canvas) {
+                try {
+                  if (thumb.canvas instanceof OffscreenCanvas) {
+                    const blob = await thumb.canvas.convertToBlob({
+                      type: "image/jpeg",
+                      quality: 0.7,
+                    });
+                    thumbUrl = URL.createObjectURL(blob);
+                  } else if (thumb.canvas instanceof HTMLCanvasElement) {
+                    thumbUrl = thumb.canvas.toDataURL("image/jpeg", 0.7);
+                  }
+                } catch (error) {
+                  console.warn(
+                    `[ProjectStore] Failed to convert thumbnail canvas for version ${file.name}:`,
+                    error,
+                  );
+                }
+              }
+
+              if (thumbUrl) {
+                filmstripThumbnails.push({ timestamp: thumb.timestamp, url: thumbUrl });
+              }
+            }
+            thumbnailUrl = filmstripThumbnails[0]?.url ?? null;
+          }
+
+          const mediaType: "video" | "audio" | "image" = file.type.startsWith("image/")
+            ? "image"
+            : metadata.hasVideo
+              ? "video"
+              : metadata.hasAudio
+                ? "audio"
+                : "image";
+
+          if (mediaType === "video" && !thumbnailUrl) {
+            try {
+              const thumbs = await mediaBridge.generateThumbnailsForMedia(
+                processedMedia.blob ?? file,
+                mediaType,
+              );
+              if (thumbs.length > 0) {
+                thumbnailUrl = thumbs[0].dataUrl;
+                filmstripThumbnails.push(
+                  ...thumbs.map((thumb) => ({
+                    timestamp: thumb.timestamp,
+                    url: thumb.dataUrl,
+                  })),
+                );
+              } else {
+                console.warn(`[ProjectStore] No thumbnails generated for version ${file.name}`);
+              }
+            } catch (error) {
+              console.warn(
+                `[ProjectStore] Failed to generate thumbnails for version ${file.name}:`,
+                error,
+              );
+            }
+          }
+
+          const versionItem: MediaItem = {
+            id: uuidv4(),
+            name: file.name,
+            type: mediaType,
+            fileHandle: null,
+            blob: file,
+            metadata: {
+              duration: metadata.duration || 0,
+              width: metadata.width || 0,
+              height: metadata.height || 0,
+              frameRate: metadata.frameRate || 0,
+              codec: metadata.codec || "",
+              sampleRate: metadata.sampleRate || 0,
+              channels: metadata.channels || 0,
+              fileSize: file.size,
+            },
+            thumbnailUrl,
+            waveformData: processedMedia.waveformData?.peaks || null,
+            filmstripThumbnails:
+              filmstripThumbnails.length > 0 ? filmstripThumbnails : undefined,
+            title: sourceItem.title,
+            description: sourceItem.description,
+            tags: sourceItem.tags,
+            group: sourceItem.group,
+            generationMeta: sourceItem.generationMeta,
+            sourceFile: { name: file.name, size: file.size, lastModified: file.lastModified, folder: sourceFolder },
+          };
+
+          const assetGroupId = sourceItem.assetGroupId ?? sourceItem.id;
+          const currentProject = get().project;
+          const updatedItems = currentProject.mediaLibrary.items.map((existing) => {
+            const existingGroupId = existing.assetGroupId ?? existing.id;
+            if (existingGroupId !== assetGroupId) return existing;
+            return { ...existing, assetGroupId, isCurrent: false };
+          });
+          const currentVersion: MediaItem = {
+            ...versionItem,
+            assetGroupId,
+            isCurrent: true,
+          };
+
+          try {
+            await saveMediaBlob(currentProject.id, currentVersion.id, file, currentVersion.metadata);
+            backendSaveService.uploadMediaAsync(
+              currentProject.id,
+              currentVersion.id,
+              file,
+              currentVersion.name,
+            );
+          } catch (error) {
+            return {
+              success: false,
+              error: {
+                code: "STORAGE_FULL" as const,
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : `Failed to persist asset version ${file.name}`,
+              },
+            };
+          }
+
+          set({
+            project: {
+              ...currentProject,
+              mediaLibrary: {
+                ...currentProject.mediaLibrary,
+                items: [...updatedItems, currentVersion],
+              },
+              modifiedAt: Date.now(),
+            },
+          });
+
+          return { success: true, actionId: currentVersion.id };
+        } catch (error) {
+          return {
+            success: false,
+            error: {
+              code: "DECODE_ERROR" as const,
+              message:
+                error instanceof Error ? error.message : `Unknown error importing ${file.name}`,
+            },
+          };
+        } finally {
+          set((s) => {
+            const next = new Set(s.replacingMediaIds);
+            next.delete(sourceMediaId);
+            return { replacingMediaIds: next };
+          });
+        }
+      },
+
       setCurrentAssetVersion: (mediaId: string) => {
         const { project } = get();
         const selected = project.mediaLibrary.items.find((item) => item.id === mediaId);
@@ -2314,24 +2544,13 @@ export const useProjectStore = create<ProjectState>()(
         });
         return true;
       },
-      setKieAIItemState: (mediaId: string, isPending: boolean, kieaiError: boolean) => {
+      setGenerationStatus: (mediaId: string, status: string) => {
         const { project } = get();
         const updatedItems = project.mediaLibrary.items.map((item) =>
-          item.id === mediaId
+          item.id === mediaId && item.generationMeta
             ? {
                 ...item,
-                isPending,
-                kieaiError,
-                generationMeta: item.generationMeta
-                  ? {
-                      ...item.generationMeta,
-                      status: kieaiError
-                        ? "failed"
-                        : isPending
-                          ? "processing"
-                          : item.generationMeta.status,
-                    }
-                  : undefined,
+                generationMeta: { ...item.generationMeta, status },
               }
             : item,
         );
@@ -2411,9 +2630,6 @@ export const useProjectStore = create<ProjectState>()(
           description: previousItem?.description,
           tags: previousItem?.tags,
           group: previousItem?.group,
-          isPlaceholder: false,
-          isPending: false,
-          kieaiError: false,
           generationMeta: previousItem?.generationMeta
             ? { ...previousItem.generationMeta, status: "realized" }
             : undefined,
@@ -2433,6 +2649,12 @@ export const useProjectStore = create<ProjectState>()(
 
         try {
           await saveMediaBlob(project.id, mediaId, file, updatedItem.metadata);
+          backendSaveService.uploadMediaAsync(
+            project.id,
+            mediaId,
+            file,
+            updatedItem.name,
+          );
         } catch (err) {
           console.error("[ProjectStore] Failed to persist KieAI result blob:", err);
         }
@@ -2752,8 +2974,8 @@ export const useProjectStore = create<ProjectState>()(
             if (probeResult.audioStreamCount > 1) {
               audioTrackCount = probeResult.audioStreamCount;
             }
-          } catch {
-            // FFmpeg probe unavailable — proceed with count of 1
+          } catch (error) {
+            console.warn(`[ProjectStore] FFmpeg audio stream probe failed for ${videoClip.mediaId}; proceeding with one track:`, error);
           }
         }
 
@@ -4391,6 +4613,15 @@ export const useProjectStore = create<ProjectState>()(
           };
         });
 
+        // Push every auto-save to the backend (fire-and-forget).
+        autoSaveManager.on("saved", () => {
+          const project = get().project;
+          if (!project) return;
+          backendSaveService.save(project).catch((err) => {
+            console.error("[BackendSave] auto-save push failed:", err);
+          });
+        });
+
         // Subscribe to project state changes to mark as dirty for auto-save
         // Uses Zustand's subscribeWithSelector middleware to detect changes to project object only
         // Trigger auto-save when any project field changes (timeline, media, settings, etc.)
@@ -4417,13 +4648,63 @@ export const useProjectStore = create<ProjectState>()(
             return false;
           }
 
+          // ── Migrate existing IndexedDB media to backend ──────────────
           const storedMedia = await loadProjectMedia(recoveredProject.id);
           const blobMap = new Map(storedMedia.map((m) => [m.id, m.blob]));
 
-          // After JSON deserialization blob fields become {} (an empty truthy
-          // object), not null. Null them out here so restoreMediaItem's guard
-          // `if (!blob) return item` correctly marks un-stored media as missing
-          // rather than treating the invalid {} as a real Blob.
+          // Upload every locally stored blob to the backend.
+          const reachable = await backendSaveService.isReachable();
+          if (reachable) {
+            backendSaveService.resetForProject();
+            for (const record of storedMedia) {
+              if (!record.blob) continue;
+              const item = recoveredProject.mediaLibrary.items.find((i) => i.id === record.id);
+              backendSaveService.uploadMediaAsync(
+                recoveredProject.id,
+                record.id,
+                record.blob,
+                item?.name ?? record.id,
+              );
+            }
+            // Wait for uploads to finish (fire-and-forget, but we need them
+            // before we can switch to backend-only storage).
+            await new Promise((r) => setTimeout(r, 1000));
+
+            // Push project JSON, then reload from backend for canonical remoteUrls.
+            await backendSaveService.save(recoveredProject);
+            const backendProject = await backendSaveService.load(recoveredProject.id);
+            if (backendProject) {
+              // Clean up IndexedDB — we've migrated.
+              await deleteProjectMedia(recoveredProject.id);
+              const titleEngine = useEngineStore.getState().getTitleEngine();
+              const graphicsEngine = useEngineStore.getState().getGraphicsEngine();
+              if (titleEngine && backendProject.textClips) {
+                titleEngine.loadTextClips(backendProject.textClips);
+              }
+              if (graphicsEngine) {
+                if (backendProject.shapeClips) graphicsEngine.loadShapeClips(backendProject.shapeClips);
+                if (backendProject.svgClips) graphicsEngine.loadSVGClips(backendProject.svgClips);
+                if (backendProject.stickerClips) graphicsEngine.loadStickerClips(backendProject.stickerClips);
+              }
+              const newHistory = new ActionHistory();
+              const newExecutor = new ActionExecutor(newHistory);
+              set({
+                project: backendProject,
+                actionHistory: newHistory,
+                actionExecutor: newExecutor,
+                clipUndoStack: [],
+                clipRedoStack: [],
+                templateUndoStack: [],
+                templateRedoStack: [],
+                error: null,
+                explicitlyCreated: true,
+              });
+              await projectManager.addToRecent(backendProject);
+              return true;
+            }
+          }
+
+          // ── Backend unreachable — hydrate from IndexedDB as before ───
           const restoredItems = await Promise.all(
             recoveredProject.mediaLibrary.items.map((item) =>
               restoreMediaItem({ ...item, blob: null }, blobMap.get(item.id)),
@@ -4445,15 +4726,9 @@ export const useProjectStore = create<ProjectState>()(
             titleEngine.loadTextClips(recoveredProject.textClips);
           }
           if (graphicsEngine) {
-            if (recoveredProject.shapeClips) {
-              graphicsEngine.loadShapeClips(recoveredProject.shapeClips);
-            }
-            if (recoveredProject.svgClips) {
-              graphicsEngine.loadSVGClips(recoveredProject.svgClips);
-            }
-            if (recoveredProject.stickerClips) {
-              graphicsEngine.loadStickerClips(recoveredProject.stickerClips);
-            }
+            if (recoveredProject.shapeClips) graphicsEngine.loadShapeClips(recoveredProject.shapeClips);
+            if (recoveredProject.svgClips) graphicsEngine.loadSVGClips(recoveredProject.svgClips);
+            if (recoveredProject.stickerClips) graphicsEngine.loadStickerClips(recoveredProject.stickerClips);
           }
 
           const newHistory = new ActionHistory();

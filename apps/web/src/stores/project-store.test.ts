@@ -8,8 +8,8 @@ const {
   mockEffectsBridgeState,
   mockSaveMediaBlob,
   mockTransitionBridge,
-  mockTransitionBridgeState,
-} = vi.hoisted(() => {
+  mockTransitionBridgeState
+        } = vi.hoisted(() => {
   const clipEffects = new Map<string, Array<{
     id: string;
     type: string;
@@ -43,7 +43,7 @@ const {
           type: effectType,
           enabled: true,
           params: { ...getDefaultParams(effectType), ...params },
-          order: effects.length,
+          order: effects.length
         };
         clipEffects.set(clipId, [...effects, effect]);
         return { success: true, effectId: effect.id };
@@ -76,8 +76,8 @@ const {
     clearEffects: vi.fn((clipId: string) => {
       clipEffects.delete(clipId);
     }),
-    getColorGrading: vi.fn(() => ({})),
-  };
+    getColorGrading: vi.fn(() => ({}))
+        };
 
   const trackTransitions = new Map<string, Transition[]>();
   const transitionBridge = {
@@ -88,23 +88,23 @@ const {
           trackId,
           transitions.map((transition) => ({
             ...transition,
-            params: { ...transition.params },
-          })),
+            params: { ...transition.params }
+        })),
         );
       },
     ),
     clearTransitionsForTrack: vi.fn((trackId: string) => {
       trackTransitions.delete(trackId);
-    }),
-  };
+    })
+        };
 
   return {
     mockEffectsBridge: effectsBridge,
     mockEffectsBridgeState: { clipEffects },
     mockSaveMediaBlob: vi.fn().mockResolvedValue(undefined),
     mockTransitionBridge: transitionBridge,
-    mockTransitionBridgeState: { trackTransitions },
-  };
+    mockTransitionBridgeState: { trackTransitions }
+        };
 });
 
 vi.mock("../services/auto-save", () => ({
@@ -114,10 +114,10 @@ vi.mock("../services/auto-save", () => ({
     triggerSave: vi.fn(),
     getRecentSaves: vi.fn().mockResolvedValue([]),
     loadSave: vi.fn(),
-    deleteSave: vi.fn(),
-  },
-  initializeAutoSave: vi.fn().mockResolvedValue(undefined),
-}));
+    deleteSave: vi.fn()
+        },
+  initializeAutoSave: vi.fn().mockResolvedValue(undefined)
+        }));
 
 vi.mock("../bridges/media-bridge", () => ({
   getMediaBridge: vi.fn(() => ({
@@ -132,27 +132,39 @@ vi.mock("../bridges/media-bridge", () => ({
         width: 1920,
         height: 1080,
         frameRate: 30,
-      },
-    }),
-  })),
-  initializeMediaBridge: vi.fn().mockResolvedValue(undefined),
-}));
+        metadata: {
+          hasVideo: true,
+          hasAudio: false,
+          duration: 10,
+          width: 1920,
+          height: 1080,
+          frameRate: 30,
+          codec: "h264",
+          sampleRate: 0,
+          channels: 0
+        }
+        }
+        }),
+    generateThumbnailsForMedia: vi.fn().mockResolvedValue([])
+        })),
+  initializeMediaBridge: vi.fn().mockResolvedValue(undefined)
+        }));
 
 vi.mock("../services/media-storage", () => ({
   saveMediaBlob: mockSaveMediaBlob,
   deleteMediaBlob: vi.fn().mockResolvedValue(undefined),
   loadProjectMedia: vi.fn().mockResolvedValue([]),
   loadFileHandle: vi.fn().mockResolvedValue(null),
-  loadDirectoryHandle: vi.fn().mockResolvedValue(null),
-}));
+  loadDirectoryHandle: vi.fn().mockResolvedValue(null)
+        }));
 
 vi.mock("../bridges/effects-bridge", () => ({
-  getEffectsBridge: vi.fn(() => mockEffectsBridge),
-}));
+  getEffectsBridge: vi.fn(() => mockEffectsBridge)
+        }));
 
 vi.mock("../bridges/transition-bridge", () => ({
-  getTransitionBridge: vi.fn(() => mockTransitionBridge),
-}));
+  getTransitionBridge: vi.fn(() => mockTransitionBridge)
+        }));
 
 describe("ProjectStore", () => {
   beforeEach(() => {
@@ -185,8 +197,8 @@ describe("ProjectStore", () => {
       useProjectStore.getState().createNewProject("4K Project", {
         width: 3840,
         height: 2160,
-        frameRate: 60,
-      });
+        frameRate: 60
+        });
       const { project } = useProjectStore.getState();
 
       expect(project.settings.width).toBe(3840);
@@ -229,16 +241,16 @@ describe("ProjectStore", () => {
           height: 720,
           frameRate: 24,
           sampleRate: 44100,
-          channels: 2,
+          channels: 2
         },
         mediaLibrary: { items: [] },
         timeline: {
           tracks: [],
           subtitles: [],
           duration: 0,
-          markers: [],
-        },
-      };
+          markers: []
+        }
+        };
 
       useProjectStore.getState().loadProject(existingProject);
       const { project } = useProjectStore.getState();
@@ -263,11 +275,11 @@ describe("ProjectStore", () => {
           codec: "h264",
           sampleRate: 48000,
           channels: 2,
-          fileSize: 1000000,
+          fileSize: 1000000
         },
         thumbnailUrl: null,
-        waveformData: null,
-      };
+        waveformData: null
+        };
 
       const projectWithMedia: Project = {
         id: "project-with-media",
@@ -279,7 +291,7 @@ describe("ProjectStore", () => {
           height: 1080,
           frameRate: 30,
           sampleRate: 48000,
-          channels: 2,
+          channels: 2
         },
         mediaLibrary: { items: [mockMediaItem] },
         timeline: {
@@ -293,14 +305,14 @@ describe("ProjectStore", () => {
               locked: false,
               hidden: false,
               muted: false,
-              solo: false,
-            },
+              solo: false
+        },
           ],
           subtitles: [],
           duration: 30,
-          markers: [],
-        },
-      };
+          markers: []
+        }
+        };
 
       useProjectStore.getState().loadProject(projectWithMedia);
       const { project } = useProjectStore.getState();
@@ -327,13 +339,11 @@ describe("ProjectStore", () => {
           codec: "png",
           sampleRate: 0,
           channels: 0,
-          fileSize: blob.size,
+          fileSize: blob.size
         },
         thumbnailUrl: "data:image/png;base64,abc",
-        waveformData: null,
-        isPlaceholder: true,
-        isPending: true,
-      };
+        waveformData: null
+        };
 
       const result = await useProjectStore.getState().addGeneratedMedia(item, blob);
 
@@ -342,10 +352,8 @@ describe("ProjectStore", () => {
       expect(stored).toMatchObject({
         id: "generated-media-1",
         name: "Scene metadata.png",
-        type: "image",
-        isPlaceholder: false,
-        isPending: false,
-      });
+        type: "image"
+        });
       expect(mockSaveMediaBlob).toHaveBeenCalledWith(
         useProjectStore.getState().project.id,
         "generated-media-1",
@@ -371,12 +379,12 @@ describe("ProjectStore", () => {
           codec: "png",
           sampleRate: 0,
           channels: 0,
-          fileSize: originalBlob.size,
+          fileSize: originalBlob.size
         },
         thumbnailUrl: null,
         waveformData: null,
-        isCurrent: true,
-      };
+        isCurrent: true
+        };
       await useProjectStore.getState().addGeneratedMedia(original, originalBlob);
 
       const version: MediaItem = {
@@ -389,9 +397,9 @@ describe("ProjectStore", () => {
           provider: "wavespeed",
           model: "image-model",
           prompt: "new version",
-          jobId: "job-1",
-        },
-      };
+          jobId: "job-1"
+        }
+        };
 
       const result = await useProjectStore.getState().addAssetVersion("asset-v1", version, versionBlob);
 
@@ -401,14 +409,14 @@ describe("ProjectStore", () => {
       expect(items[0]).toMatchObject({
         id: "asset-v1",
         assetGroupId: "asset-v1",
-        isCurrent: false,
-      });
+        isCurrent: false
+        });
       expect(items[1]).toMatchObject({
         id: "asset-v2",
         assetGroupId: "asset-v1",
         isCurrent: true,
-        generationMeta: expect.objectContaining({ provider: "wavespeed", jobId: "job-1" }),
-      });
+        generationMeta: expect.objectContaining({ provider: "wavespeed", jobId: "job-1" })
+        });
       expect(items[0].blob).toBe(originalBlob);
       expect(items[1].blob).toBe(versionBlob);
       expect(mockSaveMediaBlob).toHaveBeenLastCalledWith(
@@ -416,6 +424,68 @@ describe("ProjectStore", () => {
         "asset-v2",
         versionBlob,
         items[1].metadata,
+      );
+    });
+
+    it("imports a replacement file as a distinct current version", async () => {
+      const originalBlob = new Blob(["v1"], { type: "image/png" });
+      const original: MediaItem = {
+        id: "local-v1",
+        name: "Local v1.png",
+        type: "image",
+        fileHandle: null,
+        blob: originalBlob,
+        metadata: {
+          duration: 0,
+          width: 16,
+          height: 16,
+          frameRate: 0,
+          codec: "png",
+          sampleRate: 0,
+          channels: 0,
+          fileSize: originalBlob.size
+        },
+        thumbnailUrl: null,
+        waveformData: null,
+        title: "Hero shot",
+        group: "B-roll",
+        isCurrent: true
+        };
+      await useProjectStore.getState().addGeneratedMedia(original, originalBlob);
+
+      const replacement = new File(["v2"], "Local v2.mp4", { type: "video/mp4" });
+      const result = await useProjectStore
+        .getState()
+        .addAssetVersionFromFile("local-v1", replacement);
+
+      expect(result.success).toBe(true);
+      expect(result.actionId).toBeTruthy();
+
+      const items = useProjectStore.getState().project.mediaLibrary.items;
+      const originalAfter = items.find((item) => item.id === "local-v1");
+      const version = items.find((item) => item.id === result.actionId);
+
+      expect(items).toHaveLength(2);
+      expect(originalAfter).toMatchObject({
+        id: "local-v1",
+        assetGroupId: "local-v1",
+        isCurrent: false,
+        name: "Local v1.png"
+        });
+      expect(version).toMatchObject({
+        name: "Local v2.mp4",
+        type: "video",
+        assetGroupId: "local-v1",
+        isCurrent: true,
+        title: "Hero shot",
+        group: "B-roll"
+        });
+      expect(version?.blob).toBe(replacement);
+      expect(mockSaveMediaBlob).toHaveBeenLastCalledWith(
+        useProjectStore.getState().project.id,
+        result.actionId,
+        replacement,
+        version?.metadata,
       );
     });
 
@@ -435,13 +505,13 @@ describe("ProjectStore", () => {
           codec: "png",
           sampleRate: 0,
           channels: 0,
-          fileSize: blob.size,
+          fileSize: blob.size
         },
         thumbnailUrl: null,
         waveformData: null,
         assetGroupId,
-        isCurrent,
-      });
+        isCurrent
+        });
       await useProjectStore.getState().addGeneratedMedia(makeItem("group-a-v1", "group-a", true), blob);
       await useProjectStore.getState().addGeneratedMedia(makeItem("group-a-v2", "group-a", false), blob);
       await useProjectStore.getState().addGeneratedMedia(makeItem("group-b-v1", "group-b", true), blob);
@@ -482,8 +552,8 @@ describe("ProjectStore", () => {
     it("should update project settings", async () => {
       const result = await useProjectStore.getState().updateSettings({
         width: 2560,
-        height: 1440,
-      });
+        height: 1440
+        });
 
       expect(result.success).toBe(true);
 
@@ -500,8 +570,8 @@ describe("ProjectStore", () => {
 
       await useProjectStore.getState().updateSettings({
         width: 3840,
-        height: 2160,
-      });
+        height: 2160
+        });
 
       const { project } = useProjectStore.getState();
       expect(project.settings.frameRate).toBe(originalFrameRate);
@@ -636,7 +706,7 @@ describe("ProjectStore", () => {
           height: 1080,
           frameRate: 30,
           sampleRate: 48000,
-          channels: 2,
+          channels: 2
         },
         mediaLibrary: {
           items: [
@@ -654,20 +724,20 @@ describe("ProjectStore", () => {
                 codec: "h264",
                 sampleRate: 48000,
                 channels: 2,
-                fileSize: 500000,
-              },
+                fileSize: 500000
+        },
               thumbnailUrl: null,
-              waveformData: null,
-            },
-          ],
+              waveformData: null
+        },
+          ]
         },
         timeline: {
           tracks: [],
           subtitles: [],
           duration: 0,
-          markers: [],
-        },
-      };
+          markers: []
+        }
+        };
 
       useProjectStore.getState().loadProject(projectWithMedia);
 
@@ -694,7 +764,7 @@ describe("ProjectStore", () => {
           height: 1080,
           frameRate: 30,
           sampleRate: 48000,
-          channels: 2,
+          channels: 2
         },
         mediaLibrary: { items: [] },
         timeline: {
@@ -720,11 +790,11 @@ describe("ProjectStore", () => {
                     scale: { x: 1, y: 1 },
                     rotation: 0,
                     anchor: { x: 0.5, y: 0.5 },
-                    opacity: 1,
-                  },
+                    opacity: 1
+        },
                   volume: 1,
-                  keyframes: [],
-                },
+                  keyframes: []
+        },
                 {
                   id: "clip-2",
                   type: "video",
@@ -741,24 +811,24 @@ describe("ProjectStore", () => {
                     scale: { x: 1, y: 1 },
                     rotation: 0,
                     anchor: { x: 0.5, y: 0.5 },
-                    opacity: 1,
-                  },
+                    opacity: 1
+        },
                   volume: 1,
-                  keyframes: [],
-                },
+                  keyframes: []
+        },
               ],
               transitions: [],
               locked: false,
               hidden: false,
               muted: false,
-              solo: false,
-            },
+              solo: false
+        },
           ],
           subtitles: [],
           duration: 15,
-          markers: [],
-        },
-      };
+          markers: []
+        }
+        };
 
       useProjectStore.getState().loadProject(projectWithClips);
 
@@ -778,8 +848,8 @@ describe("ProjectStore", () => {
         height: 1080,
         frameRate: 30,
         sampleRate: 48000,
-        channels: 2,
-      },
+        channels: 2
+        },
       mediaLibrary: { items: [] },
       timeline: {
         tracks: [
@@ -804,24 +874,24 @@ describe("ProjectStore", () => {
                   scale: { x: 1, y: 1 },
                   rotation: 0,
                   anchor: { x: 0.5, y: 0.5 },
-                  opacity: 1,
-                },
+                  opacity: 1
+        },
                 volume: 1,
-                keyframes: [],
-              },
+                keyframes: []
+        },
             ],
             transitions: [],
             locked: false,
             hidden: false,
             muted: false,
-            solo: false,
-          },
+            solo: false
+        },
         ],
         subtitles: [],
         duration: 8,
-        markers: [],
-      },
-    });
+        markers: []
+        }
+        });
 
     it("should persist video effects to the clip timeline state", () => {
       useProjectStore.getState().loadProject(createProjectWithVideoClip());
@@ -836,7 +906,7 @@ describe("ProjectStore", () => {
           id: addedEffect!.id,
           type: "brightness",
           enabled: true,
-          params: { value: 15 },
+          params: { value: 15 }
         },
       ]);
       expect(useProjectStore.getState().getVideoEffects("video-clip-1")).toHaveLength(1);
@@ -877,7 +947,7 @@ describe("ProjectStore", () => {
           id: brightness!.id,
           type: "brightness",
           enabled: false,
-          params: { value: 20 },
+          params: { value: 20 }
         },
       ]);
     });
@@ -899,11 +969,11 @@ describe("ProjectStore", () => {
           codec: "h264",
           sampleRate: 48000,
           channels: 2,
-          fileSize: 1000000,
+          fileSize: 1000000
         },
         thumbnailUrl: null,
-        waveformData: null,
-      };
+        waveformData: null
+        };
 
       const clip: Clip = {
         id: "video-clip-1",
@@ -921,11 +991,11 @@ describe("ProjectStore", () => {
           scale: { x: 1, y: 1 },
           rotation: 0,
           anchor: { x: 0.5, y: 0.5 },
-          opacity: 1,
+          opacity: 1
         },
         volume: 1,
-        keyframes: [],
-      };
+        keyframes: []
+        };
 
       return {
         id: "editing-template-project",
@@ -937,7 +1007,7 @@ describe("ProjectStore", () => {
           height: 1080,
           frameRate: 30,
           sampleRate: 48000,
-          channels: 2,
+          channels: 2
         },
         mediaLibrary: { items: [mediaItem] },
         timeline: {
@@ -951,14 +1021,14 @@ describe("ProjectStore", () => {
               locked: false,
               hidden: false,
               muted: false,
-              solo: false,
-            },
+              solo: false
+        },
           ],
           subtitles: [],
           duration: 10,
-          markers: [],
-        },
-      };
+          markers: []
+        }
+        };
     };
 
     beforeEach(() => {
@@ -987,7 +1057,7 @@ describe("ProjectStore", () => {
         "video-clip-1",
         {
           name: "Ada Lovelace",
-          role: "Director",
+          role: "Director"
         },
       );
 
@@ -1000,8 +1070,8 @@ describe("ProjectStore", () => {
           applicationId,
           controlValues: expect.objectContaining({
             name: "Ada Lovelace",
-            role: "Director",
-          }),
+            role: "Director"
+        })
         }),
       ]);
       expect(
@@ -1056,7 +1126,7 @@ describe("ProjectStore", () => {
         "video-clip-1",
         {
           name: "Ada Lovelace",
-          role: "Director",
+          role: "Director"
         },
       );
 
@@ -1067,8 +1137,8 @@ describe("ProjectStore", () => {
           applicationId!,
           {
             name: "Grace Hopper",
-            role: "Engineer",
-          },
+            role: "Engineer"
+        },
         ),
       ).toBe(true);
 
@@ -1078,8 +1148,8 @@ describe("ProjectStore", () => {
           applicationId,
           controlValues: expect.objectContaining({
             name: "Grace Hopper",
-            role: "Engineer",
-          }),
+            role: "Engineer"
+        })
         }),
       ]);
       expect(getRecipeTextValues(applicationId!)).toEqual([
@@ -1105,7 +1175,7 @@ describe("ProjectStore", () => {
         "video-clip-1",
         {
           name: "Ada Lovelace",
-          role: "Director",
+          role: "Director"
         },
       );
 
@@ -1116,8 +1186,8 @@ describe("ProjectStore", () => {
           applicationId!,
           {
             name: "Grace Hopper",
-            role: "Engineer",
-          },
+            role: "Engineer"
+        },
         ),
       ).toBe(true);
       expect(getRecipeTextValues(applicationId!)).toEqual([
@@ -1137,8 +1207,8 @@ describe("ProjectStore", () => {
           applicationId,
           controlValues: expect.objectContaining({
             name: "Ada Lovelace",
-            role: "Director",
-          }),
+            role: "Director"
+        })
         }),
       ]);
 
@@ -1154,8 +1224,8 @@ describe("ProjectStore", () => {
           applicationId,
           controlValues: expect.objectContaining({
             name: "Grace Hopper",
-            role: "Engineer",
-          }),
+            role: "Engineer"
+        })
         }),
       ]);
     });
@@ -1215,8 +1285,8 @@ describe("ProjectStore", () => {
         height: 1080,
         frameRate: 30,
         sampleRate: 48000,
-        channels: 2,
-      },
+        channels: 2
+        },
       mediaLibrary: { items: [] },
       timeline: {
         tracks: [
@@ -1241,11 +1311,11 @@ describe("ProjectStore", () => {
                   scale: { x: 1, y: 1 },
                   rotation: 0,
                   anchor: { x: 0.5, y: 0.5 },
-                  opacity: 1,
-                },
+                  opacity: 1
+        },
                 volume: 1,
-                keyframes: [],
-              },
+                keyframes: []
+        },
               {
                 id: "clip-b",
                 type: "video",
@@ -1262,24 +1332,24 @@ describe("ProjectStore", () => {
                   scale: { x: 1, y: 1 },
                   rotation: 0,
                   anchor: { x: 0.5, y: 0.5 },
-                  opacity: 1,
-                },
+                  opacity: 1
+        },
                 volume: 1,
-                keyframes: [],
-              },
+                keyframes: []
+        },
             ],
             transitions: [],
             locked: false,
             hidden: false,
             muted: false,
-            solo: false,
-          },
+            solo: false
+        },
         ],
         subtitles: [],
         duration: 8,
-        markers: [],
-      },
-    });
+        markers: []
+        }
+        });
 
     it("should persist adjacent clip transitions and mirror them into the transition bridge", () => {
       useProjectStore.getState().loadProject(createProjectWithAdjacentClips());
@@ -1290,8 +1360,8 @@ describe("ProjectStore", () => {
         clipBId: "clip-b",
         type: "crossfade",
         duration: 0.5,
-        params: { curve: "ease" },
-      };
+        params: { curve: "ease" }
+        };
 
       const addedTransition = useProjectStore
         .getState()
@@ -1300,7 +1370,7 @@ describe("ProjectStore", () => {
         .getState()
         .updateClipTransition("transition-1", {
           duration: 0.75,
-          params: { curve: "linear" },
+          params: { curve: "linear" }
         });
 
       expect(addedTransition).toEqual(transition);
@@ -1310,16 +1380,16 @@ describe("ProjectStore", () => {
         clipBId: "clip-b",
         type: "crossfade",
         duration: 0.75,
-        params: { curve: "linear" },
-      });
+        params: { curve: "linear" }
+        });
       expect(updatedTransition).toEqual({
         id: "transition-1",
         clipAId: "clip-a",
         clipBId: "clip-b",
         type: "crossfade",
         duration: 0.75,
-        params: { curve: "linear" },
-      });
+        params: { curve: "linear" }
+        });
       expect(mockTransitionBridgeState.trackTransitions.get("video-track-1")).toEqual([
         {
           id: "transition-1",
@@ -1327,7 +1397,7 @@ describe("ProjectStore", () => {
           clipBId: "clip-b",
           type: "crossfade",
           duration: 0.75,
-          params: { curve: "linear" },
+          params: { curve: "linear" }
         },
       ]);
 
@@ -1410,11 +1480,11 @@ describe("ProjectStore", () => {
           scale: { x: 1, y: 1 },
           rotation: 0,
           anchor: { x: 0.5, y: 0.5 },
-          opacity: 1,
+          opacity: 1
         },
         volume: 1,
-        keyframes: [],
-      };
+        keyframes: []
+        };
 
       const projectWithClip: Project = {
         id: "test",
@@ -1426,7 +1496,7 @@ describe("ProjectStore", () => {
           height: 1080,
           frameRate: 30,
           sampleRate: 48000,
-          channels: 2,
+          channels: 2
         },
         mediaLibrary: { items: [] },
         timeline: {
@@ -1440,14 +1510,14 @@ describe("ProjectStore", () => {
               locked: false,
               hidden: false,
               muted: false,
-              solo: false,
-            },
+              solo: false
+        },
           ],
           subtitles: [],
           duration: 5,
-          markers: [],
-        },
-      };
+          markers: []
+        }
+        };
 
       useProjectStore.getState().loadProject(projectWithClip);
       useProjectStore.getState().copyClips(["clip-to-copy"]);
@@ -1473,11 +1543,11 @@ describe("ProjectStore", () => {
           sampleRate: 48000,
           channels: 2,
           fileSize: 1000000,
-          audioTrackCount,
+          audioTrackCount
         },
         thumbnailUrl: null,
-        waveformData: null,
-      };
+        waveformData: null
+        };
 
       const videoClip: Clip = {
         id: "video-clip-1",
@@ -1495,11 +1565,11 @@ describe("ProjectStore", () => {
           scale: { x: 1, y: 1 },
           rotation: 0,
           anchor: { x: 0.5, y: 0.5 },
-          opacity: 1,
+          opacity: 1
         },
         volume: 1,
-        keyframes: [],
-      };
+        keyframes: []
+        };
 
       return {
         id: "test-project",
@@ -1511,7 +1581,7 @@ describe("ProjectStore", () => {
           height: 1080,
           frameRate: 30,
           sampleRate: 48000,
-          channels: 2,
+          channels: 2
         },
         mediaLibrary: { items: [mediaItem] },
         timeline: {
@@ -1525,14 +1595,14 @@ describe("ProjectStore", () => {
               locked: false,
               hidden: false,
               muted: false,
-              solo: false,
-            },
+              solo: false
+        },
           ],
           subtitles: [],
           duration: 10,
-          markers: [],
-        },
-      };
+          markers: []
+        }
+        };
     };
 
     it("should create one audio clip when media has a single audio track", async () => {

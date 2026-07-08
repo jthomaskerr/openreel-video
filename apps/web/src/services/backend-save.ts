@@ -82,7 +82,14 @@ class BackendSaveService {
       body: JSON.stringify(sanitize(project)),
     });
     if (!res.ok) {
-      throw new Error(`Backend save failed: HTTP ${res.status}`);
+      let detail = "";
+      try {
+        const body = await res.json() as { error?: string; detail?: string };
+        detail = body.detail ?? body.error ?? "";
+      } catch {
+        // ignore parse errors
+      }
+      throw new Error(`Backend save failed: HTTP ${res.status}${detail ? ` — ${detail}` : ""}`);
     }
   }
 

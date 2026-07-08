@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { backendSaveService } from "../services/backend-save";
 import { autoSaveManager, type AutoSaveMetadata } from "../services/auto-save";
-import { clearAllStorage, loadProjectMedia } from "../services/media-storage";
-import { restoreMediaItem } from "../utils/media-recovery";
+import { clearAllStorage } from "../services/media-storage";
 import { useProjectStore } from "../stores/project-store";
 
 interface RecoveryState {
@@ -30,34 +29,21 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
         const saves = await autoSaveManager.checkForRecovery();
 
         if (autoRestoreProjectId) {
-          // Backend is the primary store — try it first.
+          // Backend is authoritative — no IndexedDB dependency.
           const backendProject = await backendSaveService.load(autoRestoreProjectId);
           if (backendProject) {
-            // Merge blobs from IDB for any media the engine needs immediately.
-            const stored = await loadProjectMedia(backendProject.id);
-            const blobMap = new Map(stored.map((m) => [m.id, m.blob]));
-            const restoredItems = await Promise.all(
-              backendProject.mediaLibrary.items.map((item) =>
-                restoreMediaItem({ ...item, blob: null }, blobMap.get(item.id)),
-              ),
-            );
-            const fullyRestored = {
-              ...backendProject,
-              mediaLibrary: { ...backendProject.mediaLibrary, items: restoredItems },
-            };
-            loadProject(fullyRestored);
+            loadProject(backendProject);
             setState({ isChecking: false, availableSaves: [], showDialog: false, error: null });
             return;
           }
 
-          // Backend unreachable or no save — fall back to IDB auto-saves.
-          const projectSaves = saves
-            .filter((s) => s.projectId === autoRestoreProjectId)
-            .sort((a, b) => b.timestamp - a.timestamp);
-          if (projectSaves.length > 0) {
-            await recoverFromAutoSave(projectSaves[0].id);
-          }
-          setState({ isChecking: false, availableSaves: [], showDialog: false, error: null });
+          // Backend unreachable — surface the error.
+          setState({
+            isChecking: false,
+            availableSaves: [],
+            showDialog: false,
+            error: "Could not reach the project server. Please ensure the orchestrator is running and try again.",
+          });
           return;
         }
 
