@@ -697,13 +697,16 @@ export const Timeline: React.FC = () => {
       const oldDuration = clip.duration;
       const newDuration =
         edge === "left"
-          ? Math.max(0.1, clip.startTime + clip.duration - newTime)
+          // Left-edge: newTime is the new inPoint, so duration = outPoint - newInPoint
+          ? Math.max(0.1, clip.outPoint - newTime)
           : Math.max(0.1, newTime - clip.startTime);
 
       const updates =
         edge === "left"
           ? {
-              startTime: newTime,
+              // Trim from left: advance inPoint (clip beginning of source),
+              // keep startTime (clip stays in place on timeline)
+              inPoint: newTime,
               duration: newDuration,
             }
           : {

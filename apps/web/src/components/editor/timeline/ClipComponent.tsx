@@ -85,10 +85,14 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
     mouseX: number;
     startTime: number;
     duration: number;
+    inPoint: number;
+    outPoint: number;
   }>({
     mouseX: 0,
     startTime: clip.startTime,
     duration: clip.duration,
+    inPoint: clip.inPoint,
+    outPoint: clip.outPoint,
   });
   const dragStartRef = useRef<{ mouseY: number; clipY: number; scrollTop: number }>({
     mouseY: 0,
@@ -392,6 +396,8 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
         mouseX: e.clientX,
         startTime: clip.startTime,
         duration: clip.duration,
+        inPoint: clip.inPoint,
+        outPoint: clip.outPoint,
       };
       document.body.style.cursor = "ew-resize";
     };
@@ -620,14 +626,15 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
       const deltaTime = deltaX / pixelsPerSecond;
 
       if (trimEdge === "left") {
-        const newStartTime = Math.max(
+        // Left-edge trim: clip the beginning of the source by advancing inPoint.
+        // The clip stays in place on the timeline; only its source start offset changes.
+        const newInPoint = Math.max(
           0,
-          trimStartRef.current.startTime + deltaTime,
+          trimStartRef.current.inPoint + deltaTime,
         );
-        const maxStartTime =
-          trimStartRef.current.startTime + trimStartRef.current.duration - 0.1;
-        const clampedStartTime = Math.min(newStartTime, maxStartTime);
-        onTrimClip(clip.id, "left", clampedStartTime);
+        const maxInPoint = trimStartRef.current.outPoint - 0.1;
+        const clampedInPoint = Math.min(newInPoint, maxInPoint);
+        onTrimClip(clip.id, "left", clampedInPoint);
       } else {
         const newEndTime =
           trimStartRef.current.startTime +
