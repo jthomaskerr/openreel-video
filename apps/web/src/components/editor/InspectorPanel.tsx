@@ -64,6 +64,7 @@ import { ProblemsPanel } from "./inspector/ProblemsPanel";
 import { ImportErrorsPanel } from "./inspector/ImportErrorsPanel";
 import { LogPanel } from "./inspector/LogPanel";
 import { AssetInspectorWithTabs } from "./inspector/AssetInspectorWithTabs";
+import { ClipTimingSection } from "./inspector/ClipTimingSection";
 
 // Initialize engines as singletons
 const chromaKeyEngine = new ChromaKeyEngine({ width: 1920, height: 1080 });
@@ -921,6 +922,7 @@ export const InspectorPanel: React.FC = () => {
             />
           )}
           <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
+            {selectedClip && <ClipTimingSection clip={selectedClip} />}
             <ImportErrorsPanel errors={importErrors} />
             {isSelectedMetadataClip ? (
               metadataKind === "note" ? (

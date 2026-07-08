@@ -5,6 +5,7 @@ import type { Project } from "@openreel/core";
 import { createEmptyProject } from "../../stores/project/project-helpers";
 import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
+import { useTimelineStore } from "../../stores/timeline-store";
 import { InspectorPanel } from "./InspectorPanel";
 
 const clipId = "clip-vid";
@@ -28,7 +29,12 @@ function seedClip(opts: {
           clips: [
             {
               id: clipId,
-              type: opts.trackType === "audio" ? "audio" : opts.trackType === "image" ? "image" : "video",
+              type:
+                opts.trackType === "audio"
+                  ? "audio"
+                  : opts.trackType === "image"
+                    ? "image"
+                    : "video",
               mediaId: opts.mediaId,
               trackId,
               startTime: 0,
@@ -78,12 +84,15 @@ describe("InspectorPanel real tabs", () => {
     cleanup();
     useUIStore.getState().clearSelection();
     useProjectStore.setState({ project: createEmptyProject("Reset") });
+    useTimelineStore.setState({ playheadPosition: 0 });
   });
 
   it("shows the video tab set after switching to Edit pane", () => {
     render(<InspectorPanel />);
     switchToEditPane();
-    const inspectorTabs = screen.getByRole("tablist", { name: /Inspector tabs/ });
+    const inspectorTabs = screen.getByRole("tablist", {
+      name: /Inspector tabs/,
+    });
     expect(inspectorTabs).toBeInTheDocument();
     expect(
       screen.getByRole("tab", { name: /Transform/ }),
@@ -109,6 +118,27 @@ describe("InspectorPanel real tabs", () => {
     expect(useUIStore.getState().inspectorActiveTab).toBe("audio");
     expect(screen.queryByText("Position X")).toBeNull();
   });
+
+  it("edits clip timing and can set end from the timeline playhead", () => {
+    useTimelineStore.setState({ playheadPosition: 4 });
+    render(<InspectorPanel />);
+    switchToEditPane();
+
+    expect(screen.getByLabelText("Clip start time")).toHaveValue(0);
+    expect(screen.getByLabelText("Clip duration")).toHaveValue(10);
+    expect(screen.getByLabelText("Clip end time")).toHaveValue(10);
+
+    fireEvent.change(screen.getByLabelText("Clip duration"), {
+      target: { value: "6" },
+    });
+    expect(useProjectStore.getState().getClip(clipId)?.duration).toBe(6);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Set clip end to playhead/ }),
+    );
+    expect(useProjectStore.getState().getClip(clipId)?.duration).toBe(4);
+    expect(screen.getByLabelText("Clip end time")).toHaveValue(4);
+  });
 });
 
 describe("InspectorPanel tab sets per clip type", () => {
@@ -120,6 +150,7 @@ describe("InspectorPanel tab sets per clip type", () => {
     cleanup();
     useUIStore.getState().clearSelection();
     useProjectStore.setState({ project: createEmptyProject("Reset") });
+    useTimelineStore.setState({ playheadPosition: 0 });
   });
 
   it("audio clip shows Audio + AI, no Speed or Transform", () => {
