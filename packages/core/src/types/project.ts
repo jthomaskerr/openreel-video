@@ -2,6 +2,43 @@ import type { Timeline } from "./timeline";
 import type { TextClip } from "../text/types";
 import type { ShapeClip, SVGClip, StickerClip } from "../graphics/types";
 
+/**
+ * Producer-independent status of the primary media source file.
+ *
+ * - OK: media blob is available and loadable.
+ * - MISSING: no blob and no generation metadata — imported/linked file that
+ *   cannot be found on disk. User can "Link file" to resolve.
+ * - UNREALIZED: no blob BUT generationMeta exists — a generated asset that
+ *   has not been produced yet. Not "missing," just not ready. User can retry
+ *   generation, not "Link file."
+ * - PENDING: generation is in progress (KieAI/WaveSpeed polling).
+ * - ERROR: generation or polling failed.
+ */
+export enum MediaStatus {
+  OK = "OK",
+  MISSING = "MISSING",
+  UNREALIZED = "UNREALIZED",
+  PENDING = "PENDING",
+  ERROR = "ERROR",
+}
+
+/**
+ * Derive the media-file status from a MediaItem without checking flags
+ * like `isPlaceholder` or `isMissingMedia` that overloaded two concerns.
+ */
+export function getMediaStatus(item: MediaItem): MediaStatus {
+  if (item.blob) return MediaStatus.OK;
+  if (item.generationMeta) {
+    const gs = item.generationMeta.status;
+    if (gs === "failed" || gs === "cancelled") return MediaStatus.ERROR;
+    if (gs === "unrealized") return MediaStatus.UNREALIZED;
+    // queued, submitting, processing, running, pending — all "in flight"
+    return MediaStatus.PENDING;
+  }
+  // No blob and no generation metadata — truly missing
+  return MediaStatus.MISSING;
+}
+
 export interface ProjectSettings {
   readonly width: number;
   readonly height: number;
@@ -38,14 +75,10 @@ export interface MediaItem {
   readonly thumbnailUrl: string | null;
   readonly waveformData: Float32Array | null;
   readonly filmstripThumbnails?: FilmstripThumbnail[];
-  readonly isPlaceholder?: boolean;
   readonly originalUrl?: string;
   /** File hint stored in JSON for cross-session/cross-machine asset matching */
   readonly sourceFile?: { name: string; size: number; lastModified: number; folder?: string };
-  /** True while a background KieAI generation task is in progress */
-  readonly isPending?: boolean;
-  /** True when polling exhausted all retries — shows manual retry button */
-  readonly kieaiError?: boolean;
+
   /** KieAI task ID used to poll for completion */
   readonly kieaiTaskId?: string;
   /** Shared identifier for all MediaItems that are versions of the same asset */

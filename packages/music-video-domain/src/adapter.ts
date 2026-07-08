@@ -36,9 +36,6 @@ export interface NeuralFramesMediaSpec {
   thumbnailUrl: string | null;
   originalUrl?: string;
   waveformData: null;
-  isPlaceholder: boolean;
-  isPending?: boolean;
-  kieaiError?: boolean;
   assetGroupId?: string;
   group?: string;
   tags?: string[];
@@ -343,9 +340,7 @@ function buildGeneratedMediaSpec(result: NeuralFramesImportResult, asset: Genera
     metadata: mediaMetadata(),
     thumbnailUrl: asset.outputPath ?? null,
     waveformData: null,
-    isPlaceholder: !hasOutput,
-    isPending: !isResolved && asset.status !== "failed" && asset.status !== "cancelled",
-    kieaiError: asset.status === "failed" || asset.status === "cancelled",
+
     assetGroupId: asset.id,
     group: "Generated",
     tags: ["generated", asset.provider, effectiveStatus],
@@ -387,7 +382,6 @@ function buildGeneratedImageMediaSpec(input: {
     metadata: mediaMetadata(),
     thumbnailUrl: input.thumbnailUrl,
     waveformData: null,
-    isPlaceholder: false,
     group: input.group,
     tags: input.tags,
     generationMeta: { ...input.generationMeta, jobId: input.id, status: "realized" },
@@ -417,7 +411,6 @@ function buildReferenceMediaSpec(input: {
     metadata: mediaMetadata(),
     thumbnailUrl: input.thumbnailUrl,
     waveformData: null,
-    isPlaceholder: false,
     group: "Reference Images",
     tags: input.tags,
     generationMeta: {
@@ -458,7 +451,6 @@ function buildAudioMediaSpec(
     thumbnailUrl: thumbnailUrl ?? null,
     originalUrl,
     waveformData: null,
-    isPlaceholder: true,
     group: "Imported Audio",
     tags: ["audio", "neuralframes"],
     sourceFile: { name, size: 0, lastModified: 0 },
@@ -501,7 +493,6 @@ function buildUnrealizedSceneMediaSpec(
     metadata: mediaMetadata(),
     thumbnailUrl,
     waveformData: null,
-    isPlaceholder: true,
     assetGroupId: id,
     group: "Neural Frames Scenes",
     tags: ["scene", "neuralframes", "unrealized"],
@@ -535,7 +526,6 @@ function buildCharacterMediaSpec(
     metadata: mediaMetadata(),
     thumbnailUrl: thumbnailUrl ?? null,
     waveformData: null,
-    isPlaceholder: !thumbnailUrl,
     group: "Characters",
     tags: ["character", "neuralframes"],
     generationMeta: { ...generationMeta, jobId: id },

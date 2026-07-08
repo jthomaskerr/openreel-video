@@ -183,10 +183,9 @@ export class ProjectSerializer {
   private normalizeImportedProject(project: Project): Project {
     const itemsById = new Map(project.mediaLibrary.items.map((item) => [item.id, item]));
     const processedItems: MediaItem[] = project.mediaLibrary.items.map((item) => {
-      if (!item.blob) {
+      if (!item.blob && !item.generationMeta) {
         return {
           ...item,
-          isPlaceholder: true,
           originalUrl: item.thumbnailUrl || undefined,
         };
       }
@@ -253,7 +252,6 @@ export class ProjectSerializer {
       },
       thumbnailUrl: null,
       waveformData: null,
-      isPlaceholder: true,
       sourceFile,
     };
   }

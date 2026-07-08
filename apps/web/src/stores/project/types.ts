@@ -115,6 +115,8 @@ export interface ProjectState {
 
   importMedia: (file: File) => Promise<ActionResult>;
   deleteMedia: (mediaId: string) => Promise<ActionResult>;
+  replaceMediaAsset: (mediaId: string, file: File, sourceFolder?: string) => Promise<ActionResult>;
+  addAssetVersionFromFile: (sourceMediaId: string, file: File, sourceFolder?: string) => Promise<ActionResult>;
   renameMedia: (mediaId: string, name: string) => Promise<ActionResult>;
   /** Update user-editable metadata (title, description, tags, group) on a media item */
   updateMediaMetadata: (mediaId: string, patch: { title?: string; description?: string; tags?: string[]; group?: string }) => Promise<ActionResult>;

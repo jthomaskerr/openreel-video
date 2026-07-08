@@ -73,14 +73,14 @@ function projectWithMissingClip(): Project {
               volume: 1,
               keyframes: [],
               metadata: {
-                sourceFile: { name: "missing-scene.mp4", size: 12345, lastModified: 99 },
-              },
-            },
-          ],
+                sourceFile: { name: "missing-scene.mp4", size: 12345, lastModified: 99 }
+        }
         },
-      ],
-    },
-  };
+          ]
+        },
+      ]
+        }
+        };
 }
 
 describe("ProjectSerializer imported unresolved media", () => {
@@ -100,9 +100,9 @@ describe("ProjectSerializer imported unresolved media", () => {
         id: "missing-video-id",
         name: "missing-scene.mp4",
         type: "video",
-        isPlaceholder: true,
-        sourceFile: { name: "missing-scene.mp4", size: 12345, lastModified: 99 },
-      }),
+
+        sourceFile: { name: "missing-scene.mp4", size: 12345, lastModified: 99 }
+        }),
     );
   });
 
@@ -115,9 +115,8 @@ describe("ProjectSerializer imported unresolved media", () => {
 
     expect(imported.mediaLibrary.items).toContainEqual(
       expect.objectContaining({
-        id: "missing-video-id",
-        isPlaceholder: true,
-      }),
+        id: "missing-video-id"
+        }),
     );
   });
 
