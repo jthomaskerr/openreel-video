@@ -3,7 +3,7 @@ import React, {
   useEffect,
   useCallback,
   useState,
-  useMemo,
+  useMemo
 } from "react";
 import {
   Play,
@@ -17,7 +17,7 @@ import {
   Minimize2,
   Move,
   Loader2,
-  ZoomIn,
+  ZoomIn
 } from "lucide-react";
 import { useProjectStore } from "../../stores/project-store";
 import { useTimelineStore } from "../../stores/timeline-store";
@@ -46,8 +46,9 @@ import {
   type SVGClip,
   type StickerClip,
   type Subtitle,
-  type Track,
+  type Track
 } from "@openreel/core";
+import { getMediaStatus, MediaStatus } from "@openreel/core";
 import { useEngineStore } from "../../stores/engine-store";
 import {
   type HandlePosition,
@@ -72,6 +73,10 @@ import {
   CropModeView,
   MotionPathOverlay,
   ParticleRenderer,
+  drawMissingVideoPlaceholderSync,
+  drawWarningOverlay,
+  loadAndDrawThumbnail,
+  resolvePlaceholderColors,
 } from "./preview/index";
 import { getAudioPlaybackClips } from "./preview-audio-playback";
 import { ProcessingOverlay } from "./ProcessingOverlay";
@@ -79,9 +84,9 @@ import {
   getPersonSegmentationEngine,
   getBackgroundRemovalEngine,
   getStabilizedTransform,
-  getVidstabEngine,
+  getVidstabEngine
 } from "@openreel/core";
-import type { MotionPathConfig, GSAPMotionPathPoint } from "@openreel/core";
+import type { MotionPathConfig, GSAPMotionPathPoint, MediaItem } from "@openreel/core";
 
 interface GPULayer {
   bitmap: ImageBitmap;
@@ -122,7 +127,7 @@ const preparePreviewFrame = async (
   if (!preferBitmap && !needsProcessing) {
     return {
       frame: frameCanvas,
-      cleanup: () => {},
+      cleanup: () => {}
     };
   }
 
@@ -137,7 +142,7 @@ const preparePreviewFrame = async (
         frame: frameBitmap,
         cleanup: () => {
           frameBitmap?.close();
-        },
+        }
       };
     }
 
@@ -147,7 +152,7 @@ const preparePreviewFrame = async (
         frame: frameBitmap,
         cleanup: () => {
           frameBitmap?.close();
-        },
+        }
       };
     }
 
@@ -156,7 +161,7 @@ const preparePreviewFrame = async (
       cleanup: () => {
         processedFrame?.close();
         frameBitmap?.close();
-      },
+      }
     };
   } catch {
     processedFrame?.close();
@@ -164,7 +169,7 @@ const preparePreviewFrame = async (
 
     return {
       frame: frameCanvas,
-      cleanup: () => {},
+      cleanup: () => {}
     };
   }
 };
@@ -186,7 +191,7 @@ const applyStabilizationTransform = (
       canvasWidth,
       canvasHeight,
       sourceWidth: frameWidth,
-      sourceHeight: frameHeight,
+      sourceHeight: frameHeight
     },
   ) as ClipTransform;
 };
@@ -264,12 +269,12 @@ const renderFrameWithGPU = async (
       position: transform.position,
       scale: {
         x: transform.scale.x * fitScale.x,
-        y: transform.scale.y * fitScale.y,
+        y: transform.scale.y * fitScale.y
       },
       rotation: transform.rotation,
       anchor: transform.anchor,
       opacity: transform.opacity,
-      borderRadius: transform.borderRadius,
+      borderRadius: transform.borderRadius
     };
 
     renderer.renderLayer({
@@ -277,7 +282,7 @@ const renderFrameWithGPU = async (
       transform: gpuTransform,
       effects: [],
       opacity: transform.opacity,
-      borderRadius: transform.borderRadius || 0,
+      borderRadius: transform.borderRadius || 0
     });
 
     const result = await renderer.endFrame();
@@ -323,12 +328,12 @@ const renderAllLayersWithGPU = async (
         position: layer.transform.position,
         scale: {
           x: layer.transform.scale.x * fitScale.x,
-          y: layer.transform.scale.y * fitScale.y,
+          y: layer.transform.scale.y * fitScale.y
         },
         rotation: layer.transform.rotation,
         anchor: layer.transform.anchor,
         opacity: layer.transform.opacity,
-        borderRadius: layer.transform.borderRadius,
+        borderRadius: layer.transform.borderRadius
       };
 
       renderer.renderLayer({
@@ -336,7 +341,7 @@ const renderAllLayersWithGPU = async (
         transform: gpuTransform,
         effects: [],
         opacity: layer.transform.opacity,
-        borderRadius: layer.transform.borderRadius || 0,
+        borderRadius: layer.transform.borderRadius || 0
       });
     }
 
@@ -429,9 +434,7 @@ const renderTextClipWithSubjectMask = async (
   }
 };
 
-interface ClipWithPlaceholder {
-  isPlaceholder?: boolean;
-}
+
 
 export const Preview: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -505,7 +508,7 @@ export const Preview: React.FC = () => {
         type: effect.type,
         enabled: effect.enabled,
         params: effect.params,
-        metadata: effect.metadata,
+        metadata: effect.metadata
       })),
     ), []);
 
@@ -557,13 +560,13 @@ export const Preview: React.FC = () => {
 
   const getResolvedClipAudioEffects = useCallback((clip: PreviewClip): Effect[] => {
     return resolveTimelineClipAudioEffects(clip, {
-      tracks: timelineTracksRef.current,
+      tracks: timelineTracksRef.current
     });
   }, []);
 
   const getResolvedClipVolumeAutomation = useCallback((clip: PreviewClip) =>
     resolveClipVolumeAutomation(clip, {
-      tracks: timelineTracksRef.current,
+      tracks: timelineTracksRef.current
     }), []);
 
   const rendererRef = useRef<Renderer | null>(null);
@@ -767,6 +770,75 @@ export const Preview: React.FC = () => {
   // when any part of the project changes (including clips)
   const project = useProjectStore((state) => state.project);
   const getMediaItem = useProjectStore((state) => state.getMediaItem);
+  const allMediaItems = useProjectStore(
+    (state) => state.project.mediaLibrary.items,
+  );
+
+  // Keep a ref to allMediaItems for use in callbacks without causing re-runs
+  const allMediaItemsRef = useRef(allMediaItems);
+  useEffect(() => {
+    allMediaItemsRef.current = allMediaItems;
+  }, [allMediaItems]);
+
+  // Track which missing-media warnings have been emitted (once per mediaId)
+  const missingMediaWarnedRef = useRef<Set<string>>(new Set());
+
+  /**
+   * Render a missing-video placeholder into an ImageBitmap for the
+   * scrub/decode pipeline. All missing video clips go through this path
+   * so the user sees a thumbnail + warning instead of black/blank.
+   */
+  const renderMissingVideoBitmap = useCallback(
+    async (
+      clip: { id: string; mediaId?: string },
+      mediaItem: MediaItem,
+      canvasWidth: number,
+      canvasHeight: number,
+    ): Promise<ImageBitmap | null> => {
+      // Emit one structured warning per missing media item
+      if (!missingMediaWarnedRef.current.has(mediaItem.id)) {
+        missingMediaWarnedRef.current.add(mediaItem.id);
+        const item = mediaItem as { thumbnailUrl?: string | null };
+        console.warn(
+          `[Preview] Missing video file — ` +
+            `clipId=${clip.id} mediaId=${mediaItem.id} name="${mediaItem.name}" ` +
+            `hasThumbnail=${!!item.thumbnailUrl}`,
+        );
+      }
+
+      try {
+        const canvas = new OffscreenCanvas(canvasWidth, canvasHeight);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return null;
+
+        const { thumbnailUrl } = drawMissingVideoPlaceholderSync({
+          ctx,
+          clip: clip as unknown as PreviewClip,
+          mediaItem,
+          allMediaItems: allMediaItemsRef.current,
+          canvasWidth,
+          canvasHeight,
+          isDark,
+        });
+
+        // Load and draw the thumbnail asynchronously so the ImageBitmap
+        // captures the actual thumbnail image, not just the warning overlay.
+        if (thumbnailUrl) {
+          await loadAndDrawThumbnail(thumbnailUrl, ctx, canvasWidth, canvasHeight);
+          // Draw the warning overlay on top of the thumbnail
+          const colors = resolvePlaceholderColors(isDark);
+          const mediaName = mediaItem?.name ?? "Missing media";
+          const isMissing = mediaItem ? getMediaStatus(mediaItem) === MediaStatus.MISSING : true;
+          drawWarningOverlay(ctx, canvasWidth, canvasHeight, mediaName, isMissing, colors);
+        }
+
+        return await createImageBitmap(canvas);
+      } catch {
+        return null;
+      }
+    },
+    [isDark],
+  );
 
   // Get text clips from TitleEngine
   const getTitleEngine = useEngineStore((state) => state.getTitleEngine);
@@ -827,7 +899,7 @@ export const Preview: React.FC = () => {
 
     return {
       width: width * zoomLevel,
-      height: height * zoomLevel,
+      height: height * zoomLevel
     };
   }, [settings.height, settings.width, videoAreaSize, zoomLevel]);
 
@@ -876,7 +948,7 @@ export const Preview: React.FC = () => {
     togglePlayback,
     seekTo,
     seekRelative,
-    setPlayheadPosition,
+    setPlayheadPosition
   } = useTimelineStore();
 
   useEffect(() => {
@@ -905,7 +977,7 @@ export const Preview: React.FC = () => {
         points: [],
         showPath: true,
         autoOrient: false,
-        alignOrigin: [0.5, 0.5],
+        alignOrigin: [0.5, 0.5]
       });
     } else {
       setMotionPathConfig(null);
@@ -1075,7 +1147,7 @@ export const Preview: React.FC = () => {
           canvas,
           width: settings.width,
           height: settings.height,
-          preferredRenderer: isWebGPUSupported() ? "webgpu" : "canvas2d",
+          preferredRenderer: isWebGPUSupported() ? "webgpu" : "canvas2d"
         });
 
         rendererRef.current = renderer;
@@ -1332,7 +1404,7 @@ export const Preview: React.FC = () => {
           pan: 0,
           muted: audioTrack.muted || false,
           solo: audioTrack.solo || false,
-          effects: [],
+          effects: []
         });
 
         const mediaItem = getMediaItem(audioClip.mediaId);
@@ -1350,7 +1422,7 @@ export const Preview: React.FC = () => {
             const audioContext = audioGraph.getAudioContext();
             const loaded = await loadAudioBuffer(
               audioContext,
-              mediaItem.blob,
+              getMediaSourceBlob(mediaItem)!,
               audioClip.audioTrackIndex ?? 0,
             );
             if (!loaded) {
@@ -1398,7 +1470,7 @@ export const Preview: React.FC = () => {
           volumeAutomation: getResolvedClipVolumeAutomation(audioClip),
           pan: 0,
           effects: previewAudio.effects,
-          speed: audioClip.speed ?? 1,
+          speed: audioClip.speed ?? 1
         });
       }
 
@@ -1446,7 +1518,7 @@ export const Preview: React.FC = () => {
           try {
             audioBuffer = await loadAudioBuffer(
               audioContext,
-              mediaItem.blob,
+              getMediaSourceBlob(mediaItem)!,
               clip.audioTrackIndex ?? 0,
             );
             if (audioBuffer) {
@@ -1533,7 +1605,7 @@ export const Preview: React.FC = () => {
           volumeAutomation: getResolvedClipVolumeAutomation(clip),
           pan: 0,
           effects: scheduleEffects,
-          speed: clip.speed ?? 1,
+          speed: clip.speed ?? 1
         });
       }
 
@@ -1564,15 +1636,35 @@ export const Preview: React.FC = () => {
       canvasHeight: number,
     ): Promise<ImageBitmap | null> => {
       const mediaItem = getMediaItem(clip.mediaId);
-      if (!mediaItem?.blob) return null;
+      if (!mediaItem?.blob) {
+        // Missing video — render placeholder frame
+        if (
+          mediaItem &&
+          mediaItem.type === "video" &&
+          getMediaStatus(mediaItem) !== MediaStatus.OK
+        ) {
+          try {
+            return await renderMissingVideoBitmap(
+              clip,
+              mediaItem,
+              canvasWidth,
+              canvasHeight,
+            );
+          } catch {
+            return null;
+          }
+        }
+        return null;
+      }
       const vidstab = getVidstabEngine();
-      const mediaBlob = (vidstab.hasStabilized(clip.id)
+      const effectiveBlob = vidstab.hasStabilized(clip.id)
         ? vidstab.getStabilizedBlob(clip.id)
-        : mediaItem.blob)!;
+        : getMediaSourceBlob(mediaItem);
+      const mediaBlob = effectiveBlob!;
 
       if (mediaItem.type === "image") {
         try {
-          return await createImageBitmap(mediaItem.blob);
+          return await createImageBitmap(effectiveBlob!);
         } catch {
           return null;
         }
@@ -2107,7 +2199,7 @@ export const Preview: React.FC = () => {
                         y:
                           animatedTransform.scale.y *
                           emphasisState.scale *
-                          emphasisState.scaleY,
+                          emphasisState.scaleY
                       },
                       position: {
                         x:
@@ -2115,10 +2207,10 @@ export const Preview: React.FC = () => {
                           emphasisState.offsetX * canvas.width,
                         y:
                           animatedTransform.position.y +
-                          emphasisState.offsetY * canvas.height,
+                          emphasisState.offsetY * canvas.height
                       },
                       rotation:
-                        animatedTransform.rotation + emphasisState.rotation,
+                        animatedTransform.rotation + emphasisState.rotation
                     };
                   }
 
@@ -2291,7 +2383,7 @@ export const Preview: React.FC = () => {
   }, []);
 
   const renderFallbackFrame = useCallback(
-    (time: number) => {
+    async (time: number) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
 
@@ -2352,7 +2444,41 @@ export const Preview: React.FC = () => {
 
             if (time >= clipStart && time < clipEnd) {
               const mediaItem = getMediaItem(clip.mediaId);
-              if (mediaItem) {
+              if (mediaItem && getMediaStatus(mediaItem) !== MediaStatus.OK) {
+                // Missing video placeholder — draw thumbnail + warning
+                hasRenderedContent = true;
+                try {
+                  const { thumbnailUrl } = drawMissingVideoPlaceholderSync({
+                    ctx,
+                    clip: clip as unknown as PreviewClip,
+                    mediaItem,
+                    allMediaItems: allMediaItemsRef.current,
+                    canvasWidth: canvas.width,
+                    canvasHeight: canvas.height,
+                    isDark,
+                  });
+                  // Load and draw the thumbnail asynchronously so the
+                  // frame shows the actual image, not just the warning.
+                  if (thumbnailUrl) {
+                    await loadAndDrawThumbnail(thumbnailUrl, ctx, canvas.width, canvas.height);
+                    // Draw warning overlay on top of thumbnail
+                    const colors = resolvePlaceholderColors(isDark);
+                    const mediaName = mediaItem?.name ?? "Missing media";
+                    const isMediaMissing = mediaItem ? getMediaStatus(mediaItem) === MediaStatus.MISSING : true;
+                    drawWarningOverlay(ctx, canvas.width, canvas.height, mediaName, isMediaMissing, colors);
+                  }
+                } catch {
+                  // Fallback to simple text
+                  ctx.fillStyle = textSecondary;
+                  ctx.font = "bold 20px Inter, sans-serif";
+                  ctx.textAlign = "center";
+                  ctx.fillText(
+                    "Missing media",
+                    canvas.width / 2,
+                    canvas.height / 2,
+                  );
+                }
+              } else if (mediaItem) {
                 hasRenderedContent = true;
                 ctx.fillStyle = textPrimary;
                 ctx.font = "bold 24px Inter, sans-serif";
@@ -2368,23 +2494,6 @@ export const Preview: React.FC = () => {
                   `${formatTime(time)} / ${formatTime(clip.duration)}`,
                   canvas.width / 2,
                   canvas.height / 2 + 30,
-                );
-              } else if ((clip as ClipWithPlaceholder).isPlaceholder) {
-                hasRenderedContent = true;
-                ctx.fillStyle = textSecondary;
-                ctx.font = "bold 20px Inter, sans-serif";
-                ctx.textAlign = "center";
-                ctx.fillText(
-                  "Drop media here",
-                  canvas.width / 2,
-                  canvas.height / 2,
-                );
-                ctx.font = "14px Inter, sans-serif";
-                ctx.fillStyle = emptyText;
-                ctx.fillText(
-                  "Replace this placeholder with your content",
-                  canvas.width / 2,
-                  canvas.height / 2 + 28,
                 );
               }
             }
@@ -2480,6 +2589,8 @@ export const Preview: React.FC = () => {
       allShapeClips,
       allSubtitles,
       isDark,
+      allMediaItemsRef,
+      loadAndDrawThumbnail,
     ],
   );
 
@@ -2518,6 +2629,15 @@ export const Preview: React.FC = () => {
                 return { canUse: false, clips: [] };
               }
               allVideoClips.push({ clip, mediaItem });
+            } else if (
+              mediaItem &&
+              mediaItem.type === "video" &&
+              !mediaItem.blob &&
+              getMediaStatus(mediaItem) !== MediaStatus.OK
+            ) {
+              // A visible future video clip has missing source — fall back to
+              // the multi-track renderer so the placeholder can be drawn.
+              return { canUse: false, clips: [] };
             }
           }
         }
@@ -2610,9 +2730,9 @@ export const Preview: React.FC = () => {
       const imageBitmapCache = new Map<string, ImageBitmap>();
       for (const { clip } of imageClips) {
         const mediaItem = getMediaItem(clip.mediaId);
-        if (mediaItem?.type === "image" && mediaItem.blob) {
+        if (mediaItem?.type === "image" && getMediaSourceBlob(mediaItem)) {
           try {
-            const bitmap = await createImageBitmap(mediaItem.blob);
+            const bitmap = await createImageBitmap(getMediaSourceBlob(mediaItem)!);
             imageBitmapCache.set(clip.id, bitmap);
           } catch (error) {
             console.warn(`Failed to cache image bitmap for ${clip.id}:`, error);
@@ -2652,7 +2772,8 @@ export const Preview: React.FC = () => {
           }
         }
 
-        if (!mediaItem.blob) {
+        const effectiveBlob = getMediaSourceBlob(mediaItem);
+        if (!effectiveBlob) {
           return Promise.resolve();
         }
 
@@ -2660,7 +2781,7 @@ export const Preview: React.FC = () => {
         const isStabilized = vidstabEng.hasStabilized(clip.id);
         const playBlob = (isStabilized
           ? vidstabEng.getStabilizedBlob(clip.id)
-          : mediaItem.blob)!;
+          : effectiveBlob)!;
         const cacheId = isStabilized ? `stabilized:${clip.id}` : clip.mediaId;
         const url = URL.createObjectURL(playBlob);
         const video = document.createElement("video");
@@ -2734,7 +2855,7 @@ export const Preview: React.FC = () => {
           pan: 0,
           muted: audioTrack.muted || false,
           solo: audioTrack.solo || false,
-          effects: [],
+          effects: []
         });
       }
 
@@ -3128,13 +3249,13 @@ export const Preview: React.FC = () => {
             opacity: transform.opacity * emphasisState.opacity,
             scale: {
               x: transform.scale.x * emphasisState.scale * emphasisState.scaleX,
-              y: transform.scale.y * emphasisState.scale * emphasisState.scaleY,
+              y: transform.scale.y * emphasisState.scale * emphasisState.scaleY
             },
             position: {
               x: transform.position.x + emphasisState.offsetX * canvas.width,
-              y: transform.position.y + emphasisState.offsetY * canvas.height,
+              y: transform.position.y + emphasisState.offsetY * canvas.height
             },
-            rotation: transform.rotation + emphasisState.rotation,
+            rotation: transform.rotation + emphasisState.rotation
           };
         }
 
@@ -3406,8 +3527,8 @@ export const Preview: React.FC = () => {
           const { Input, ALL_FORMATS, BlobSource, CanvasSink } = mediabunny;
 
           const input = new Input({
-            source: new BlobSource(mediaItem.blob),
-            formats: ALL_FORMATS,
+            source: new BlobSource(getMediaSourceBlob(mediaItem)!),
+            formats: ALL_FORMATS
           });
 
           const videoTrack = await input.getPrimaryVideoTrack();
@@ -3432,7 +3553,7 @@ export const Preview: React.FC = () => {
           }
 
           const sink = new CanvasSink(videoTrack, {
-            poolSize: 3,
+            poolSize: 3
           });
 
           const speedEngine = getSpeedEngine();
@@ -3603,7 +3724,7 @@ export const Preview: React.FC = () => {
                     y:
                       transform.scale.y *
                       emphasisState.scale *
-                      emphasisState.scaleY,
+                      emphasisState.scaleY
                   },
                   position: {
                     x:
@@ -3611,9 +3732,9 @@ export const Preview: React.FC = () => {
                       emphasisState.offsetX * canvas.width,
                     y:
                       transform.position.y +
-                      emphasisState.offsetY * canvas.height,
+                      emphasisState.offsetY * canvas.height
                   },
-                  rotation: transform.rotation + emphasisState.rotation,
+                  rotation: transform.rotation + emphasisState.rotation
                 };
               }
 
@@ -3740,8 +3861,8 @@ export const Preview: React.FC = () => {
         const { Input, ALL_FORMATS, BlobSource, CanvasSink } = mediabunny;
 
         const input = new Input({
-          source: new BlobSource(mediaItem.blob),
-          formats: ALL_FORMATS,
+          source: new BlobSource(getMediaSourceBlob(mediaItem)!),
+          formats: ALL_FORMATS
         });
 
         const videoTrack = await input.getPrimaryVideoTrack();
@@ -3757,7 +3878,7 @@ export const Preview: React.FC = () => {
         }
 
         const sink = new CanvasSink(videoTrack, {
-          poolSize: 3,
+          poolSize: 3
         });
 
         return {
@@ -3765,7 +3886,7 @@ export const Preview: React.FC = () => {
           sink,
           mediaId: clip.mediaId,
           clipId: clip.id,
-          trackIndex,
+          trackIndex
         };
       } catch (error) {
         console.error(
@@ -3787,9 +3908,9 @@ export const Preview: React.FC = () => {
           if (imageBitmapCacheRef.current.has(clip.id)) continue;
 
           const mediaItem = getMediaItem(clip.mediaId);
-          if (mediaItem?.type === "image" && mediaItem.blob) {
+          if (mediaItem?.type === "image" && getMediaSourceBlob(mediaItem)) {
             try {
-              const bitmap = await createImageBitmap(mediaItem.blob);
+              const bitmap = await createImageBitmap(getMediaSourceBlob(mediaItem)!);
               imageBitmapCacheRef.current.set(clip.id, bitmap);
             } catch (error) {
               console.warn(
@@ -3878,7 +3999,7 @@ export const Preview: React.FC = () => {
           pan: 0,
           muted: track.muted || false,
           solo: track.solo || false,
-          effects: [],
+          effects: []
         });
       }
 
@@ -4297,16 +4418,16 @@ export const Preview: React.FC = () => {
                   y:
                     transform.scale.y *
                     emphasisState.scale *
-                    emphasisState.scaleY,
+                    emphasisState.scaleY
                 },
                 position: {
                   x:
                     transform.position.x + emphasisState.offsetX * canvas.width,
                   y:
                     transform.position.y +
-                    emphasisState.offsetY * canvas.height,
+                    emphasisState.offsetY * canvas.height
                 },
-                rotation: transform.rotation + emphasisState.rotation,
+                rotation: transform.rotation + emphasisState.rotation
               };
             }
 
@@ -4321,7 +4442,42 @@ export const Preview: React.FC = () => {
             videoClipPromises.push(
               (async () => {
                 const resources = playbackResourcesRef.current.get(clip.id);
-                if (!resources) return null;
+                if (!resources) {
+                  // Missing video — render placeholder for this clip
+                  const mediaItem = getMediaItem(clip.mediaId);
+                  if (mediaItem && getMediaStatus(mediaItem) !== MediaStatus.OK) {
+                    try {
+                      const placeholderCanvas = new OffscreenCanvas(canvas.width, canvas.height);
+                      const pctx = placeholderCanvas.getContext("2d");
+                      if (pctx) {
+                        const { thumbnailUrl } = drawMissingVideoPlaceholderSync({
+                          ctx: pctx,
+                          clip: clip as unknown as PreviewClip,
+                          mediaItem,
+                          allMediaItems: allMediaItemsRef.current,
+                          canvasWidth: canvas.width,
+                          canvasHeight: canvas.height,
+                          isDark,
+                        });
+                        if (thumbnailUrl) {
+                          await loadAndDrawThumbnail(thumbnailUrl, pctx, canvas.width, canvas.height);
+                          const colors = resolvePlaceholderColors(isDark);
+                          const mediaName = mediaItem?.name ?? "Missing media";
+                          const isMediaMissing = getMediaStatus(mediaItem) === MediaStatus.MISSING;
+                          drawWarningOverlay(pctx, canvas.width, canvas.height, mediaName, isMediaMissing, colors);
+                        }
+                        const bitmap = await createImageBitmap(placeholderCanvas);
+                        return {
+                          clip,
+                          transform,
+                          frame: bitmap,
+                          cleanup: () => { bitmap.close(); },
+                        };
+                      }
+                    } catch { /* fall through */ }
+                  }
+                  return null;
+                }
 
                 const speedEngine = getSpeedEngine();
                 const adjustedLocalTime =
@@ -4368,7 +4524,7 @@ export const Preview: React.FC = () => {
                       clip,
                       transform: stabilizedTransform,
                       frame: preparedFrame.frame,
-                      cleanup: preparedFrame.cleanup,
+                      cleanup: preparedFrame.cleanup
                     };
                   }
                 } catch (error) {
@@ -4446,7 +4602,7 @@ export const Preview: React.FC = () => {
                     if (frame instanceof ImageBitmap) {
                       gpuLayers.push({
                         bitmap: frame,
-                        transform,
+                        transform
                       });
                     }
                   }
@@ -4503,8 +4659,8 @@ export const Preview: React.FC = () => {
                           opacity: 1,
                           scale: { x: 1, y: 1 },
                           position: { x: 0, y: 0 },
-                          anchor: { x: 0, y: 0 },
-                        },
+                          anchor: { x: 0, y: 0 }
+                        }
                       });
                     }
                   }
@@ -4872,7 +5028,7 @@ export const Preview: React.FC = () => {
       try {
         const rendered = await renderFrameDirectly(time);
         if (!rendered) {
-          renderFallbackFrame(time);
+          await renderFallbackFrame(time);
         }
       } finally {
         renderInFlightRef.current = false;
@@ -4910,6 +5066,7 @@ export const Preview: React.FC = () => {
     isScrubbing,
     renderFrameDirectly,
     renderFallbackFrame,
+    loadAndDrawThumbnail,
     releaseScrubVideoElements,
     project.modifiedAt,
     isDark,
@@ -4993,14 +5150,14 @@ export const Preview: React.FC = () => {
       scale: { x: 1, y: 1 },
       rotation: 0,
       opacity: 1,
-      anchor: { x: 0.5, y: 0.5 },
+      anchor: { x: 0.5, y: 0.5 }
     };
 
     const transform = liveTransform
       ? {
           ...clipTransform,
           position: liveTransform.position,
-          scale: liveTransform.scale,
+          scale: liveTransform.scale
         }
       : clipTransform;
 
@@ -5080,7 +5237,7 @@ export const Preview: React.FC = () => {
       height: clipHeight,
       centerX,
       centerY,
-      displayScale,
+      displayScale
     };
   }, [
     selectedClip,
@@ -5152,7 +5309,7 @@ export const Preview: React.FC = () => {
       centerX,
       centerY,
       displayScale,
-      isTextClip: true,
+      isTextClip: true
     };
   }, [selectedTextClip, settings.width, settings.height, canvasSize]);
 
@@ -5255,7 +5412,7 @@ export const Preview: React.FC = () => {
       centerX,
       centerY,
       displayScale,
-      isShapeClip: true,
+      isShapeClip: true
     };
   }, [selectedShapeClip, settings.width, settings.height, canvasSize]);
 
@@ -5331,7 +5488,7 @@ export const Preview: React.FC = () => {
         width: shapeWidth,
         height: shapeHeight,
         centerX,
-        centerY,
+        centerY
       };
     },
     [settings.width, settings.height],
@@ -5443,7 +5600,7 @@ export const Preview: React.FC = () => {
       height: subtitleHeight,
       centerX,
       centerY: topY + subtitleHeight / 2,
-      displayScale,
+      displayScale
     };
   }, [
     selectedSubtitleObj,
@@ -5466,7 +5623,7 @@ export const Preview: React.FC = () => {
         scale: { x: 1, y: 1 },
         rotation: 0,
         opacity: 1,
-        anchor: { x: 0.5, y: 0.5 },
+        anchor: { x: 0.5, y: 0.5 }
       };
 
       isInteractingRef.current = true;
@@ -5479,8 +5636,8 @@ export const Preview: React.FC = () => {
           x: transform.position.x,
           y: transform.position.y,
           scaleX: transform.scale.x,
-          scaleY: transform.scale.y,
-        },
+          scaleY: transform.scale.y
+        }
       };
     },
     [selectedClip, clipAtPlayhead],
@@ -5499,7 +5656,7 @@ export const Preview: React.FC = () => {
         scale: { x: 1, y: 1 },
         rotation: 0,
         opacity: 1,
-        anchor: { x: 0.5, y: 0.5 },
+        anchor: { x: 0.5, y: 0.5 }
       };
 
       isInteractingRef.current = true;
@@ -5511,8 +5668,8 @@ export const Preview: React.FC = () => {
           x: transform.position.x,
           y: transform.position.y,
           scaleX: transform.scale.x,
-          scaleY: transform.scale.y,
-        },
+          scaleY: transform.scale.y
+        }
       };
     },
     [selectedClip, clipAtPlayhead],
@@ -5538,8 +5695,8 @@ export const Preview: React.FC = () => {
           x: transform.position.x,
           y: transform.position.y,
           scaleX: transform.scale.x,
-          scaleY: transform.scale.y,
-        },
+          scaleY: transform.scale.y
+        }
       };
     },
     [activeTextClip],
@@ -5566,8 +5723,8 @@ export const Preview: React.FC = () => {
           x: transform.position.x,
           y: transform.position.y,
           scaleX: transform.scale.x,
-          scaleY: transform.scale.y,
-        },
+          scaleY: transform.scale.y
+        }
       };
     },
     [activeTextClip],
@@ -5593,8 +5750,8 @@ export const Preview: React.FC = () => {
           x: transform.position.x,
           y: transform.position.y,
           scaleX: transform.scale.x,
-          scaleY: transform.scale.y,
-        },
+          scaleY: transform.scale.y
+        }
       };
     },
     [activeShapeClip],
@@ -5621,8 +5778,8 @@ export const Preview: React.FC = () => {
           x: transform.position.x,
           y: transform.position.y,
           scaleX: transform.scale.x,
-          scaleY: transform.scale.y,
-        },
+          scaleY: transform.scale.y
+        }
       };
     },
     [activeShapeClip],
@@ -5713,7 +5870,7 @@ export const Preview: React.FC = () => {
 
           newTransform = {
             position: { x: startTransform.x, y: startTransform.y },
-            scale: { x: newScaleX, y: newScaleY },
+            scale: { x: newScaleX, y: newScaleY }
           };
         }
 
@@ -5788,7 +5945,7 @@ export const Preview: React.FC = () => {
 
           newTransform = {
             position: { x: startTransform.x, y: startTransform.y },
-            scale: { x: newScaleX, y: newScaleY },
+            scale: { x: newScaleX, y: newScaleY }
           };
         }
 
@@ -5917,22 +6074,22 @@ export const Preview: React.FC = () => {
 
         newTransform = {
           position: { x: newX, y: newY },
-          scale: { x: newScaleX, y: newScaleY },
+          scale: { x: newScaleX, y: newScaleY }
         };
       }
 
       pendingTransformRef.current = {
         clipId: clip.id,
-        transform: newTransform,
+        transform: newTransform
       };
 
       const currentTransform = clip.transform || {
         position: { x: 0, y: 0 },
-        scale: { x: 1, y: 1 },
+        scale: { x: 1, y: 1 }
       };
       setLiveTransform({
         position: newTransform.position || currentTransform.position,
-        scale: newTransform.scale || currentTransform.scale,
+        scale: newTransform.scale || currentTransform.scale
       });
 
       if (!rafIdRef.current) {
@@ -6145,6 +6302,8 @@ export const Preview: React.FC = () => {
     let src: string | null = null;
     if (mediaItem.blob) {
       src = URL.createObjectURL(mediaItem.blob);
+    } else if (mediaItem.remoteUrl) {
+      src = mediaItem.remoteUrl;
     } else if (mediaItem.originalUrl) {
       src = mediaItem.originalUrl;
     }
@@ -6153,7 +6312,7 @@ export const Preview: React.FC = () => {
 
     return {
       src,
-      type: mediaItem.type as "video" | "image",
+      type: mediaItem.type as "video" | "image"
     };
   }, [cropMode, cropClipId, cropClip, getMediaItem]);
 
@@ -6161,6 +6320,17 @@ export const Preview: React.FC = () => {
   const cropMediaType = cropMediaData?.type ?? "video";
 
   const shouldShowCropMode = cropMode && cropClipId && cropClip && cropVideoSrc;
+
+  // Resolve a Blob for a media item (required for createImageBitmap / MediaBunny).
+  // Returns null if only a remote URL is available — callers that can use a
+  // string URL should prefer getMediaSourceUrl.
+  const getMediaSourceBlob = useCallback(
+    (item: MediaItem | null | undefined): Blob | null => {
+      if (!item) return null;
+      return item.blob ?? null;
+    },
+    [],
+  );
 
   return (
     <div
@@ -6216,13 +6386,13 @@ export const Preview: React.FC = () => {
               ? {
                   width: "100%",
                   height: "100%",
-                  maxWidth: "none",
+                  maxWidth: "none"
                 }
               : {
                   width: `${previewFrameSize.width}px`,
                   height: `${previewFrameSize.height}px`,
                   maxWidth: "100%",
-                  maxHeight: "100%",
+                  maxHeight: "100%"
                 }
           }
           onMouseMove={!isPlaying ? handleGraphicsMouseMove : undefined}
@@ -6235,7 +6405,7 @@ export const Preview: React.FC = () => {
             height={settings.height}
             className="w-full h-full object-contain bg-[var(--screen-bg)]"
             style={{
-              cursor: hoveredGraphicClipId && !isPlaying ? "pointer" : "default",
+              cursor: hoveredGraphicClipId && !isPlaying ? "pointer" : "default"
             }}
           />
 
@@ -6323,7 +6493,7 @@ export const Preview: React.FC = () => {
                 left: clipBounds.x,
                 top: clipBounds.y,
                 width: clipBounds.width,
-                height: clipBounds.height,
+                height: clipBounds.height
               }}
             >
               {/* Selection border */}
@@ -6399,7 +6569,7 @@ export const Preview: React.FC = () => {
                 left: textClipBounds.x,
                 top: textClipBounds.y,
                 width: textClipBounds.width,
-                height: textClipBounds.height,
+                height: textClipBounds.height
               }}
             >
               {/* Selection border - cyan for text clips */}
@@ -6475,7 +6645,7 @@ export const Preview: React.FC = () => {
                 left: shapeClipBounds.x,
                 top: shapeClipBounds.y,
                 width: shapeClipBounds.width,
-                height: shapeClipBounds.height,
+                height: shapeClipBounds.height
               }}
             >
               {selectedShapeClip.type !== "svg" && (
@@ -6552,7 +6722,7 @@ export const Preview: React.FC = () => {
                 left: subtitleBounds.x,
                 top: subtitleBounds.y,
                 width: subtitleBounds.width,
-                height: subtitleBounds.height,
+                height: subtitleBounds.height
               }}
             >
               {/* Selection border - yellow/orange for subtitles */}
@@ -6579,7 +6749,7 @@ export const Preview: React.FC = () => {
                     left: bounds.x,
                     top: bounds.y,
                     width: bounds.width,
-                    height: bounds.height,
+                    height: bounds.height
                   }}
                 >
                   <div className="absolute inset-0 border-2 border-dashed border-white/80 rounded-sm" />
