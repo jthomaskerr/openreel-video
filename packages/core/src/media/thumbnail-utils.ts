@@ -1,11 +1,12 @@
 import type { MediaItem } from "../types/project";
+import { getMediaStatus, MediaStatus } from "../types/project";
 
 /**
  * Returns true when the media item has no loadable file: no blob in memory
  * and no remote/original URL to fetch from.
  */
 export function isVideoFileMissing(item: MediaItem): boolean {
-  return !item.blob && !item.originalUrl && !item.remoteUrl;
+  return getMediaStatus(item) !== MediaStatus.OK;
 }
 
 /**
