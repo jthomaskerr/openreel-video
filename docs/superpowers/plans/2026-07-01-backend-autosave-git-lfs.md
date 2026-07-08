@@ -30,7 +30,9 @@ Each `MediaItem.id` is unique to one media version. Versions of the same logical
 |---|---|
 | `apps/orchestrator/src/projects/git-store.ts` | Shared repo/worktree manager, git-lfs setup, async commits, history lookup, remote config/push support |
 | `apps/orchestrator/src/projects/project-store.ts` | Project CRUD backed by git worktrees, slug IDs, atomic `project.json` writes, media scanning, UUID-dir migration helper |
-| `apps/orchestrator/src/projects/routes.ts` | Project CRUD, media upload/serve, config/remote endpoints, history endpoints |
+| `apps/orchestrator/src/projects/routes.ts` | Project CRUD, media upload/serve, config/remote endpoints, history endpoints; validates project/media path params before storage access |
+| `apps/orchestrator/src/projects/storage-validation.ts` | Shared project/media id and filename validation plus path containment helper |
+| `apps/orchestrator/src/projects/storage-validation.test.ts` | Helper coverage for valid slug/UUID/media names and traversal/path separator rejection |
 | `apps/orchestrator/src/projects/index.ts` | Exports `ProjectStore`, `GitStore`, router |
 | `apps/orchestrator/src/app.ts` | Wires `GitStore`, `ProjectStore`, project router, generated assets, health endpoint, 50mb JSON body limit |
 | `apps/orchestrator/package.json` | Includes `multer` and `@types/multer` |
@@ -85,10 +87,13 @@ Other empty/test project dirs were moved to quarantine under `~/openreel-project
 
 Migration update: `migrateUuidDirs()` now scans both `projectsRepo/*` and legacy nested `projectsRepo/projects/*` UUID project directories, promotes migrated projects into the root worktree layout, and writes the updated slug-id `project.json` in the migrated directory. `createApp()` starts the migration best-effort at orchestrator startup.
 
+Path hardening update: orchestrator project/media route params and store/git path entrypoints now reject empty values, traversal (`..`), path separators, and percent-encoded separator variants before filesystem or git worktree path use. Served media filenames are resolved under the project `media/` directory before `sendFile`.
+
 ## Validation checklist
 
 - [x] `git lfs version` succeeds.
 - [x] `pnpm --filter @openreel/orchestrator typecheck` or orchestrator `tsc --noEmit` passes.
+- [x] `pnpm --filter @openreel/orchestrator exec node --import tsx --test src/projects/storage-validation.test.ts` passes.
 - [x] `pnpm --filter @openreel/web typecheck` or web `tsc --noEmit` passes.
 - [ ] Start orchestrator on port `4041`.
 - [ ] Start web app.

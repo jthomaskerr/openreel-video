@@ -2,10 +2,16 @@ import { Router } from "express";
 import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
 import { mkdirSync } from "node:fs";
-import { join, extname } from "node:path";
+import { extname } from "node:path";
 import type { ProjectSettings, Project } from "@openreel/core";
 import { ProjectStore } from "./project-store";
 import { GitStore } from "./git-store";
+import {
+  assertValidMediaFilename,
+  assertValidMediaId,
+  assertValidProjectId,
+  resolveContainedPath,
+} from "./storage-validation";
 
 // ── Commit message helpers ───────────────────────────────────────────────────
 
@@ -30,6 +36,38 @@ function generateCommitMessage(prev: Project | null, next: Project): string {
   return parts.join(", ");
 }
 
+// ── Request validation helpers ───────────────────────────────────────────────
+
+function rejectInvalidProjectId(req: Request, res: Response): boolean {
+  try {
+    assertValidProjectId(req.params.id);
+    return false;
+  } catch {
+    res.status(400).json({ error: "Invalid project id" });
+    return true;
+  }
+}
+
+function rejectInvalidMediaId(req: Request, res: Response): boolean {
+  try {
+    assertValidMediaId(req.params.mediaId);
+    return false;
+  } catch {
+    res.status(400).json({ error: "Invalid media id" });
+    return true;
+  }
+}
+
+function rejectInvalidMediaFilename(req: Request, res: Response): boolean {
+  try {
+    assertValidMediaFilename(req.params.filename);
+    return false;
+  } catch {
+    res.status(400).json({ error: "Invalid media filename" });
+    return true;
+  }
+}
+
 // ── Router factory ───────────────────────────────────────────────────────────
 
 export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Router {
@@ -39,12 +77,25 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
   const upload = multer({
     storage: multer.diskStorage({
       destination: (req, _file, cb) => {
-        const dir = store.mediaDir(req.params.id);
-        mkdirSync(dir, { recursive: true });
-        cb(null, dir);
+        try {
+          assertValidProjectId(req.params.id);
+          assertValidMediaId(req.params.mediaId);
+          const dir = store.mediaDir(req.params.id);
+          mkdirSync(dir, { recursive: true });
+          cb(null, dir);
+        } catch (err) {
+          cb(err as Error, "");
+        }
       },
       filename: (req, file, cb) => {
-        cb(null, `${req.params.mediaId}${extname(file.originalname)}`);
+        try {
+          assertValidMediaId(req.params.mediaId);
+          const filename = `${req.params.mediaId}${extname(file.originalname)}`;
+          assertValidMediaFilename(filename);
+          cb(null, filename);
+        } catch (err) {
+          cb(err as Error, "");
+        }
       },
     }),
   });
@@ -92,6 +143,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
 
   // GET /api/projects/:id — load project + media filename map
   router.get("/:id", async (req: Request, res: Response) => {
+    if (rejectInvalidProjectId(req, res)) return;
     try {
       const project = await store.loadProject(req.params.id);
       if (!project) {
@@ -126,6 +178,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
 
   // PUT /api/projects/:id — upsert project.json + git commit
   router.put("/:id", async (req: Request, res: Response) => {
+    if (rejectInvalidProjectId(req, res)) return;
     try {
       const incoming = req.body as Project;
       if (!incoming?.id || incoming.id !== req.params.id) {
@@ -144,6 +197,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
 
   // PATCH /api/projects/:id — rename
   router.patch("/:id", async (req: Request, res: Response) => {
+    if (rejectInvalidProjectId(req, res)) return;
     try {
       const { name } = req.body as { name?: string };
       if (!name?.trim()) {
@@ -164,6 +218,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
 
   // DELETE /api/projects/:id
   router.delete("/:id", async (req: Request, res: Response) => {
+    if (rejectInvalidProjectId(req, res)) return;
     try {
       const deleted = await store.deleteProject(req.params.id);
       if (!deleted) {
@@ -182,6 +237,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
   router.post(
     "/:id/media/:mediaId",
     async (req: Request, res: Response, next: NextFunction) => {
+      if (rejectInvalidProjectId(req, res) || rejectInvalidMediaId(req, res)) return;
       try {
         await store.ensureProjectWorktree(req.params.id);
         next();
@@ -209,7 +265,9 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
 
   // GET /api/projects/:id/media/:filename — serve a media file
   router.get("/:id/media/:filename", (req: Request, res: Response) => {
-    const filePath = join(store.mediaDir(req.params.id), req.params.filename);
+    if (rejectInvalidProjectId(req, res) || rejectInvalidMediaFilename(req, res)) return;
+    const mediaDir = store.mediaDir(req.params.id);
+    const filePath = resolveContainedPath(mediaDir, req.params.filename);
     res.sendFile(filePath, (err) => {
       if (err) res.status(404).json({ error: "Media file not found" });
     });
@@ -219,6 +277,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
 
   // GET /api/projects/:id/history — list commits for project.json
   router.get("/:id/history", async (req: Request, res: Response) => {
+    if (rejectInvalidProjectId(req, res)) return;
     try {
       const history = await gitStore.getHistory(req.params.id);
       res.json(history);
@@ -229,6 +288,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
 
   // GET /api/projects/:id/history/:sha — get project at a specific commit
   router.get("/:id/history/:sha", async (req: Request, res: Response) => {
+    if (rejectInvalidProjectId(req, res)) return;
     try {
       const project = await gitStore.getProjectAtCommit(req.params.id, req.params.sha);
       if (!project) {

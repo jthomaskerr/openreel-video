@@ -4,6 +4,12 @@ import { join, extname, basename } from "node:path";
 import crypto from "node:crypto";
 import type { Project, ProjectSettings } from "@openreel/core";
 import type { GitStore } from "./git-store";
+import {
+  assertValidProjectId,
+  isValidMediaFilename,
+  isValidMediaId,
+  isValidProjectId,
+} from "./storage-validation";
 
 export interface ProjectSummary {
   readonly id: string;
@@ -59,19 +65,23 @@ export class ProjectStore {
 
   /** Worktree path for a project. */
   projectDir(id: string): string {
+    assertValidProjectId(id);
     return this.gitStore.worktreePath(id);
   }
 
   private projectJsonPath(id: string): string {
+    assertValidProjectId(id);
     return join(this.projectDir(id), "project.json");
   }
 
   /** Media directory inside the worktree. */
   mediaDir(id: string): string {
+    assertValidProjectId(id);
     return join(this.projectDir(id), "media");
   }
 
   async ensureProjectWorktree(id: string): Promise<void> {
+    assertValidProjectId(id);
     await this.gitStore.ensureWorktree(id);
   }
 
@@ -90,10 +100,12 @@ export class ProjectStore {
     const summaries = (
       await Promise.all(
         dirs.map(async (dir) => {
+          if (!isValidProjectId(dir.name)) return null;
           const jsonPath = join(this.gitStore["repoDir"], dir.name, "project.json");
           try {
             const raw = await readFile(jsonPath, "utf-8");
             const project = JSON.parse(raw) as Project;
+            if (!isValidProjectId(project.id)) return null;
             return {
               id: project.id,
               name: project.name,
@@ -110,6 +122,7 @@ export class ProjectStore {
   }
 
   async loadProject(id: string): Promise<Project | null> {
+    assertValidProjectId(id);
     const path = this.projectJsonPath(id);
     if (!existsSync(path)) return null;
     try {
@@ -121,6 +134,7 @@ export class ProjectStore {
   }
 
   async saveProject(project: Project): Promise<Project> {
+    assertValidProjectId(project.id);
     await this.ensureProjectDir(project.id);
     const updated: Project = { ...project, modifiedAt: Date.now() };
     const finalPath = this.projectJsonPath(project.id);
@@ -132,15 +146,18 @@ export class ProjectStore {
 
   async createProject(name: string, settings?: Partial<ProjectSettings>): Promise<Project> {
     const slug = toSlug(name);
+    assertValidProjectId(slug);
     const project = defaultProject({ id: slug, name, settings });
     return this.saveProject(project);
   }
 
   async renameProject(id: string, name: string): Promise<Project | null> {
+    assertValidProjectId(id);
     const project = await this.loadProject(id);
     if (!project) return null;
 
     const newSlug = toSlug(name);
+    assertValidProjectId(newSlug);
     const renamed: Project = { ...project, name, id: newSlug, modifiedAt: Date.now() };
 
     // Move worktree if slug changed
@@ -163,6 +180,7 @@ export class ProjectStore {
   }
 
   async deleteProject(id: string): Promise<boolean> {
+    assertValidProjectId(id);
     const dir = this.projectDir(id);
     const existed = existsSync(dir);
     if (existed) {
@@ -207,6 +225,7 @@ export class ProjectStore {
       }
 
       const newSlug = toSlug(project.name);
+      if (!isValidProjectId(newSlug)) return;
       const newDir = join(repoDir, newSlug);
       if (existsSync(newDir)) return; // already migrated (or slug clash)
 
@@ -245,12 +264,15 @@ export class ProjectStore {
 
   /** Scan the media directory and return { [mediaId]: storedFilename }. */
   async scanMedia(projectId: string): Promise<Record<string, string>> {
+    assertValidProjectId(projectId);
     const dir = this.mediaDir(projectId);
     if (!existsSync(dir)) return {};
     const files = await readdir(dir);
     const result: Record<string, string> = {};
     for (const file of files) {
+      if (!isValidMediaFilename(file)) continue;
       const mediaId = basename(file, extname(file));
+      if (!isValidMediaId(mediaId)) continue;
       result[mediaId] = file;
     }
     return result;

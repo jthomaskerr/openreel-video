@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { Project } from "@openreel/core";
+import { assertValidProjectId } from "./storage-validation";
 
 const execFileAsync = promisify(execFile);
 
@@ -24,12 +25,14 @@ export class GitStore {
 
   /** Filesystem path to a project's git worktree (slug-based directory directly under repoDir). */
   worktreePath(projectId: string): string {
+    assertValidProjectId(projectId);
     return join(this.repoDir, projectId);
   }
 
   // ── Locking ──────────────────────────────────────────────────────────────
 
   #withLock(projectId: string, fn: () => Promise<void>): Promise<void> {
+    assertValidProjectId(projectId);
     const prev = this.#locks.get(projectId) ?? Promise.resolve();
     const next = prev.then(fn, fn); // run fn even if prev rejected
     this.#locks.set(
@@ -106,6 +109,7 @@ export class GitStore {
    * Idempotent — safe to call on every save.
    */
   async ensureWorktree(projectId: string): Promise<void> {
+    assertValidProjectId(projectId);
     await this.ensureSharedRepo();
 
     const wtPath = this.worktreePath(projectId);
@@ -121,6 +125,7 @@ export class GitStore {
 
   /** Remove a project's worktree and branch. */
   async deleteWorktree(projectId: string): Promise<void> {
+    assertValidProjectId(projectId);
     const wtPath = this.worktreePath(projectId);
 
     // Remove the worktree (cleans up the branch listing in main repo)
@@ -146,12 +151,14 @@ export class GitStore {
    * Stage all changes and commit in the worktree. Fire-and-forget — never throws to caller.
    */
   commitAsync(projectId: string, message: string): void {
+    assertValidProjectId(projectId);
     this.#withLock(projectId, () => this.#commitInner(projectId, message)).catch((err) =>
       console.error(`[GitStore] commit failed for ${projectId}:`, err),
     );
   }
 
   async #commitInner(projectId: string, message: string): Promise<void> {
+    assertValidProjectId(projectId);
     const wtPath = this.worktreePath(projectId);
 
     // ensureWorktree is idempotent — only initialises if needed
@@ -173,6 +180,7 @@ export class GitStore {
 
   /** List commits touching project.json in the worktree. */
   async getHistory(projectId: string): Promise<string[]> {
+    assertValidProjectId(projectId);
     const wtPath = this.worktreePath(projectId);
     if (!existsSync(join(wtPath, ".git"))) return [];
 
@@ -185,6 +193,7 @@ export class GitStore {
 
   /** Retrieve project.json at a specific commit. */
   async getProjectAtCommit(projectId: string, sha: string): Promise<Project | null> {
+    assertValidProjectId(projectId);
     const wtPath = this.worktreePath(projectId);
     if (!existsSync(join(wtPath, ".git"))) return null;
 
