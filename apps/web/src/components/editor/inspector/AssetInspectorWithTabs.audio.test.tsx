@@ -96,6 +96,23 @@ describe("AssetInspectorWithTabs audio tab", () => {
     expect(wavesurferMock.instance.playPause).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores persisted non-Blob blob placeholders when opening the inspector", async () => {
+    render(
+      <AssetInspectorWithTabs
+        item={makeAudioItem({
+          blob: {} as unknown as Blob,
+          originalUrl: "https://cdn.example.test/song.wav",
+        })}
+      />,
+    );
+
+    await waitFor(() => expect(wavesurferMock.create).toHaveBeenCalled());
+    expect(screen.getByRole("tab", { name: /Audio/ })).toBeInTheDocument();
+    expect(wavesurferMock.create).toHaveBeenCalledWith(
+      expect.objectContaining({ url: "https://cdn.example.test/song.wav" }),
+    );
+  });
+
   it("keeps the inspector mounted when waveform initialization throws", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     wavesurferMock.create.mockImplementationOnce(() => {

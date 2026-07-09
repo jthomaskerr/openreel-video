@@ -16,6 +16,10 @@ function formatDuration(seconds: number | undefined): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function isUsableBlob(value: unknown): value is Blob {
+  return typeof Blob !== "undefined" && value instanceof Blob;
+}
+
 function normalizeWaveformData(
   waveformData: WaveformPreviewItem["waveformData"],
 ): Float32Array | number[] | null {
@@ -54,7 +58,8 @@ export function WaveformPreview({ item }: Props) {
     [waveformItem.waveformData],
   );
   const duration = item.metadata?.duration;
-  const hasPlayableSource = Boolean(item.blob || item.originalUrl || remoteUrl);
+  const blob = isUsableBlob(item.blob) ? item.blob : null;
+  const hasPlayableSource = Boolean(blob || item.originalUrl || remoteUrl);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -68,9 +73,14 @@ export function WaveformPreview({ item }: Props) {
     let objectUrl: string | null = null;
     let wavesurfer: WaveSurferInstance | null = null;
     let url = remoteUrl ?? item.originalUrl ?? null;
-    if (item.blob && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
-      objectUrl = URL.createObjectURL(item.blob);
-      url = objectUrl;
+    if (blob && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") {
+      try {
+        objectUrl = URL.createObjectURL(blob);
+        url = objectUrl;
+      } catch (error) {
+        console.warn("[WaveformPreview] Failed to create audio preview URL", error);
+        setLoadError("Audio preview unavailable");
+      }
     }
 
     if (!url) return;
@@ -118,7 +128,7 @@ export function WaveformPreview({ item }: Props) {
       wavesurfer?.destroy();
       if (objectUrl && typeof URL !== "undefined") URL.revokeObjectURL(objectUrl);
     };
-  }, [item.blob, item.id, duration, item.originalUrl, remoteUrl, waveformData]);
+  }, [blob, item.id, duration, item.originalUrl, remoteUrl, waveformData]);
 
   const handlePlayPause = useCallback(() => {
     void wavesurferRef.current?.playPause();

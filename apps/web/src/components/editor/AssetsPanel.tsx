@@ -438,19 +438,21 @@ const MediaThumbnail: React.FC<{
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-    <div className="flex flex-col">
+    <div
+      className="flex flex-col cursor-pointer"
+      draggable
+      onDragStart={onDragStart}
+      onClick={onSelect}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onAddToTimeline();
+      }}
+    >
       {/* Thumbnail container */}
       <div
-        draggable
-        onDragStart={onDragStart}
-        onClick={onSelect}
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          onAddToTimeline();
-        }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
-        className={`aspect-video bg-background-tertiary rounded-lg border-2 relative group cursor-pointer transition-all overflow-hidden shadow-sm ${borderClass}`}
+        className={`aspect-video bg-background-tertiary rounded-lg border-2 relative group transition-all overflow-hidden shadow-sm ${borderClass}`}
       >
         {/* Thumbnail or placeholder */}
         {effectiveThumbnailUrl ? (
@@ -664,9 +666,10 @@ const MediaThumbnailRow = React.memo(
     onRenameRef?: React.MutableRefObject<(item: MediaItem) => void>;
   }) => {
     const handleSelect = useCallback(() => {
-      useUIStore.getState().select({ type: "clip", id: item.id });
-      onManageRef?.current?.(item);
-    }, [item.id, onManageRef]);
+      const ui = useUIStore.getState();
+      ui.select({ type: "clip", id: item.id });
+      ui.setInspectedAsset(item);
+    }, [item]);
 
     const handleDelete = useCallback(async () => {
       await useProjectStore.getState().deleteMedia(item.id);
