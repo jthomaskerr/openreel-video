@@ -24,9 +24,9 @@
 
 - [x] **#12** i have made many edits to the VintageTokyo project but none have appeared in the project git repo at ~/openreel-projects ➕ 2026-07-08 🔗 Fixed ✅ 2026-07-08 ^item-12
 
-- [ ] **#13** if a file is imported with the same filename and size then it should replace the existing item not be added as a new one ➕ 2026-07-08 ^item-13
+- [/] **#13** if a file is imported with the same filename and size then it should replace the existing item not be added as a new one ➕ 2026-07-08 🔗 Implemented ^item-13
 
-- [/] **#14** omfg how is this possible? the inspector display is broken AGAIN. Fucking get the regression testing right. i click on a clip and no inspector appears ➕ 2026-07-08 #errored ^item-14
+- [x] **#14** omfg how is this possible? the inspector display is broken AGAIN. Fucking get the regression testing right. i click on a clip and no inspector appears ➕ 2026-07-08 #errored 🔗 validation: ✅ 2026-07-09 ^item-14
 
 - [x] **#15** the backend-down autosave is broken again. on refresh I get the outdated version from the backend complete with the missing media ➕ 2026-07-08 #errored 🔗 commit ✅ 2026-07-09 ^item-15
 
@@ -34,7 +34,12 @@
 
 - [x] **#17** [Error] [ErrorBoundary] Component error: (2) TypeError: Type error — WaveformPreview.tsx:43 {componentStack: "↵WaveformPreview@http://localhost:5173/src/compone…69:12↵App@http://localhost:5173/src/App.tsx:67:79"} (anonymous function) (main.tsx:13) componentDidCatch (ErrorBoundary.tsx:27) callback (chunk-YYN6DZAU.js:14084) callCallback (chunk-YYN6DZAU.js:11248) commitUpdateQueue (chunk-YYN6DZAU.js:11265) commitLayoutEffectOnFiber (chunk-YYN6DZAU.js:17075) commitLayoutMountEffects_complete (chunk-YYN6DZAU.js:17980) commitLayoutEffects_begin (chunk-YYN6DZAU.js:17969) commitLayoutEffects_begin (chunk-YYN6DZAU.js:17950) commitLayoutEffects (chunk-YYN6DZAU.js:17920) commitRootImpl (chunk-YYN6DZAU.js:19353) commitRoot (chunk-YYN6DZAU.js:19277) performSyncWorkOnRoot (chunk-YYN6DZAU.js:18895) flushSyncCallbacks (chunk-YYN6DZAU.js:9119) (anonymous function) (chunk-YYN6DZAU.js:18627) ➕ 2026-07-08 🔗 commit ✅ 2026-07-09 ^item-17
 
-- [ ] **#18** clip/timeline clip selection does not trigger the inspector ➕ 2026-07-08 ^item-18
+- [/] **#18** clip/timeline clip selection does not trigger the inspector ➕ 2026-07-08 🔗 Implemented ^item-18
+
+- [x] **#19** audio inspector is throwing a runtime error ➕ 2026-07-09 🔗 Commit ✅ 2026-07-09 ^item-19
+  > Follow-up correction committed d60c1be: actual failure was clicking audio asset filename/card. Fixed media asset card click handling and non-Blob persisted blob placeholders that crashed WaveformPreview once inspector opened. Browser verified clicking tmp-test-audio.wav filename opens inspector.
+
+- [ ] **#20** images are no longer rendering in the preview. how tf is it that you keep breaking things?! ➕ 2026-07-09 ^item-20
 
 ## Archived
 
