@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useProjectStore } from "./project-store";
 import { useEngineStore } from "./engine-store";
+import { backendSaveService } from "../services/backend-save";
 import type { Project, Clip, MediaItem, Transition } from "@openreel/core";
 
 const {
@@ -240,6 +241,95 @@ describe("ProjectStore", () => {
         expect(project.id).toMatch(
           /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
         );
+      });
+
+      it("regression: preserves media imported during pending backend create", async () => {
+        const now = Date.now();
+        const backendProject: Project = {
+          id: "my-new-slug",
+          name: "My New Project",
+          createdAt: now,
+          modifiedAt: now,
+          settings: {
+            width: 1920, height: 1080, frameRate: 30,
+            sampleRate: 48000, channels: 2,
+          },
+          mediaLibrary: { items: [] },
+          timeline: { tracks: [], subtitles: [], duration: 0, markers: [] },
+        };
+
+        // Deferred promise: keeps backendSaveService.create() pending until
+        // we explicitly resolve it below, so we can inject a media import
+        // "during" the race window deterministically instead of racing real
+        // timers.
+        let resolveCreate!: (project: Project) => void;
+        const createPromise = new Promise<Project>((resolve) => {
+          resolveCreate = resolve;
+        });
+
+        const isReachableSpy = vi
+          .spyOn(backendSaveService, "isReachable")
+          .mockResolvedValue(true);
+        const createSpy = vi
+          .spyOn(backendSaveService, "create")
+          .mockReturnValue(createPromise);
+        const saveSpy = vi
+          .spyOn(backendSaveService, "save")
+          .mockResolvedValue(undefined);
+
+        useProjectStore.getState().createNewProject("Pending Import Test");
+
+        // Let the isReachable().then(create(...)) chain start before we
+        // inject the media import, so the import genuinely lands during the
+        // pending window.
+        await vi.waitFor(() => expect(createSpy).toHaveBeenCalled());
+
+        // Import media during the pending backend-create window — this
+        // simulates the exact race condition where a user drags in a file
+        // while the orchestrator is still assigning the slug id.
+        const mediaItem: MediaItem = {
+          id: "imported-while-pending",
+          name: "race-import.mp4",
+          type: "video",
+          fileHandle: null,
+          blob: new Blob(["video-data"], { type: "video/mp4" }),
+          metadata: {
+            duration: 5, width: 1920, height: 1080, frameRate: 30,
+            codec: "h264", sampleRate: 48000, channels: 2, fileSize: 1000,
+          },
+          thumbnailUrl: null,
+        };
+        // Inject the item by mutating the project state directly via the
+        // zustand setState API (available on every zustand store).
+        useProjectStore.setState((s) => ({
+          project: {
+            ...s.project,
+            mediaLibrary: { items: [...s.project.mediaLibrary.items, mediaItem] },
+          },
+        }));
+
+        // Now let the pending backend create() resolve and the slug swap happen.
+        resolveCreate(backendProject);
+        await vi.waitFor(() => {
+          expect(useProjectStore.getState().project.id).toBe("my-new-slug");
+        });
+
+        // Without fix: media imported during the pending window is silently
+        // lost (replaced by the empty backend skeleton).
+        // With fix: the imported media survives the slug swap.
+        expect(useProjectStore.getState().project.id).toBe("my-new-slug");
+        expect(useProjectStore.getState().project.mediaLibrary.items).toHaveLength(1);
+        expect(useProjectStore.getState().project.mediaLibrary.items[0]?.name).toBe("race-import.mp4");
+        expect(saveSpy).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: "my-new-slug",
+            mediaLibrary: { items: [expect.objectContaining({ name: "race-import.mp4" })] },
+          }),
+        );
+
+        isReachableSpy.mockRestore();
+        createSpy.mockRestore();
+        saveSpy.mockRestore();
       });
     });
   });

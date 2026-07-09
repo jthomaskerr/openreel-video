@@ -1551,7 +1551,18 @@ export const useProjectStore = create<ProjectState>()(
             return backendSaveService.create(projectName, settings).then((backendProject) => {
               const current = get();
               if (current.project.id === snapshotId) {
-                const merged = { ...backendProject, modifiedAt: Date.now() };
+                // Merge the backend slug id + timestamps into the live
+                // project state instead of replacing it outright.  The
+                // store may already hold media items, clips, and settings
+                // that were added during the backend create() call;
+                // discarding them would silently lose data and push an
+                // empty project back to the backend git store.
+                const merged = {
+                  ...current.project,
+                  id: backendProject.id,
+                  createdAt: backendProject.createdAt,
+                  modifiedAt: Date.now(),
+                };
                 syncProjectEffectsBridge(merged, previousProject);
                 syncProjectTransitionsBridge(merged, previousProject);
                 set({ project: merged });
