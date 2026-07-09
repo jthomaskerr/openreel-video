@@ -1,6 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Project } from "@openreel/core";
+import { generateThumbnailFromBlob, generateThumbnailFromUrl } from "../utils/media-recovery";
 import { backendSaveService } from "./backend-save";
+
+vi.mock("../utils/media-recovery", () => ({
+  generateThumbnailFromBlob: vi.fn().mockResolvedValue(null),
+  generateThumbnailFromUrl: vi.fn().mockResolvedValue(null),
+  shouldRegenerateThumbnail: vi.fn((item: { thumbnailUrl: string | null; type: string }) =>
+    (item.type === "video" || item.type === "image") &&
+    (!item.thumbnailUrl || item.thumbnailUrl.startsWith("blob:")),
+  ),
+}));
+
+const mockGenerateThumbnailFromBlob = vi.mocked(generateThumbnailFromBlob);
+const mockGenerateThumbnailFromUrl = vi.mocked(generateThumbnailFromUrl);
 
 const makeProject = (): Project => ({
   id: "project-1",
@@ -58,19 +71,28 @@ const makeProject = (): Project => ({
 });
 
 afterEach(() => {
+  backendSaveService.resetForProject();
   vi.unstubAllGlobals();
+  vi.clearAllMocks();
 });
 
 describe("backendSaveService.load", () => {
-  it("populates remoteUrl for media files returned by the backend", async () => {
+  it("populates remoteUrl and blob for media files returned by the backend", async () => {
+    const mediaBlob = new Blob(["video"], { type: "video/mp4" });
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          project: makeProject(),
-          mediaFiles: { "media-1": "media-1.mp4" },
-        }),
+      vi.fn().mockImplementation(async (url: string) => {
+        if (url.endsWith("/media/media-1.mp4")) {
+          return { ok: true, blob: async () => mediaBlob };
+        }
+
+        return {
+          ok: true,
+          json: async () => ({
+            project: makeProject(),
+            mediaFiles: { "media-1": "media-1.mp4" },
+          }),
+        };
       }),
     );
 
@@ -79,7 +101,51 @@ describe("backendSaveService.load", () => {
     expect(project?.mediaLibrary.items[0]?.remoteUrl).toBe(
       "http://localhost:4041/api/projects/project-1/media/media-1.mp4",
     );
+    expect(project?.mediaLibrary.items[0]?.blob).toBe(mediaBlob);
     expect(project?.mediaLibrary.items[1]?.remoteUrl).toBeUndefined();
+  });
+
+  it("regenerates missing or stale blob thumbnails from downloaded backend media", async () => {
+    const baseProject = makeProject();
+    const staleProject: Project = {
+      ...baseProject,
+      mediaLibrary: {
+        ...baseProject.mediaLibrary,
+        items: [
+          {
+            ...baseProject.mediaLibrary.items[0]!,
+            thumbnailUrl: "blob:stale-thumbnail",
+          },
+        ],
+      },
+    };
+    const mediaBlob = new Blob(["video"], { type: "video/mp4" });
+    mockGenerateThumbnailFromBlob.mockResolvedValueOnce("blob:regenerated-thumbnail");
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string) => {
+        if (url.endsWith("/media/media-1.mp4")) {
+          return { ok: true, blob: async () => mediaBlob };
+        }
+
+        return {
+          ok: true,
+          json: async () => ({
+            project: staleProject,
+            mediaFiles: { "media-1": "media-1.mp4" },
+          }),
+        };
+      }),
+    );
+
+    const project = await backendSaveService.load("project-1");
+
+    expect(mockGenerateThumbnailFromBlob).toHaveBeenCalledWith(mediaBlob, "video");
+    expect(mockGenerateThumbnailFromUrl).not.toHaveBeenCalled();
+    expect(project?.mediaLibrary.items[0]?.thumbnailUrl).toBe(
+      "blob:regenerated-thumbnail",
+    );
   });
 });
 
@@ -104,6 +170,41 @@ describe("backendSaveService.save", () => {
     await backendSaveService.save({ ...makeProject(), id: "vintage-tokyo" });
 
     expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:4041/api/projects/vintage-tokyo",
+      expect.objectContaining({ method: "PUT" }),
+    );
+  });
+
+  it("uploads media blobs before saving project JSON", async () => {
+    const calls: string[] = [];
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") calls.push("media");
+      if (init?.method === "PUT") calls.push("project");
+      return { ok: true };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await backendSaveService.save({
+      ...makeProject(),
+      id: "vintage-tokyo",
+      mediaLibrary: {
+        items: [
+          {
+            ...makeProject().mediaLibrary.items[0]!,
+            blob: new Blob(["clip"], { type: "video/mp4" }),
+          },
+        ],
+      },
+    });
+
+    expect(calls).toEqual(["media", "project"]);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://localhost:4041/api/projects/vintage-tokyo/media/media-1",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
       "http://localhost:4041/api/projects/vintage-tokyo",
       expect.objectContaining({ method: "PUT" }),
     );

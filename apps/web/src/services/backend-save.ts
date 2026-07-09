@@ -1,5 +1,10 @@
 // apps/web/src/services/backend-save.ts
 import type { Project, MediaItem, ProjectSettings } from "@openreel/core";
+import {
+  generateThumbnailFromBlob,
+  generateThumbnailFromUrl,
+  shouldRegenerateThumbnail,
+} from "../utils/media-recovery";
 import { reportRuntimeError } from "../stores/notification-store";
 
 interface ProjectSummary {
@@ -29,6 +34,7 @@ function sanitize(project: Project): object {
         blob: undefined,
         fileHandle: undefined,
         remoteUrl: undefined,
+        thumbnailUrl: item.thumbnailUrl?.startsWith("blob:") ? null : item.thumbnailUrl,
         filmstripThumbnails: undefined,
       })),
     },
@@ -67,11 +73,53 @@ export interface BackendProjectResponse {
 }
 
 class BackendSaveService {
-  /** MediaIds successfully uploaded this session. Cleared on project switch. */
+  /** Media uploads successfully completed this session. Cleared on project switch. */
   private uploadedIds = new Set<string>();
+  /** In-flight media uploads keyed by project/media id so saves can await them. */
+  private uploadPromises = new Map<string, Promise<void>>();
 
   resetForProject(): void {
     this.uploadedIds.clear();
+    this.uploadPromises.clear();
+  }
+
+  private getUploadKey(projectId: string, mediaId: string): string {
+    return `${projectId}:${mediaId}`;
+  }
+
+  private async uploadMedia(
+    projectId: string,
+    mediaId: string,
+    blob: Blob,
+    filename: string,
+  ): Promise<void> {
+    if (isClientOnlyProjectId(projectId)) return;
+
+    const key = this.getUploadKey(projectId, mediaId);
+    if (this.uploadedIds.has(key)) return;
+
+    const existing = this.uploadPromises.get(key);
+    if (existing) return existing;
+
+    const promise = (async () => {
+      const ext = getExt(blob, filename);
+      const form = new FormData();
+      form.append("file", blob, `${mediaId}${ext}`);
+
+      const res = await fetch(`${BASE_URL}/api/projects/${projectId}/media/${mediaId}`, {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      this.uploadedIds.add(key);
+    })();
+
+    this.uploadPromises.set(key, promise);
+    try {
+      await promise;
+    } finally {
+      this.uploadPromises.delete(key);
+    }
   }
 
   /** Returns true if the orchestrator is reachable. */
@@ -120,6 +168,13 @@ class BackendSaveService {
       return;
     }
 
+    await Promise.all(
+      project.mediaLibrary.items.map((item) => {
+        if (!item.blob) return Promise.resolve();
+        return this.uploadMedia(project.id, item.id, item.blob, item.name);
+      }),
+    );
+
     const res = await fetch(`${BASE_URL}/api/projects/${project.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -142,26 +197,10 @@ class BackendSaveService {
    * already-uploaded mediaIds are skipped. Fire-and-forget.
    */
   uploadMediaAsync(projectId: string, mediaId: string, blob: Blob, filename: string): void {
-    if (isClientOnlyProjectId(projectId)) return;
-    if (this.uploadedIds.has(mediaId)) return;
-    this.uploadedIds.add(mediaId);
-
-    const ext = getExt(blob, filename);
-    const form = new FormData();
-    form.append("file", blob, `${mediaId}${ext}`);
-
-    fetch(`${BASE_URL}/api/projects/${projectId}/media/${mediaId}`, {
-      method: "POST",
-      body: form,
-    })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      })
-      .catch((err) => {
-        this.uploadedIds.delete(mediaId);
-        console.error(`[BackendSave] media upload failed (${mediaId}):`, err);
-        reportRuntimeError("Backend media upload failed", err, "backend-save.media-upload");
-      });
+    this.uploadMedia(projectId, mediaId, blob, filename).catch((err) => {
+      console.error(`[BackendSave] media upload failed (${mediaId}):`, err);
+      reportRuntimeError("Backend media upload failed", err, "backend-save.media-upload");
+    });
   }
 
   /**
@@ -200,11 +239,42 @@ class BackendSaveService {
       if (!res.ok) return null;
       const { project, mediaFiles } = (await res.json()) as BackendProjectResponse;
 
-      const items = project.mediaLibrary.items.map((item) => {
-        const filename = mediaFiles[item.id];
-        if (!filename) return item;
-        return { ...item, remoteUrl: `${BASE_URL}/api/projects/${projectId}/media/${filename}` };
-      });
+      const items = await Promise.all(
+        project.mediaLibrary.items.map(async (item) => {
+          const filename = mediaFiles[item.id];
+          if (!filename) return item;
+
+          const remoteUrl = `${BASE_URL}/api/projects/${projectId}/media/${filename}`;
+          let blob: Blob | null = null;
+
+          try {
+            const mediaRes = await fetch(remoteUrl);
+            if (!mediaRes.ok) throw new Error(`HTTP ${mediaRes.status}`);
+            blob = await mediaRes.blob();
+          } catch (err) {
+            console.error(`[BackendSave] media download failed (${item.id}):`, err);
+          }
+
+          const itemWithMedia = { ...item, remoteUrl, blob };
+
+          if (!shouldRegenerateThumbnail(itemWithMedia)) {
+            return itemWithMedia;
+          }
+
+          try {
+            const thumbnailUrl = blob
+              ? await generateThumbnailFromBlob(blob, item.type)
+              : await generateThumbnailFromUrl(remoteUrl, item.type);
+            if (thumbnailUrl) {
+              return { ...itemWithMedia, thumbnailUrl };
+            }
+          } catch (err) {
+            console.warn(`[BackendSave] thumbnail regeneration failed (${item.id}):`, err);
+          }
+
+          return itemWithMedia;
+        }),
+      );
 
       return { ...project, mediaLibrary: { ...project.mediaLibrary, items } };
     } catch {
