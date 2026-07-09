@@ -81,6 +81,40 @@ import { restoreMediaItem } from "../utils/media-recovery";
 import { projectManager } from "../services/project-manager";
 import { reportRuntimeError, toast } from "./notification-store";
 
+function getImportedFileName(item: MediaItem): string {
+  return item.sourceFile?.name ?? item.name;
+}
+
+function getImportedFileSize(item: MediaItem): number | undefined {
+  return item.sourceFile?.size ?? item.metadata?.fileSize;
+}
+
+function findMediaItemByFileIdentity(
+  items: readonly MediaItem[],
+  file: File,
+): MediaItem | undefined {
+  return items.find(
+    (item) => getImportedFileName(item) === file.name && getImportedFileSize(item) === file.size,
+  );
+}
+
+function preserveUserMediaMetadata(
+  replacement: MediaItem,
+  previous: MediaItem | undefined,
+): MediaItem {
+  if (!previous) return replacement;
+  return {
+    ...replacement,
+    title: previous.title,
+    description: previous.description,
+    tags: previous.tags,
+    group: previous.group,
+    assetGroupId: previous.assetGroupId,
+    isCurrent: previous.isCurrent,
+    generationMeta: previous.generationMeta,
+  };
+}
+
 /**
  * ProjectState - Complete state interface for project management
  *
@@ -1781,6 +1815,14 @@ export const useProjectStore = create<ProjectState>()(
             file.name.toLowerCase().endsWith(".srt") ||
             file.type === "text/srt" ||
             file.type === "application/x-subrip";
+          const existingSameFile = findMediaItemByFileIdentity(
+            project.mediaLibrary.items,
+            file,
+          );
+
+          if (existingSameFile && !isSrt) {
+            return get().replaceMediaAsset(existingSameFile.id, file);
+          }
 
           if (isSrt) {
             const srtText = await file.text();
@@ -1799,8 +1841,8 @@ export const useProjectStore = create<ProjectState>()(
                 ? subtitles[subtitles.length - 1].endTime
                 : 0;
 
-            const srtMediaId = uuidv4();
-            const newMediaItem: MediaItem = {
+            const srtMediaId = existingSameFile?.id ?? uuidv4();
+            const newMediaItem: MediaItem = preserveUserMediaMetadata({
               id: srtMediaId,
               name: file.name,
               type: "srt" as MediaItem["type"],
@@ -1822,13 +1864,19 @@ export const useProjectStore = create<ProjectState>()(
                 size: file.size,
                 lastModified: file.lastModified,
               },
-            };
+            }, existingSameFile);
+
+            const updatedItems = existingSameFile
+              ? project.mediaLibrary.items.map((item) =>
+                  item.id === existingSameFile.id ? newMediaItem : item,
+                )
+              : [...project.mediaLibrary.items, newMediaItem];
 
             const updatedProject = {
               ...project,
               mediaLibrary: {
                 ...project.mediaLibrary,
-                items: [...project.mediaLibrary.items, newMediaItem],
+                items: updatedItems,
               },
               modifiedAt: Date.now(),
             };
@@ -2213,15 +2261,22 @@ export const useProjectStore = create<ProjectState>()(
             item.id === mediaId ? updatedItem : item,
           );
 
-          set({
-            project: {
-              ...project,
-              mediaLibrary: {
-                items: updatedItems,
-              },
-              modifiedAt: Date.now(),
+          const updatedProject = {
+            ...project,
+            mediaLibrary: {
+              items: updatedItems,
             },
-          });
+            modifiedAt: Date.now(),
+          };
+          set({ project: updatedProject });
+
+          await saveMediaBlob(updatedProject.id, mediaId, file, updatedItem.metadata);
+          backendSaveService.uploadMediaAsync(
+            updatedProject.id,
+            mediaId,
+            file,
+            file.name,
+          );
 
           if (updatedItem.type === "video" && !updatedItem.thumbnailUrl) {
             setTimeout(async () => {

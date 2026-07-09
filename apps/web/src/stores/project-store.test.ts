@@ -425,6 +425,134 @@ describe("ProjectStore", () => {
     });
   });
 
+  describe("media import duplicate handling", () => {
+    function seedProjectWithMedia(item: MediaItem, clip?: Clip) {
+      const base = useProjectStore.getState().project;
+      useProjectStore.getState().loadProject({
+        ...base,
+        mediaLibrary: { items: [item] },
+        timeline: {
+          ...base.timeline,
+          tracks: [
+            {
+              id: "track-1",
+              type: "video",
+              name: "Video 1",
+              clips: clip ? [clip] : [],
+              transitions: [],
+              locked: false,
+              hidden: false,
+              muted: false,
+              solo: false,
+            },
+          ],
+        },
+      });
+    }
+
+    it("replaces an existing media item when imported file name and size match", async () => {
+      const oldBlob = new Blob(["old"], { type: "video/mp4" });
+      const replacement = new File(["same"], "test-video.mp4", { type: "video/mp4" });
+      const existing: MediaItem = {
+        id: "existing-media",
+        name: "test-video.mp4",
+        type: "video",
+        fileHandle: null,
+        blob: oldBlob,
+        metadata: {
+          duration: 5,
+          width: 1280,
+          height: 720,
+          frameRate: 24,
+          codec: "h264",
+          sampleRate: 0,
+          channels: 0,
+          fileSize: replacement.size,
+        },
+        thumbnailUrl: "old-thumb",
+        title: "User title",
+        tags: ["keep"],
+      };
+      const clip: Clip = {
+        id: "clip-1",
+        mediaId: existing.id,
+        trackId: "track-1",
+        startTime: 0,
+        duration: 5,
+        inPoint: 0,
+        outPoint: 5,
+        type: "video",
+        effects: [],
+        audioEffects: [],
+        transform: {
+          position: { x: 0.5, y: 0.5 },
+          scale: { x: 1, y: 1 },
+          rotation: 0,
+          anchor: { x: 0.5, y: 0.5 },
+          opacity: 1,
+        },
+        volume: 1,
+        keyframes: [],
+      };
+      seedProjectWithMedia(existing, clip);
+
+      const result = await useProjectStore.getState().importMedia(replacement);
+
+      expect(result.success).toBe(true);
+      const state = useProjectStore.getState();
+      const items = state.project.mediaLibrary.items;
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        id: "existing-media",
+        name: "test-video.mp4",
+        title: "User title",
+        tags: ["keep"],
+      });
+      expect(items[0].blob).toBe(replacement);
+      expect(items[0].metadata.fileSize).toBe(replacement.size);
+      expect(state.project.timeline.tracks[0]?.clips[0]?.mediaId).toBe("existing-media");
+      expect(mockSaveMediaBlob).toHaveBeenLastCalledWith(
+        state.project.id,
+        "existing-media",
+        replacement,
+        items[0].metadata,
+      );
+    });
+
+    it("adds a new media item when filename matches but size differs", async () => {
+      const existing: MediaItem = {
+        id: "existing-media",
+        name: "test-video.mp4",
+        type: "video",
+        fileHandle: null,
+        blob: new Blob(["old"], { type: "video/mp4" }),
+        metadata: {
+          duration: 5,
+          width: 1280,
+          height: 720,
+          frameRate: 24,
+          codec: "h264",
+          sampleRate: 0,
+          channels: 0,
+          fileSize: 3,
+        },
+        thumbnailUrl: null,
+      };
+      seedProjectWithMedia(existing);
+
+      const result = await useProjectStore
+        .getState()
+        .importMedia(new File(["different-size"], "test-video.mp4", { type: "video/mp4" }));
+
+      expect(result.success).toBe(true);
+      const items = useProjectStore.getState().project.mediaLibrary.items;
+      expect(items).toHaveLength(2);
+      expect(items[0]?.id).toBe("existing-media");
+      expect(items[1]?.id).not.toBe("existing-media");
+      expect(items[1]?.name).toBe("test-video.mp4");
+    });
+  });
+
   describe("generated media", () => {
     it("adds available generated media and persists its blob", async () => {
       const blob = new Blob(["generated"], { type: "image/png" });
