@@ -111,6 +111,8 @@ export const Timeline: React.FC = () => {
     toggleSnap,
     timelineMaximized,
     toggleTimelineMaximized,
+    setInspectedAsset,
+    setSidebarTab,
   } = useUIStore();
   const selectedClipIds = getSelectedClipIds();
 
@@ -273,8 +275,14 @@ export const Timeline: React.FC = () => {
     return () => window.removeEventListener("openreel:timeline-scroll-to", handler);
   }, [pixelsPerSecond, viewportWidth]);
 
+  const revealClipInspector = useCallback(() => {
+    setInspectedAsset(null);
+    setSidebarTab("edit");
+  }, [setInspectedAsset, setSidebarTab]);
+
   const handleSelectClip = useCallback(
     (clipId: string, addToSelection: boolean) => {
+      revealClipInspector();
       const isTextClip = allTextClips.some((tc) => tc.id === clipId);
       if (isTextClip) {
         const textClip = allTextClips.find((tc) => tc.id === clipId);
@@ -303,7 +311,7 @@ export const Timeline: React.FC = () => {
       }
       select({ type: "clip", id: clipId, trackId }, addToSelection);
     },
-    [tracks, select, allTextClips, allShapeClips],
+    [tracks, select, allTextClips, allShapeClips, revealClipInspector],
   );
 
   const [selectedKeyframeIds, setSelectedKeyframeIds] = useState<string[]>([]);
@@ -503,6 +511,7 @@ export const Timeline: React.FC = () => {
 
     if (selectedItems.length > 0) {
       selectMultiple(selectedItems);
+      revealClipInspector();
     }
 
     setIsBoxSelecting(false);
@@ -514,6 +523,7 @@ export const Timeline: React.FC = () => {
     tracks,
     getTrackHeight,
     selectMultiple,
+    revealClipInspector,
   ]);
 
   useEffect(() => {
