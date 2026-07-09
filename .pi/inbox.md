@@ -22,7 +22,19 @@
 
 - [x] **#11** there are projects in the recent projects list in the frontend that do not exist in the backend git repo. The backend git repo (not the server, the repo itself) must be the single source of truth for the list of projects. And "recent projects" must be renamed to "Projects" ➕ 2026-07-08 🔗 Commit ✅ 2026-07-08 ^item-11
 
-- [ ] **#12** i have made many edits to the VintageTokyo project but none have appeared in the project git repo at ~/openreel-projects ➕ 2026-07-08 ^item-12
+- [x] **#12** i have made many edits to the VintageTokyo project but none have appeared in the project git repo at ~/openreel-projects ➕ 2026-07-08 🔗 Fixed ✅ 2026-07-08 ^item-12
+
+- [ ] **#13** if a file is imported with the same filename and size then it should replace the existing item not be added as a new one ➕ 2026-07-08 ^item-13
+
+- [/] **#14** omfg how is this possible? the inspector display is broken AGAIN. Fucking get the regression testing right. i click on a clip and no inspector appears ➕ 2026-07-08 #errored ^item-14
+
+- [x] **#15** the backend-down autosave is broken again. on refresh I get the outdated version from the backend complete with the missing media ➕ 2026-07-08 #errored 🔗 commit ✅ 2026-07-09 ^item-15
+
+- [x] **#16** [Error] Failed to load resource: The operation couldn’t be completed. (WebKitBlobResource error 1.) (7a90da82-0066-4a73-aeec-48d129fadf56, line 0). The url is blob:http://localhost:5173/d1f58dda-46f7-..... you're clearly loading the remoteUrl instead of its contents into the blob ➕ 2026-07-08 #errored 🔗 commit ✅ 2026-07-09 ^item-16
+
+- [x] **#17** [Error] [ErrorBoundary] Component error: (2) TypeError: Type error — WaveformPreview.tsx:43 {componentStack: "↵WaveformPreview@http://localhost:5173/src/compone…69:12↵App@http://localhost:5173/src/App.tsx:67:79"} (anonymous function) (main.tsx:13) componentDidCatch (ErrorBoundary.tsx:27) callback (chunk-YYN6DZAU.js:14084) callCallback (chunk-YYN6DZAU.js:11248) commitUpdateQueue (chunk-YYN6DZAU.js:11265) commitLayoutEffectOnFiber (chunk-YYN6DZAU.js:17075) commitLayoutMountEffects_complete (chunk-YYN6DZAU.js:17980) commitLayoutEffects_begin (chunk-YYN6DZAU.js:17969) commitLayoutEffects_begin (chunk-YYN6DZAU.js:17950) commitLayoutEffects (chunk-YYN6DZAU.js:17920) commitRootImpl (chunk-YYN6DZAU.js:19353) commitRoot (chunk-YYN6DZAU.js:19277) performSyncWorkOnRoot (chunk-YYN6DZAU.js:18895) flushSyncCallbacks (chunk-YYN6DZAU.js:9119) (anonymous function) (chunk-YYN6DZAU.js:18627) ➕ 2026-07-08 🔗 commit ✅ 2026-07-09 ^item-17
+
+- [ ] **#18** clip/timeline clip selection does not trigger the inspector ➕ 2026-07-08 ^item-18
 
 ## Archived
 
