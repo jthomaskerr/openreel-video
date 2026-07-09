@@ -1,4 +1,5 @@
 import type { MediaItem } from "@openreel/core";
+import { isMediaBlob } from "./media-blob";
 
 function isThumbnailableMediaType(type: MediaItem["type"]): boolean {
   return type === "video" || type === "image";
@@ -125,10 +126,14 @@ export async function restoreMediaItem(
   item: MediaItem,
   storedBlob: Blob | undefined,
 ): Promise<MediaItem> {
-  const blob = storedBlob || item.blob;
+  const blob = isMediaBlob(storedBlob)
+    ? storedBlob
+    : isMediaBlob(item.blob)
+      ? item.blob
+      : null;
 
   if (!blob) {
-    return item;
+    return { ...item, blob: null };
   }
 
   let thumbnailUrl = item.thumbnailUrl;

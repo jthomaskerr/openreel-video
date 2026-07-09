@@ -6,6 +6,7 @@ import {
   shouldRegenerateThumbnail,
 } from "../utils/media-recovery";
 import { reportRuntimeError } from "../stores/notification-store";
+import { isMediaBlob } from "../utils/media-blob";
 
 interface ProjectSummary {
   id: string;
@@ -170,7 +171,7 @@ class BackendSaveService {
 
     await Promise.all(
       project.mediaLibrary.items.map((item) => {
-        if (!item.blob) return Promise.resolve();
+        if (!isMediaBlob(item.blob)) return Promise.resolve();
         return this.uploadMedia(project.id, item.id, item.blob, item.name);
       }),
     );

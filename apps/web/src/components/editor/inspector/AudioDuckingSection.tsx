@@ -19,6 +19,7 @@ import {
 } from "@openreel/core";
 import { Slider } from "@openreel/ui";
 import { useProjectStore } from "../../../stores/project-store";
+import { getMediaItemBlob, readMediaBlobArrayBuffer } from "../../../utils/media-blob";
 import type { AudioDuckingSettings } from "../../../stores/project";
 
 interface AudioDuckingSectionProps {
@@ -144,7 +145,7 @@ const buildTriggerTrackBuffer = async (
         (item) => item.id === sourceClip.mediaId,
       );
 
-      if (!mediaItem?.blob) {
+      if (!mediaItem) {
         continue;
       }
 
@@ -159,7 +160,11 @@ const buildTriggerTrackBuffer = async (
       }
 
       try {
-        const arrayBuffer = await mediaItem.blob.arrayBuffer();
+        const blob = await getMediaItemBlob(mediaItem);
+        if (!blob) {
+          continue;
+        }
+        const arrayBuffer = await readMediaBlobArrayBuffer(blob);
         const decodedBuffer = await decodeContext.decodeAudioData(arrayBuffer.slice(0));
         const source = offlineContext.createBufferSource();
         const gainNode = offlineContext.createGain();

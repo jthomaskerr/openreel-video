@@ -13,6 +13,7 @@ import {
   type HighlightResult,
   type HighlightPreferences,
 } from "../../../services/highlight-service";
+import { getMediaItemBlob, readMediaBlobArrayBuffer } from "../../../utils/media-blob";
 
 interface HighlightExtractorPanelProps {
   clipId: string;
@@ -48,7 +49,7 @@ export const HighlightExtractorPanel: React.FC<HighlightExtractorPanelProps> = (
     if (!clip) return;
 
     const mediaItem = getMediaItem(clip.mediaId);
-    if (!mediaItem?.blob) {
+    if (!mediaItem) {
       setError("Media not found or not loaded");
       return;
     }
@@ -61,12 +62,18 @@ export const HighlightExtractorPanel: React.FC<HighlightExtractorPanelProps> = (
       setPhase("Transcribing audio...");
       setProgress(5);
 
+      const blob = await getMediaItemBlob(mediaItem);
+      if (!blob) {
+        throw new Error("Media not found or not loaded");
+      }
+
+      const mediaItemWithBlob = { ...mediaItem, blob };
       const transcriptionService = getTranscriptionService() || initializeTranscriptionService({
         apiEndpoint: `${OPENREEL_TRANSCRIBE_URL}/transcribe`,
       });
       const subtitles = await transcriptionService.transcribeClip(
         clip,
-        mediaItem,
+        mediaItemWithBlob,
         (p) => setProgress(Math.round(p.progress * 20)),
       );
 
@@ -83,7 +90,7 @@ export const HighlightExtractorPanel: React.FC<HighlightExtractorPanelProps> = (
       setPhase("Decoding audio...");
       setProgress(25);
 
-      const arrayBuffer = await mediaItem.blob.arrayBuffer();
+      const arrayBuffer = await readMediaBlobArrayBuffer(blob);
       const audioContext = new OfflineAudioContext(1, 44100, 44100);
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 

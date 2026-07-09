@@ -1,5 +1,6 @@
 import { getAudioEngine } from "@openreel/core";
 import { useProjectStore } from "../stores/project-store";
+import { getMediaItemBlob, readMediaBlobArrayBuffer } from "../utils/media-blob";
 
 export interface SilenceSettings {
   threshold: number;
@@ -55,14 +56,19 @@ export class SilenceCutBridge {
     }
 
     const mediaItem = store.getMediaItem(clip.mediaId);
-    if (!mediaItem?.blob) {
-      throw new Error("Media blob not found");
+    if (!mediaItem) {
+      throw new Error("Media item not found");
     }
 
     onProgress?.(10, "Loading audio...");
 
+    const blob = await getMediaItemBlob(mediaItem);
+    if (!blob) {
+      throw new Error("Media blob not found");
+    }
+
     const audioContext = this.getAudioContext();
-    const arrayBuffer = await mediaItem.blob.arrayBuffer();
+    const arrayBuffer = await readMediaBlobArrayBuffer(blob);
     const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
 
     onProgress?.(30, "Detecting silence...");
