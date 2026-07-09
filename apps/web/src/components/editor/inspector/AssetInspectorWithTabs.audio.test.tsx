@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { MediaItem } from "@openreel/core";
 
 const wavesurferMock = vi.hoisted(() => {
@@ -94,5 +94,40 @@ describe("AssetInspectorWithTabs audio tab", () => {
       }),
     );
     expect(wavesurferMock.instance.playPause).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the inspector mounted when waveform initialization throws", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    wavesurferMock.create.mockImplementationOnce(() => {
+      throw new TypeError("bad waveform data");
+    });
+
+    render(<AssetInspectorWithTabs item={makeAudioItem({ originalUrl: "https://cdn.example.test/song.wav" })} />);
+
+    expect(await screen.findByText("Audio preview unavailable")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Audio/ })).toBeInTheDocument();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[WaveformPreview] Failed to initialize waveform",
+      expect.any(TypeError),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it("ignores malformed persisted waveform data instead of passing it to WaveSurfer", async () => {
+    render(
+      <AssetInspectorWithTabs
+        item={makeAudioItem({
+          originalUrl: "https://cdn.example.test/song.wav",
+          waveformData: { 0: 0.1, 1: "bad" } as unknown as Float32Array,
+        })}
+      />,
+    );
+
+    await waitFor(() => expect(wavesurferMock.create).toHaveBeenCalled());
+    expect(wavesurferMock.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        peaks: undefined,
+      }),
+    );
   });
 });
