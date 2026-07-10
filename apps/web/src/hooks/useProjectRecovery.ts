@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import { backendSaveService } from "../services/backend-save";
 import { autoSaveManager, type AutoSaveMetadata } from "../services/auto-save";
 import { clearAllStorage } from "../services/media-storage";
-import { projectManager } from "../services/project-manager";
 import { useProjectStore } from "../stores/project-store";
 
 interface RecoveryState {
@@ -52,19 +51,17 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
             .sort((a, b) => b.timestamp - a.timestamp)[0];
 
           if (matchingSave) {
-            const recoveredProject = await autoSaveManager.recover(matchingSave.id);
+            const success = await recoverFromAutoSave(matchingSave.id);
             if (cancelled) return;
-            if (recoveredProject) {
-              loadProject(recoveredProject);
-              await projectManager.addToRecent(recoveredProject);
-              if (cancelled) return;
+            if (success) {
               setState({ isChecking: false, availableSaves: [], showDialog: false, error: null });
             } else {
+              const storeError = useProjectStore.getState().error;
               setState({
                 isChecking: false,
                 availableSaves: [],
                 showDialog: false,
-                error: "Could not restore the local autosave for this project.",
+                error: storeError ?? "Could not restore the local autosave for this project.",
               });
             }
             return;

@@ -37,9 +37,14 @@
 - [/] **#18** clip/timeline clip selection does not trigger the inspector ➕ 2026-07-08 🔗 Implemented ^item-18
 
 - [x] **#19** audio inspector is throwing a runtime error ➕ 2026-07-09 🔗 Commit ✅ 2026-07-09 ^item-19
-  > Follow-up correction committed d60c1be: actual failure was clicking audio asset filename/card. Fixed media asset card click handling and non-Blob persisted blob placeholders that crashed WaveformPreview once inspector opened. Browser verified clicking tmp-test-audio.wav filename opens inspector.
 
-- [ ] **#20** images are no longer rendering in the preview. how tf is it that you keep breaking things?! ➕ 2026-07-09 ^item-20
+- [x] **#20** images are no longer rendering in the preview. how tf is it that you keep breaking things?! ➕ 2026-07-09 🔗 commit ✅ 2026-07-10 ^item-20
+
+- [ ] **#21** The timing pane in the inspector needs changes. Create the spec and then STOP for approval. 1. You must distingush between the timeline placement and trim. So make duration a non editable label, make timeline the first row with two columns, each containing a number input and the set button (as a new svg icon - a line with a small triangle on top, like the scrub marker). Then reuse the timeline clip display (with the select handles) to trim on the second row. The trimmed content should still be visible, but there should be a dynamic zoom like trimming on android or quicktime player. The preview window should show the current handle position when dragging. ➕ 2026-07-10 ^item-21
+
+- [ ] **#22** we are still creating new projects all the time on start. DO NOT do this. the url HAS a project id. We must only load that ➕ 2026-07-10 ^item-22
+
+- [ ] **#23** If there is a title available in any of the metadata for a media, use that title, not the filename. if you use the filename, convert snake/kebab case to sentence case and drop the extension ➕ 2026-07-10 ^item-23
 
 ## Archived
 

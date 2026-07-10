@@ -739,35 +739,41 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
             )}
 
             {/* Video: time-accurate filmstrip (frames selected by inPoint + tile position) */}
-            {mediaType === "video" && mediaItem?.filmstripThumbnails && mediaItem.filmstripThumbnails.length > 0 && (
-              <div className="absolute inset-0 flex opacity-70">
-                {Array.from({ length: tileCount }).map((_, i) => {
-                  const sourceTime = clip.inPoint + ((i + 0.5) / tileCount) * clip.duration;
-                  const thumbs = mediaItem.filmstripThumbnails!;
-                  let best = 0;
-                  let bestDist = Math.abs(thumbs[0].timestamp - sourceTime);
-                  for (let j = 1; j < thumbs.length; j++) {
-                    const d = Math.abs(thumbs[j].timestamp - sourceTime);
-                    if (d < bestDist) { bestDist = d; best = j; }
-                  }
-                  return (
-                    <div
-                      key={i}
-                      className="flex-1 h-full bg-cover bg-center"
-                      style={{ backgroundImage: `url(${thumbs[best].url})` }}
-                    />
-                  );
-                })}
-              </div>
-            )}
+            {mediaType === "video" && (() => {
+              const liveThumbs = mediaItem?.filmstripThumbnails?.filter((t) => !t.url.startsWith("blob:")) ?? [];
+              if (liveThumbs.length === 0) return null;
+              return (
+                <div className="absolute inset-0 flex opacity-70">
+                  {Array.from({ length: tileCount }).map((_, i) => {
+                    const sourceTime = clip.inPoint + ((i + 0.5) / tileCount) * clip.duration;
+                    let best = 0;
+                    let bestDist = Math.abs(liveThumbs[0].timestamp - sourceTime);
+                    for (let j = 1; j < liveThumbs.length; j++) {
+                      const d = Math.abs(liveThumbs[j].timestamp - sourceTime);
+                      if (d < bestDist) { bestDist = d; best = j; }
+                    }
+                    return (
+                      <div
+                        key={i}
+                        className="flex-1 h-full bg-cover bg-center"
+                        style={{ backgroundImage: `url(${liveThumbs[best].url})` }}
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
             {/* Video: single thumbnail fallback — repeat-fill */}
-            {mediaType === "video" && !mediaItem?.filmstripThumbnails?.length && effectiveThumbnailUrl && (
-              <div
-                className="absolute inset-0 opacity-60"
-                style={{ backgroundImage: `url(${effectiveThumbnailUrl})`, backgroundRepeat: "repeat-x", backgroundSize: "auto 100%" }}
-              />
-            )}
+            {mediaType === "video" &&
+              !mediaItem?.filmstripThumbnails?.some((t) => !t.url.startsWith("blob:")) &&
+              effectiveThumbnailUrl &&
+              !effectiveThumbnailUrl.startsWith("blob:") && (
+                <div
+                  className="absolute inset-0 opacity-60"
+                  style={{ backgroundImage: `url(${effectiveThumbnailUrl})`, backgroundRepeat: "repeat-x", backgroundSize: "auto 100%" }}
+                />
+              )}
 
             {/* Image / character / style: repeat thumbnail across full clip width */}
             {mediaType === "image" && effectiveThumbnailUrl && !effectiveThumbnailUrl.startsWith("blob:") && (

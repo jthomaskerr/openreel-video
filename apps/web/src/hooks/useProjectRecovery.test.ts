@@ -366,9 +366,15 @@ describe("useProjectRecovery hook", () => {
 
     const { result } = renderHook(() => useProjectRecovery("test-project-id"));
 
-    await waitFor(() => {
-      expect(result.current.isChecking).toBe(false);
-    });
+    // recoverFromAutoSave's backend-reachable branch waits ~1s for
+    // fire-and-forget media uploads to settle before falling back to IDB
+    // hydration, so the default 1000ms waitFor timeout isn't enough here.
+    await waitFor(
+      () => {
+        expect(result.current.isChecking).toBe(false);
+      },
+      { timeout: 3000 },
+    );
 
     expect(mockBackendLoad).toHaveBeenCalledWith("test-project-id");
     expect(mockAutoSaveRecover).toHaveBeenCalledWith("matching-save");

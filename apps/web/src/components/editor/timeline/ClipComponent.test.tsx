@@ -143,6 +143,75 @@ describe("ClipComponent", () => {
     expect(container.innerHTML).toContain("data:image/png;base64,thumb");
   });
 
+  it("never renders a stale blob: URL for video thumbnails (single-thumbnail fallback)", () => {
+    const media: MediaItem = {
+      ...mediaItem("media-1"),
+      thumbnailUrl: "blob:http://localhost/dead-uuid",
+    };
+    useProjectStore.setState((state) => ({
+      project: { ...state.project, mediaLibrary: { items: [media] } },
+    }));
+
+    const clip = makeClip();
+    const track = makeTrack(clip);
+
+    const { container } = render(
+      <div style={{ position: "relative", width: 500, height: 80 }}>
+        <ClipComponent
+          clip={clip}
+          track={track}
+          allTracks={[track]}
+          pixelsPerSecond={20}
+          isSelected={false}
+          trackHeights={new Map([[track.id, 60]])}
+          timelineRef={{ current: document.createElement("div") }}
+          onSelect={vi.fn()}
+          onMoveClip={vi.fn()}
+          onSnapIndicator={vi.fn()}
+        />
+      </div>,
+    );
+
+    expect(container.innerHTML).not.toContain("blob:http://localhost/dead-uuid");
+  });
+
+  it("never renders a stale blob: URL for video thumbnails (filmstrip tiles)", () => {
+    const media: MediaItem = {
+      ...mediaItem("media-1"),
+      thumbnailUrl: "blob:http://localhost/dead-uuid",
+      filmstripThumbnails: [
+        { timestamp: 0, url: "blob:http://localhost/dead-frame-0" },
+        { timestamp: 2.5, url: "blob:http://localhost/dead-frame-1" },
+        { timestamp: 5, url: "blob:http://localhost/dead-frame-2" },
+      ],
+    };
+    useProjectStore.setState((state) => ({
+      project: { ...state.project, mediaLibrary: { items: [media] } },
+    }));
+
+    const clip = makeClip();
+    const track = makeTrack(clip);
+
+    const { container } = render(
+      <div style={{ position: "relative", width: 500, height: 80 }}>
+        <ClipComponent
+          clip={clip}
+          track={track}
+          allTracks={[track]}
+          pixelsPerSecond={20}
+          isSelected={false}
+          trackHeights={new Map([[track.id, 60]])}
+          timelineRef={{ current: document.createElement("div") }}
+          onSelect={vi.fn()}
+          onMoveClip={vi.fn()}
+          onSnapIndicator={vi.fn()}
+        />
+      </div>,
+    );
+
+    expect(container.innerHTML).not.toContain("blob:http://localhost/dead-frame");
+  });
+
   it("falls back to clip referenceAssetIds when the media item has no file and no thumbnail", () => {
     const refMedia = {
       ...mediaItem("ref-1"),

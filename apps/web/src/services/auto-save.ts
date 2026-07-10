@@ -1,5 +1,25 @@
 import type { Project } from "@openreel/core";
 
+/**
+ * blob: URLs are page-scoped and guaranteed invalid after a reload — never
+ * persist them. Mirrors backend-save.ts's sanitize() for the same reason.
+ */
+export function sanitizeForAutoSave(project: Project): Project {
+  return {
+    ...project,
+    mediaLibrary: {
+      ...project.mediaLibrary,
+      items: project.mediaLibrary.items.map((item) => ({
+        ...item,
+        thumbnailUrl: item.thumbnailUrl?.startsWith("blob:") ? null : item.thumbnailUrl,
+        filmstripThumbnails: item.filmstripThumbnails?.some((t) => t.url.startsWith("blob:"))
+          ? undefined
+          : item.filmstripThumbnails,
+      })),
+    },
+  };
+}
+
 export interface AutoSaveConfig {
   interval: number;
   maxSlots: number;
@@ -194,7 +214,7 @@ class AutoSaveManager {
       projectName: project.name,
       timestamp: Date.now(),
       slot: this.currentSlot,
-      data: JSON.stringify(project),
+      data: JSON.stringify(sanitizeForAutoSave(project)),
     };
 
     await this.saveRecord(record);
@@ -326,7 +346,7 @@ class AutoSaveManager {
         return null;
       }
 
-      const project = JSON.parse(record.data) as Project;
+      const project = sanitizeForAutoSave(JSON.parse(record.data) as Project);
 
       this.emit("restored", { project, timestamp: record.timestamp });
       return project;
