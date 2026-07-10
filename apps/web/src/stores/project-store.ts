@@ -41,6 +41,7 @@ import {
   textAnimationEngine,
   getMediaStatus,
   MediaStatus,
+  filenameToTitle,
 } from "@openreel/core";
 import { v4 as uuidv4 } from "uuid";
 import type {
@@ -96,6 +97,10 @@ function findMediaItemByFileIdentity(
   return items.find(
     (item) => getImportedFileName(item) === file.name && getImportedFileSize(item) === file.size,
   );
+}
+
+function deriveMediaTitle(fileName: string, metadataTitle: string | undefined): string {
+  return metadataTitle || filenameToTitle(fileName);
 }
 
 function preserveUserMediaMetadata(
@@ -1858,6 +1863,7 @@ export const useProjectStore = create<ProjectState>()(
                 channels: 0,
                 fileSize: file.size,
               },
+              title: filenameToTitle(file.name),
               thumbnailUrl: null,
               sourceFile: {
                 name: file.name,
@@ -2030,6 +2036,7 @@ export const useProjectStore = create<ProjectState>()(
             thumbnailUrl,
             filmstripThumbnails:
               filmstripThumbnails.length > 0 ? filmstripThumbnails : undefined,
+            title: deriveMediaTitle(file.name, processedMedia.metadata.title),
             sourceFile: { name: file.name, size: file.size, lastModified: file.lastModified },
           };
 

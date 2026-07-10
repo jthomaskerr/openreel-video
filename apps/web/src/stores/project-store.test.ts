@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useProjectStore } from "./project-store";
 import { useEngineStore } from "./engine-store";
 import { backendSaveService } from "../services/backend-save";
+import { getMediaBridge } from "../bridges/media-bridge";
 import type { Project, Clip, MediaItem, Transition } from "@openreel/core";
 
 const {
@@ -550,6 +551,87 @@ describe("ProjectStore", () => {
       expect(items[0]?.id).toBe("existing-media");
       expect(items[1]?.id).not.toBe("existing-media");
       expect(items[1]?.name).toBe("test-video.mp4");
+    });
+  });
+
+  describe("media import — title derivation", () => {
+    it("uses the container metadata title when present", async () => {
+      vi.mocked(getMediaBridge).mockReturnValueOnce({
+        isInitialized: vi.fn().mockReturnValue(true),
+        importFile: vi.fn().mockResolvedValue({
+          success: true,
+          media: {
+            id: "mock-media-id",
+            name: "some_raw_file_name.mp4",
+            type: "video",
+            duration: 10,
+            width: 1920,
+            height: 1080,
+            frameRate: 30,
+            metadata: {
+              hasVideo: true,
+              hasAudio: false,
+              duration: 10,
+              width: 1920,
+              height: 1080,
+              frameRate: 30,
+              codec: "h264",
+              sampleRate: 0,
+              channels: 0,
+              title: "My Great Video",
+            },
+          },
+        }),
+        generateThumbnailsForMedia: vi.fn().mockResolvedValue([]),
+      } as unknown as ReturnType<typeof getMediaBridge>);
+
+      const result = await useProjectStore
+        .getState()
+        .importMedia(new File(["x"], "some_raw_file_name.mp4", { type: "video/mp4" }));
+
+      expect(result.success).toBe(true);
+      const item = useProjectStore.getState().project.mediaLibrary.items.at(-1);
+      expect(item?.name).toBe("some_raw_file_name.mp4");
+      expect(item?.title).toBe("My Great Video");
+    });
+
+    it("derives the title from the filename when no metadata title is present", async () => {
+      vi.mocked(getMediaBridge).mockReturnValueOnce({
+        isInitialized: vi.fn().mockReturnValue(true),
+        importFile: vi.fn().mockResolvedValue({
+          success: true,
+          media: {
+            id: "mock-media-id",
+            name: "my_cool_clip.mp4",
+            type: "video",
+            duration: 10,
+            width: 1920,
+            height: 1080,
+            frameRate: 30,
+            metadata: {
+              hasVideo: true,
+              hasAudio: false,
+              duration: 10,
+              width: 1920,
+              height: 1080,
+              frameRate: 30,
+              codec: "h264",
+              sampleRate: 0,
+              channels: 0,
+            },
+          },
+        }),
+        generateThumbnailsForMedia: vi.fn().mockResolvedValue([]),
+      } as unknown as ReturnType<typeof getMediaBridge>);
+
+      const result = await useProjectStore
+        .getState()
+        .importMedia(new File(["x"], "my_cool_clip.mp4", { type: "video/mp4" }));
+
+      expect(result.success).toBe(true);
+      const item = useProjectStore.getState().project.mediaLibrary.items.at(-1);
+      expect(item?.name).toBe("my_cool_clip.mp4");
+      expect(item?.title).toBe("My cool clip");
     });
   });
 
