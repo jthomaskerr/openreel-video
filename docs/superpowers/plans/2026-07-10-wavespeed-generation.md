@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-10  
 **Spec:** `docs/spec/wavespeed-generation.md`  
-**Status:** Ready for implementation  
+**Status:** Deterministic implementation complete; browser/provider gates pending  
 **Outcome:** A shot-aware WaveSpeed image/video generation flow resolves stable references and exact shot audio, survives reload/retry, finalizes one versioned asset, and applies an explicit idempotent timeline placement policy.
 
 ## Current-state findings
