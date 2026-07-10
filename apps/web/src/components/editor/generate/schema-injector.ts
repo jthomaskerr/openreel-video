@@ -102,7 +102,8 @@ export function getRefImageUrls(
 ): MediaItem[] {
   return refIds
     .map((id) => mediaItems.find((item) => item.id === id))
-    .filter((item): item is MediaItem =>
-      !!item && (!!item.originalUrl || !!item.thumbnailUrl),
-    );
+    .filter((item): item is MediaItem => {
+      const url = item?.originalUrl ?? item?.thumbnailUrl;
+      return !!url && /^https:\/\//i.test(url);
+    });
 }
