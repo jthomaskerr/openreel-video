@@ -28,6 +28,265 @@ Do not add a new database framework solely for this feature. Implement a small f
 
 ## Delivery sequence
 
+## Execution protocol for GPT-5.6-Luna subagents
+
+This section is normative for parallel execution. A subagent owns only the files in its work package unless the package explicitly lists a shared file. When a shared file must change, the subagent records the required edit in its handoff and the integration owner applies it. Subagents must not reformat unrelated code, delete user changes, or infer contracts that are owned by an earlier package.
+
+Every package follows the same loop:
+
+1. Read this plan, the cited spec sections, the package's existing files, and the nearest tests. Do not load unrelated directories.
+2. State the package's measurable outcome before editing.
+3. Add or update a deterministic failing test for each behavior being introduced.
+4. Implement the smallest permanent change that makes the focused tests pass.
+5. Run the focused test command, TypeScript checking for the affected workspace, and lint when an affected workspace exposes a lint script.
+6. Inspect `git diff --check` and the package-scoped diff. Do not stage or commit because multiple agents share the working tree; the integration owner commits after reconciliation.
+7. Return a handoff containing files changed, contract decisions, exact commands and results, known failure modes, and any work that remains blocked by another package.
+
+Tests must use fixed IDs and timestamps, no network, no real provider credentials, and no wall-clock sleeps. Prefer table-driven tests. Error assertions use stable codes, not complete English messages. No persisted fixture may contain an API key, signed URL, upload token, `blob:` URL, or localhost provider input.
+
+### Dependency graph and execution waves
+
+| Wave | Packages | May run in parallel | Starts when | Integration gate |
+|---|---|---|---|---|
+| 0 | WP-00 | No | Immediately | Expanded plan reviewed against spec |
+| 1 | WP-01, WP-02, WP-03 | Yes | Wave 0 complete | Shared contracts compile; all three focused suites pass |
+| 2 | WP-04, WP-05 | Yes | WP-01 and relevant WP-02/WP-03 contracts merged | Restart/redaction and PCM/cache suites pass |
+| 3 | WP-06 | No | WP-04 and WP-05 merged | Failure-injection submission suite passes |
+| 4 | WP-07A, WP-07B | Yes, with disjoint ownership | WP-06 merged | Finalization and placement suites pass together |
+| 5 | WP-08, WP-09 | Yes | WP-06 and status contracts from WP-07A merged | Component and state-machine suites pass |
+| 6 | WP-10 | No | All implementation packages merged | Full deterministic, browser, and provider gates evidenced |
+
+`WP-01` owns exported shared types and schemas. `WP-02` and `WP-03` may define package-private provisional types while running in parallel, but the integration owner must replace them with `WP-01` exports before Wave 1 closes. This is the only intentional Wave 1 reconciliation point.
+
+### Repository-wide contract decisions
+
+- All durations and timeline/source positions are finite seconds. Validation rejects `NaN`, infinities, negatives, reversed ranges, and zero-length ranges. Zero is valid for a start or in-point.
+- Persisted timestamps are Unix milliseconds. Tests inject them; business logic must not call `Date.now()` internally when a timestamp parameter or clock dependency can be supplied.
+- Logical job IDs are application IDs. Provider job IDs identify attempts. Idempotency keys are derived from provider plus provider job ID and are never inferred from prompt or media identity.
+- `GenerationContext` contains project linkage only. `providerInputs` contains only keys accepted by the selected recorded schema. A serializer must make this separation visible.
+- Remote provider inputs persist only opaque upload-token IDs. Signed provider URLs may exist in memory during a provider call but never in job JSON, media provenance, browser storage, logs, or test snapshots.
+- Placement is a sub-state independent of provider completion. A completed provider job with failed placement remains completed and offers placement retry.
+- Legacy jobs missing an explicit target become terminal `needs-attention` records. Migration never treats the first reference as a version source.
+- Character slugs are normalized once when stored. Prompt resolution is exact against the canonical slug and retains stable character IDs after rename.
+
+### Standard handoff template
+
+```text
+Outcome: <measurable result>
+Files changed: <paths>
+Contracts added/consumed: <symbols and schema versions>
+Tests: <exact command and pass/fail count>
+Typecheck/lint: <exact command and result>
+Failure modes checked: <list>
+Integration notes: <shared export edits or ordering requirements>
+Unverified: <explicit gaps, or none>
+```
+
+## Executable work packages
+
+### WP-00: Plan expansion and execution control
+
+**Owner:** integration owner. **Dependencies:** none. **Owned file:** this plan.
+
+**Outcome:** Every implementation package can be assigned without requiring architectural invention, and parallel packages have non-overlapping ownership plus a stated reconciliation point.
+
+**Tasks:**
+
+1. Confirm every normative requirement in spec sections 6–17 maps to one package and one deterministic or browser/provider gate.
+2. Record current dirty files before dispatch and preserve all pre-existing modifications.
+3. Create the execution waves above. Dispatch only a wave whose dependencies are green.
+4. After each wave, review package diffs, replace provisional types with shared exports, run the combined gate, then make one conventional commit per coherent behavior.
+
+**Acceptance:** The traceability matrix at the end of this document has no unowned requirement; each package below has inputs, outputs, test cases, commands, and failure behavior.
+
+### WP-01: Shared generation contracts, schemas, and migrations
+
+**Owner:** domain-contract agent. **Dependencies:** none. **Exclusive files:** `packages/music-video-domain/src/generation/**` and generation-specific domain tests. **Shared-file requests:** `packages/music-video-domain/src/types.ts`, `packages/music-video-domain/src/index.ts`, and existing adapter fixtures are applied by the integration owner.
+
+**Outcome:** Web and orchestrator import one versioned, secret-safe contract that parses valid generation jobs and rejects ambiguous targets or malformed state.
+
+**Required public symbols:**
+
+- `GENERATION_JOB_SCHEMA_VERSION` starting at `2`.
+- `GenerationTarget`, `GenerationTiming`, `GenerationPlacementPolicy`, `GenerationPlacementState`, `GenerationReferenceOrigin`, `ResolvedGenerationReference`, `ResolvedGenerationAudio`, `GenerationContext`, `GenerationError`, `GenerationAttempt`, `GenerationCheckpointName`, `GenerationCheckpointState`, `GenerationOutput`, `GenerationJob`, and `GenerationModelCapability`.
+- Zod schemas with matching names suffixed `Schema`, plus `parseGenerationJob` and `migratePersistedGenerationJob`.
+- `SanitizedGenerationProvenance`, which permits IDs, model/schema identity, timing, hash, dimensions, sanitized inputs, and reference origins, but has no fields for secrets or temporary URLs.
+- `ProjectCharacter` with stable `id`, canonical `slug`, `displayName`, `primaryImageMediaId`, and optional `primaryImageVersionId`.
+
+**Contract details:**
+
+- Target is exactly `{kind:'new-asset', placeholderMediaId}` or `{kind:'new-version', sourceMediaId, placeholderMediaId}`.
+- Placement policy is exactly `none`, `create-linked-clip`, or `replace-selected-clip-media`; replace requires `clipId` at context validation time.
+- Job status includes `preparing`, `queued`, `running`, `completed`, `failed`, `canceling`, `canceled`, and `needs-attention` for migrated unsafe legacy records.
+- Attempt history records attempt number, provider job ID when submission occurred, start/end timestamps, terminal error, and does not duplicate current secret-bearing inputs.
+- Checkpoints separately represent output claimed/downloaded/verified/inspected, placeholder finalized, shot linked, and placement applied. Each stores status and timestamp, not arbitrary provider payload.
+- Schemas use strict objects at network and persistence boundaries. Provider inputs remain a JSON-value record and are sanitized separately by WP-03.
+
+**Deterministic tests:**
+
+1. Parse a complete new-asset and new-version job.
+2. Preserve `0`, `false`, and `[]` in JSON-valued sanitized inputs.
+3. Reject missing placeholder, replacement without clip, invalid timing, duplicate/invalid attempt numbers, and unknown boundary keys.
+4. Serialize/parse round-trip without signed URLs or temporary URLs.
+5. Migrate a reconstructable legacy job only when explicit placeholder/target fields exist.
+6. Migrate an ambiguous `linkedMediaIds` job to `needs-attention` without creating `sourceMediaId`.
+7. Convert NeuralFrames character fixtures deterministically to stable IDs/slugs; collision handling is deterministic and tested.
+
+**Focused gate:** use the domain workspace's existing test and typecheck scripts discovered from `package.json`; the suite must remain below two seconds on a warm run.
+
+**Subagent prompt:** Implement WP-01 exactly. Do not edit web or orchestrator. If shared exports/types need changes, report the exact patch in the handoff rather than editing shared files. Start from tests, keep Zod schemas strict, and prove unsafe legacy jobs never infer a source from references.
+
+### WP-02: Pure timing, character, reference, and audio-source resolvers
+
+**Owner:** context-resolver agent. **Dependencies:** consumes WP-01 concepts but may use local provisional interfaces until reconciliation. **Exclusive files:** `apps/web/src/features/generation/context/**`.
+
+**Outcome:** Given explicit project/shot/clip/media inputs, pure functions return one deterministic generation context or stable errors/warnings without network, stores, browser APIs, or provider assumptions.
+
+**Required functions:**
+
+- `resolveGenerationTiming({linkedClip, shot, manualRange})` returns `{timing, errors, warnings}` using timeline > shot > complete manual precedence.
+- `tokenizeCharacterMentions(prompt)` returns exact textual spans and first-mention canonical slug order.
+- `resolveCharacterTokens({tokens, characters, mediaVersions, priorBindings})` retains valid prior stable-ID bindings after character display-name changes and emits `unresolved-token`, `ambiguous-token`, `missing-primary-image`, or `inaccessible-primary-image` errors.
+- `resolveGenerationReferences({source, characters, shotReferences, userReferences})` merges in normative order, deduplicates by `mediaId + versionId`, and accumulates all origin labels on the first item.
+- `resolveMainAudioSource({projectAudioId, linkedMainAudioClipId, clips, media, timing})` returns a selected source or `audio-ambiguous`, `audio-unavailable`, `audio-no-coverage`, plus partial-coverage warning.
+- `projectRangeToAudioSourceRange({timing, clip})` accounts for clip start, source in-point/trim, speed, and audible intersection. It does not use a selected visual clip's in-point.
+
+**Input discipline:** Define narrow readonly input types rather than importing the project store. URLs are not resolved here. References carry canonical identity and local access state only; WP-04/WP-06 converts them to upload tokens.
+
+**Deterministic test table:**
+
+- Timing: timeline wins, valid shot fallback, complete manual fallback, zero start accepted, half-manual absent/error, negative/non-finite/reversed/equal rejected.
+- Tokens: punctuation and repeated mentions, first-mention order, exact slug rather than display-name match, rename with prior binding, slug collision ambiguity, missing/inaccessible image.
+- References: four-source order, source position retained, duplicate accumulates origins, same media/different version remains distinct, excluded automatic reference stays excluded only in draft.
+- Audio: explicit project identity wins, linked main clip second, unique fully covering eligible clip third, narration/SFX/hidden/muted/generated embedded audio excluded, ambiguous candidates do not guess.
+- Conversion: speed 0.5/1/2, non-zero in-point and trims, exact and partial overlap, empty overlap, fixed numeric expectations with tolerance no larger than one microsecond.
+
+**Focused gate:** run only context resolver tests plus web TypeScript checking. No jsdom is required.
+
+**Subagent prompt:** Implement WP-02 only under the owned directory. Use pure functions and table-driven Vitest tests. Do not touch Zustand, React, fetch, media decoding, or shared domain files. Return any provisional-to-shared type mapping in the handoff.
+
+### WP-03: WaveSpeed model normalization and input validation
+
+**Owner:** schema-adapter agent. **Dependencies:** consumes `GenerationModelCapability` from WP-01 after reconciliation. **Exclusive files:** `apps/web/src/services/wavespeed/model-capabilities.ts`, `apps/web/src/services/wavespeed/adapters/**`, `apps/web/src/services/wavespeed/__fixtures__/**`, and adjacent tests. **Deferred orchestrator mirror:** WP-04 imports the pure adapter package or moves it to shared domain during integration; do not duplicate logic.
+
+**Outcome:** Recorded WaveSpeed schemas normalize into explicit capabilities, and one pure sanitizer maps user values plus resolved media only into reviewed provider fields.
+
+**Adapter contract:**
+
+- `normalizeWaveSpeedModel(rawModel, overrideRegistry)` returns a capability or stable `unsupported-schema` result with evidence describing which schema/override established output and mode.
+- `sanitizeWaveSpeedInputs({schema, capability, draftValues, source, references, audio})` returns sanitized JSON inputs and ordered field errors.
+- Only explicit media annotations, typed array items, or a reviewed model override may identify source/reference/audio fields. Generic URI format alone is insufficient.
+- Unknown draft keys are stripped. Required, enum, numeric, string/array length, conditional source, reference min/max, audio, and duration rules are applied deterministically.
+- Defaults are exposed separately as `getModelDefaults`; sanitizer does not reapply defaults during render/submit.
+- A stable schema version is computed from a canonicalized subset of request schema plus override version. No arbitrary provider code or formulas are evaluated.
+
+**Fixtures and tests:** Include anonymized recorded schemas for each family currently returned by the existing route. Test text-to-image, image-to-image, text-to-video, image-to-video, reference-array, audio-capable, misleading `type` string, untyped URI, unknown key stripping, `false`/`0`/`[]` preservation, reference count limits, duration bounds/allowed values, and schema-version drift.
+
+**Focused gate:** adapter tests and web TypeScript checking; no network snapshots.
+
+**Subagent prompt:** Implement WP-03 in the exclusive files. First inventory existing WaveSpeed route/client schema shapes. Do not edit `schema-injector.ts` yet; the integration owner replaces callers after the adapter contract is green. Unsupported schema must fail closed, especially for URI/media mapping.
+
+### WP-04: Orchestrator security, uploads, persistence, and routes
+
+**Owner:** orchestrator agent. **Dependencies:** WP-01 and WP-03. **Exclusive files:** new files under `apps/orchestrator/src/services/generation/**` and `apps/orchestrator/src/services/wavespeed/**`, route tests. **Shared files:** request integration-owner edits to `routes/wavespeed.ts`, `app.ts`, `env.ts`, route index, and package scripts.
+
+**Outcome:** The orchestrator is the sole credential owner and authoritative durable job boundary; restart, replay, invalid input, and upload lifecycle behavior is deterministic.
+
+**Repository interface and filesystem implementation:**
+
+- `GenerationJobRepository`: create, get, update under keyed lock, find by provider completion key, list active by project, and compare-and-set checkpoint.
+- JSON files live under a configurable generation data directory. Writes use same-directory temp file, fsync where existing repository conventions require it, then atomic rename. Startup ignores/removes only demonstrably orphaned temp files.
+- Maintain durable lookup records for logical job ID and `(provider, providerJobId)`; conflicting provider keys fail with `generation-provider-id-conflict`.
+- Tests use a unique temporary directory and instantiate a second repository to prove restart recovery.
+
+**Upload repository:** validate MIME, byte limit, ownership, expiry, and reference count; return opaque IDs. Provider URL resolution is in-memory and redacted. Cleanup deletes only expired, unreferenced inputs.
+
+**Routes:** configuration status, model discovery, upload, submit, status, cancel, retry, finalization-status, placement-retry, and cleanup. Enforce existing session/project authorization, exact content types, request limits, model allowlist, timeouts, strict shared schemas, and stable safe errors. Remove browser key headers and reject them if present. Configuration exposes only boolean state.
+
+**Tests:** secret-header rejection, absent configuration, malformed/oversize bodies and files, unknown model/field stripping, ownership failures, restart recovery, concurrent duplicate submit/provider ID, upload expiry/refcount, safe cancel/retry, and redaction corpus covering headers, bearer values, provider keys, prompts when disabled, signed URLs, and upload tokens.
+
+**Focused gate:** orchestrator route/repository/redaction tests, typecheck, and `git diff --check`.
+
+### WP-05: Deterministic audio extraction and cache
+
+**Owner:** media agent. **Dependencies:** WP-02 range contract and WP-01 audio provenance. **Exclusive files:** `apps/web/src/features/generation/audio/**`.
+
+**Outcome:** Exact source ranges produce deterministic PCM WAV bytes and hashes, are cached by every byte-affecting input, and do no work for unsupported models.
+
+**Contract:** A narrow injected decoder/extractor adapter receives source identity, resolved source range, output sample rate/channels/format, and returns bytes plus actual range. Default output is PCM WAV with a documented fixed format chosen from the existing media bridge's supported deterministic path. `buildGenerationAudioCacheKey` includes project, media/version, source range, in-point/trim, speed, sample rate, channels, and format using canonical number encoding.
+
+**Tests:** generated PCM ramp/impulse fixtures verify header, sample count, exact converted range, partial-range metadata, stable SHA-256, cache reuse, invalidation for each key field, abort cleanup/object-URL revocation, and zero adapter calls when capability rejects audio.
+
+**Focused gate:** audio tests under two seconds and web typecheck. Do not invoke a real FFmpeg process in gate tests.
+
+### WP-06: Submission coordinator and draft/job cache
+
+**Owner:** submission agent. **Dependencies:** WP-01–WP-05. **Exclusive files:** `apps/web/src/features/generation/submit-generation.ts`, adjacent tests, and new V2 draft/cache modules. **Shared callers:** dialog and existing job store edits are integration-owned.
+
+**Outcome:** One accepted user action creates exactly one tracked placeholder and one provider submission, while every injected preparation failure leaves an explicit failed placeholder plus retryable draft.
+
+**Coordinator phases:** validate draft; acquire in-flight key; create/persist placeholder; resolve references; extract/upload optional audio; sanitize inputs; submit logical job; cache returned status; release key. Use injected ports for project mutations, upload, submit, clock, and ID generation. Compensations never delete the placeholder; they mark it failed with stage/error code. Optional input failures require explicit draft removal or retry, never silent omission.
+
+**Tests:** invalid draft focuses first field without mutation; double click and concurrent identical calls; Strict Mode replay; failures after placeholder, each reference, audio extraction/upload, provider submit, and local cache write; new-asset and new-version targets; exact placeholder ID in submitted context; no local/blob URL; no source inferred from reference.
+
+### WP-07A: Durable finalization state machine
+
+**Owner:** finalization agent. **Dependencies:** WP-04 and WP-06. **Exclusive files:** orchestrator finalization service and tests.
+
+**Outcome:** Repeated/reordered completion signals, restart, and two workers produce one verified output and resumable checkpoints without resubmitting the provider.
+
+**States:** claim provider completion key; download; verify MIME/size; inspect metadata through injected port; request placeholder finalization mutation; request shot linkage mutation; request placement; record terminal completion. Each successful side effect stores an idempotency key returned to the web mutation boundary. Placement failure is recorded separately and does not undo job completion.
+
+**Tests:** two concurrent callers, restart after every checkpoint, corrupted/oversize output, new asset without source, explicit new version, shot-link retry, placement retry, and provider submission count remaining one.
+
+### WP-07B: Project-store finalization and placement mutations
+
+**Owner:** project/timeline agent. **Dependencies:** WP-01 placement contracts; may start after those merge while WP-07A runs. **Exclusive files:** new V2 mutation helpers/tests and `place-generated-asset.ts` tests. **Shared existing store/action files:** integration owner applies a minimal reviewed patch.
+
+**Outcome:** Idempotency-keyed mutations finalize one placeholder, append one shot attempt, and apply at most one undo-aware timeline mutation.
+
+**Tests:** new asset group; new immutable version in exact source group; duplicate key replay; append shot generated media/attempt once; `none`; create one linked clip at exact zero/non-zero timing; replace only `mediaId` while preserving clip ID/start/duration/in-out/effects/transforms/metadata; invalid shot mismatch; placement retry; undo/redo replacement.
+
+### WP-08: Generate inspector and accessible draft experience
+
+**Owner:** UI agent. **Dependencies:** WP-06 and stable status contracts. **Exclusive files:** new `GenerateTab` and section components/tests plus a V2 draft store. **Shared tab/dialog files:** integration owner applies reviewed edits.
+
+**Outcome:** All valid entry contexts expose one accessible shot-aware Generate workflow whose draft survives selection changes and whose submit/status/recovery controls reflect the coordinator.
+
+Use the `ui-ux-pro-max` skill before implementation. Follow spec section 5 exactly. Component tests cover context visibility, model filtering, token pills, reference origins/exclusion warning, timing/audio reasons, model switch preservation/reset list, first-invalid focus and error summary, duplicate submit, draft restoration, recovery actions, `aria-live`, alerts, tab roles/relationships, roving focus/Home/End/arrows, and narrow layouts without horizontal page overflow.
+
+Browser behavior is not accepted from jsdom alone; WP-10 owns the mandatory live verification.
+
+### WP-09: Regenerate, variation, cancel, retry, and recovery
+
+**Owner:** recovery agent. **Dependencies:** WP-04, WP-06, WP-07A. **Exclusive files:** generation command/state-machine modules and tests. **Shared status UI:** integration owner applies reviewed wiring.
+
+**Outcome:** Every recovery action resumes the correct stage and preserves attempt history without duplicate provider work.
+
+Define an explicit transition table. Regenerate copies recorded configuration then re-runs live context resolution. Variation creates an editable draft only. Provider retry increments attempt and may submit a new provider job. Save retry and placement retry never submit. Cancel moves through canceling, stops polling regardless of provider support, and releases only unreferenced uploads.
+
+Tests enumerate every allowed transition and reject all others; assert provider call counts, attempt history, polling behavior, and cleanup reference counts.
+
+### WP-10: Integration, observability, browser verification, eval, and delivery
+
+**Owner:** integration owner. **Dependencies:** all packages. **Owned scope:** caller wiring, docs, fake provider harness, evidence, commits, and final verification.
+
+**Outcome:** One controller serves inspector and dialog, deterministic suites pass, live browser scenarios prove the UI behavior, and paid provider evidence meets the spec threshold before the feature flag is enabled.
+
+**Integration order:**
+
+1. Export WP-01 contracts and replace Wave 1 provisional types.
+2. Wire the WP-03 sanitizer into both client and orchestrator; delete guessing behavior only after adapter fixtures pass.
+3. Wire orchestrator routes and remove all browser key reads/headers. Add configuration migration docs before removal is committed.
+4. Wire coordinator into dialog and job cache, then finalization/store ports, then inspector/recovery UI.
+5. Add redacted structured events with injected logger tests. Do not log raw prompts unless diagnostic prompt logging is explicitly enabled.
+6. Add fake-provider integration cases from spec 14.3 and failure injection at upload, provider, save, and placement boundaries.
+7. Run affected tests after each atomic commit, then full workspace test, lint, typecheck, and build.
+8. Start the app with `pnpm dev` on port 5173 and use the browser tool for every spec section 15 scenario. Capture exact IDs and screenshots/recordings in a dated evidence directory that is ignored unless Joseph approves tracking it.
+9. Run the paid matrix only when credentials and spend authorization are available. The threshold is 100% technical pipeline cases, zero duplicates/leaks, and at least 90% subjective adherence across fixed prompts.
+
+**Stop conditions:** Do not enable `wavespeedGenerationV2`, claim UI completion, or push a release-ready commit if browser verification is unavailable. Do not run paid evals without explicit authorization. If credentials are unavailable, deterministic and fake-provider work may be complete but final status is `BLOCKED` or `DONE_WITH_CONCERNS` according to whether release readiness was requested.
+
 ### 1. Shared contracts and migrations
 
 **Files:**
@@ -217,6 +476,48 @@ Do not add a new database framework solely for this feature. Implement a small f
 - Capture screenshots/recordings, sanitized manifests, logical/provider job IDs, media/clip IDs, audio hash/range, and exact command outputs in a dated evidence directory outside tracked generated assets unless explicitly approved.
 
 **Gate:** all deterministic gates pass, provider eval reaches threshold, and exact browser behavior is evidenced. UI completion cannot be claimed without this step.
+
+## Requirement traceability
+
+| Spec requirement | Implementation owner | Primary deterministic evidence | Live evidence |
+|---|---|---|---|
+| §2 ownership boundaries | WP-01, WP-07B | contract and store mutation tests | asset/shot/clip inspection |
+| §4 image/video/new asset/variation workflows | WP-06, WP-08, WP-09 | coordinator and component tests | browser cases 4–6 |
+| §5 inspector information architecture/accessibility | WP-08 | component keyboard/ARIA/draft tests | browser case 9 |
+| §6 typed context/timing/duration | WP-01, WP-02, WP-03 | schema, resolver, duration-adapter tests | timing labels and submitted manifest |
+| §7 audio source/extraction/cache | WP-02, WP-05 | range conversion, PCM, hash, cache tests | waveform plus recorded hash/range |
+| §8 reference and character resolution | WP-02, WP-04, WP-06 | order/dedupe/token/upload tests | character/reference thumbnails and manifest |
+| §9 model discovery/forms/schema drift | WP-03, WP-08 | recorded adapter and component reset tests | model refresh/switch scenarios |
+| §10 secret and submission boundary | WP-04, WP-06 | route, redaction, failure-injection tests | browser network/log inspection |
+| §11 persistent jobs | WP-01, WP-04, WP-09 | migration/restart/retry/cancel tests | reload-during-job scenario |
+| §12 completion/versioning/placement | WP-07A, WP-07B | checkpoint/concurrency/undo tests | exact media/shot/clip IDs |
+| §13 status/errors/recovery | WP-08, WP-09 | state transition and recovery-action tests | four injected failure scenarios |
+| §14.1–14.3 deterministic suites | WP-10 | focused and fake-provider command logs | not applicable |
+| §14.4 paid provider eval | WP-10 | sanitized eval manifest validator | paid outputs after authorization |
+| §15 browser verification | WP-10 | fixture/setup scripts | screenshots/recordings for all nine cases |
+| §16 observability | WP-04, WP-07A, WP-10 | redacted event/logger tests | sanitized event capture |
+| §17 rollout/compatibility | WP-01, WP-04, WP-10 | migration and feature-flag tests | rollback/poll-existing-job check |
+
+## Canonical verification commands
+
+Subagents may narrow test paths during development. The integration owner runs these gates after reconciliation, using the actual test filenames created by the packages:
+
+```bash
+pnpm --filter @openreel/music-video-domain test:run
+pnpm --filter @openreel/music-video-domain typecheck
+pnpm --filter @openreel/web test:run
+pnpm --filter @openreel/web typecheck
+pnpm --filter @openreel/web lint
+pnpm --filter @openreel/orchestrator test:run
+pnpm --filter @openreel/orchestrator typecheck
+pnpm test
+pnpm typecheck
+pnpm lint
+pnpm build
+git diff --check
+```
+
+Any pre-existing unrelated failure is recorded with its exact command and output. It is not silently attributed to this feature, and it does not excuse a failure in a focused WaveSpeed gate.
 
 ## Commit sequence
 
