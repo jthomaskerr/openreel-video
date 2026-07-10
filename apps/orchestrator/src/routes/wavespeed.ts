@@ -28,7 +28,30 @@ wavespeedRouter.post("/upload", async (req, res) => {
 wavespeedRouter.post("/", async (req, res) => {
   if (!guard(req, res)) return; try { requireJsonContentType(req.header("content-type")); } catch { return safe(res, 415, "content-type-required"); }
   if (!config.wavespeedApiKey) return safe(res, 503, "provider-not-configured"); const body = req.body as any;
-  try { validateModel(String(body?.model), new Set([String(body?.model)])); if (!body?.context?.projectId || !body?.target) throw new Error("context-required"); const client = new Client(config.wavespeedApiKey) as any; const [providerJobId] = await client._submit(body.model, body.inputs ?? {}); const now = Date.now(); const job = await jobs.create({ ...body, schemaVersion: 2, id: body.id || crypto.randomUUID(), provider: "wavespeed", modelId: body.model, modelSchemaVersion: String(body.modelSchemaVersion || "unknown"), status: "queued", createdAt: now, updatedAt: now, attempts: [{ attemptNumber: 1, providerJobId, startedAt: now }], checkpoints: {} }); return res.status(202).json({ jobId: job.id, providerJobId }); } catch (e) { return safe(res, 400, e instanceof Error ? e.message : "generation-submit-failed"); }
+  try {
+    const model = String(body?.modelId ?? body?.model ?? "");
+    const providerInputs = body?.providerInputs ?? body?.inputs ?? {};
+    validateModel(model, new Set([model]));
+    if (!body?.context?.projectId || !body?.context?.target) throw new Error("context-required");
+    const client = new Client(config.wavespeedApiKey) as any;
+    const [providerJobId] = await client._submit(model, providerInputs);
+    const now = Date.now();
+    const job = await jobs.create({
+      ...body,
+      schemaVersion: 2,
+      id: body.id || crypto.randomUUID(),
+      provider: "wavespeed",
+      modelId: model,
+      modelSchemaVersion: String(body.modelSchemaVersion || "unknown"),
+      providerInputs,
+      status: "queued",
+      createdAt: now,
+      updatedAt: now,
+      attempts: [{ attemptNumber: 1, providerJobId, startedAt: now }],
+      checkpoints: {},
+    });
+    return res.status(202).json({ jobId: job.id, providerJobId });
+  } catch (e) { return safe(res, 400, e instanceof Error ? e.message : "generation-submit-failed"); }
 });
 
 wavespeedRouter.get("/:jobId", async (req, res) => { if (!guard(req, res)) return; const job = await jobs.get(req.params.jobId); if (!job) return safe(res, 404, "generation-not-found"); if (!config.wavespeedApiKey) return safe(res, 503, "provider-not-configured"); try { const providerJobId = job.attempts.at(-1)?.providerJobId; const result = await (new Client(config.wavespeedApiKey) as any)._getResult(providerJobId); const status = result.data?.status; const next = status === "completed" ? "completed" : status === "failed" ? "failed" : "running"; await jobs.update(job.id, (j) => ({ ...j, status: next, updatedAt: Date.now() })); return res.json({ status: next, jobId: job.id }); } catch { return safe(res, 502, "generation-status-failed"); } });

@@ -25,7 +25,8 @@ import { QwenForm } from "../kieai/forms/QwenForm";
 
 // ── WaveSpeed ────────────────────────────────────────────────────────────────
 import type { WavespeedModel } from "../../../services/wavespeed/index";
-import { fetchModelsCached, submitGeneration } from "../../../services/wavespeed/index";
+import { fetchModelsCached, submitGenerationJob } from "../../../services/wavespeed/index";
+import type { GenerationContext } from "@openreel/music-video-domain/generation";
 import { SchemaForm } from "./SchemaForm";
 
 import { uploadFileStream } from "../../../services/kieai/file-upload";
@@ -373,9 +374,6 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
       } else if (model.provider === "wavespeed" && model.wsModel) {
         const schema = model.wsModel.api_schema?.api_schemas?.[0]?.request_schema;
         const injected = schema ? injectImageInputs(schema, wsInputs, getRefImageUrls(project.mediaLibrary.items, refIds)) : wsInputs;
-        const jobId = await submitGeneration(model.wsModel.model_id, injected);
-        if (ac.signal.aborted) return;
-
         const mediaId = uuidv4();
         const isVideo = model.genType.includes("video");
         const name = `wavespeed_${model.wsModel.model_id.split("/").pop()}.${isVideo ? "mp4" : "jpg"}`;
@@ -383,11 +381,29 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
           id: mediaId, name, type: isVideo ? "video" : "image", fileHandle: null, blob: null,
           metadata: { duration: 0, width: 0, height: 0, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 0 },
           thumbnailUrl: previewUrl ?? null,
-          generationMeta: { provider: "wavespeed", model: model.wsModel.model_id, prompt: String(wsInputs.prompt ?? ""), inputs: wsInputs, jobId, status: "pending" },
+          generationMeta: { provider: "wavespeed", model: model.wsModel.model_id, prompt: String(wsInputs.prompt ?? ""), inputs: injected, status: "pending" },
         });
+        const timing = effectiveShot && Number.isFinite(effectiveShot.startSeconds) && Number.isFinite(effectiveShot.endSeconds) && effectiveShot.endSeconds > effectiveShot.startSeconds
+          ? { source: "shot" as const, startSeconds: effectiveShot.startSeconds, endSeconds: effectiveShot.endSeconds, durationSeconds: effectiveShot.endSeconds - effectiveShot.startSeconds }
+          : undefined;
+        const context: GenerationContext = {
+          projectId: project.id,
+          ...(effectiveShot?.id ? { shotId: effectiveShot.id } : {}),
+          target: { kind: "new-asset", placeholderMediaId: mediaId },
+          ...(timing ? { timing } : {}),
+          references: [],
+          placementPolicy: "none",
+        };
+        const submitted = await submitGenerationJob({
+          id: uuidv4(), projectId: project.id, provider: "wavespeed", modelId: model.wsModel.model_id,
+          modelSchemaVersion: "wavespeed-schema-v1", context, providerInputs: injected,
+        });
+        if (ac.signal.aborted) return;
+        const jobId = submitted.jobId;
+        useProjectStore.getState().setGenerationStatus(mediaId, "pending");
         enqueueJob({
           provider: "wavespeed", providerJobId: jobId, model: model.wsModel.model_id,
-          prompt: String(wsInputs.prompt ?? ""), inputs: wsInputs, projectId: project.id, linkedMediaIds: refIds,
+          prompt: String(wsInputs.prompt ?? ""), inputs: injected, projectId: project.id, linkedMediaIds: [mediaId, ...refIds],
         });
         handleClose();
       }
