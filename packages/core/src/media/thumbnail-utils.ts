@@ -6,6 +6,7 @@ import { getMediaStatus, MediaStatus } from "../types/project";
  * and no remote/original URL to fetch from.
  */
 export function isVideoFileMissing(item: MediaItem): boolean {
+  if (item.originalUrl || item.remoteUrl) return false;
   return getMediaStatus(item) !== MediaStatus.OK;
 }
 

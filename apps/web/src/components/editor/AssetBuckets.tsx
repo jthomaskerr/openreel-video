@@ -89,7 +89,7 @@ function getStatusLabel(item: MediaItem): string {
   const s = getMediaStatus(item);
   if (s === MediaStatus.ERROR) return "Error";
   if (s === MediaStatus.PENDING) return "Pending";
-  if (s === MediaStatus.MISSING) return "Missing";
+  if (s === MediaStatus.MISSING) return "Placeholder";
   if (s === MediaStatus.UNREALIZED) return "Unrealized";
   return "Normal";
 }

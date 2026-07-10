@@ -157,7 +157,7 @@ describe("AssetBuckets grouping and controls", () => {
     renderBuckets({
       groupBy: "status",
       items: [
-        media({ id: "normal", name: "normal clip", type: "video" }),
+        media({ id: "normal", name: "normal clip", type: "video", blob: new Blob() }),
         media({ id: "pending", name: "pending clip", type: "video", generationMeta: { provider: "t", model: "t", status: "processing" } }),
         media({ id: "error", name: "error clip", type: "video", generationMeta: { provider: "t", model: "t", status: "failed" } }),
         media({ id: "placeholder", name: "placeholder clip", type: "video", blob: null, sourceFile: { name: "m.mp4", size: 0, lastModified: 0 } }),
@@ -181,7 +181,7 @@ describe("AssetBuckets grouping and controls", () => {
       ref,
       groupBy: "status",
       items: [
-        media({ id: "normal", name: "normal clip", type: "video" }),
+        media({ id: "normal", name: "normal clip", type: "video", blob: new Blob() }),
         media({ id: "pending", name: "pending clip", type: "video", generationMeta: { provider: "t", model: "t", status: "processing" } }),
         media({ id: "error", name: "error clip", type: "video", generationMeta: { provider: "t", model: "t", status: "failed" } }),
         media({ id: "placeholder", name: "placeholder clip", type: "video", blob: null, sourceFile: { name: "m.mp4", size: 0, lastModified: 0 } }),
