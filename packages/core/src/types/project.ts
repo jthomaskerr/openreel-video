@@ -94,7 +94,12 @@ export interface MediaItem {
     readonly jobId?: string;
     readonly status?: string;
   };
-  /** User-editable title for the asset (distinct from filename-based name) */
+  /**
+   * Display title for the asset, distinct from `name` (the immutable source filename).
+   * Populated at import from container metadata (ID3/MP4/WebM/Vorbis/RIFF title tags) when
+   * present, otherwise derived from the filename (snake/kebab case converted to sentence case,
+   * extension dropped). User-editable afterward via the rename action.
+   */
   readonly title?: string;
   /** User-editable description / notes for the asset */
   readonly description?: string;
