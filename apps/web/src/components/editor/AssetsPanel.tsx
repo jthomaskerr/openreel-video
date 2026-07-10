@@ -1173,9 +1173,10 @@ export const AssetsPanel: React.FC = () => {
   onRetryKieAIRef.current = handleRetryKieAI;
   const onManageRef = useRef((item: MediaItem) => setInspectedAsset(item));
   const onRenameRef = useRef((item: MediaItem) => {
-    const newName = window.prompt("Rename asset:", item.name);
-    if (newName && newName.trim() && newName.trim() !== item.name) {
-      useProjectStore.getState().renameMedia(item.id, newName.trim());
+    const currentTitle = item.title || item.name;
+    const newTitle = window.prompt("Rename asset:", currentTitle);
+    if (newTitle && newTitle.trim() && newTitle.trim() !== currentTitle) {
+      useProjectStore.getState().updateMediaMetadata(item.id, { title: newTitle.trim() });
     }
   });
 
