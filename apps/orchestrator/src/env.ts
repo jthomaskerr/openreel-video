@@ -62,4 +62,5 @@ export const config = {
     "MV_GENERATED_ASSETS_DIR",
     join(__dir, "../../../generated-assets"),
   ),
+  generationDataDir: env("MV_GENERATION_DATA_DIR", join(__dir, "../../../generated-assets/generation")),
 } as const;

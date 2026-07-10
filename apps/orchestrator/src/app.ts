@@ -15,6 +15,7 @@ export function createApp(): Express {
   const app = express();
 
   app.use(cors());
+  app.use("/api/generate/wavespeed/upload", express.raw({ limit: "50mb", type: ["image/*", "video/*", "audio/*"] }));
   app.use(express.json({ limit: "50mb" }));
 
   // Serve locally cached generated assets (scene images etc.)
