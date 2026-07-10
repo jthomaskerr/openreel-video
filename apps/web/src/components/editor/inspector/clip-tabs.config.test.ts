@@ -4,13 +4,13 @@ import { getTabIdsForClipType, getTabsForClipType, TAB_DEFS } from "./clip-tabs.
 describe("clip-tabs.config", () => {
   it("video has all 7 media tabs in workflow order", () => {
     expect(getTabIdsForClipType("video")).toEqual([
-      "transform", "color", "effects", "audio", "speed", "animate", "ai",
+      "transform", "color", "effects", "audio", "speed", "animate", "ai", "generate",
     ]);
   });
 
   it("image has speed but no audio", () => {
     expect(getTabIdsForClipType("image")).toEqual([
-      "transform", "color", "effects", "speed", "animate", "ai",
+      "transform", "color", "effects", "speed", "animate", "ai", "generate",
     ]);
   });
 
@@ -37,6 +37,6 @@ describe("clip-tabs.config", () => {
     const defs = getTabsForClipType("video");
     expect(defs[0]).toMatchObject({ id: "transform", label: "Transform" });
     expect(typeof defs[0].icon).toBe("object");
-    expect(Object.keys(TAB_DEFS)).toHaveLength(9);
+    expect(Object.keys(TAB_DEFS)).toHaveLength(10);
   });
 });

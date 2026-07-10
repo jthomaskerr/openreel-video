@@ -9,6 +9,7 @@ export type InspectorTabId =
   | "speed"
   | "animate"
   | "ai"
+  | "generate"
   | "style"
   | "note";
 
@@ -36,12 +37,13 @@ export const TAB_DEFS: Record<InspectorTabId, InspectorTabDef> = {
   speed: { id: "speed", label: "Speed", icon: Gauge },
   animate: { id: "animate", label: "Animate", icon: Film },
   ai: { id: "ai", label: "AI", icon: Sparkles },
+  generate: { id: "generate", label: "Generate", icon: Sparkles },
   style: { id: "style", label: "Style", icon: Type },
   note: { id: "note", label: "Note", icon: StickyNote },
 };
 const TABS_BY_CLIP_TYPE: Record<InspectorClipType, InspectorTabId[]> = {
-  video: ["transform", "color", "effects", "audio", "speed", "animate", "ai"],
-  image: ["transform", "color", "effects", "speed", "animate", "ai"],
+  video: ["transform", "color", "effects", "audio", "speed", "animate", "ai", "generate"],
+  image: ["transform", "color", "effects", "speed", "animate", "ai", "generate"],
   audio: ["audio", "ai"],
   text: ["transform", "style", "effects", "animate"],
   shape: ["transform", "style", "effects", "animate"],

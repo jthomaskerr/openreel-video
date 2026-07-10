@@ -58,6 +58,7 @@ import { AnimateTab } from "./inspector/tabs/AnimateTab";
 import { StyleTab } from "./inspector/tabs/StyleTab";
 import { EffectsTab } from "./inspector/tabs/EffectsTab";
 import { AiTab } from "./inspector/tabs/AiTab";
+import { GenerateTab } from "./inspector/tabs/generation/GenerateTab";
 import { MetadataClipInspector } from "./inspector/MetadataClipInspector";
 import { SceneMetadataInspector } from "./inspector/SceneMetadataInspector";
 import { ProblemsPanel } from "./inspector/ProblemsPanel";
@@ -144,6 +145,7 @@ export const InspectorPanel: React.FC = () => {
   const srtInputRef = useRef<HTMLInputElement>(null);
   const subtitleFontInputRef = useRef<HTMLInputElement>(null);
   const customFonts = useCustomFonts();
+  const [generationModels, setGenerationModels] = useState<Array<{ id: string; label: string; provider: string; modes: Array<"image" | "video"> }>>([]);
 
   useEffect(() => {
     setExpandedRecipeApplicationId(null);
@@ -835,6 +837,24 @@ export const InspectorPanel: React.FC = () => {
   const sidebarTab = useUIStore((s) => s.sidebarTab);
   const setSidebarTab = useUIStore((s) => s.setSidebarTab);
 
+  useEffect(() => {
+    if (inspectorActiveTab !== "generate") return;
+    let cancelled = false;
+    fetch("/api/generate/wavespeed/models")
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error("model discovery failed")))
+      .then((payload: { models?: Array<{ model_id: string; name?: string; type?: string }> }) => {
+        if (cancelled) return;
+        setGenerationModels((payload.models ?? []).map((model) => ({
+          id: model.model_id,
+          label: model.name ?? model.model_id,
+          provider: "WaveSpeed",
+          modes: model.type?.includes("video") ? ["video"] : ["image"],
+        })));
+      })
+      .catch(() => { if (!cancelled) setGenerationModels([]); });
+    return () => { cancelled = true; };
+  }, [inspectorActiveTab]);
+
   const activeTab: InspectorTabId =
     (clipTabIds.includes(inspectorActiveTab as InspectorTabId)
       ? (inspectorActiveTab as InspectorTabId)
@@ -990,6 +1010,17 @@ export const InspectorPanel: React.FC = () => {
                     isEnhancingAudio={isEnhancingAudio}
                     audioEnhanced={audioEnhanced}
                     isApplyingSelectedClipEffect={isApplyingSelectedClipEffect}
+                  />
+                </InspectorTabPanel>
+                <InspectorTabPanel tab="generate" active={activeTab}>
+                  <GenerateTab
+                    projectId={project.id}
+                    draftId={selectedClip?.id}
+                    context="clip"
+                    mode="image"
+                    models={generationModels}
+                    prompt={metadataKind === "scene" ? String(selectedTimelineClip?.metadata?.prompt ?? "") : ""}
+                    timing={selectedClip ? { start: selectedClip.startTime, end: selectedClip.startTime + selectedClip.duration, source: "Timeline" } : undefined}
                   />
                 </InspectorTabPanel>
                 <InspectorTabPanel tab="audio" active={activeTab}>
