@@ -426,6 +426,10 @@ importers:
         version: 1.6.1(@types/node@20.19.43)(jsdom@24.1.3)
 
   packages/music-video-domain:
+    dependencies:
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
     devDependencies:
       typescript:
         specifier: ^5.4.5
