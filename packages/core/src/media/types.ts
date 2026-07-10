@@ -25,6 +25,8 @@ export interface MediaTrackInfo {
   audioBitrate?: number;
   /** Number of audio tracks in the file (may be > 1 for multi-track video/audio files) */
   audioTrackCount?: number;
+  /** Title tag read from container metadata (ID3, MP4 atoms, WebM tags, Vorbis comments, RIFF INFO), if present and non-empty */
+  title?: string;
 }
 
 export interface ThumbnailResult {

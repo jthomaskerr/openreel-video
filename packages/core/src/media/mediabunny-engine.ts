@@ -126,6 +126,7 @@ type MediaBunnyInput = {
   getPrimaryAudioTrack(): Promise<InputAudioTrack | null>;
   getAudioTracks(): Promise<InputAudioTrack[]>;
   getFormat(): Promise<unknown>;
+  getMetadataTags(): Promise<{ title?: string }>;
   [Symbol.dispose]?: () => void;
 };
 
@@ -405,6 +406,15 @@ export class MediaBunnyEngine {
       const duration = await input.computeDuration();
       const mimeType = await input.getMimeType();
 
+      let title: string | undefined;
+      try {
+        const tags = await input.getMetadataTags();
+        const trimmed = tags.title?.trim();
+        if (trimmed) title = trimmed;
+      } catch {
+        // Malformed or unsupported metadata block — fall through without a title.
+      }
+
       const videoTrack = await input.getPrimaryVideoTrack();
       const audioTrack = await input.getPrimaryAudioTrack();
 
@@ -469,6 +479,7 @@ export class MediaBunnyEngine {
         canDecode: canDecodeVideo || canDecodeAudio,
         videoBitrate,
         audioTrackCount,
+        title,
       };
     } finally {
       input[Symbol.dispose]?.();

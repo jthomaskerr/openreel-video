@@ -1,5 +1,30 @@
-import { describe, it, expect } from "vitest";
-import { isSupportedFormat, inferMediaType } from "./mediabunny-engine";
+import { describe, it, expect, vi } from "vitest";
+import { isSupportedFormat, inferMediaType, MediaBunnyEngine } from "./mediabunny-engine";
+
+const nextTagsHolder = vi.hoisted(() => ({ tags: {} as { title?: string } }));
+
+vi.mock("mediabunny", () => ({
+  ALL_FORMATS: [],
+  BlobSource: class {
+    constructor(public file: File | Blob) {}
+  },
+  Input: class {
+    async computeDuration() { return 10; }
+    async getMimeType() { return "audio/mpeg"; }
+    async getPrimaryVideoTrack() { return null; }
+    async getPrimaryAudioTrack() {
+      return {
+        sampleRate: 44100,
+        numberOfChannels: 2,
+        codec: "mp3",
+        canDecode: async () => true,
+      };
+    }
+    async getAudioTracks() { return [{}]; }
+    async getMetadataTags() { return nextTagsHolder.tags; }
+    [Symbol.dispose]() {}
+  },
+}));
 
 // ─── isSupportedFormat ────────────────────────────────────────────────────────
 
@@ -200,5 +225,55 @@ describe("inferMediaType", () => {
     it("returns null for text/plain", () => {
       expect(inferMediaType("text/plain")).toBeNull();
     });
+  });
+});
+
+// ─── extractMetadata: title tag extraction ────────────────────────────────────
+
+describe("MediaBunnyEngine.extractMetadata title extraction", () => {
+  async function initializedEngine(): Promise<MediaBunnyEngine> {
+    const engine = new MediaBunnyEngine();
+    await engine.initialize();
+    return engine;
+  }
+
+  it("extracts a non-empty title tag from container metadata", async () => {
+    nextTagsHolder.tags = { title: "My Song" };
+    const engine = await initializedEngine();
+    const file = new File([new Uint8Array([0])], "track.mp3", { type: "audio/mpeg" });
+
+    const result = await engine.extractMetadata(file);
+
+    expect(result.title).toBe("My Song");
+  });
+
+  it("trims whitespace around a title tag", async () => {
+    nextTagsHolder.tags = { title: "  My Song  " };
+    const engine = await initializedEngine();
+    const file = new File([new Uint8Array([0])], "track.mp3", { type: "audio/mpeg" });
+
+    const result = await engine.extractMetadata(file);
+
+    expect(result.title).toBe("My Song");
+  });
+
+  it("leaves title undefined when the tag is whitespace-only", async () => {
+    nextTagsHolder.tags = { title: "   " };
+    const engine = await initializedEngine();
+    const file = new File([new Uint8Array([0])], "track.mp3", { type: "audio/mpeg" });
+
+    const result = await engine.extractMetadata(file);
+
+    expect(result.title).toBeUndefined();
+  });
+
+  it("leaves title undefined when no title tag is present", async () => {
+    nextTagsHolder.tags = {};
+    const engine = await initializedEngine();
+    const file = new File([new Uint8Array([0])], "track.mp3", { type: "audio/mpeg" });
+
+    const result = await engine.extractMetadata(file);
+
+    expect(result.title).toBeUndefined();
   });
 });
