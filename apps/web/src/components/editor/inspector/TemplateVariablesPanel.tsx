@@ -190,7 +190,7 @@ const MediaPlaceholderInput: React.FC<PlaceholderInputProps> = ({
               {media.thumbnailUrl ? (
                 <img
                   src={media.thumbnailUrl}
-                  alt={media.name}
+                  alt={media.title || media.name}
                   className="w-full h-full object-cover"
                 />
               ) : (

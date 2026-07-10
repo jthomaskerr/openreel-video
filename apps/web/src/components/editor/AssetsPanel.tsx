@@ -292,7 +292,7 @@ const MediaThumbnail: React.FC<{
         {/* Small thumbnail */}
         <div className="w-12 h-8 rounded bg-background-tertiary relative overflow-hidden flex-shrink-0">
           {effectiveThumbnailUrl ? (
-            <img src={effectiveThumbnailUrl} alt={item.name} className="w-full h-full object-cover" />
+            <img src={effectiveThumbnailUrl} alt={item.title || item.name} className="w-full h-full object-cover" />
           ) : (
             <div className="w-full h-full flex items-center justify-center">
               <Icon size={14} className={iconColor} />
@@ -324,9 +324,9 @@ const MediaThumbnail: React.FC<{
         <div className="flex-1 min-w-0">
           <div
             className={`text-[11px] truncate font-medium ${isSelected ? "text-primary" : "text-text-primary"}`}
-            title={item.name}
+            title={item.title || item.name}
           >
-            {item.name}
+            {item.title || item.name}
           </div>
           <div className="flex items-center gap-1.5 text-[9px] text-text-muted">
             {item.metadata?.duration && <span>{formatDuration(item.metadata.duration)}</span>}
@@ -458,7 +458,7 @@ const MediaThumbnail: React.FC<{
         {effectiveThumbnailUrl ? (
           <img
             src={effectiveThumbnailUrl}
-            alt={item.name}
+            alt={item.title || item.name}
             className="w-full h-full object-cover"
           />
         ) : (
@@ -559,9 +559,9 @@ const MediaThumbnail: React.FC<{
           className={`text-[10px] truncate font-medium ${
             isSelected ? "text-primary" : "text-text-primary"
           }`}
-          title={item.name}
+          title={item.title || item.name}
         >
-          {item.name}
+          {item.title || item.name}
         </div>
         {viewMode === "large" && (
           <div className="flex items-center gap-1.5 text-[9px] text-text-muted mt-0.5">

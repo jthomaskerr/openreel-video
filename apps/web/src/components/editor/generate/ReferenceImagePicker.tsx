@@ -18,11 +18,11 @@ export interface ReferenceImagePickerProps {
 function ImageThumb({ item }: { item: MediaItem }) {
   const url = item.thumbnailUrl ?? item.originalUrl;
   if (url) {
-    return <img src={url} alt={item.name} className="w-full h-full object-cover rounded" />;
+    return <img src={url} alt={item.title || item.name} className="w-full h-full object-cover rounded" />;
   }
   return (
     <div className="w-full h-full rounded bg-background-tertiary flex items-center justify-center">
-      <span className="text-[10px] text-text-muted truncate px-1">{item.name}</span>
+      <span className="text-[10px] text-text-muted truncate px-1">{item.title || item.name}</span>
     </div>
   );
 }
@@ -99,7 +99,7 @@ export function ReferenceImagePicker({
                               <img src={item.thumbnailUrl} alt="" className="w-full h-full object-cover" />
                             )}
                           </div>
-                          <span className="truncate">{item.name}</span>
+                          <span className="truncate">{item.title || item.name}</span>
                         </button>
                       ))}
                       {unselectedLibrary.length > 8 && (
@@ -178,12 +178,12 @@ export function ReferenceImagePicker({
                 type="button"
                 onClick={() => remove(item.id)}
                 className="absolute top-1 right-1 w-5 h-5 rounded-full bg-black/60 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                aria-label={`Remove ${item.name}`}
+                aria-label={`Remove ${item.title || item.name}`}
               >
                 <X size={10} className="text-white" />
               </button>
               <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/60 to-transparent p-1.5">
-                <p className="text-[9px] text-white truncate leading-tight">{item.name}</p>
+                <p className="text-[9px] text-white truncate leading-tight">{item.title || item.name}</p>
               </div>
             </div>
           ))}
