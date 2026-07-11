@@ -36,7 +36,11 @@ function sanitize(project: Project): object {
         fileHandle: undefined,
         remoteUrl: undefined,
         thumbnailUrl: item.thumbnailUrl?.startsWith("blob:") ? null : item.thumbnailUrl,
-        filmstripThumbnails: undefined,
+        filmstripThumbnails: item.filmstripThumbnails?.every((thumbnail) =>
+          !thumbnail.url.startsWith("blob:"),
+        )
+          ? item.filmstripThumbnails
+          : undefined,
       })),
     },
     textClips: undefined,
@@ -243,7 +247,11 @@ class BackendSaveService {
       const items = await Promise.all(
         project.mediaLibrary.items.map(async (item) => {
           const filename = mediaFiles[item.id];
-          if (!filename) return item;
+          if (!filename) {
+            return item.thumbnailUrl?.startsWith("blob:")
+              ? { ...item, thumbnailUrl: null, filmstripThumbnails: undefined }
+              : item;
+          }
 
           const remoteUrl = `${BASE_URL}/api/projects/${projectId}/media/${filename}`;
           let blob: Blob | null = null;

@@ -78,7 +78,7 @@ import {
 } from "../services/media-storage";
 import { parseSRT } from "./project/subtitle-helpers";
 import { backendSaveService } from "../services/backend-save";
-import { restoreMediaItem } from "../utils/media-recovery";
+import { blobToDataUrl, restoreMediaItem } from "../utils/media-recovery";
 import { projectManager } from "../services/project-manager";
 import { reportRuntimeError, toast } from "./notification-store";
 
@@ -1583,41 +1583,59 @@ export const useProjectStore = create<ProjectState>()(
         // meantime (idempotent after-the-fact gating).
         const snapshotId = nextProject.id;
         const projectName = name ?? nextProject.name;
+        autoSaveManager.markPendingProjectCreation({
+          temporaryId: snapshotId,
+          name: projectName,
+          settings: nextProject.settings,
+          createdAt: Date.now(),
+        });
         backendSaveService
           .isReachable()
-          .then((reachable) => {
-            if (!reachable) return;
-            return backendSaveService.create(projectName, settings).then((backendProject) => {
-              const current = get();
-              if (current.project.id === snapshotId) {
-                // Merge the backend slug id + timestamps into the live
-                // project state instead of replacing it outright.  The
-                // store may already hold media items, clips, and settings
-                // that were added during the backend create() call;
-                // discarding them would silently lose data and push an
-                // empty project back to the backend git store.
-                const merged = {
-                  ...current.project,
-                  id: backendProject.id,
-                  createdAt: backendProject.createdAt,
-                  modifiedAt: Date.now(),
-                };
-                syncProjectEffectsBridge(merged, previousProject);
-                syncProjectTransitionsBridge(merged, previousProject);
-                set({ project: merged });
-                backendSaveService.resetForProject();
-                // Push the full current project state (tracks, clips, media
-                // items) to the backend now instead of waiting for the next
-                // autosave cycle. This prevents skeleton-only projects from
-                // being persisted when the user closes before autosave fires.
-                backendSaveService.save(merged).catch((saveErr) => {
-                  console.error("[BackendSave] initial full save failed:", saveErr);
-                  reportRuntimeError("Backend save failed", saveErr, "backend-save.initial-full-save");
-                });
-              }
+          .then(async (reachable) => {
+            if (!reachable) {
+              autoSaveManager.clearPendingProjectCreation(snapshotId);
+              return;
+            }
+            const backendProject = await backendSaveService.create(projectName, settings);
+            const current = get();
+            if (current.project.id !== snapshotId) {
+              autoSaveManager.clearPendingProjectCreation(snapshotId);
+              return;
+            }
+            // Merge the backend slug id + timestamps into the live project
+            // state instead of replacing it outright. The store may already
+            // hold media items, clips, and settings added during create().
+            const merged = {
+              ...current.project,
+              id: backendProject.id,
+              createdAt: backendProject.createdAt,
+              modifiedAt: Date.now(),
+            };
+            syncProjectEffectsBridge(merged, previousProject);
+            syncProjectTransitionsBridge(merged, previousProject);
+            set({ project: merged });
+            backendSaveService.resetForProject();
+            try {
+              await autoSaveManager.migrateProjectId(snapshotId, backendProject.id);
+            } catch (migrationError) {
+              console.error("[AutoSave] project identity migration failed:", migrationError);
+              reportRuntimeError(
+                "Local project recovery handoff failed",
+                migrationError,
+                "backend-save.identity-migration",
+              );
+            }
+            // Push the full current project state (tracks, clips, media
+            // items) to the backend now instead of waiting for the next
+            // autosave cycle. This prevents skeleton-only projects from being
+            // persisted when the user closes before autosave fires.
+            backendSaveService.save(merged).catch((saveErr) => {
+              console.error("[BackendSave] initial full save failed:", saveErr);
+              reportRuntimeError("Backend save failed", saveErr, "backend-save.initial-full-save");
             });
           })
           .catch((err) => {
+            autoSaveManager.clearPendingProjectCreation(snapshotId);
             console.error("[BackendSave] create new project failed, using local id:", err);
             reportRuntimeError("Backend project creation failed", err, "backend-save.create-project");
           });
@@ -1959,7 +1977,7 @@ export const useProjectStore = create<ProjectState>()(
                       type: "image/jpeg",
                       quality: 0.7,
                     });
-                    thumbUrl = URL.createObjectURL(blob);
+                    thumbUrl = await blobToDataUrl(blob);
                   } else if (thumb.canvas instanceof HTMLCanvasElement) {
                     thumbUrl = thumb.canvas.toDataURL("image/jpeg", 0.7);
                   }
@@ -2021,7 +2039,7 @@ export const useProjectStore = create<ProjectState>()(
             name: file.name,
             type: mediaType,
             fileHandle: null,
-            blob: file,
+            blob: processedMedia.blob ?? file,
             metadata: {
               // Images have no inherent duration (like graphics), duration is set on the clip
               duration: processedMedia.metadata.duration || 0,
@@ -2185,7 +2203,7 @@ export const useProjectStore = create<ProjectState>()(
                       type: "image/jpeg",
                       quality: 0.7,
                     });
-                    thumbUrl = URL.createObjectURL(blob);
+                    thumbUrl = await blobToDataUrl(blob);
                   } else if (thumb.canvas instanceof HTMLCanvasElement) {
                     thumbUrl = thumb.canvas.toDataURL("image/jpeg", 0.7);
                   }
@@ -2242,7 +2260,7 @@ export const useProjectStore = create<ProjectState>()(
             name: file.name,
             type: mediaType,
             fileHandle: null,
-            blob: file,
+            blob: processedMedia.blob ?? file,
             metadata: {
               duration: processedMedia.metadata.duration || 0,
               width: processedMedia.metadata.width || 0,
@@ -2573,7 +2591,7 @@ export const useProjectStore = create<ProjectState>()(
                       type: "image/jpeg",
                       quality: 0.7,
                     });
-                    thumbUrl = URL.createObjectURL(blob);
+                    thumbUrl = await blobToDataUrl(blob);
                   } else if (thumb.canvas instanceof HTMLCanvasElement) {
                     thumbUrl = thumb.canvas.toDataURL("image/jpeg", 0.7);
                   }
@@ -2630,7 +2648,7 @@ export const useProjectStore = create<ProjectState>()(
             name: file.name,
             type: mediaType,
             fileHandle: null,
-            blob: file,
+            blob: processedMedia.blob ?? file,
             metadata: {
               duration: metadata.duration || 0,
               width: metadata.width || 0,
@@ -3262,6 +3280,9 @@ export const useProjectStore = create<ProjectState>()(
               trackId: targetTrack.id,
               mediaId: videoClip.mediaId,
               startTime: videoClip.startTime,
+              duration: videoClip.duration,
+              inPoint: videoClip.inPoint,
+              outPoint: videoClip.outPoint,
               audioTrackIndex: trackIdx,
             },
           };
@@ -4887,8 +4908,34 @@ export const useProjectStore = create<ProjectState>()(
             return false;
           }
 
+          const temporaryProjectId = recoveredProject.id;
+          let projectToRecover = recoveredProject;
+          const pendingCreation = autoSaveManager.getPendingProjectCreation(temporaryProjectId);
+
+          // A refresh can interrupt the original POST after the local UUID
+          // autosave has completed. Retry creation from that complete local
+          // snapshot before attempting backend media migration, so the UUID
+          // never becomes a permanent backend lookup key.
+          if (pendingCreation && await backendSaveService.isReachable()) {
+            try {
+              const backendProject = await backendSaveService.create(
+                pendingCreation.name,
+                pendingCreation.settings,
+              );
+              projectToRecover = {
+                ...recoveredProject,
+                id: backendProject.id,
+                createdAt: backendProject.createdAt,
+                modifiedAt: Date.now(),
+              };
+              await autoSaveManager.migrateProjectId(temporaryProjectId, backendProject.id);
+            } catch (error) {
+              console.warn("[Recovery] Pending backend project creation failed; keeping local project:", error);
+            }
+          }
+
           // ── Migrate existing IndexedDB media to backend ──────────────
-          const storedMedia = await loadProjectMedia(recoveredProject.id);
+          const storedMedia = await loadProjectMedia(temporaryProjectId);
           const blobMap = new Map(storedMedia.map((m) => [m.id, m.blob]));
 
           // Upload every locally stored blob to the backend.
@@ -4897,9 +4944,9 @@ export const useProjectStore = create<ProjectState>()(
             backendSaveService.resetForProject();
             for (const record of storedMedia) {
               if (!record.blob) continue;
-              const item = recoveredProject.mediaLibrary.items.find((i) => i.id === record.id);
+              const item = projectToRecover.mediaLibrary.items.find((i) => i.id === record.id);
               backendSaveService.uploadMediaAsync(
-                recoveredProject.id,
+                projectToRecover.id,
                 record.id,
                 record.blob,
                 item?.name ?? record.id,
@@ -4910,11 +4957,11 @@ export const useProjectStore = create<ProjectState>()(
             await new Promise((r) => setTimeout(r, 1000));
 
             // Push project JSON, then reload from backend for canonical remoteUrls.
-            await backendSaveService.save(recoveredProject);
-            const backendProject = await backendSaveService.load(recoveredProject.id);
+            await backendSaveService.save(projectToRecover);
+            const backendProject = await backendSaveService.load(projectToRecover.id);
             if (backendProject) {
               // Clean up IndexedDB — we've migrated.
-              await deleteProjectMedia(recoveredProject.id);
+              await deleteProjectMedia(temporaryProjectId);
               const titleEngine = useEngineStore.getState().getTitleEngine();
               const graphicsEngine = useEngineStore.getState().getGraphicsEngine();
               if (titleEngine && backendProject.textClips) {
@@ -4945,15 +4992,15 @@ export const useProjectStore = create<ProjectState>()(
 
           // ── Backend unreachable — hydrate from IndexedDB as before ───
           const restoredItems = await Promise.all(
-            recoveredProject.mediaLibrary.items.map((item) =>
+            projectToRecover.mediaLibrary.items.map((item) =>
               restoreMediaItem({ ...item, blob: null }, blobMap.get(item.id)),
             ),
           );
 
           const projectWithMedia: Project = {
-            ...recoveredProject,
+            ...projectToRecover,
             mediaLibrary: {
-              ...recoveredProject.mediaLibrary,
+              ...projectToRecover.mediaLibrary,
               items: restoredItems,
             },
           };
@@ -4961,13 +5008,13 @@ export const useProjectStore = create<ProjectState>()(
           const titleEngine = useEngineStore.getState().getTitleEngine();
           const graphicsEngine = useEngineStore.getState().getGraphicsEngine();
 
-          if (titleEngine && recoveredProject.textClips) {
-            titleEngine.loadTextClips(recoveredProject.textClips);
+          if (titleEngine && projectToRecover.textClips) {
+            titleEngine.loadTextClips(projectToRecover.textClips);
           }
           if (graphicsEngine) {
-            if (recoveredProject.shapeClips) graphicsEngine.loadShapeClips(recoveredProject.shapeClips);
-            if (recoveredProject.svgClips) graphicsEngine.loadSVGClips(recoveredProject.svgClips);
-            if (recoveredProject.stickerClips) graphicsEngine.loadStickerClips(recoveredProject.stickerClips);
+            if (projectToRecover.shapeClips) graphicsEngine.loadShapeClips(projectToRecover.shapeClips);
+            if (projectToRecover.svgClips) graphicsEngine.loadSVGClips(projectToRecover.svgClips);
+            if (projectToRecover.stickerClips) graphicsEngine.loadStickerClips(projectToRecover.stickerClips);
           }
 
           const newHistory = new ActionHistory();

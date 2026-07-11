@@ -111,6 +111,10 @@ const {
 
 vi.mock("../services/auto-save", () => ({
   autoSaveManager: {
+    markPendingProjectCreation: vi.fn(),
+    clearPendingProjectCreation: vi.fn(),
+    migrateProjectId: vi.fn().mockResolvedValue(undefined),
+    getPendingProjectCreation: vi.fn().mockReturnValue(null),
     startAutoSave: vi.fn(),
     stopAutoSave: vi.fn(),
     triggerSave: vi.fn(),
@@ -1934,6 +1938,31 @@ describe("ProjectStore", () => {
         expect(audioTracks[i].clips[0].mediaId).toBe("video-media-1");
         expect(audioTracks[i].clips[0].audioTrackIndex).toBe(i);
       }
+    });
+
+    it("regression: preserves the source clip trim when separating audio", async () => {
+      const project = createProjectWithVideoClip(1);
+      const sourceClip = project.timeline.tracks[0].clips[0];
+      project.timeline.tracks[0].clips[0] = {
+        ...sourceClip,
+        startTime: 12,
+        duration: 3,
+        inPoint: 7,
+        outPoint: 10,
+      };
+
+      useProjectStore.getState().loadProject(project);
+      const result = await useProjectStore.getState().separateAudio("video-clip-1");
+
+      expect(result.success).toBe(true);
+      const audioClip = useProjectStore.getState().project.timeline.tracks
+        .find((track) => track.type === "audio")?.clips[0];
+      expect(audioClip).toEqual(expect.objectContaining({
+        startTime: 12,
+        duration: 3,
+        inPoint: 7,
+        outPoint: 10,
+      }));
     });
 
     it("should default to one audio track when audioTrackCount is undefined", async () => {

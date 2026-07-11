@@ -5,6 +5,22 @@ function isThumbnailableMediaType(type: MediaItem["type"]): boolean {
   return type === "video" || type === "image";
 }
 
+export async function blobToDataUrl(blob: Blob): Promise<string> {
+  if (typeof FileReader !== "undefined") {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error ?? new Error("Failed to read thumbnail"));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:${blob.type || "application/octet-stream"};base64,${btoa(binary)}`;
+}
+
 export function shouldRegenerateThumbnail(item: Pick<MediaItem, "thumbnailUrl" | "type">): boolean {
   return isThumbnailableMediaType(item.type) && (!item.thumbnailUrl || item.thumbnailUrl.startsWith("blob:"));
 }
@@ -51,7 +67,11 @@ function generateVideoThumbnailFromSource(
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         canvas.toBlob(
           (thumbBlob) => {
-            finish(thumbBlob ? URL.createObjectURL(thumbBlob) : null);
+            if (!thumbBlob) {
+              finish(null);
+              return;
+            }
+            void blobToDataUrl(thumbBlob).then(finish).catch(() => finish(null));
           },
           "image/jpeg",
           0.7,
@@ -100,7 +120,7 @@ export async function generateThumbnailFromBlob(
   }
 
   if (type === "image") {
-    return URL.createObjectURL(blob);
+    return blobToDataUrl(blob);
   }
 
   const src = URL.createObjectURL(blob);
@@ -133,7 +153,14 @@ export async function restoreMediaItem(
       : null;
 
   if (!blob) {
-    return { ...item, blob: null };
+    return {
+      ...item,
+      blob: null,
+      thumbnailUrl: item.thumbnailUrl?.startsWith("blob:") ? null : item.thumbnailUrl,
+      filmstripThumbnails: item.filmstripThumbnails?.some((thumb) => thumb.url.startsWith("blob:"))
+        ? undefined
+        : item.filmstripThumbnails,
+    };
   }
 
   let thumbnailUrl = item.thumbnailUrl;

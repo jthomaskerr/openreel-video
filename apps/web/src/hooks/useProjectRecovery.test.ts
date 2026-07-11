@@ -31,6 +31,7 @@ const {
 vi.mock("../services/backend-save", () => ({
   backendSaveService: {
     load: (...args: unknown[]) => mockBackendLoad(...(args as [string])),
+    create: vi.fn().mockResolvedValue({ id: "mock-backend-project", createdAt: 0, modifiedAt: 0 }),
     uploadMediaAsync: vi.fn(),
     resetForProject: vi.fn(),
     save: vi.fn().mockResolvedValue(undefined),
@@ -43,6 +44,10 @@ vi.mock("../services/backend-save", () => ({
 // ---------------------------------------------------------------------------
 vi.mock("../services/auto-save", () => ({
   autoSaveManager: {
+    markPendingProjectCreation: vi.fn(),
+    clearPendingProjectCreation: vi.fn(),
+    migrateProjectId: vi.fn().mockResolvedValue(undefined),
+    getPendingProjectCreation: vi.fn().mockReturnValue(null),
     initialize: vi.fn().mockResolvedValue(undefined),
     checkForRecovery: (...args: unknown[]) => mockCheckForRecovery(...(args as [])),
     recover: (...args: unknown[]) => mockAutoSaveRecover(...(args as [])),

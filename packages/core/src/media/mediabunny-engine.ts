@@ -73,6 +73,22 @@ function mimeFromExtension(filename: string): string | null {
   return EXTENSION_MIME_MAP[ext] || null;
 }
 
+async function blobToDataUrl(blob: Blob): Promise<string> {
+  if (typeof FileReader !== "undefined") {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error ?? new Error("Failed to read thumbnail"));
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:${blob.type || "application/octet-stream"};base64,${btoa(binary)}`;
+}
+
 export function isSupportedFormat(mimeType: string, fileName?: string): boolean {
   const baseMimeType = mimeType.split(";")[0].trim();
   if (
@@ -545,7 +561,7 @@ export class MediaBunnyEngine {
               type: "image/jpeg",
               quality: 0.7,
             });
-            dataUrl = URL.createObjectURL(blob);
+            dataUrl = await blobToDataUrl(blob);
           } catch {}
 
           thumbnails.push({
@@ -618,7 +634,7 @@ export class MediaBunnyEngine {
               type: "image/jpeg",
               quality: 0.6,
             });
-            dataUrl = URL.createObjectURL(blob);
+            dataUrl = await blobToDataUrl(blob);
           } catch {}
 
           thumbnails.push({

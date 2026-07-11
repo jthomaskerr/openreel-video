@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MediaItem, Project } from "@openreel/core";
 import { sanitizeForAutoSave } from "./auto-save";
+import { generateThumbnailFromBlob } from "../utils/media-recovery";
 
 function makeMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
   return {
@@ -38,6 +39,15 @@ function makeProject(overrides: Partial<Project> = {}): Project {
 }
 
 describe("sanitizeForAutoSave", () => {
+  it("generates a durable data URL for an image thumbnail", async () => {
+    const thumbnail = await generateThumbnailFromBlob(
+      new Blob(["image-bytes"], { type: "image/png" }),
+      "image",
+    );
+
+    expect(thumbnail).toMatch(/^data:image\/png;base64,/);
+  });
+
   it("nulls out a thumbnailUrl that starts with blob:", () => {
     const project = makeProject({
       mediaLibrary: {

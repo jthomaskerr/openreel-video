@@ -4,6 +4,10 @@ import type { Project, Clip, Track } from "@openreel/core";
 
 vi.mock("../services/auto-save", () => ({
   autoSaveManager: {
+    markPendingProjectCreation: vi.fn(),
+    clearPendingProjectCreation: vi.fn(),
+    migrateProjectId: vi.fn().mockResolvedValue(undefined),
+    getPendingProjectCreation: vi.fn().mockReturnValue(null),
     startAutoSave: vi.fn(),
     stopAutoSave: vi.fn(),
     triggerSave: vi.fn(),

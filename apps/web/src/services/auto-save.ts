@@ -36,6 +36,13 @@ export interface AutoSaveMetadata {
   isRecovery: boolean;
 }
 
+export interface PendingProjectCreation {
+  temporaryId: string;
+  name: string;
+  settings: Project["settings"];
+  createdAt: number;
+}
+
 interface AutoSaveRecord {
   id: string;
   projectId: string;
@@ -55,6 +62,7 @@ const DEFAULT_CONFIG: AutoSaveConfig = {
 const AUTO_SAVE_DB_NAME = "openreel-autosave";
 const AUTO_SAVE_DB_VERSION = 1;
 const AUTO_SAVE_STORE = "autosaves";
+const PENDING_CREATION_STORAGE_KEY = "openreel-pending-project-creations";
 
 type AutoSaveEventType = "saved" | "restored" | "error" | "recoveryAvailable";
 type AutoSaveEventCallback = (data?: unknown) => void;
@@ -354,6 +362,75 @@ class AutoSaveManager {
       console.error("[AutoSave] Recovery failed:", error);
       this.emit("error", { error, message: "Failed to recover project" });
       return null;
+    }
+  }
+
+  /**
+   * Records a UUID-to-backend creation handoff before the network request
+   * starts. This survives a reload during the identity transition, when the
+   * backend slug does not exist yet but the local autosave does.
+   */
+  markPendingProjectCreation(pending: PendingProjectCreation): void {
+    try {
+      const entries = this.readPendingProjectCreations();
+      entries[pending.temporaryId] = pending;
+      localStorage.setItem(PENDING_CREATION_STORAGE_KEY, JSON.stringify(entries));
+    } catch (error) {
+      console.warn("[AutoSave] Failed to persist pending project creation:", error);
+    }
+  }
+
+  getPendingProjectCreation(temporaryId: string): PendingProjectCreation | null {
+    return this.readPendingProjectCreations()[temporaryId] ?? null;
+  }
+
+  clearPendingProjectCreation(temporaryId: string): void {
+    try {
+      const entries = this.readPendingProjectCreations();
+      delete entries[temporaryId];
+      localStorage.setItem(PENDING_CREATION_STORAGE_KEY, JSON.stringify(entries));
+    } catch (error) {
+      console.warn("[AutoSave] Failed to clear pending project creation:", error);
+    }
+  }
+
+  /**
+   * Re-keys local autosaves after the backend assigns the canonical slug.
+   * Keeping the records under the slug prevents a later recovery from issuing
+   * a backend request for the temporary UUID.
+   */
+  async migrateProjectId(temporaryId: string, canonicalId: string): Promise<void> {
+    if (temporaryId === canonicalId) {
+      this.clearPendingProjectCreation(temporaryId);
+      return;
+    }
+    if (!this.db) await this.initialize();
+
+    const records = (await this.getAllSaves()).filter((record) => record.projectId === temporaryId);
+    for (const record of records) {
+      const project = JSON.parse(record.data) as Project;
+      const migrated: AutoSaveRecord = {
+        ...record,
+        id: `${canonicalId}-slot-${record.slot}`,
+        projectId: canonicalId,
+        data: JSON.stringify(sanitizeForAutoSave({ ...project, id: canonicalId })),
+      };
+      await this.deleteRecord(record.id);
+      await this.saveRecord(migrated);
+    }
+
+    this.clearPendingProjectCreation(temporaryId);
+  }
+
+  private readPendingProjectCreations(): Record<string, PendingProjectCreation> {
+    try {
+      if (typeof localStorage === "undefined") return {};
+      const raw = localStorage.getItem(PENDING_CREATION_STORAGE_KEY);
+      if (!raw) return {};
+      const parsed = JSON.parse(raw) as Record<string, PendingProjectCreation>;
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
     }
   }
 

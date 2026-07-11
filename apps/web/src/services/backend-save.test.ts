@@ -147,6 +147,30 @@ describe("backendSaveService.load", () => {
       "blob:regenerated-thumbnail",
     );
   });
+
+  it("clears stale blob thumbnails when the backend has no media binary", async () => {
+    const baseProject = makeProject();
+    const staleProject: Project = {
+      ...baseProject,
+      mediaLibrary: {
+        items: [{
+          ...baseProject.mediaLibrary.items[0]!,
+          thumbnailUrl: "blob:stale-thumbnail",
+          filmstripThumbnails: [{ timestamp: 0, url: "blob:stale-frame" }],
+        }],
+      },
+    };
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ project: staleProject, mediaFiles: {} }),
+    }));
+
+    const project = await backendSaveService.load("project-1");
+
+    expect(project?.mediaLibrary.items[0]?.thumbnailUrl).toBeNull();
+    expect(project?.mediaLibrary.items[0]?.filmstripThumbnails).toBeUndefined();
+  });
 });
 
 describe("backendSaveService.save", () => {
@@ -173,6 +197,42 @@ describe("backendSaveService.save", () => {
       "http://localhost:4041/api/projects/vintage-tokyo",
       expect.objectContaining({ method: "PUT" }),
     );
+  });
+
+  it("persists durable filmstrip thumbnails but strips page-scoped blob URLs", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await backendSaveService.save({
+      ...makeProject(),
+      id: "vintage-tokyo",
+      mediaLibrary: {
+        items: [{
+          ...makeProject().mediaLibrary.items[0]!,
+          filmstripThumbnails: [
+            { timestamp: 0, url: "data:image/jpeg;base64,frame" },
+            { timestamp: 5, url: "https://cdn.example/frame.jpg" },
+          ],
+        }],
+      },
+    });
+
+    const body = JSON.parse(fetchMock.mock.calls.at(-1)?.[1]?.body as string);
+    expect(body.mediaLibrary.items[0].filmstripThumbnails).toHaveLength(2);
+
+    await backendSaveService.save({
+      ...makeProject(),
+      id: "vintage-tokyo",
+      mediaLibrary: {
+        items: [{
+          ...makeProject().mediaLibrary.items[0]!,
+          filmstripThumbnails: [{ timestamp: 0, url: "blob:session-only" }],
+        }],
+      },
+    });
+
+    const blobBody = JSON.parse(fetchMock.mock.calls.at(-1)?.[1]?.body as string);
+    expect(blobBody.mediaLibrary.items[0].filmstripThumbnails).toBeUndefined();
   });
 
   it("uploads media blobs before saving project JSON", async () => {

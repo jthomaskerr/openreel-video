@@ -35,6 +35,33 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
         const saves = await autoSaveManager.checkForRecovery();
 
         if (autoRestoreProjectId) {
+          const pendingCreation = autoSaveManager.getPendingProjectCreation(autoRestoreProjectId);
+          if (pendingCreation) {
+            // A reload can happen after the UUID autosave but before POST
+            // returns its canonical slug. Do not turn that temporary UUID
+            // into a backend GET/404; recover the local save and let the
+            // store retry the identity handoff.
+            const matchingPendingSave = saves
+              .filter((save) => save.projectId === autoRestoreProjectId)
+              .sort((a, b) => b.timestamp - a.timestamp)[0];
+            if (matchingPendingSave) {
+              const success = await recoverFromAutoSave(matchingPendingSave.id);
+              if (cancelled) return;
+              if (success) {
+                setState({ isChecking: false, availableSaves: [], showDialog: false, error: null });
+              } else {
+                const storeError = useProjectStore.getState().error;
+                setState({
+                  isChecking: false,
+                  availableSaves: [],
+                  showDialog: false,
+                  error: storeError ?? "Could not restore the pending local project.",
+                });
+              }
+              return;
+            }
+          }
+
           // Prefer the backend copy when a URL project id is present, but do not
           // strand fresh local work if the backend save has not completed yet
           // (for example after HMR/page refresh shortly after an import).
