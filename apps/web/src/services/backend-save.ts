@@ -82,10 +82,51 @@ class BackendSaveService {
   private uploadedIds = new Set<string>();
   /** In-flight media uploads keyed by project/media id so saves can await them. */
   private uploadPromises = new Map<string, Promise<void>>();
+  private scheduledProject: Project | null = null;
+  private scheduledSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private saveChain: Promise<void> = Promise.resolve();
 
   resetForProject(): void {
     this.uploadedIds.clear();
     this.uploadPromises.clear();
+    this.scheduledProject = null;
+    if (this.scheduledSaveTimer) {
+      clearTimeout(this.scheduledSaveTimer);
+      this.scheduledSaveTimer = null;
+    }
+  }
+
+  /**
+   * Debounce backend persistence independently of IndexedDB autosave. The
+   * latest project snapshot wins, PUTs are serialized, and a failed PUT is
+   * retried even if the user makes no further edit.
+   */
+  scheduleSave(project: Project, delayMs: number = 2_000): void {
+    this.scheduledProject = project;
+    if (this.scheduledSaveTimer) clearTimeout(this.scheduledSaveTimer);
+    this.scheduledSaveTimer = setTimeout(() => {
+      this.scheduledSaveTimer = null;
+      const pending = this.scheduledProject;
+      this.scheduledProject = null;
+      if (!pending) return;
+
+      const run = this.saveChain
+        .catch(() => undefined)
+        .then(() => this.save(pending));
+      this.saveChain = run;
+      void run.catch((error) => {
+        console.error("[BackendSave] scheduled save failed; retrying:", error);
+        reportRuntimeError("Backend auto-save failed", error, "backend-save.scheduled-save");
+        if (!this.scheduledProject) this.scheduledProject = pending;
+        if (!this.scheduledSaveTimer) {
+          this.scheduledSaveTimer = setTimeout(() => {
+            this.scheduledSaveTimer = null;
+            const retry = this.scheduledProject;
+            if (retry) this.scheduleSave(retry, 0);
+          }, 5_000);
+        }
+      });
+    }, delayMs);
   }
 
   private getUploadKey(projectId: string, mediaId: string): string {

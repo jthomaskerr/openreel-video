@@ -72,6 +72,7 @@ const makeProject = (): Project => ({
 
 afterEach(() => {
   backendSaveService.resetForProject();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -174,6 +175,36 @@ describe("backendSaveService.load", () => {
 });
 
 describe("backendSaveService.save", () => {
+  it("schedules a backend PUT without waiting for an IndexedDB save event", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    backendSaveService.scheduleSave({ ...makeProject(), id: "vintage-tokyo" }, 100);
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:4041/api/projects/vintage-tokyo",
+      expect.objectContaining({ method: "PUT" }),
+    );
+  });
+
+  it("retries a failed scheduled PUT without requiring another edit", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error("temporary outage"))
+      .mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    backendSaveService.scheduleSave({ ...makeProject(), id: "vintage-tokyo" }, 0);
+    await vi.runAllTimersAsync();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    consoleError.mockRestore();
+  });
+
   it("does not PUT client-only UUID project ids to the backend", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

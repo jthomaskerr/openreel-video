@@ -4865,10 +4865,7 @@ export const useProjectStore = create<ProjectState>()(
           const pushCurrentProjectToBackend = () => {
             const project = get().project;
             if (!project) return;
-            backendSaveService.save(project).catch((err) => {
-              console.error("[BackendSave] auto-save push failed:", err);
-              reportRuntimeError("Backend auto-save failed", err, "backend-save.auto-save");
-            });
+            backendSaveService.scheduleSave(project, 0);
           };
 
           // Push immediately after a local save and retry the latest current
@@ -4883,6 +4880,7 @@ export const useProjectStore = create<ProjectState>()(
             () => {
               if (get().explicitlyCreated) {
                 autoSaveManager.markDirty();
+                backendSaveService.scheduleSave(get().project);
               }
             },
           );
