@@ -64,10 +64,15 @@ const AUTO_SAVE_DB_VERSION = 1;
 const AUTO_SAVE_STORE = "autosaves";
 const PENDING_CREATION_STORAGE_KEY = "openreel-pending-project-creations";
 
-type AutoSaveEventType = "saved" | "restored" | "error" | "recoveryAvailable";
+type AutoSaveEventType =
+  | "saved"
+  | "syncRequested"
+  | "restored"
+  | "error"
+  | "recoveryAvailable";
 type AutoSaveEventCallback = (data?: unknown) => void;
 
-class AutoSaveManager {
+export class AutoSaveManager {
   private config: AutoSaveConfig;
   private db: IDBDatabase | null = null;
   private intervalId: ReturnType<typeof setInterval> | null = null;
@@ -79,6 +84,7 @@ class AutoSaveManager {
 
   private pendingProject: Project | null = null;
   private isDirty: boolean = false;
+  private dirtyRevision: number = 0;
   private getProjectFn: (() => Project) | null = null;
 
   constructor(config: Partial<AutoSaveConfig> = {}) {
@@ -142,13 +148,15 @@ class AutoSaveManager {
     // Force an initial save so the project is persisted immediately,
     // even before the user makes any changes.
     this.isDirty = true;
+    this.dirtyRevision += 1;
     this.pendingProject = getProject();
     void this.saveIfDirty();
 
     // Set up periodic saves
     this.intervalId = setInterval(() => {
       this.pendingProject = this.getProjectFn!();
-      this.saveIfDirty();
+      void this.saveIfDirty();
+      this.emit("syncRequested", { project: this.pendingProject });
     }, this.config.interval);
   }
 
@@ -168,11 +176,13 @@ class AutoSaveManager {
     }
     this.getProjectFn = null;
     this.isDirty = false;
+    this.dirtyRevision = 0;
     this.pendingProject = null;
   }
 
   markDirty(): void {
     this.isDirty = true;
+    this.dirtyRevision += 1;
 
     // Debounce the save
     if (this.debounceTimeoutId) {
@@ -195,16 +205,25 @@ class AutoSaveManager {
     }
 
     const project = this.pendingProject;
+    const revision = this.dirtyRevision;
     const hash = this.computeHash(project);
 
     if (hash === this.lastSavedHash) {
+      if (revision === this.dirtyRevision) this.isDirty = false;
       return; // No changes
     }
 
     try {
       await this.save(project);
       this.lastSavedHash = hash;
-      this.isDirty = false;
+      if (revision === this.dirtyRevision) {
+        this.isDirty = false;
+      } else if (this.getProjectFn) {
+        // An edit landed while this save was in flight. Save the fresh state
+        // immediately instead of letting the older completion clear it.
+        this.pendingProject = this.getProjectFn();
+        void this.saveIfDirty();
+      }
     } catch (error) {
       console.error("[AutoSave] Save failed:", error);
       this.emit("error", { error, message: "Auto-save failed" });

@@ -120,6 +120,8 @@ function preserveUserMediaMetadata(
   };
 }
 
+let autoSaveBindingsInitialized = false;
+
 /**
  * ProjectState - Complete state interface for project management
  *
@@ -4858,6 +4860,35 @@ export const useProjectStore = create<ProjectState>()(
         // double-invoking effects with no cleanup, or multiple mounts).
         if (autoSaveManager.isStarted()) return;
         await initializeAutoSave();
+
+        if (!autoSaveBindingsInitialized) {
+          const pushCurrentProjectToBackend = () => {
+            const project = get().project;
+            if (!project) return;
+            backendSaveService.save(project).catch((err) => {
+              console.error("[BackendSave] auto-save push failed:", err);
+              reportRuntimeError("Backend auto-save failed", err, "backend-save.auto-save");
+            });
+          };
+
+          // Push immediately after a local save and retry the latest current
+          // project on every autosave interval. A transient failed PUT must not
+          // leave the backend stale until the user makes another edit.
+          autoSaveManager.on("saved", pushCurrentProjectToBackend);
+          autoSaveManager.on("syncRequested", pushCurrentProjectToBackend);
+
+          // Trigger local auto-save whenever the project object changes.
+          useProjectStore.subscribe(
+            (state) => state.project,
+            () => {
+              if (get().explicitlyCreated) {
+                autoSaveManager.markDirty();
+              }
+            },
+          );
+          autoSaveBindingsInitialized = true;
+        }
+
         autoSaveManager.start(() => {
           const { project } = get();
           const titleEngine = useEngineStore.getState().getTitleEngine();
@@ -4871,28 +4902,6 @@ export const useProjectStore = create<ProjectState>()(
             stickerClips: graphicsEngine?.getAllStickerClips() || [],
           };
         });
-
-        // Push every auto-save to the backend (fire-and-forget).
-        autoSaveManager.on("saved", () => {
-          const project = get().project;
-          if (!project) return;
-          backendSaveService.save(project).catch((err) => {
-            console.error("[BackendSave] auto-save push failed:", err);
-            reportRuntimeError("Backend auto-save failed", err, "backend-save.auto-save");
-          });
-        });
-
-        // Subscribe to project state changes to mark as dirty for auto-save
-        // Uses Zustand's subscribeWithSelector middleware to detect changes to project object only
-        // Trigger auto-save when any project field changes (timeline, media, settings, etc.)
-        useProjectStore.subscribe(
-          (state) => state.project,
-          () => {
-            if (get().explicitlyCreated) {
-              autoSaveManager.markDirty();
-            }
-          },
-        );
       },
 
       checkForRecovery: async () => {

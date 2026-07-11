@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MediaItem, Project } from "@openreel/core";
-import { sanitizeForAutoSave } from "./auto-save";
+import { AutoSaveManager, sanitizeForAutoSave } from "./auto-save";
 import { generateThumbnailFromBlob } from "../utils/media-recovery";
 
 function makeMediaItem(overrides: Partial<MediaItem> = {}): MediaItem {
@@ -37,6 +37,52 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     ...overrides,
   };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("AutoSaveManager synchronization", () => {
+  it("does not clear an edit that lands while an older save is in flight", async () => {
+    let project = makeProject({ modifiedAt: 1 });
+    let resolveFirstSave!: () => void;
+    const firstSave = new Promise<void>((resolve) => {
+      resolveFirstSave = resolve;
+    });
+    const save = vi.fn()
+      .mockImplementationOnce(() => firstSave)
+      .mockResolvedValue(undefined);
+    const manager = new AutoSaveManager({ interval: 60_000, debounceTime: 60_000 });
+    (manager as unknown as { save: (project: Project) => Promise<void> }).save = save;
+
+    manager.start(() => project);
+    expect(save).toHaveBeenCalledTimes(1);
+
+    project = makeProject({ modifiedAt: 2 });
+    manager.markDirty();
+    resolveFirstSave();
+
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+    expect(save.mock.calls[1]?.[0].modifiedAt).toBe(2);
+    manager.destroy();
+  });
+
+  it("requests backend synchronization on every autosave interval", async () => {
+    vi.useFakeTimers();
+    const project = makeProject({ id: "vintage-tokyo" });
+    const manager = new AutoSaveManager({ interval: 1_000 });
+    const save = vi.fn().mockResolvedValue(undefined);
+    const syncRequested = vi.fn();
+    (manager as unknown as { save: (project: Project) => Promise<void> }).save = save;
+    manager.on("syncRequested", syncRequested);
+
+    manager.start(() => project);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(syncRequested).toHaveBeenCalledWith({ project });
+    manager.destroy();
+  });
+});
 
 describe("sanitizeForAutoSave", () => {
   it("generates a durable data URL for an image thumbnail", async () => {
