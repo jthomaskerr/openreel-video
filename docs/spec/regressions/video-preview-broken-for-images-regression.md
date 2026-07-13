@@ -1,5 +1,7 @@
 # Image Preview and Video Thumbnail Regression
 
+**Canonical functional specs:** [Media Assets](../media-assets.md) and [Timeline](../timeline.md).
+
 **Status:** Implemented and verified.
 
 ## Outcome

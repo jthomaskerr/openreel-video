@@ -1,5 +1,7 @@
 # Timeline and Media Thumbnail Regression
 
+**Canonical functional specs:** [Media Assets](../media-assets.md), [Timeline](../timeline.md), and [Project Lifecycle and Persistence](../project.md).
+
 **Status:** Open. The hydration path succeeds in headless Chrome but the reported
 failure persists in Orion; browser-specific diagnostics are required.
 

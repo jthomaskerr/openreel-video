@@ -1,5 +1,7 @@
 # Backend Outage Must Not Mark Media Missing
 
+**Canonical functional specs:** [Media Assets](../media-assets.md), [Project Lifecycle and Persistence](../project.md), and [Problems, Errors & Logging](../problems-errors-logging.md).
+
 **Status:** Open design and implementation regression.
 
 ## Outcome

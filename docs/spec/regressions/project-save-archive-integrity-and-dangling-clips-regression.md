@@ -1,5 +1,7 @@
 # Project-save regression: archive integrity, truthful commits, and dangling clips
 
+**Canonical functional specs:** [Project Lifecycle and Persistence](../project.md), [Media Assets](../media-assets.md), and [Timeline](../timeline.md).
+
 ## Status and scope
 
 **Status:** Reproduced from the `vintage-tokyo` repository and current source. Specification only. No product code or project data was changed during this investigation.

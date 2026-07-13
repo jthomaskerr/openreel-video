@@ -1,5 +1,7 @@
 # Project-save regression: referenced media missing from backend storage
 
+**Canonical functional specs:** [Project Lifecycle and Persistence](../project.md) and [Media Assets](../media-assets.md).
+
 ## Status and scope
 
 **Status:** Specification only. Do not treat this document as evidence that the

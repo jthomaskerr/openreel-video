@@ -1,5 +1,7 @@
 # Timeline Clip Placement and Context Menu Regression
 
+**Canonical functional spec:** [Timeline](../timeline.md).
+
 **Status:** Open regression contract.
 
 **Outcome:** Media enters the selected timeline track at the user's intended time, and timeline context menus open at the pointer that invoked them.

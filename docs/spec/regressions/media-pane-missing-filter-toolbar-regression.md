@@ -1,5 +1,7 @@
 # Media Pane Missing-Filter and Toolbar Regression
 
+**Canonical functional spec:** [Media Assets](../media-assets.md).
+
 **Status:** Reproduced from source; implementation pending.
 
 **Scope:** Media-pane missing-only filtering, final missing-asset replacement, and pane-level toolbar layout.
