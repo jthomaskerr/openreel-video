@@ -37,6 +37,11 @@ export interface GitCommitTransaction {
   expectedEntries: readonly GitStagedNameStatusEntry[];
 }
 
+export interface GitProjectTransaction {
+  readonly commit: (message: string, transaction: GitCommitTransaction) => Promise<GitCommitReceipt>;
+  readonly unstage: (paths: readonly string[]) => Promise<void>;
+}
+
 function isAbsoluteLike(pathname: string): boolean {
   return (
     isAbsolute(pathname) ||
@@ -469,6 +474,23 @@ export class GitStore {
   async commit(projectId: string, message: string, transaction: GitCommitTransaction): Promise<GitCommitReceipt> {
     assertValidProjectId(projectId);
     return this.#withLock(projectId, () => this.#commitInner(projectId, message, transaction));
+  }
+
+  /** Holds the same project lock used by every Git mutation and supplies non-reentrant operations. */
+  async withProjectTransaction<T>(
+    projectId: string,
+    operation: (transaction: GitProjectTransaction) => Promise<T>,
+  ): Promise<T> {
+    assertValidProjectId(projectId);
+    return this.#withLock(projectId, () => operation({
+      commit: (message, transaction) => this.#commitInner(projectId, message, transaction),
+      unstage: async (paths) => {
+        const normalized = normalizeCommitPaths(paths);
+        if (normalized.length > 0) {
+          await this.git(["reset", "--", ...normalized], this.worktreePath(projectId));
+        }
+      },
+    }));
   }
 
   /**

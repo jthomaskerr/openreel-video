@@ -4,6 +4,7 @@ import { join, extname, basename } from "node:path";
 import crypto from "node:crypto";
 import type { Project, ProjectSettings } from "@openreel/core";
 import type { GitStore } from "./git-store";
+import { recoverInterruptedSave } from "./save-transaction";
 import type { LfsRemoteObjectCheck } from "./lfs-integrity";
 import {
   auditProjectMediaManifest,
@@ -112,6 +113,7 @@ export class ProjectStore {
       await Promise.all(
         dirs.map(async (dir) => {
           if (!isValidProjectId(dir.name)) return null;
+          await recoverInterruptedSave(this, this.gitStore, dir.name);
           const jsonPath = join(this.gitStore["repoDir"], dir.name, "project.json");
           try {
             const raw = await readFile(jsonPath, "utf-8");
@@ -134,6 +136,7 @@ export class ProjectStore {
 
   async loadProject(id: string): Promise<Project | null> {
     assertValidProjectId(id);
+    await recoverInterruptedSave(this, this.gitStore, id);
     const path = this.projectJsonPath(id);
     if (!existsSync(path)) return null;
     try {

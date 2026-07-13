@@ -6,17 +6,15 @@ import { extname } from "node:path";
 import type {
   ProjectSettings,
   Project,
-  ProjectSaveLfsPayloadVerification,
-  ProjectSaveReceipt,
+  ProjectSaveRequest,
 } from "@openreel/core";
 import { ProjectStore } from "./project-store";
 import {
   GitStore,
-  type GitCommitReceipt,
   type GitCommitTransaction,
   type GitStagedNameStatusEntry,
 } from "./git-store";
-import { deterministicCommitMessage, semanticProjectChanges } from "./semantic-commit";
+import { executeSaveTransaction, SaveTransactionError } from "./save-transaction";
 import {
   assertValidMediaFilename,
   assertValidMediaId,
@@ -43,28 +41,6 @@ function commitTransaction(
   return {
     allowlist,
     expectedEntries,
-  };
-}
-
-function projectSaveReceipt(
-  projectId: string,
-  sourceModifiedAt: number,
-  receipt: GitCommitReceipt | null,
-  persistedAt: number | null,
-  committed: boolean,
-  lfsPayloads: readonly ProjectSaveLfsPayloadVerification[],
-): ProjectSaveReceipt {
-  return {
-    saved: true,
-    projectId,
-    persistedAt,
-    sourceModifiedAt,
-    commitSha: receipt?.commitSha ?? null,
-    treeSha: receipt?.treeSha ?? null,
-    projectBlobSha: receipt?.projectBlobSha ?? null,
-    mediaManifestDigest: receipt?.mediaManifestDigest ?? null,
-    lfsPayloads,
-    committed,
   };
 }
 
@@ -269,13 +245,16 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
     }
   });
 
-  // PUT /api/projects/:id — upsert project.json + git commit
+  // PUT /api/projects/:id — atomically audit, conflict-check, stage and commit a snapshot
   router.put("/:id", async (req: Request, res: Response) => {
     if (rejectInvalidProjectId(req, res)) return;
     try {
-      const incoming = req.body as Project;
-      if (!incoming?.id || incoming.id !== req.params.id || !incoming.name?.trim()) {
-        res.status(400).json({ error: "Invalid project payload" });
+      const request = req.body as ProjectSaveRequest;
+      const incoming = request?.project as Project | undefined;
+      if (!request?.baseRevision || !incoming?.id || request.projectId !== req.params.id
+        || incoming.id !== req.params.id || !incoming.name?.trim()
+        || !Array.isArray(request.requiredMediaManifest)) {
+        res.status(400).json({ error: "Invalid project save request" });
         return;
       }
 
@@ -284,57 +263,24 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         return;
       }
 
-      const prev = await store.loadProject(req.params.id);
       console.info("[Persistence] PUT validated", {
         projectId: req.params.id,
         modifiedAt: incoming.modifiedAt,
         mediaItems: incoming.mediaLibrary.items.length,
         tracks: incoming.timeline.tracks.length,
       });
-      const saved = await store.saveProject(incoming);
-      const semanticChanges = semanticProjectChanges(prev, saved);
-      if (semanticChanges.length === 0) {
-        const confirmed = await gitStore.readConfirmedReceipt(req.params.id);
-        const audit = await store.auditSnapshot(saved);
-        console.info("[Persistence] project.json written without commit; modifiedAt-only change remains pending", {
-          projectId: req.params.id,
-          modifiedAt: incoming.modifiedAt,
-        });
-        res.json(
-          projectSaveReceipt(
-            req.params.id,
-            incoming.modifiedAt,
-            confirmed,
-            null,
-            false,
-            audit.lfsPayloads,
-          ),
-        );
+      const receipt = await executeSaveTransaction(store, gitStore, request);
+      console.info("[Persistence] Git commit confirmed", {
+        projectId: req.params.id,
+        persistedAt: receipt.persistedAt,
+        commitSha: receipt.commitSha,
+      });
+      res.json(receipt);
+    } catch (err) {
+      if (err instanceof SaveTransactionError) {
+        res.status(err.status).json(err.body);
         return;
       }
-      console.info("[Persistence] project.json written; committing", { projectId: req.params.id });
-      const receipt = await gitStore.commit(
-        req.params.id,
-        deterministicCommitMessage(
-          semanticChanges,
-          [stagedEntry("M", "project.json")],
-        ),
-        commitTransaction(["project.json"], [stagedEntry("M", "project.json")]),
-      );
-      const audit = await store.auditSnapshot(saved);
-      const persistedAt = Date.now();
-      console.info("[Persistence] Git commit confirmed", { projectId: req.params.id, persistedAt, commitSha: receipt.commitSha });
-      res.json(
-        projectSaveReceipt(
-          req.params.id,
-          incoming.modifiedAt,
-          receipt,
-          persistedAt,
-          true,
-          audit.lfsPayloads,
-        ),
-      );
-    } catch (err) {
       console.error("[PUT /api/projects/:id] save failed:", err);
       res.status(500).json({ error: "Failed to save project", detail: String(err) });
     }

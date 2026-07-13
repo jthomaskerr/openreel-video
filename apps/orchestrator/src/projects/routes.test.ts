@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import express, { type Response } from "express";
-import type { Project } from "@openreel/core";
+import type { Project, ProjectSaveRequest } from "@openreel/core";
 import { createProjectRouter, handleMediaSendError } from "./routes";
 import type { GitCommitReceipt, GitStore } from "./git-store";
 import type { ProjectStore } from "./project-store";
-import type { ProjectMediaManifestSnapshot } from "./media-manifest";
+import { ProjectMediaManifestAuditError, type ProjectMediaManifestSnapshot } from "./media-manifest";
 
 const verifiedLfsPayload = {
   mediaId: "media-1",
@@ -58,6 +61,21 @@ function commitReceipt(overrides: Partial<GitCommitReceipt> = {}): GitCommitRece
   };
 }
 
+function saveRequest(project: Project, receipt = commitReceipt()): ProjectSaveRequest {
+  assert.ok(receipt.commitSha && receipt.treeSha && receipt.projectBlobSha);
+  return {
+    projectId: project.id,
+    project,
+    requiredMediaManifest: [],
+    baseRevision: {
+      commitSha: receipt.commitSha,
+      treeSha: receipt.treeSha,
+      projectBlobSha: receipt.projectBlobSha,
+      sourceModifiedAt: project.modifiedAt - 1,
+    },
+  };
+}
+
 test("media send errors do not write a second response after headers are sent", () => {
   let statusCalls = 0;
   let jsonCalls = 0;
@@ -101,10 +119,20 @@ test("media send errors return 404 before headers are sent", () => {
 });
 
 async function withProjectRouter(
-  store: Partial<ProjectStore>,
+  store: Partial<ProjectStore> & { testInitialProject?: Project },
   gitStore: Partial<GitStore>,
   run: (baseUrl: string) => Promise<void>,
 ): Promise<void> {
+  const tempRoot = await mkdtemp(join(tmpdir(), "openreel-routes-"));
+  if (store.testInitialProject) {
+    await writeFile(join(tempRoot, "project.json"), JSON.stringify(store.testInitialProject, null, 2));
+  }
+  store.projectDir ??= () => tempRoot;
+  gitStore.readConfirmedReceipt ??= async () => commitReceipt();
+  gitStore.withProjectTransaction ??= async (projectId, operation) => operation({
+    commit: (message, transaction) => gitStore.commit!(projectId, message, transaction),
+    unstage: async () => undefined,
+  });
   const app = express();
   app.use(express.json());
   app.use(
@@ -122,6 +150,7 @@ async function withProjectRouter(
     await new Promise<void>((resolve, reject) => {
       server.close((err) => (err ? reject(err) : resolve()));
     });
+    await rm(tempRoot, { recursive: true, force: true });
   }
 }
 
@@ -180,7 +209,7 @@ test("UUID PUT autosaves are rejected before any project worktree is touched", a
     const response = await fetch(`${baseUrl}/api/projects/${uuid}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(projectFixture(uuid, "Vintage Tokyo")),
+      body: JSON.stringify(saveRequest(projectFixture(uuid, "Vintage Tokyo"))),
     });
 
     assert.equal(response.status, 400);
@@ -201,7 +230,8 @@ test("PUT confirms persistence only after the Git commit succeeds", async () => 
     projectBlobSha: "cccccccccccccccccccccccccccccccccccccccc",
     mediaManifestDigest: "sha256:semantic-diff",
   });
-  const store: Partial<ProjectStore> = {
+  const store: Partial<ProjectStore> & { testInitialProject?: Project } = {
+    testInitialProject: previous,
     loadProject: async () => previous,
     saveProject: async (incoming: Project) => incoming,
     auditSnapshot: async () => auditReceipt(),
@@ -219,7 +249,7 @@ test("PUT confirms persistence only after the Git commit succeeds", async () => 
     const response = await fetch(`${baseUrl}/api/projects/vintage-tokyo`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(project),
+      body: JSON.stringify(saveRequest(project)),
     });
     const responseReceipt = await response.json();
 
@@ -229,7 +259,7 @@ test("PUT confirms persistence only after the Git commit succeeds", async () => 
     assert.equal(responseReceipt.commitSha, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     assert.equal(responseReceipt.treeSha, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
     assert.equal(responseReceipt.projectBlobSha, "cccccccccccccccccccccccccccccccccccccccc");
-    assert.equal(responseReceipt.mediaManifestDigest, "sha256:semantic-diff");
+    assert.equal(responseReceipt.mediaManifestDigest, "sha256:manifest-digest");
     assert.deepEqual(responseReceipt.lfsPayloads, [verifiedLfsPayload]);
     assert.match(
       commitMessage,
@@ -240,7 +270,7 @@ test("PUT confirms persistence only after the Git commit succeeds", async () => 
 });
 
 
-test("PUT writes modifiedAt-only changes without creating a Git commit", async () => {
+test("PUT commits modifiedAt-only changes so authoritative JSON never remains ahead of HEAD", async () => {
   const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");
   const incoming = { ...previous, modifiedAt: previous.modifiedAt + 1 };
   let commits = 0;
@@ -250,7 +280,8 @@ test("PUT writes modifiedAt-only changes without creating a Git commit", async (
     projectBlobSha: "ffffffffffffffffffffffffffffffffffffffff",
     mediaManifestDigest: "sha256:confirmed-diff",
   });
-  const store: Partial<ProjectStore> = {
+  const store: Partial<ProjectStore> & { testInitialProject?: Project } = {
+    testInitialProject: previous,
     loadProject: async () => previous,
     saveProject: async (project: Project) => project,
     auditSnapshot: async () => auditReceipt(),
@@ -267,20 +298,20 @@ test("PUT writes modifiedAt-only changes without creating a Git commit", async (
     const response = await fetch(`${baseUrl}/api/projects/vintage-tokyo`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(incoming),
+      body: JSON.stringify(saveRequest(incoming, deferredReceipt)),
     });
     const receipt = await response.json();
 
     assert.equal(response.status, 200);
-    assert.equal(commits, 0);
+    assert.equal(commits, 1);
     assert.equal(receipt.saved, true);
-    assert.equal(receipt.committed, false);
+    assert.equal(receipt.committed, true);
     assert.equal(receipt.commitSha, "dddddddddddddddddddddddddddddddddddddddd");
     assert.equal(receipt.treeSha, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
     assert.equal(receipt.projectBlobSha, "ffffffffffffffffffffffffffffffffffffffff");
-    assert.equal(receipt.mediaManifestDigest, "sha256:confirmed-diff");
+    assert.equal(receipt.mediaManifestDigest, "sha256:manifest-digest");
     assert.deepEqual(receipt.lfsPayloads, [verifiedLfsPayload]);
-    assert.equal(receipt.persistedAt, null);
+    assert.equal(typeof receipt.persistedAt, "number");
     assert.equal(receipt.sourceModifiedAt, incoming.modifiedAt);
   });
 });
@@ -288,11 +319,14 @@ test("PUT writes modifiedAt-only changes without creating a Git commit", async (
 test("PUT exposes Git commit failures instead of returning a false success", async () => {
   const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");
   const project = { ...previous, name: "Vintage Tokyo Revised", modifiedAt: previous.modifiedAt + 1 };
-  const store: Partial<ProjectStore> = {
+  const store: Partial<ProjectStore> & { testInitialProject?: Project } = {
+    testInitialProject: previous,
     loadProject: async () => previous,
     saveProject: async (incoming: Project) => incoming,
+    auditSnapshot: async () => auditReceipt(),
   };
   const gitStore: Partial<GitStore> = {
+    readConfirmedReceipt: async () => commitReceipt(),
     commit: async (_projectId: string, _message: string, _transaction?: unknown) => {
       throw new Error("git index is locked");
     },
@@ -302,11 +336,62 @@ test("PUT exposes Git commit failures instead of returning a false success", asy
     const response = await fetch(`${baseUrl}/api/projects/vintage-tokyo`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(project),
+      body: JSON.stringify(saveRequest(project)),
     });
     const responseBody = await response.json();
 
     assert.equal(response.status, 500);
     assert.match(responseBody.detail, /git index is locked/);
+  });
+});
+
+test("PUT maps stale base revisions to a structured PROJECT_CONFLICT 409", async () => {
+  const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");
+  const confirmed = commitReceipt();
+  const store: Partial<ProjectStore> & { testInitialProject?: Project } = {
+    testInitialProject: previous,
+    loadProject: async () => previous,
+  };
+  const gitStore: Partial<GitStore> = { readConfirmedReceipt: async () => confirmed };
+
+  await withProjectRouter(store, gitStore, async (baseUrl) => {
+    const valid = saveRequest({ ...previous, name: "Stale", modifiedAt: 3 });
+    const submitted: ProjectSaveRequest = {
+      ...valid,
+      baseRevision: { ...valid.baseRevision, commitSha: "0".repeat(40) },
+    };
+    const response = await fetch(`${baseUrl}/api/projects/vintage-tokyo`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(submitted),
+    });
+    const body = await response.json();
+    assert.equal(response.status, 409);
+    assert.equal(body.code, "PROJECT_CONFLICT");
+    assert.equal(body.submittedBaseRevision.commitSha, "0".repeat(40));
+    assert.equal(body.currentBaseRevision.commitSha, confirmed.commitSha);
+  });
+});
+
+test("PUT maps absent originals to a structured MEDIA_INCOMPLETE 409", async () => {
+  const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");
+  const missing = { mediaId: "media-1", semanticFilename: "Interview.mp4", relativePhysicalPath: "media/Interview.mp4", expectedByteSize: 42, actualFilename: null };
+  const store: Partial<ProjectStore> & { testInitialProject?: Project } = {
+    testInitialProject: previous,
+    loadProject: async () => previous,
+    auditSnapshot: async () => { throw new ProjectMediaManifestAuditError({ ...auditReceipt(), missingEntries: [missing] }); },
+  };
+  const gitStore: Partial<GitStore> = { readConfirmedReceipt: async () => commitReceipt() };
+
+  await withProjectRouter(store, gitStore, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/projects/vintage-tokyo`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(saveRequest({ ...previous, name: "Missing", modifiedAt: 3 })),
+    });
+    const body = await response.json();
+    assert.equal(response.status, 409);
+    assert.equal(body.code, "MEDIA_INCOMPLETE");
+    assert.deepEqual(body.missingItems, [{ mediaId: "media-1", semanticFilename: "Interview.mp4", relativePhysicalPath: "media/Interview.mp4", expectedByteSize: 42 }]);
   });
 });
