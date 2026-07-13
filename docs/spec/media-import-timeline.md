@@ -35,15 +35,53 @@ The timeline supports the following track types, each with a distinct role:
 | `video` | Video clips, including storyboard-specialized scene clips |
 | `audio` | Audio clips (imported audio, generated audio) |
 | `image` | Still image clips (generated images, reference images) |
+| `text` | Text clips |
+| `graphics` | Shape, SVG, and sticker clips |
 | `metadata` | Non-playback metadata clips (characters, sections, styles/LoRAs, music-video workflow) |
+| `subtitle` | Timed subtitle clips and imported SRT media |
 
-### 2.2 Metadata Track Layout
+### 2.2 New Track Dropdown
+
+The timeline's new-track dropdown MUST expose Video Track, Audio Track, Image Track, Text Track, Graphics Track, Metadata Track, Subtitle Track, and Scene Track.
+
+Scene Track is a user-facing specialization of a `video` track, not a new serialized `Track.type`. Creating one MUST create a video track named "Scene Track" and mark clips created through its scene workflow with `metadata.kind === "storyboard-shot"`. This preserves compatibility with playback, persistence, grouping, and the storyboard inspector.
+
+### 2.3 Empty-Space Context Menu
+
+Right-clicking empty space inside a track row MUST open a context menu anchored at the pointer's viewport coordinates. The click determines both the target track and an exact timeline time derived from the pointer's horizontal position. The menu MUST contain:
+
+- Add `<clip type>` for every clip type valid on the target track, as defined below;
+- Paste at Clicked Time, enabled only when the clipboard contains a compatible clip;
+- Select All Clips on Track;
+- Add Track, opening the same new-track choices as the new-track dropdown;
+- Rename Track, Duplicate Track, and Delete Track.
+
+Commands that create or paste a clip MUST use the clicked timeline time as `startTime`; they MUST NOT silently append to the end or substitute the playhead time. Delete Track MUST use the standard destructive-action confirmation when the track is non-empty. Locked tracks MUST disable all mutating commands.
+
+| Target track | Valid Add commands |
+|---|---|
+| `video` | Add Video Clip; Add Image Clip |
+| Scene Track (`video` specialization) | Add Scene Clip; Add Video Clip; Add Image Clip |
+| `audio` | Add Audio Clip |
+| `image` | Add Image Clip |
+| `text` | Add Text Clip |
+| `graphics` | Add Shape Clip; Add SVG Clip; Add Sticker Clip |
+| `metadata` | Add Metadata Clip |
+| `subtitle` | Add Subtitle Clip |
+
+An Add command that needs source media MUST open the appropriate media picker filtered to compatible media, then insert the chosen media at the captured clicked time. Commands for source-free types MUST create a default editable clip at that time.
+
+### 2.4 Clip Context Menu Placement
+
+Right-clicking a timeline clip MUST open its context menu at the pointer's viewport coordinates, clamped only as needed to keep the full menu within the visible viewport. The menu MUST be positioned from the context-menu event that opened it, not from the clip's origin, selection rectangle, timeline container, playhead, or a stale previous click. Pointer coordinates MUST remain correct when the timeline is horizontally scrolled, vertically scrolled, or zoomed.
+
+### 2.5 Metadata Track Layout
 
 Metadata tracks MUST reuse the same visual layout as audio and video tracks. They share the same row height, clip rendering primitives, and timeline interaction model (selection, drag, trim). The only difference is that metadata clips do not contribute to playback output.
 
 > **Rationale:** User directives require metadata tracks to look and behave like other tracks, not as a separate UI surface. See implications report: "Metadata tracks should be rendered with the same layout as audio/video tracks."
 
-### 2.3 Track Grouping
+### 2.6 Track Grouping
 
 Tracks are organized into logical groups for the timeline UI. Grouping is derived from track content and clip metadata — it is view state only and MUST NOT mutate timeline `Track` data or project serialization.
 
