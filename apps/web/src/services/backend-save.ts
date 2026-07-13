@@ -424,6 +424,14 @@ class BackendSaveService {
             const mediaRes = await fetch(remoteUrl);
             if (!mediaRes.ok) throw new Error(`HTTP ${mediaRes.status}`);
             blob = await mediaRes.blob();
+            console.info("[BackendSave] media downloaded for hydration", {
+              projectId,
+              mediaId: item.id,
+              mediaType: item.type,
+              contentType: blob.type,
+              byteLength: blob.size,
+              hadThumbnail: Boolean(item.thumbnailUrl),
+            });
           } catch (err) {
             console.error(`[BackendSave] media download failed (${item.id}):`, err);
           }
@@ -439,8 +447,21 @@ class BackendSaveService {
               ? await generateThumbnailFromBlob(blob, item.type)
               : await generateThumbnailFromUrl(remoteUrl, item.type);
             if (thumbnailUrl) {
+              console.info("[BackendSave] thumbnail hydration succeeded", {
+                projectId,
+                mediaId: item.id,
+                mediaType: item.type,
+                thumbnailKind: thumbnailUrl.startsWith("data:") ? "data" : thumbnailUrl.startsWith("blob:") ? "blob" : "remote",
+              });
               return { ...itemWithMedia, thumbnailUrl };
             }
+            console.warn("[BackendSave] thumbnail hydration returned no thumbnail", {
+              projectId,
+              mediaId: item.id,
+              mediaType: item.type,
+              contentType: blob?.type ?? null,
+              byteLength: blob?.size ?? null,
+            });
           } catch (err) {
             console.warn(`[BackendSave] thumbnail regeneration failed (${item.id}):`, err);
           }

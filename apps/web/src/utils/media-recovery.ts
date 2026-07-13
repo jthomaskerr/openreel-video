@@ -31,8 +31,23 @@ function generateVideoThumbnailFromSource(
 ): Promise<string | null> {
   return new Promise((resolve) => {
     const video = document.createElement("video");
+    const sourceKind = src.startsWith("blob:") ? "blob" : src.startsWith("data:") ? "data" : "remote";
+    const startedAt = performance.now();
     let settled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    const snapshot = () => ({
+      sourceKind,
+      readyState: video.readyState,
+      networkState: video.networkState,
+      duration: video.duration,
+      currentTime: video.currentTime,
+      videoWidth: video.videoWidth,
+      videoHeight: video.videoHeight,
+      mediaErrorCode: video.error?.code ?? null,
+      mediaErrorMessage: video.error?.message ?? null,
+      elapsedMs: Math.round(performance.now() - startedAt),
+    });
 
     const cleanup = () => {
       if (timeoutId) clearTimeout(timeoutId);
@@ -40,9 +55,15 @@ function generateVideoThumbnailFromSource(
       video.remove();
     };
 
-    const finish = (thumbnailUrl: string | null) => {
+    const finish = (thumbnailUrl: string | null, outcome: string, error?: unknown) => {
       if (settled) return;
       settled = true;
+      const details = { outcome, ...snapshot(), error };
+      if (thumbnailUrl) {
+        console.info("[ThumbnailRecovery] video thumbnail generated", details);
+      } else {
+        console.warn("[ThumbnailRecovery] video thumbnail unavailable", details);
+      }
       cleanup();
       resolve(thumbnailUrl);
     };
@@ -60,7 +81,7 @@ function generateVideoThumbnailFromSource(
 
         const ctx = canvas.getContext("2d");
         if (!ctx) {
-          finish(null);
+          finish(null, "canvas-context-unavailable");
           return;
         }
 
@@ -68,16 +89,18 @@ function generateVideoThumbnailFromSource(
         canvas.toBlob(
           (thumbBlob) => {
             if (!thumbBlob) {
-              finish(null);
+              finish(null, "canvas-to-blob-null");
               return;
             }
-            void blobToDataUrl(thumbBlob).then(finish).catch(() => finish(null));
+            void blobToDataUrl(thumbBlob)
+              .then((url) => finish(url, "success"))
+              .catch((error) => finish(null, "blob-to-data-url-failed", error));
           },
           "image/jpeg",
           0.7,
         );
-      } catch {
-        finish(null);
+      } catch (error) {
+        finish(null, "canvas-capture-failed", error);
       }
     };
 
@@ -89,6 +112,7 @@ function generateVideoThumbnailFromSource(
     }
 
     video.onloadeddata = () => {
+      console.info("[ThumbnailRecovery] video loaded data", snapshot());
       try {
         const seekTime = Number.isFinite(video.duration) && video.duration > 0
           ? Math.min(0.1, video.duration / 2)
@@ -98,15 +122,27 @@ function generateVideoThumbnailFromSource(
         } else {
           capture();
         }
-      } catch {
+      } catch (error) {
+        console.warn("[ThumbnailRecovery] video seek failed; capturing current frame", {
+          ...snapshot(),
+          error,
+        });
         capture();
       }
     };
 
-    video.onseeked = capture;
-    video.onerror = () => finish(null);
+    video.onseeked = () => {
+      console.info("[ThumbnailRecovery] video seeked", snapshot());
+      capture();
+    };
+    video.onerror = () => finish(null, "media-error");
 
-    timeoutId = setTimeout(() => finish(null), 5000);
+    console.info("[ThumbnailRecovery] video thumbnail requested", {
+      sourceKind,
+      crossOrigin,
+      userAgent: navigator.userAgent,
+    });
+    timeoutId = setTimeout(() => finish(null, "timeout"), 5000);
     video.src = src;
   });
 }

@@ -1,10 +1,12 @@
 # Timeline and Media Thumbnail Regression
 
-**Status:** Fixed in `da923b3`; verified against `vintage-tokyo` on 13 July 2026.
+**Status:** Open. The hydration path succeeds in headless Chrome but the reported
+failure persists in Orion; browser-specific diagnostics are required.
 
-**Outcome:** Videos loaded from backend persistence display a regenerated thumbnail
-in the Media pane and a repeated thumbnail in each timeline clip. Current-session
-object URLs remain renderable, but page-scoped object URLs are never persisted.
+**Required outcome:** Videos loaded from backend persistence display a regenerated
+thumbnail in the Media pane and a repeated thumbnail in each timeline clip across
+supported browsers, including Orion. Current-session object URLs remain renderable,
+but page-scoped object URLs are never persisted.
 
 ## Reported symptom
 
@@ -92,7 +94,10 @@ Observed after opening `Vintage Tokyo` from the Projects dialog:
 - 11 timeline elements had `data:image/jpeg` background images;
 - no video card used a broken image source.
 
-This verifies the exact reported surfaces, not only project load or unit tests.
+This verifies the implementation in Chrome only. It does not close the regression:
+the same project still fails in Orion. Compare Orion's `[ThumbnailRecovery]` and
+`[BackendSave]` diagnostics with the Chrome sequence to identify whether the failure
+occurs during download, metadata/decode, seek, canvas capture, or rendering.
 
 ## Important failure modes
 
