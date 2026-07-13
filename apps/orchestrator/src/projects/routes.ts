@@ -55,6 +55,11 @@ function rejectInvalidMediaFilename(req: Request, res: Response): boolean {
   }
 }
 
+export function handleMediaSendError(res: Response, err?: Error): void {
+  if (!err || res.headersSent) return;
+  res.status(404).json({ error: "Media file not found" });
+}
+
 // ── Router factory ───────────────────────────────────────────────────────────
 
 export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Router {
@@ -329,7 +334,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
     const mediaDir = store.mediaDir(req.params.id);
     const filePath = resolveContainedPath(mediaDir, req.params.filename);
     res.sendFile(filePath, (err) => {
-      if (err) res.status(404).json({ error: "Media file not found" });
+      handleMediaSendError(res, err);
     });
   });
 

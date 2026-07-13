@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import express from "express";
+import express, { type Response } from "express";
 import type { Project } from "@openreel/core";
-import { createProjectRouter } from "./routes";
+import { createProjectRouter, handleMediaSendError } from "./routes";
 import type { GitStore } from "./git-store";
 import type { ProjectStore } from "./project-store";
 
@@ -23,6 +23,48 @@ function projectFixture(id: string, name: string): Project {
     timeline: { tracks: [], subtitles: [], markers: [], duration: 0 },
   };
 }
+
+test("media send errors do not write a second response after headers are sent", () => {
+  let statusCalls = 0;
+  let jsonCalls = 0;
+  const response = {
+    headersSent: true,
+    status: () => {
+      statusCalls += 1;
+      return response;
+    },
+    json: () => {
+      jsonCalls += 1;
+      return response;
+    },
+  } as unknown as Response;
+
+  handleMediaSendError(response, new Error("request aborted"));
+
+  assert.equal(statusCalls, 0);
+  assert.equal(jsonCalls, 0);
+});
+
+test("media send errors return 404 before headers are sent", () => {
+  let statusCode: number | undefined;
+  let body: unknown;
+  const response = {
+    headersSent: false,
+    status: (code: number) => {
+      statusCode = code;
+      return response;
+    },
+    json: (value: unknown) => {
+      body = value;
+      return response;
+    },
+  } as unknown as Response;
+
+  handleMediaSendError(response, new Error("missing file"));
+
+  assert.equal(statusCode, 404);
+  assert.deepEqual(body, { error: "Media file not found" });
+});
 
 async function withProjectRouter(
   store: Partial<ProjectStore>,
