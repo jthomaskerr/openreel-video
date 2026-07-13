@@ -39,6 +39,7 @@ export interface GitCommitTransaction {
 
 export interface GitProjectTransaction {
   readonly commit: (message: string, transaction: GitCommitTransaction) => Promise<GitCommitReceipt>;
+  readonly stage: (paths: readonly string[]) => Promise<void>;
   readonly unstage: (paths: readonly string[]) => Promise<void>;
 }
 
@@ -484,6 +485,12 @@ export class GitStore {
     assertValidProjectId(projectId);
     return this.#withLock(projectId, () => operation({
       commit: (message, transaction) => this.#commitInner(projectId, message, transaction),
+      stage: async (paths) => {
+        const normalized = normalizeCommitPaths(paths);
+        if (normalized.length > 0) {
+          await this.git(["add", "-A", "--", ...normalized], this.worktreePath(projectId));
+        }
+      },
       unstage: async (paths) => {
         const normalized = normalizeCommitPaths(paths);
         if (normalized.length > 0) {

@@ -1,5 +1,5 @@
 import crypto, { createHash } from "node:crypto";
-import { open, readFile, rename, rm } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
   Project,
@@ -15,6 +15,8 @@ import type { GitCommitReceipt, GitProjectTransaction, GitStore } from "./git-st
 import { ProjectMediaManifestAuditError } from "./media-manifest";
 import type { ProjectStore } from "./project-store";
 import { deterministicCommitMessage, semanticProjectChanges } from "./semantic-commit";
+import { allocateMediaFilename } from "./media-filename";
+import { listPendingMedia, type PendingMediaEntry } from "./pending-media";
 import {
   assessDestructiveChange,
   authorizeDestructiveChange,
@@ -53,6 +55,15 @@ interface SaveJournal {
   readonly proposedBytes: string;
   readonly stagedPath: string;
   readonly restorePath: string;
+  readonly pendingMoves?: readonly PendingMediaMove[];
+}
+
+interface PendingMediaMove {
+  readonly mediaId: string;
+  readonly pendingContentPath: string;
+  readonly pendingEntryDirectory: string;
+  readonly mediaPath: string;
+  readonly relativeMediaPath: string;
 }
 
 export class SimulatedSaveProcessCrash extends Error {}
@@ -113,11 +124,20 @@ async function recoverUnderLock(
   const currentCommit = receipt?.commitSha;
   const committedTarget = receipt?.projectBlobSha === journal.targetProjectBlobSha;
   const projectPath = join(store.projectDir(projectId), "project.json");
-  await transaction.unstage(["project.json"]);
+  await transaction.unstage(["project.json", ...(journal.pendingMoves ?? []).map((move) => move.relativeMediaPath)]);
   if (currentCommit === journal.baseCommitSha) {
     await replaceBytes(projectPath, journal.restorePath, Buffer.from(journal.previousBytes, "base64"));
+    for (const move of journal.pendingMoves ?? []) {
+      await mkdir(move.pendingEntryDirectory, { recursive: true });
+      await rename(move.mediaPath, move.pendingContentPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+      });
+    }
   } else if (committedTarget) {
     await replaceBytes(projectPath, journal.restorePath, Buffer.from(journal.proposedBytes, "base64"));
+    for (const move of journal.pendingMoves ?? []) {
+      await rm(move.pendingEntryDirectory, { recursive: true, force: true });
+    }
   } else {
     throw new Error(`Interrupted save for ${projectId} cannot be recovered against current HEAD ${currentCommit ?? "none"}`);
   }
@@ -181,7 +201,7 @@ export async function executeSaveTransaction(
   gitStore: GitStore,
   request: ProjectSaveRequest,
   options: SaveTransactionOptions = {},
-): Promise<ProjectSaveReceipt> {
+): Promise<ProjectSaveReceipt & { readonly project: Project }> {
   if (!request?.project || request.projectId !== request.project.id) {
     throw new TypeError("Project save request id does not match its snapshot");
   }
@@ -221,27 +241,61 @@ export async function executeSaveTransaction(
       });
     }
 
-    let audit;
-    try {
-      // Fail missing/invalid originals with the structured snapshot error before
-      // invoking LFS plumbing, which cannot inspect an absent worktree path.
-      await store.auditSnapshot(request.project as Project, { verifyLfs: false });
-      audit = await store.auditSnapshot(request.project as Project);
-    } catch (error) {
-      if (error instanceof ProjectMediaManifestAuditError) throw mediaIncomplete(request.projectId, error);
-      throw error;
-    }
-    if (serializeRequiredMediaManifest(request.requiredMediaManifest)
-      !== serializeRequiredMediaManifest(audit.requiredMediaManifest)) {
-      throw new Error("Submitted required media manifest does not match the audited snapshot manifest");
-    }
-
     const transactionId = crypto.randomUUID();
     const stagedPath = `${projectPath}.${transactionId}.save`;
     const restorePath = `${projectPath}.${transactionId}.restore`;
-    const proposed = request.project as Project;
+    const pendingEntries = await listPendingMedia(store.projectDir(request.projectId));
+    const pendingById = new Map(pendingEntries.map((entry) => [entry.mediaId, entry]));
+    const referencedPending = (request.project as Project).mediaLibrary.items
+      .filter((item) => pendingById.has(item.id));
+    const occupied = new Set<string>();
+    try {
+      for (const filename of await readdir(store.mediaDir(request.projectId))) occupied.add(filename);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    for (const item of (request.project as Project).mediaLibrary.items) {
+      if (!pendingById.has(item.id)) occupied.add(item.name);
+    }
+    const allocatedById = new Map<string, string>();
+    for (const item of referencedPending) {
+      const pending = pendingById.get(item.id)!;
+      if (item.metadata.fileSize !== pending.byteSize) {
+        throw new Error(`Pending media byte size does not match snapshot metadata for ${item.id}`);
+      }
+      const allocated = allocateMediaFilename(item.name || pending.originalFilename, occupied, {
+        caseSensitive: false,
+        unicodeNormalization: "NFC",
+      }).persistedBasename;
+      occupied.add(allocated);
+      allocatedById.set(item.id, allocated);
+    }
+    const proposed: Project = {
+      ...(request.project as Project),
+      mediaLibrary: {
+        ...(request.project as Project).mediaLibrary,
+        items: (request.project as Project).mediaLibrary.items.map((item) => {
+          const allocated = allocatedById.get(item.id);
+          return allocated ? { ...item, name: allocated } : item;
+        }),
+      },
+    };
+    const pendingMoves: PendingMediaMove[] = referencedPending.map((item) => {
+      const pending = pendingById.get(item.id) as PendingMediaEntry;
+      const filename = allocatedById.get(item.id)!;
+      return {
+        mediaId: item.id,
+        pendingContentPath: pending.contentPath,
+        pendingEntryDirectory: pending.entryDirectory,
+        mediaPath: join(store.mediaDir(request.projectId), filename),
+        relativeMediaPath: `media/${filename}`,
+      };
+    });
     const proposedBytes = Buffer.from(JSON.stringify(proposed, null, 2), "utf8");
-    const expectedEntries = options.expectedEntries ?? [{ status: "M", path: "project.json" }] as const;
+    const expectedEntries = options.expectedEntries ?? [
+      ...pendingMoves.map((move) => ({ status: "A", path: move.relativeMediaPath })),
+      { status: "M", path: "project.json" },
+    ] as const;
     const commit = options.commit
       ?? ((_projectId: string, message: string, transaction: Parameters<GitProjectTransaction["commit"]>[1]) =>
         gitTransaction.commit(message, transaction));
@@ -254,11 +308,32 @@ export async function executeSaveTransaction(
       proposedBytes: proposedBytes.toString("base64"),
       stagedPath,
       restorePath,
+      pendingMoves,
     };
     let simulatedCrash = false;
+    let audit;
 
     try {
       await durableWrite(journalPath(store, request.projectId), JSON.stringify(journal));
+      await mkdir(store.mediaDir(request.projectId), { recursive: true });
+      for (const move of pendingMoves) await rename(move.pendingContentPath, move.mediaPath);
+      try {
+        // Pending bytes become auditable only inside this locked transaction.
+        await store.auditSnapshot(proposed, { verifyLfs: false });
+        await gitTransaction.stage(pendingMoves.map((move) => move.relativeMediaPath));
+        audit = await store.auditSnapshot(proposed, { pointerSource: "index" });
+      } catch (error) {
+        if (error instanceof ProjectMediaManifestAuditError) throw mediaIncomplete(request.projectId, error);
+        throw error;
+      }
+      const canonicalSubmittedManifest = request.requiredMediaManifest.map((entry) => {
+        const filename = allocatedById.get(entry.mediaId);
+        return filename ? { ...entry, semanticFilename: filename, relativePhysicalPath: `media/${filename}` } : entry;
+      });
+      if (serializeRequiredMediaManifest(canonicalSubmittedManifest)
+        !== serializeRequiredMediaManifest(audit.requiredMediaManifest)) {
+        throw new Error("Submitted required media manifest does not match the audited snapshot manifest");
+      }
       await durableWrite(stagedPath, proposedBytes);
       await rename(stagedPath, projectPath);
       await syncDirectory(dirname(projectPath));
@@ -270,7 +345,7 @@ export async function executeSaveTransaction(
       const receipt = await commit(
         request.projectId,
         deterministicCommitMessage(semanticProjectChanges(currentProject, proposed), expectedEntries),
-        { allowlist: ["project.json"], expectedEntries },
+        { allowlist: ["project.json", ...pendingMoves.map((move) => move.relativeMediaPath)], expectedEntries },
       );
       assertReceipt(receipt);
       if (options.simulateCrashAt === "after-ref-update") {
@@ -278,6 +353,7 @@ export async function executeSaveTransaction(
         throw new SimulatedSaveProcessCrash("simulated crash after ref update");
       }
       await rm(journalPath(store, request.projectId), { force: true });
+      for (const move of pendingMoves) await rm(move.pendingEntryDirectory, { recursive: true, force: true });
       return {
         saved: true,
         committed: true,
@@ -289,10 +365,18 @@ export async function executeSaveTransaction(
         projectBlobSha: receipt.projectBlobSha,
         mediaManifestDigest: audit.mediaManifestDigest,
         lfsPayloads: audit.lfsPayloads,
+        project: proposed,
       };
     } catch (error) {
       if (simulatedCrash) throw error;
+      await gitTransaction.unstage(pendingMoves.map((move) => move.relativeMediaPath));
       await replaceBytes(projectPath, restorePath, previousBytes);
+      for (const move of pendingMoves) {
+        await mkdir(move.pendingEntryDirectory, { recursive: true });
+        await rename(move.mediaPath, move.pendingContentPath).catch((moveError: NodeJS.ErrnoException) => {
+          if (moveError.code !== "ENOENT") throw moveError;
+        });
+      }
       await rm(journalPath(store, request.projectId), { force: true });
       throw error;
     } finally {

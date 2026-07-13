@@ -1,8 +1,9 @@
 import { Router } from "express";
 import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
+import crypto from "node:crypto";
 import { mkdirSync } from "node:fs";
-import { extname } from "node:path";
+import { rm } from "node:fs/promises";
 import type {
   ProjectSettings,
   Project,
@@ -15,6 +16,14 @@ import {
   type GitStagedNameStatusEntry,
 } from "./git-store";
 import { executeSaveTransaction, SaveTransactionError } from "./save-transaction";
+import {
+  cleanupExpiredPendingMedia,
+  listPendingMedia,
+  MAX_PENDING_MEDIA_BYTES,
+  pendingUploadTempDirectory,
+  removePendingMedia,
+  storePendingUpload,
+} from "./pending-media";
 import {
   assertValidMediaFilename,
   assertValidMediaId,
@@ -90,31 +99,30 @@ export function handleMediaSendError(res: Response, err?: Error): void {
 export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Router {
   const router = Router();
 
-  // Multer: disk storage — destination = project media dir, filename = <mediaId><ext>
+  // Uploads remain outside saved membership until a typed snapshot claims them.
   const upload = multer({
     storage: multer.diskStorage({
       destination: (req, _file, cb) => {
         try {
           assertValidProjectId(req.params.id);
           assertValidMediaId(req.params.mediaId);
-          const dir = store.mediaDir(req.params.id);
+          const dir = pendingUploadTempDirectory(store.projectDir(req.params.id));
           mkdirSync(dir, { recursive: true });
           cb(null, dir);
         } catch (err) {
           cb(err as Error, "");
         }
       },
-      filename: (req, file, cb) => {
+      filename: (req, _file, cb) => {
         try {
           assertValidMediaId(req.params.mediaId);
-          const filename = `${req.params.mediaId}${extname(file.originalname)}`;
-          assertValidMediaFilename(filename);
-          cb(null, filename);
+          cb(null, `${req.params.mediaId}-${crypto.randomUUID()}.upload`);
         } catch (err) {
           cb(err as Error, "");
         }
       },
     }),
+    limits: { fileSize: MAX_PENDING_MEDIA_BYTES, files: 1 },
   });
 
   // ═══ Config routes (must be before /:id to avoid shadowing) ═══════════════
@@ -353,20 +361,51 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
           res.status(400).json({ error: "No file uploaded" });
           return;
         }
-        await gitStore.commit(
-          req.params.id,
-          `media: add ${req.file.originalname} (${req.params.mediaId})`,
-          commitTransaction(
-            [`media/${req.file.filename}`],
-            [stagedEntry("A", `media/${req.file.filename}`)],
-          ),
+        const pending = await storePendingUpload(
+          store.projectDir(req.params.id),
+          req.params.mediaId,
+          req.file.path,
+          req.file.originalname,
+          req.file.mimetype,
+          req.file.size,
         );
-        res.json({ filename: req.file.filename });
+        await cleanupExpiredPendingMedia(store.projectDir(req.params.id));
+        res.json({
+          pending: true,
+          mediaId: pending.mediaId,
+          originalFilename: pending.originalFilename,
+          byteSize: pending.byteSize,
+        });
       } catch (err) {
-        res.status(500).json({ error: "Failed to upload media", detail: String(err) });
+        if (req.file?.path) await rm(req.file.path, { force: true }).catch(() => undefined);
+        const status = err instanceof TypeError ? 415 : err instanceof RangeError ? 413 : 500;
+        res.status(status).json({ error: "Failed to upload media", detail: String(err) });
       }
     },
   );
+
+  router.get("/:id/media/pending", async (req: Request, res: Response) => {
+    if (rejectInvalidProjectId(req, res)) return;
+    try {
+      const entries = await listPendingMedia(store.projectDir(req.params.id));
+      res.json(entries.map(({ contentPath: _contentPath, entryDirectory: _entryDirectory, ...entry }) => ({
+        ...entry,
+        pending: true,
+      })));
+    } catch (err) {
+      res.status(500).json({ error: "Failed to list pending media", detail: String(err) });
+    }
+  });
+
+  router.delete("/:id/media/pending/:mediaId", async (req: Request, res: Response) => {
+    if (rejectInvalidProjectId(req, res) || rejectInvalidMediaId(req, res)) return;
+    try {
+      await removePendingMedia(store.projectDir(req.params.id), req.params.mediaId);
+      res.json({ removed: true, mediaId: req.params.mediaId });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to remove pending media", detail: String(err) });
+    }
+  });
 
   // GET /api/projects/:id/media/:filename — serve a media file
   router.get("/:id/media/:filename", (req: Request, res: Response) => {

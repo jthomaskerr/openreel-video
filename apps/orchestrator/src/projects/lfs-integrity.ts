@@ -38,6 +38,8 @@ export interface LfsVerificationOptions {
   readonly remote?: string | null;
   /** Injectable remote probe for deterministic tests and deployment-specific LFS APIs. */
   readonly checkRemoteObject?: LfsRemoteObjectCheck;
+  /** Resolve pointers from the current index before ref update, or from HEAD. */
+  readonly pointerSource?: "HEAD" | "index";
 }
 
 export type LfsRemoteObjectCheck = (
@@ -79,8 +81,12 @@ async function checkPointerWithGitLfs(repoDir: string, pointer: string): Promise
   });
 }
 
-async function committedPointer(repoDir: string, entry: LfsManifestIdentity): Promise<LfsPointerMetadata> {
-  const pointer = await git(repoDir, ["show", `HEAD:${entry.relativePhysicalPath}`]);
+async function committedPointer(
+  repoDir: string,
+  entry: LfsManifestIdentity,
+  source: "HEAD" | "index",
+): Promise<LfsPointerMetadata> {
+  const pointer = await git(repoDir, ["show", source === "index" ? `:${entry.relativePhysicalPath}` : `HEAD:${entry.relativePhysicalPath}`]);
 
   // Git LFS plumbing performs the authoritative syntax check. Parsing only
   // extracts the two fields needed to locate and verify the payload.
@@ -198,7 +204,7 @@ export async function verifyGitLfsPayloads(
 ): Promise<LfsPayloadVerification[]> {
   return Promise.all(
     entries.map(async (entry) => {
-      const pointer = await committedPointer(repoDir, entry);
+      const pointer = await committedPointer(repoDir, entry, options.pointerSource ?? "HEAD");
       const [local, remote] = await Promise.all([
         verifyLocalObject(repoDir, pointer),
         verifyRemoteObject(repoDir, pointer.oid, options.remote, options.checkRemoteObject),

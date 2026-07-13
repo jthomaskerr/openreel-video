@@ -107,9 +107,8 @@ async function scanMediaDirectory(mediaDir: string): Promise<Map<string, MediaFi
 
   for (const entry of files) {
     const filename = entry.name;
-    const mediaId = basename(filename, extname(filename));
     const fileStat = await stat(join(mediaDir, filename));
-    result.set(mediaId, {
+    result.set(filename, {
       filename,
       byteSize: fileStat.size,
     });
@@ -209,7 +208,8 @@ export async function auditProjectMediaManifest(
   const byteSizeMismatches: ProjectMediaManifestByteSizeMismatch[] = [];
 
   for (const entry of requiredMediaManifest) {
-    const actual = mediaFiles.get(entry.mediaId);
+    const actual = mediaFiles.get(entry.semanticFilename)
+      ?? [...mediaFiles.values()].find((file) => basename(file.filename, extname(file.filename)) === entry.mediaId);
     if (!actual) {
       missingEntries.push({
         ...entry,
@@ -240,9 +240,10 @@ export async function auditProjectMediaManifest(
 
   const danglingClips = detectDanglingClips(project);
   const lfsPayloads = options.lfsRepoDir
-    ? await verifyGitLfsPayloads(options.lfsRepoDir, requiredMediaManifest, {
+      ? await verifyGitLfsPayloads(options.lfsRepoDir, requiredMediaManifest, {
         remote: options.remote,
         checkRemoteObject: options.checkRemoteObject,
+        pointerSource: options.pointerSource,
       })
     : [];
 

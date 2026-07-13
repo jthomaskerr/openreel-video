@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import express, { type Response } from "express";
@@ -128,9 +128,11 @@ async function withProjectRouter(
     await writeFile(join(tempRoot, "project.json"), JSON.stringify(store.testInitialProject, null, 2));
   }
   store.projectDir ??= () => tempRoot;
+  store.mediaDir ??= () => join(tempRoot, "media");
   gitStore.readConfirmedReceipt ??= async () => commitReceipt();
   gitStore.withProjectTransaction ??= async (projectId, operation) => operation({
     commit: (message, transaction) => gitStore.commit!(projectId, message, transaction),
+    stage: async () => undefined,
     unstage: async () => undefined,
   });
   const app = express();
@@ -153,6 +155,138 @@ async function withProjectRouter(
     await rm(tempRoot, { recursive: true, force: true });
   }
 }
+
+test("media upload remains pending without a persistence receipt or commit", async () => {
+  const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");
+  let commits = 0;
+  let receiptReads = 0;
+  const store: Partial<ProjectStore> & { testInitialProject?: Project } = {
+    testInitialProject: previous,
+    ensureProjectWorktree: async () => undefined,
+  };
+  const gitStore: Partial<GitStore> = {
+    commit: async () => { commits++; return commitReceipt(); },
+    readConfirmedReceipt: async () => { receiptReads++; return commitReceipt(); },
+  };
+
+  await withProjectRouter(store, gitStore, async (baseUrl) => {
+    const form = new FormData();
+    form.set("file", new Blob(["video-bytes"], { type: "video/mp4" }), "Interview.mp4");
+    const response = await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/media-1`, {
+      method: "POST",
+      body: form,
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(body, {
+      pending: true,
+      mediaId: "media-1",
+      originalFilename: "Interview.mp4",
+      byteSize: 11,
+    });
+    assert.equal(commits, 0);
+    assert.equal(receiptReads, 0);
+    assert.equal("commitSha" in body, false);
+    await assert.rejects(readFile(join(store.mediaDir!(previous.id), "Interview.mp4")), { code: "ENOENT" });
+
+    const pending = await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/pending`);
+    const pendingItems = await pending.json();
+    assert.equal(pending.status, 200);
+    assert.equal(pendingItems[0].pending, true);
+    assert.equal(pendingItems[0].mediaId, "media-1");
+    assert.equal("contentPath" in pendingItems[0], false);
+
+    const removed = await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/pending/media-1`, { method: "DELETE" });
+    assert.equal(removed.status, 200);
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/pending`)).json(), []);
+
+    const invalid = new FormData();
+    invalid.set("file", new Blob(["not-media"], { type: "text/plain" }), "notes.txt");
+    const rejected = await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/media-1`, { method: "POST", body: invalid });
+    assert.equal(rejected.status, 415);
+    assert.match((await rejected.json()).detail, /Unsupported media type/);
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/pending`)).json(), []);
+    assert.equal(commits, 0);
+  });
+});
+
+test("snapshot atomically attaches pending media with a collision-safe name and stable id", async () => {
+  const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");
+  const pendingItem = {
+    id: "media-2",
+    name: "Interview.mp4",
+    type: "video" as const,
+    fileHandle: null,
+    blob: null,
+    thumbnailUrl: null,
+    metadata: { duration: 1, width: 1, height: 1, frameRate: 30, codec: "h264", sampleRate: 48_000, channels: 2, fileSize: 11 },
+  };
+  const incoming: Project = {
+    ...previous,
+    modifiedAt: previous.modifiedAt + 1,
+    mediaLibrary: { items: [pendingItem] },
+  };
+  let commits = 0;
+  let committedTransaction: { allowlist: readonly string[]; expectedEntries: readonly { status: string; path: string }[] } | undefined;
+  let auditedProject: Project | undefined;
+  const store: Partial<ProjectStore> & { testInitialProject?: Project } = {
+    testInitialProject: previous,
+    ensureProjectWorktree: async () => undefined,
+    auditSnapshot: async (project: Project) => {
+      auditedProject = project;
+      const filename = project.mediaLibrary.items[0]!.name;
+      const bytes = await readFile(join(store.mediaDir!(project.id), filename));
+      assert.equal(bytes.toString(), "video-bytes");
+      return {
+        ...auditReceipt(),
+        requiredMediaManifest: [{ mediaId: "media-2", semanticFilename: filename, relativePhysicalPath: `media/${filename}`, expectedByteSize: 11 }],
+      };
+    },
+  };
+  const gitStore: Partial<GitStore> = {
+    commit: async (_projectId, _message, transaction) => {
+      commits++;
+      committedTransaction = transaction;
+      return commitReceipt();
+    },
+  };
+
+  await withProjectRouter(store, gitStore, async (baseUrl) => {
+    await mkdir(store.mediaDir!(previous.id), { recursive: true });
+    await writeFile(join(store.mediaDir!(previous.id), "Interview.mp4"), "existing");
+    const form = new FormData();
+    form.set("file", new Blob(["video-bytes"], { type: "video/mp4" }), "Interview.mp4");
+    const upload = await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/media-2`, { method: "POST", body: form });
+    assert.equal(upload.status, 200);
+    assert.equal(commits, 0);
+
+    const request: ProjectSaveRequest = {
+      ...saveRequest(incoming),
+      requiredMediaManifest: [{ mediaId: "media-2", semanticFilename: "Interview.mp4", relativePhysicalPath: "media/Interview.mp4", expectedByteSize: 11 }],
+    };
+    const response = await fetch(`${baseUrl}/api/projects/vintage-tokyo`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(request),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(commits, 1);
+    assert.equal(body.project.mediaLibrary.items[0].id, "media-2");
+    assert.equal(body.project.mediaLibrary.items[0].name, "Interview 1.mp4");
+    assert.equal(auditedProject?.mediaLibrary.items[0]?.id, "media-2");
+    assert.equal(auditedProject?.mediaLibrary.items[0]?.name, "Interview 1.mp4");
+    assert.deepEqual(committedTransaction?.allowlist, ["project.json", "media/Interview 1.mp4"]);
+    assert.deepEqual(committedTransaction?.expectedEntries, [
+      { status: "A", path: "media/Interview 1.mp4" },
+      { status: "M", path: "project.json" },
+    ]);
+    assert.equal(await readFile(join(store.mediaDir!(previous.id), "Interview 1.mp4"), "utf8"), "video-bytes");
+    assert.deepEqual(await (await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/pending`)).json(), []);
+  });
+});
 
 test("project import canonicalizes client UUID ids to slug worktree ids", async () => {
   const savedProjects: Project[] = [];

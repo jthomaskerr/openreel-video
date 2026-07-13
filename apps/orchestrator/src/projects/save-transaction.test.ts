@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -11,6 +12,7 @@ import { config } from "../env";
 import { GitStore } from "./git-store";
 import { buildRequiredMediaManifest } from "./media-manifest";
 import { ProjectStore } from "./project-store";
+import { readPendingMedia, storePendingUpload } from "./pending-media";
 import {
   executeSaveTransaction,
   recoverInterruptedSave,
@@ -101,6 +103,92 @@ function media(id: string, name: string, size: number): MediaItem {
     metadata: { duration: 1, width: 1, height: 1, frameRate: 30, codec: "h264", sampleRate: 48_000, channels: 2, fileSize: size },
   };
 }
+
+test("pending media is LFS-audited from the index before one atomic snapshot commit", async () => {
+  const f = await fixture();
+  try {
+    const worktree = f.store.projectDir(f.project.id);
+    await mkdir(f.store.mediaDir(f.project.id), { recursive: true });
+    await writeFile(join(f.store.mediaDir(f.project.id), "Interview.mp4"), "unrelated collision");
+    const bytes = Buffer.from("pending-video");
+    const uploadTemp = join(f.fixtureRoot, "pending-upload.tmp");
+    await writeFile(uploadTemp, bytes);
+
+    const headBeforeUpload = (await git(worktree, ["rev-parse", "HEAD"])).trim();
+    await storePendingUpload(
+      worktree,
+      "media-1",
+      uploadTemp,
+      "Interview.mp4",
+      "video/mp4",
+      bytes.length,
+    );
+    assert.equal((await git(worktree, ["rev-parse", "HEAD"])).trim(), headBeforeUpload, "upload created an orphan commit");
+
+    const proposed: Project = {
+      ...f.project,
+      modifiedAt: f.project.modifiedAt + 1,
+      mediaLibrary: { items: [media("media-1", "Interview.mp4", bytes.length)] },
+    };
+    const receipt = await executeSaveTransaction(f.store, f.gitStore, request(f, proposed));
+
+    assert.notEqual(receipt.commitSha, headBeforeUpload);
+    assert.equal(receipt.project.mediaLibrary.items[0]?.id, "media-1");
+    assert.equal(receipt.project.mediaLibrary.items[0]?.name, "Interview 1.mp4");
+    const committedProject = JSON.parse(await git(worktree, ["show", "HEAD:project.json"])) as Project;
+    assert.equal(committedProject.mediaLibrary.items[0]?.id, "media-1");
+    assert.equal(committedProject.mediaLibrary.items[0]?.name, "Interview 1.mp4");
+
+    const pointer = await git(worktree, ["show", "HEAD:media/Interview 1.mp4"]);
+    const expectedOid = createHash("sha256").update(bytes).digest("hex");
+    assert.match(pointer, new RegExp(`oid sha256:${expectedOid}`));
+    assert.match(pointer, new RegExp(`size ${bytes.length}`));
+    assert.equal(receipt.lfsPayloads[0]?.oid, `sha256:${expectedOid}`);
+    assert.deepEqual(receipt.lfsPayloads[0]?.local, { state: "verified", actualSize: bytes.length });
+    assert.deepEqual(receipt.lfsPayloads[0]?.remote, { state: "local-only", remote: null });
+    assert.equal(receipt.lfsPayloads[0]?.semanticFilename, "Interview 1.mp4");
+    await assert.rejects(execFileAsync("git", ["show", "HEAD:media/Interview.mp4"], { cwd: worktree }));
+    await execFileAsync("git", ["lfs", "fsck", "--objects"], { cwd: worktree });
+    assert.equal((await git(worktree, ["rev-list", "--count", `${headBeforeUpload}..HEAD`])).trim(), "1");
+  } finally {
+    await rm(f.fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("recovery unstages and returns promoted media to pending before ref update", async () => {
+  const f = await fixture();
+  try {
+    const worktree = f.store.projectDir(f.project.id);
+    const bytes = Buffer.from("recoverable-video");
+    const uploadTemp = join(f.fixtureRoot, "recoverable-upload.tmp");
+    await writeFile(uploadTemp, bytes);
+    await storePendingUpload(worktree, "media-1", uploadTemp, "Clip.mp4", "video/mp4", bytes.length);
+    const headBefore = (await git(worktree, ["rev-parse", "HEAD"])).trim();
+    const proposed: Project = {
+      ...f.project,
+      modifiedAt: f.project.modifiedAt + 1,
+      mediaLibrary: { items: [media("media-1", "Clip.mp4", bytes.length)] },
+    };
+
+    await assert.rejects(
+      executeSaveTransaction(f.store, f.gitStore, request(f, proposed), { simulateCrashAt: "before-ref-update" }),
+      SimulatedSaveProcessCrash,
+    );
+    assert.match(await git(worktree, ["diff", "--cached", "--name-only"]), /media\/Clip\.mp4/);
+
+    await recoverInterruptedSave(f.store, f.gitStore, f.project.id);
+
+    assert.equal((await git(worktree, ["rev-parse", "HEAD"])).trim(), headBefore);
+    assert.equal(await git(worktree, ["diff", "--cached", "--name-only"]), "");
+    const restored = await readPendingMedia(worktree, "media-1");
+    assert.ok(restored);
+    assert.equal(await readFile(restored.contentPath, "utf8"), bytes.toString());
+    await assert.rejects(readFile(join(f.store.mediaDir(f.project.id), "Clip.mp4")), { code: "ENOENT" });
+    assert.deepEqual(JSON.parse(await readFile(join(worktree, "project.json"), "utf8")), f.project);
+  } finally {
+    await rm(f.fixtureRoot, { recursive: true, force: true });
+  }
+});
 
 test("absent media returns MEDIA_INCOMPLETE without mutating authoritative state", async () => {
   const f = await fixture();

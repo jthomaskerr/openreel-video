@@ -28,6 +28,7 @@ export interface ProjectMediaAuditOptions {
   /** Defaults to true; false is reserved for lower-level manifest-only checks. */
   readonly verifyLfs?: boolean;
   readonly checkRemoteObject?: LfsRemoteObjectCheck;
+  readonly pointerSource?: "HEAD" | "index";
 }
 
 function defaultSettings(): ProjectSettings {
@@ -381,8 +382,11 @@ export class ProjectStore {
     const { remote } = await this.gitStore.getConfig();
     return auditProjectMediaManifest(project, this.mediaDir(project.id), {
       lfsRepoDir: this.projectDir(project.id),
-      remote: remote ? "origin" : null,
+      // A newly staged object cannot be required to exist remotely before the
+      // commit that makes it reachable. Push durability is verified later.
+      remote: options.pointerSource === "index" ? null : remote ? "origin" : null,
       checkRemoteObject: options.checkRemoteObject,
+      pointerSource: options.pointerSource,
     });
   }
 }
