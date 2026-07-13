@@ -8,11 +8,13 @@ import type {
   ProjectSettings,
   Project,
   ProjectSaveRequest,
+  ProjectSaveReceipt,
 } from "@openreel/core";
 import { ProjectStore } from "./project-store";
 import {
   GitStore,
   type GitCommitTransaction,
+  type GitCommitReceipt,
   type GitStagedNameStatusEntry,
 } from "./git-store";
 import { executeSaveTransaction, SaveTransactionError } from "./save-transaction";
@@ -99,6 +101,38 @@ export function handleMediaSendError(res: Response, err?: Error): void {
 export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Router {
   const router = Router();
 
+  async function confirmedProjectPayload(
+    project: Project,
+    mediaFiles: Record<string, string>,
+    committedReceipt?: GitCommitReceipt,
+  ): Promise<{ project: Project; mediaFiles: Record<string, string> } & ProjectSaveReceipt> {
+    const receipt = committedReceipt ?? await gitStore.readConfirmedReceipt(project.id);
+    if (!receipt?.commitSha || !receipt.treeSha || !receipt.projectBlobSha || !receipt.mediaManifestDigest) {
+      throw new Error(`Project ${project.id} has no complete confirmed receipt`);
+    }
+    const persistedAt = await gitStore.readCommitTimestamp(project.id, receipt.commitSha);
+    if (!persistedAt) throw new Error(`Project ${project.id} commit timestamp is unavailable`);
+    const audit = await store.auditSnapshot(project);
+    if (audit.missingEntries.length > 0
+      || audit.lfsPayloads.some((payload) => payload.local.state !== "verified")) {
+      throw new Error(`Project ${project.id} committed media receipt failed verification`);
+    }
+    return {
+      project,
+      mediaFiles,
+      saved: true,
+      committed: true,
+      projectId: project.id,
+      persistedAt,
+      sourceModifiedAt: project.modifiedAt,
+      commitSha: receipt.commitSha,
+      treeSha: receipt.treeSha,
+      projectBlobSha: receipt.projectBlobSha,
+      mediaManifestDigest: audit.mediaManifestDigest,
+      lfsPayloads: audit.lfsPayloads,
+    };
+  }
+
   // Uploads remain outside saved membership until a typed snapshot claims them.
   const upload = multer({
     storage: multer.diskStorage({
@@ -176,7 +210,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         return;
       }
       const mediaFiles = await store.scanMedia(req.params.id);
-      res.json({ project, mediaFiles });
+      res.json(await confirmedProjectPayload(project, mediaFiles));
     } catch (err) {
       res.status(500).json({ error: "Failed to load project", detail: String(err) });
     }
@@ -195,7 +229,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       }
       const project = await store.createProject(name.trim(), settings);
       console.info("[Persistence] project created; committing", { projectId: project.id });
-      await gitStore.commit(
+      const receipt = await gitStore.commit(
         project.id,
         `init: create project "${project.name}"`,
         commitTransaction(
@@ -204,7 +238,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         ),
       );
       console.info("[Persistence] initial commit confirmed", { projectId: project.id });
-      res.status(201).json(project);
+      res.status(201).json(await confirmedProjectPayload(project, {}, receipt));
     } catch (err) {
       res.status(500).json({ error: "Failed to create project", detail: String(err) });
     }
@@ -238,7 +272,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       // convert UUIDs to the same slug assigned by POST /api/projects.
       const id = canonicalProjectId(project);
       const saved = await store.saveProject({ ...project, id });
-      await gitStore.commit(
+      const receipt = await gitStore.commit(
         saved.id,
         `import: create from file "${saved.name}"`,
         commitTransaction(
@@ -246,7 +280,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
           [stagedEntry("A", "project.json")],
         ),
       );
-      res.status(201).json(saved);
+      res.status(201).json(await confirmedProjectPayload(saved, {}, receipt));
     } catch (err) {
       console.error("[POST /api/projects/import] failed:", err);
       res.status(500).json({ error: "Failed to import project", detail: String(err) });

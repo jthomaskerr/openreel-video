@@ -1,6 +1,7 @@
 import { create } from "zustand";
+import type { Project, ProjectBaseRevision, ProjectSaveReceipt } from "@openreel/core";
 
-export type PersistencePhase = "idle" | "pending" | "saving" | "deferred" | "persisted" | "failed";
+export type PersistencePhase = "idle" | "pending" | "saving" | "deferred" | "persisted" | "incomplete" | "conflict" | "failed";
 
 interface PersistenceStatusState {
   phase: PersistencePhase;
@@ -9,10 +10,16 @@ interface PersistenceStatusState {
   persistedModifiedAt: number | null;
   error: string | null;
   phaseStartedAt: number | null;
+  confirmedReceipt: ProjectSaveReceipt | null;
+  baseRevision: ProjectBaseRevision | null;
+  conflictingProject: Project | null;
   markPending: (projectId: string) => void;
   markSaving: (projectId: string) => void;
   markDeferred: (projectId: string) => void;
-  markPersisted: (projectId: string, persistedAt: number, persistedModifiedAt: number) => void;
+  markPersisted: (projectId: string, receipt: ProjectSaveReceipt) => void;
+  markIncomplete: (projectId: string, error: string) => void;
+  markConflict: (projectId: string, error: string, project: Project | null) => void;
+  confirmReceipt: (projectId: string, receipt: ProjectSaveReceipt) => void;
   markFailed: (projectId: string, error: string) => void;
   reset: () => void;
 }
@@ -24,11 +31,50 @@ export const usePersistenceStatusStore = create<PersistenceStatusState>((set) =>
   persistedModifiedAt: null,
   error: null,
   phaseStartedAt: null,
+  confirmedReceipt: null,
+  baseRevision: null,
+  conflictingProject: null,
   markPending: (projectId) => set({ phase: "pending", projectId, error: null, phaseStartedAt: Date.now() }),
   markSaving: (projectId) => set({ phase: "saving", projectId, error: null, phaseStartedAt: Date.now() }),
   markDeferred: (projectId) => set({ phase: "deferred", projectId, error: null, phaseStartedAt: null }),
-  markPersisted: (projectId, persistedAt, persistedModifiedAt) =>
-    set({ phase: "persisted", projectId, persistedAt, persistedModifiedAt, error: null, phaseStartedAt: null }),
+  markPersisted: (projectId, receipt) => set({
+    phase: "persisted",
+    projectId,
+    persistedAt: receipt.persistedAt,
+    persistedModifiedAt: receipt.sourceModifiedAt,
+    confirmedReceipt: receipt,
+    baseRevision: receipt.commitSha && receipt.treeSha && receipt.projectBlobSha
+      ? {
+          commitSha: receipt.commitSha,
+          treeSha: receipt.treeSha,
+          projectBlobSha: receipt.projectBlobSha,
+          sourceModifiedAt: receipt.sourceModifiedAt,
+        }
+      : null,
+    conflictingProject: null,
+    error: null,
+    phaseStartedAt: null,
+  }),
+  markIncomplete: (projectId, error) => set({ phase: "incomplete", projectId, error, phaseStartedAt: null }),
+  markConflict: (projectId, error, project) => set({
+    phase: "conflict",
+    projectId,
+    error,
+    conflictingProject: project,
+    phaseStartedAt: null,
+  }),
+  confirmReceipt: (projectId, receipt) => set({
+    projectId,
+    confirmedReceipt: receipt,
+    baseRevision: receipt.commitSha && receipt.treeSha && receipt.projectBlobSha
+      ? {
+          commitSha: receipt.commitSha,
+          treeSha: receipt.treeSha,
+          projectBlobSha: receipt.projectBlobSha,
+          sourceModifiedAt: receipt.sourceModifiedAt,
+        }
+      : null,
+  }),
   markFailed: (projectId, error) => set({ phase: "failed", projectId, error, phaseStartedAt: null }),
   reset: () => set({
     phase: "idle",
@@ -37,5 +83,8 @@ export const usePersistenceStatusStore = create<PersistenceStatusState>((set) =>
     persistedModifiedAt: null,
     error: null,
     phaseStartedAt: null,
+    confirmedReceipt: null,
+    baseRevision: null,
+    conflictingProject: null,
   }),
 }));

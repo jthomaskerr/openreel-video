@@ -211,6 +211,19 @@ export class GitStore {
     }
   }
 
+  async readCommitTimestamp(projectId: string, commitSha: string): Promise<number | null> {
+    assertValidProjectId(projectId);
+    const wtPath = this.worktreePath(projectId);
+    if (!existsSync(join(wtPath, ".git"))) return null;
+    try {
+      const { stdout } = await this.git(["show", "-s", "--format=%aI", commitSha], wtPath);
+      const timestamp = Date.parse(stdout.trim());
+      return Number.isFinite(timestamp) ? timestamp : null;
+    } catch {
+      return null;
+    }
+  }
+
   async #resolveReceiptFromCommit(
     projectId: string,
     commitSha: string,

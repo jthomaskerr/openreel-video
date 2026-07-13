@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Project, ProjectSaveReceipt } from "@openreel/core";
 import { generateThumbnailFromBlob, generateThumbnailFromUrl } from "../utils/media-recovery";
 import { backendSaveService } from "./backend-save";
@@ -83,8 +83,31 @@ const makeReceipt = (
   treeSha: "89abcdef0123456789abcdef0123456789abcdef",
   projectBlobSha: "fedcba9876543210fedcba9876543210fedcba98",
   mediaManifestDigest: "sha256:manifest-digest",
+  lfsPayloads: [],
   committed: true,
   ...overrides,
+});
+
+const makeBackendProjectResponse = (
+  project: Project,
+  mediaFiles: Record<string, string> = {},
+) => ({
+  project,
+  mediaFiles,
+  ...makeReceipt({ projectId: project.id, sourceModifiedAt: project.modifiedAt }),
+});
+
+const makeSaveProject = (): Project => ({
+  ...makeProject(),
+  id: "vintage-tokyo",
+  mediaLibrary: { items: [] },
+});
+
+beforeEach(() => {
+  usePersistenceStatusStore.getState().confirmReceipt(
+    "vintage-tokyo",
+    makeReceipt({ sourceModifiedAt: 1 }),
+  );
 });
 
 afterEach(() => {
@@ -100,16 +123,16 @@ describe("backendSaveService.load", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (url: string) => {
-        if (url.endsWith("/media/media-1.mp4")) {
+        if (url.endsWith("/media/clip.mp4")) {
           return { ok: true, blob: async () => mediaBlob };
         }
 
         return {
           ok: true,
-          json: async () => ({
-            project: makeProject(),
-            mediaFiles: { "media-1": "media-1.mp4" },
-          }),
+          json: async () => makeBackendProjectResponse(
+            makeProject(),
+            { "media-1": "clip.mp4" },
+          ),
         };
       }),
     );
@@ -117,10 +140,14 @@ describe("backendSaveService.load", () => {
     const project = await backendSaveService.load("project-1");
 
     expect(project?.mediaLibrary.items[0]?.remoteUrl).toBe(
-      "http://localhost:4041/api/projects/project-1/media/media-1.mp4",
+      "http://localhost:4041/api/projects/project-1/media/clip.mp4",
     );
     expect(project?.mediaLibrary.items[0]?.blob).toBe(mediaBlob);
     expect(project?.mediaLibrary.items[1]?.remoteUrl).toBeUndefined();
+    expect(usePersistenceStatusStore.getState()).toMatchObject({
+      projectId: "project-1",
+      baseRevision: { commitSha: makeReceipt().commitSha },
+    });
   });
 
   it("regenerates persisted video thumbnails from the backend URL instead of a WebKit-incompatible blob URL", async () => {
@@ -143,16 +170,16 @@ describe("backendSaveService.load", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation(async (url: string) => {
-        if (url.endsWith("/media/media-1.mp4")) {
+        if (url.endsWith("/media/clip.mp4")) {
           return { ok: true, blob: async () => mediaBlob };
         }
 
         return {
           ok: true,
-          json: async () => ({
-            project: staleProject,
-            mediaFiles: { "media-1": "media-1.mp4" },
-          }),
+          json: async () => makeBackendProjectResponse(
+            staleProject,
+            { "media-1": "clip.mp4" },
+          ),
         };
       }),
     );
@@ -160,7 +187,7 @@ describe("backendSaveService.load", () => {
     const project = await backendSaveService.load("project-1");
 
     expect(mockGenerateThumbnailFromUrl).toHaveBeenCalledWith(
-      "http://localhost:4041/api/projects/project-1/media/media-1.mp4",
+      "http://localhost:4041/api/projects/project-1/media/clip.mp4",
       "video",
     );
     expect(mockGenerateThumbnailFromBlob).not.toHaveBeenCalled();
@@ -184,7 +211,7 @@ describe("backendSaveService.load", () => {
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ project: staleProject, mediaFiles: {} }),
+      json: async () => makeBackendProjectResponse(staleProject),
     }));
 
     const project = await backendSaveService.load("project-1");
@@ -197,7 +224,310 @@ describe("backendSaveService.load", () => {
 describe("backendSaveService.save", () => {
   const persistedResponse = () => ({
     ok: true,
-    json: async () => makeReceipt(),
+    json: async () => ({ project: makeSaveProject(), ...makeReceipt() }),
+  });
+
+  it("does not PUT a snapshot whose original cannot be proven", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const project = {
+      ...makeSaveProject(),
+      mediaLibrary: { items: [makeProject().mediaLibrary.items[0]!] },
+    };
+
+    await expect(backendSaveService.save(project)).rejects.toThrow("original is unavailable");
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(usePersistenceStatusStore.getState()).toMatchObject({
+      phase: "incomplete",
+      projectId: "vintage-tokyo",
+      error: expect.stringContaining("media-1"),
+    });
+  });
+
+  it.each([
+    ["wrong byte size", { "content-length": "99", "content-type": "video/mp4" }],
+    ["HTML body metadata", { "content-length": "100", "content-type": "text/html" }],
+  ])("rejects a 200 HEAD false proof with %s", async (_label, headers) => {
+    const project = {
+      ...makeSaveProject(),
+      mediaLibrary: {
+        items: [{
+          ...makeProject().mediaLibrary.items[0]!,
+          remoteUrl: "http://localhost:4041/api/projects/vintage-tokyo/media/clip.mp4",
+        }],
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers(headers),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(backendSaveService.save(project)).rejects.toThrow("original is unavailable");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(false);
+  });
+
+  it("rejects a remote URL outside the exact project media path without issuing HEAD", async () => {
+    const project = {
+      ...makeSaveProject(),
+      mediaLibrary: {
+        items: [{
+          ...makeProject().mediaLibrary.items[0]!,
+          remoteUrl: "http://localhost:4041/api/projects/other-project/media/clip.mp4",
+        }],
+      },
+    };
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(backendSaveService.save(project)).rejects.toThrow("original is unavailable");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reuploads when an authoritative HEAD says a session-uploaded id is absent", async () => {
+    const blob = new Blob(["clip"], { type: "video/mp4" });
+    const project = {
+      ...makeSaveProject(),
+      mediaLibrary: { items: [{ ...makeProject().mediaLibrary.items[0]!, blob }] },
+    };
+    const remoteProject = {
+      ...project,
+      mediaLibrary: {
+        items: [{
+          ...project.mediaLibrary.items[0]!,
+          remoteUrl: "http://localhost:4041/api/projects/vintage-tokyo/media/clip.mp4",
+        }],
+      },
+    };
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "HEAD") return { ok: false, status: 404 };
+      if (init?.method === "POST") return { ok: true, json: async () => ({ pending: true, mediaId: "media-1", originalFilename: "clip.mp4", byteSize: 4 }) };
+      return { ok: true, json: async () => ({ project: remoteProject, ...makeReceipt() }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await backendSaveService.save(project);
+    await backendSaveService.save(remoteProject);
+
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(2);
+  });
+
+  it("sends confirmed base and intent, then confirms the canonical response project", async () => {
+    const project = {
+      ...makeSaveProject(),
+      mediaLibrary: {
+        items: [{
+          ...makeProject().mediaLibrary.items[0]!,
+          blob: new Blob(["clip"], { type: "video/mp4" }),
+        }],
+      },
+    };
+    const canonicalProject = {
+      ...project,
+      mediaLibrary: {
+        items: [{ ...makeProject().mediaLibrary.items[0]!, name: "City Walk 2.mp4" }],
+      },
+    };
+    const nextReceipt = makeReceipt({
+      commitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      sourceModifiedAt: project.modifiedAt,
+    });
+    let requestBody: Record<string, unknown> | undefined;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return { ok: true, json: async () => ({ pending: true, mediaId: "media-1" }) };
+      }
+      requestBody = JSON.parse(String(init?.body));
+      return { ok: true, json: async () => ({ project: canonicalProject, ...nextReceipt }) };
+    }));
+
+    await backendSaveService.save(project, "user");
+
+    expect(requestBody).toMatchObject({
+      projectId: "vintage-tokyo",
+      saveIntent: "user",
+      baseRevision: { commitSha: makeReceipt().commitSha },
+      requiredMediaManifest: [{
+        mediaId: "media-1",
+        semanticFilename: "clip.mp4",
+        relativePhysicalPath: "media/clip.mp4",
+        expectedByteSize: 4,
+      }],
+    });
+    expect(usePersistenceStatusStore.getState()).toMatchObject({
+      phase: "persisted",
+      confirmedReceipt: nextReceipt,
+      baseRevision: { commitSha: nextReceipt.commitSha },
+    });
+    expect(project.mediaLibrary.items[0]?.name).toBe("City Walk 2.mp4");
+  });
+
+  it("does not apply canonical filenames or advance base until the whole receipt validates", async () => {
+    const project = {
+      ...makeSaveProject(),
+      mediaLibrary: {
+        items: [{
+          ...makeProject().mediaLibrary.items[0]!,
+          blob: new Blob(["clip"], { type: "video/mp4" }),
+        }],
+      },
+    };
+    const canonical = {
+      ...project,
+      mediaLibrary: {
+        items: [{ ...project.mediaLibrary.items[0]!, name: "Canonical.mp4" }],
+      },
+    };
+    const previousReceipt = usePersistenceStatusStore.getState().confirmedReceipt;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? { ok: true, json: async () => ({ pending: true, mediaId: "media-1" }) }
+        : {
+            ok: true,
+            json: async () => ({
+              project: canonical,
+              ...makeReceipt({ persistedAt: null }),
+            }),
+          }
+    ));
+
+    await expect(backendSaveService.save(project)).rejects.toThrow("invalid committed persistence response");
+
+    expect(project.mediaLibrary.items[0]?.name).toBe("clip.mp4");
+    expect(usePersistenceStatusStore.getState().confirmedReceipt).toBe(previousReceipt);
+  });
+
+  it("rejects a committed receipt whose LFS payload is not locally verified", async () => {
+    const project = makeSaveProject();
+    const previousReceipt = usePersistenceStatusStore.getState().confirmedReceipt;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        project,
+        ...makeReceipt({
+          lfsPayloads: [{
+            mediaId: "media-1",
+            semanticFilename: "clip.mp4",
+            relativePhysicalPath: "media/clip.mp4",
+            oid: "sha256:abc",
+            pointerSize: 128,
+            local: { state: "missing", actualSize: null },
+            remote: { state: "local-only", remote: null },
+          }],
+        }),
+      }),
+    }));
+
+    await expect(backendSaveService.save(project)).rejects.toThrow("invalid committed persistence response");
+    expect(usePersistenceStatusStore.getState().confirmedReceipt).toBe(previousReceipt);
+  });
+
+  it("recovers MEDIA_INCOMPLETE once, rebuilds the snapshot, and retries non-recursively", async () => {
+    const recovered = new Blob(["recovered"], { type: "video/mp4" });
+    const getFile = vi.fn().mockResolvedValue(recovered);
+    const project = {
+      ...makeSaveProject(),
+      mediaLibrary: {
+        items: [{
+          ...makeProject().mediaLibrary.items[0]!,
+          fileHandle: { getFile } as unknown as FileSystemFileHandle,
+          remoteUrl: "http://localhost:4041/api/projects/vintage-tokyo/media/clip.mp4",
+        }],
+      },
+    };
+    const putBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "HEAD") {
+        return {
+          ok: true,
+          status: 200,
+          headers: new Headers({ "content-length": "100", "content-type": "video/mp4" }),
+        };
+      }
+      if (init?.method === "POST") {
+        return { ok: true, json: async () => ({ pending: true, mediaId: "media-1" }) };
+      }
+      putBodies.push(JSON.parse(String(init?.body)));
+      if (putBodies.length === 1) {
+        return {
+          ok: false,
+          status: 409,
+          text: async () => JSON.stringify({
+            code: "MEDIA_INCOMPLETE",
+            missingItems: [{ mediaId: "media-1" }],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ project, ...makeReceipt() }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await backendSaveService.save(project);
+
+    expect(getFile).toHaveBeenCalledTimes(1);
+    expect(putBodies).toHaveLength(2);
+    expect(putBodies.map((body) => body.saveIntent)).toEqual(["autosave", "recovery"]);
+  });
+
+  it("stops after the single MEDIA_INCOMPLETE recovery retry", async () => {
+    const project = {
+      ...makeSaveProject(),
+      mediaLibrary: {
+        items: [{
+          ...makeProject().mediaLibrary.items[0]!,
+          blob: new Blob(["clip"], { type: "video/mp4" }),
+        }],
+      },
+    };
+    let putCount = 0;
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        return { ok: true, json: async () => ({ pending: true, mediaId: "media-1" }) };
+      }
+      putCount += 1;
+      return {
+        ok: false,
+        status: 409,
+        text: async () => JSON.stringify({
+          code: "MEDIA_INCOMPLETE",
+          missingItems: [{ mediaId: "media-1" }],
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(backendSaveService.save(project)).rejects.toThrow("retry exhausted");
+
+    expect(putCount).toBe(2);
+  });
+
+  it("surfaces PROJECT_CONFLICT and preserves the newer server project without advancing base", async () => {
+    const newerProject = { ...makeSaveProject(), name: "Newer server project", modifiedAt: 99 };
+    const originalBase = usePersistenceStatusStore.getState().baseRevision;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 409,
+        text: async () => JSON.stringify({ code: "PROJECT_CONFLICT" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ project: newerProject, mediaFiles: {} }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(backendSaveService.save(makeSaveProject())).rejects.toThrow("Project conflict");
+
+    expect(usePersistenceStatusStore.getState()).toMatchObject({
+      phase: "conflict",
+      conflictingProject: newerProject,
+      baseRevision: originalBase,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("treats a modifiedAt-only backend write as deferred rather than Git-persisted", async () => {
@@ -213,7 +543,7 @@ describe("backendSaveService.save", () => {
       }),
     }));
 
-    await backendSaveService.save({ ...makeProject(), id: "vintage-tokyo" });
+    await backendSaveService.save(makeSaveProject());
 
     expect(usePersistenceStatusStore.getState()).toMatchObject({
       phase: "deferred",
@@ -228,12 +558,12 @@ describe("backendSaveService.save", () => {
       const body = JSON.parse(String(init?.body));
       return {
         ok: true,
-        json: async () => makeReceipt({ sourceModifiedAt: body.modifiedAt }),
+        json: async () => makeReceipt({ sourceModifiedAt: body.project.modifiedAt }),
       };
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    backendSaveService.scheduleSave({ ...makeProject(), id: "vintage-tokyo" }, 100);
+    backendSaveService.scheduleSave(makeSaveProject(), 100);
     expect(fetchMock).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(100);
@@ -250,14 +580,14 @@ describe("backendSaveService.save", () => {
       const body = JSON.parse(String(init?.body));
       return {
         ok: true,
-        json: async () => makeReceipt({ sourceModifiedAt: body.modifiedAt }),
+        json: async () => makeReceipt({ sourceModifiedAt: body.project.modifiedAt }),
       };
     });
     vi.stubGlobal("fetch", fetchMock);
 
     for (let second = 0; second < 8; second += 1) {
       backendSaveService.scheduleSave(
-        { ...makeProject(), id: "vintage-tokyo", modifiedAt: second },
+        { ...makeSaveProject(), modifiedAt: second },
         2_000,
       );
       await vi.advanceTimersByTimeAsync(1_000);
@@ -276,7 +606,7 @@ describe("backendSaveService.save", () => {
     useNotificationStore.getState().clearAll();
 
     backendSaveService.scheduleSave(
-      { ...makeProject(), id: "vintage-tokyo" },
+      makeSaveProject(),
       10_000,
     );
     await vi.advanceTimersByTimeAsync(7_000);
@@ -301,7 +631,7 @@ describe("backendSaveService.save", () => {
     vi.stubGlobal("fetch", fetchMock);
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
-    backendSaveService.scheduleSave({ ...makeProject(), id: "vintage-tokyo" }, 0);
+    backendSaveService.scheduleSave(makeSaveProject(), 0);
     await vi.runAllTimersAsync();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -322,10 +652,18 @@ describe("backendSaveService.save", () => {
   });
 
   it("PUTs slug project ids to the backend", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(persistedResponse());
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) =>
+      init?.method === "HEAD"
+        ? {
+            ok: true,
+            status: 200,
+            headers: new Headers({ "content-length": "100", "content-type": "video/mp4" }),
+          }
+        : persistedResponse()
+    );
     vi.stubGlobal("fetch", fetchMock);
 
-    await backendSaveService.save({ ...makeProject(), id: "vintage-tokyo" });
+    await backendSaveService.save(makeSaveProject());
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:4041/api/projects/vintage-tokyo",
@@ -334,15 +672,23 @@ describe("backendSaveService.save", () => {
   });
 
   it("persists durable filmstrip thumbnails but strips page-scoped blob URLs", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(persistedResponse());
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) =>
+      init?.method === "HEAD"
+        ? {
+            ok: true,
+            status: 200,
+            headers: new Headers({ "content-length": "100", "content-type": "video/mp4" }),
+          }
+        : persistedResponse()
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     await backendSaveService.save({
-      ...makeProject(),
-      id: "vintage-tokyo",
+      ...makeSaveProject(),
       mediaLibrary: {
         items: [{
           ...makeProject().mediaLibrary.items[0]!,
+          remoteUrl: "http://localhost:4041/api/projects/vintage-tokyo/media/clip.mp4",
           filmstripThumbnails: [
             { timestamp: 0, url: "data:image/jpeg;base64,frame" },
             { timestamp: 5, url: "https://cdn.example/frame.jpg" },
@@ -352,21 +698,21 @@ describe("backendSaveService.save", () => {
     });
 
     const body = JSON.parse(fetchMock.mock.calls.at(-1)?.[1]?.body as string);
-    expect(body.mediaLibrary.items[0].filmstripThumbnails).toHaveLength(2);
+    expect(body.project.mediaLibrary.items[0].filmstripThumbnails).toHaveLength(2);
 
     await backendSaveService.save({
-      ...makeProject(),
-      id: "vintage-tokyo",
+      ...makeSaveProject(),
       mediaLibrary: {
         items: [{
           ...makeProject().mediaLibrary.items[0]!,
+          remoteUrl: "http://localhost:4041/api/projects/vintage-tokyo/media/clip.mp4",
           filmstripThumbnails: [{ timestamp: 0, url: "blob:session-only" }],
         }],
       },
     });
 
     const blobBody = JSON.parse(fetchMock.mock.calls.at(-1)?.[1]?.body as string);
-    expect(blobBody.mediaLibrary.items[0].filmstripThumbnails).toBeUndefined();
+    expect(blobBody.project.mediaLibrary.items[0].filmstripThumbnails).toBeUndefined();
   });
 
   it("uploads media blobs before saving project JSON", async () => {
@@ -374,7 +720,9 @@ describe("backendSaveService.save", () => {
     const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
       if (init?.method === "POST") calls.push("media");
       if (init?.method === "PUT") calls.push("project");
-      return init?.method === "PUT" ? persistedResponse() : { ok: true };
+      return init?.method === "PUT"
+        ? persistedResponse()
+        : { ok: true, json: async () => ({ pending: true, mediaId: "media-1" }) };
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -406,7 +754,13 @@ describe("backendSaveService.save", () => {
 
   it("does not re-upload blobs that were loaded from the same backend project", async () => {
     const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) =>
-      init?.method === "HEAD" ? { ok: true, status: 200 } : persistedResponse()
+      init?.method === "HEAD"
+        ? {
+            ok: true,
+            status: 200,
+            headers: new Headers({ "content-length": "100", "content-type": "video/mp4" }),
+          }
+        : persistedResponse()
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -417,7 +771,7 @@ describe("backendSaveService.save", () => {
         items: [{
           ...makeProject().mediaLibrary.items[0]!,
           blob: new Blob(["already remote"], { type: "video/mp4" }),
-          remoteUrl: "http://localhost:4041/api/projects/vintage-tokyo/media/media-1.mp4",
+          remoteUrl: "http://localhost:4041/api/projects/vintage-tokyo/media/clip.mp4",
         }],
       },
     });
@@ -434,7 +788,9 @@ describe("backendSaveService.save", () => {
     const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
       methods.push(init?.method ?? "GET");
       if (init?.method === "HEAD") return { ok: false, status: 404 };
-      if (init?.method === "POST") return { ok: true };
+      if (init?.method === "POST") {
+        return { ok: true, json: async () => ({ pending: true, mediaId: "media-1" }) };
+      }
       return persistedResponse();
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -446,7 +802,7 @@ describe("backendSaveService.save", () => {
         items: [{
           ...makeProject().mediaLibrary.items[0]!,
           blob: new Blob(["needs upload"], { type: "video/mp4" }),
-          remoteUrl: "http://localhost:4041/api/projects/vintage-tokyo/media/media-1.mp4",
+          remoteUrl: "http://localhost:4041/api/projects/vintage-tokyo/media/clip.mp4",
         }],
       },
     });
@@ -483,7 +839,10 @@ describe("backendSaveService.create", () => {
       "fetch",
       vi.fn().mockResolvedValue({
         ok: true,
-        json: async () => returned,
+        json: async () => ({
+          project: returned,
+          ...makeReceipt({ projectId: returned.id, sourceModifiedAt: returned.modifiedAt }),
+        }),
       }),
     );
 
@@ -491,6 +850,7 @@ describe("backendSaveService.create", () => {
 
     expect(project.id).toBe("my-new-project");
     expect(project.name).toBe("My New Project");
+    expect(usePersistenceStatusStore.getState().baseRevision?.commitSha).toBe(makeReceipt().commitSha);
   });
 
   it("passes settings through to POST body", async () => {
@@ -508,7 +868,10 @@ describe("backendSaveService.create", () => {
         capturedBody = init?.body as string;
         return {
           ok: true,
-          json: async () => returned,
+          json: async () => ({
+            project: returned,
+            ...makeReceipt({ projectId: returned.id, sourceModifiedAt: returned.modifiedAt }),
+          }),
         };
       }),
     );

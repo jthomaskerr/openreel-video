@@ -1,5 +1,12 @@
 // apps/web/src/services/backend-save.ts
-import type { Project, MediaItem, ProjectSaveReceipt, ProjectSettings } from "@openreel/core";
+import type {
+  Project,
+  MediaItem,
+  ProjectSaveReceipt,
+  ProjectSettings,
+  ProjectSaveRequest,
+  RequiredMediaManifestEntry,
+} from "@openreel/core";
 import {
   generateThumbnailFromBlob,
   generateThumbnailFromUrl,
@@ -72,15 +79,66 @@ function getExt(blob: Blob, filename: string): string {
   return mimeToExt[blob.type] ?? ".bin";
 }
 
-export interface BackendProjectResponse {
+export interface BackendProjectResponse extends ProjectSaveReceipt {
   project: Project;
   /** Map of mediaId → stored filename (e.g. "abc123.mp4") */
   mediaFiles: Record<string, string>;
 }
 
+type SaveIntent = NonNullable<ProjectSaveRequest["saveIntent"]>;
+
+interface BackendSaveResponse extends ProjectSaveReceipt {
+  project: Project;
+}
+
+interface SaveErrorBody {
+  code?: string;
+  project?: Project;
+}
+
+class TerminalPersistenceError extends Error {}
+
+class MediaOriginalUnavailableError extends TerminalPersistenceError {
+  constructor(readonly projectId: string, readonly mediaId: string) {
+    super(`Media ${mediaId} original is unavailable for project ${projectId}`);
+  }
+}
+
+function validateCommittedResponse(
+  response: BackendSaveResponse,
+  expectedProjectId: string,
+  expectedSourceModifiedAt: number,
+): ProjectSaveReceipt {
+  const nonEmpty = (value: unknown): value is string =>
+    typeof value === "string" && value.trim().length > 0;
+  if (response.saved !== true
+    || response.committed !== true
+    || response.projectId !== expectedProjectId
+    || response.project?.id !== expectedProjectId
+    || response.project.modifiedAt !== expectedSourceModifiedAt
+    || response.sourceModifiedAt !== expectedSourceModifiedAt
+    || typeof response.persistedAt !== "number"
+    || !Number.isFinite(response.persistedAt)
+    || response.persistedAt <= 0
+    || !nonEmpty(response.commitSha)
+    || !nonEmpty(response.treeSha)
+    || !nonEmpty(response.projectBlobSha)
+    || !nonEmpty(response.mediaManifestDigest)
+    || !Array.isArray(response.lfsPayloads)
+    || response.lfsPayloads.some((payload) =>
+      !nonEmpty(payload.mediaId)
+      || !nonEmpty(payload.semanticFilename)
+      || !nonEmpty(payload.relativePhysicalPath)
+      || !nonEmpty(payload.oid)
+      || payload.local.state !== "verified"
+      || !Number.isFinite(payload.local.actualSize)
+    )) {
+    throw new Error(`Backend returned an invalid committed persistence response for ${expectedProjectId}`);
+  }
+  return response;
+}
+
 class BackendSaveService {
-  /** Media uploads successfully completed this session. Cleared on project switch. */
-  private uploadedIds = new Set<string>();
   /** In-flight media uploads keyed by project/media id so saves can await them. */
   private uploadPromises = new Map<string, Promise<void>>();
   private scheduledProject: Project | null = null;
@@ -93,7 +151,6 @@ class BackendSaveService {
   private readonly requestDeadlineMs = 20_000;
 
   resetForProject(): void {
-    this.uploadedIds.clear();
     this.uploadPromises.clear();
     this.scheduledProject = null;
     this.scheduledSaveStartedAt = null;
@@ -159,6 +216,7 @@ class BackendSaveService {
         .then(() => this.save(pending));
       this.saveChain = run;
       void run.catch((error) => {
+        if (error instanceof TerminalPersistenceError) return;
         console.error("[BackendSave] scheduled save failed; retrying:", error);
         if (!this.scheduledProject) this.scheduledProject = pending;
         if (!this.scheduledSaveTimer) {
@@ -176,21 +234,44 @@ class BackendSaveService {
     return `${projectId}:${mediaId}`;
   }
 
-  private async hasCurrentBackendMedia(projectId: string, remoteUrl: string | undefined): Promise<boolean> {
-    const persistedMediaPrefix = `${BASE_URL}/api/projects/${projectId}/media/`;
-    if (!remoteUrl?.startsWith(persistedMediaPrefix)) return false;
+  private async hasCurrentBackendMedia(projectId: string, item: MediaItem): Promise<boolean> {
+    if (!item.remoteUrl) return false;
     try {
-      const response = await fetch(remoteUrl, { method: "HEAD" });
+      const url = new URL(item.remoteUrl);
+      const base = new URL(BASE_URL);
+      const expectedPath = `/api/projects/${encodeURIComponent(projectId)}/media/${encodeURIComponent(item.name)}`;
+      if (url.origin !== base.origin || url.pathname !== expectedPath || url.search || url.hash) {
+        return false;
+      }
+
+      const response = await fetch(url.toString(), { method: "HEAD" });
+      const contentLength = Number(response.headers.get("content-length"));
+      const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+      const compatibleType = item.type === "video"
+        ? contentType?.startsWith("video/")
+        : item.type === "audio"
+          ? contentType?.startsWith("audio/")
+          : item.type === "image"
+            ? contentType?.startsWith("image/")
+            : contentType === "text/plain" || contentType === "application/x-subrip";
       console.debug("[Persistence] backend media freshness checked", {
         projectId,
-        remoteUrl,
+        mediaId: item.id,
+        remoteUrl: item.remoteUrl,
         status: response.status,
+        contentLength,
+        contentType,
       });
-      return response.ok;
+      return response.ok
+        && Number.isFinite(contentLength)
+        && contentLength === item.metadata.fileSize
+        && compatibleType === true
+        && contentType !== "text/html";
     } catch (error) {
       console.warn("[Persistence] backend media freshness check failed; upload required", {
         projectId,
-        remoteUrl,
+        mediaId: item.id,
+        remoteUrl: item.remoteUrl,
         error,
       });
       return false;
@@ -206,22 +287,26 @@ class BackendSaveService {
     if (isClientOnlyProjectId(projectId)) return;
 
     const key = this.getUploadKey(projectId, mediaId);
-    if (this.uploadedIds.has(key)) return;
-
     const existing = this.uploadPromises.get(key);
     if (existing) return existing;
 
     const promise = (async () => {
       const ext = getExt(blob, filename);
       const form = new FormData();
-      form.append("file", blob, `${mediaId}${ext}`);
+      form.append("file", blob, filename || `${mediaId}${ext}`);
 
       const res = await fetch(`${BASE_URL}/api/projects/${projectId}/media/${mediaId}`, {
         method: "POST",
         body: form,
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      this.uploadedIds.add(key);
+      const pending = await res.json().catch(() => null) as {
+        pending?: boolean;
+        mediaId?: string;
+      } | null;
+      if (!pending?.pending || pending.mediaId !== mediaId) {
+        throw new Error(`Backend returned an invalid pending upload response for ${mediaId}`);
+      }
     })();
 
     this.uploadPromises.set(key, promise);
@@ -259,22 +344,95 @@ class BackendSaveService {
       const detail = await res.text();
       throw new Error(`Backend create failed: HTTP ${res.status}${detail ? ` — ${detail}` : ""}`);
     }
-    return (await res.json()) as Project;
+    const response = await res.json() as BackendSaveResponse;
+    const receipt = validateCommittedResponse(
+      response,
+      response.project?.id ?? "",
+      response.project?.modifiedAt ?? Number.NaN,
+    );
+    usePersistenceStatusStore.getState().confirmReceipt(response.project.id, receipt);
+    return response.project;
+  }
+
+  private async prepareSnapshot(
+    project: Project,
+    forceLocalIds: ReadonlySet<string> = new Set(),
+  ): Promise<{
+    project: Project;
+    manifest: RequiredMediaManifestEntry[];
+    uploads: Array<{ item: MediaItem; blob: Blob }>;
+  }> {
+    // Prove every original before uploading any of them. This prevents a
+    // partial media stage from disguising an incomplete snapshot.
+    const prepared = await Promise.all(project.mediaLibrary.items.map(async (item) => {
+      if (!forceLocalIds.has(item.id) && await this.hasCurrentBackendMedia(project.id, item)) {
+        return { item, blob: null, upload: false, byteSize: item.metadata.fileSize };
+      }
+
+      let blob = isMediaBlob(item.blob) ? item.blob : null;
+      if (!blob && item.fileHandle) {
+        try {
+          const recovered = await item.fileHandle.getFile();
+          if (isMediaBlob(recovered)) blob = recovered;
+        } catch (error) {
+          console.warn("[Persistence] media handle recovery failed", {
+            projectId: project.id,
+            mediaId: item.id,
+            error,
+          });
+        }
+      }
+      if (!blob) throw new MediaOriginalUnavailableError(project.id, item.id);
+      return { item: { ...item, blob }, blob, upload: true, byteSize: blob.size };
+    }));
+
+    return {
+      project: {
+        ...project,
+        mediaLibrary: { ...project.mediaLibrary, items: prepared.map(({ item }) => item) },
+      },
+      manifest: prepared.map(({ item, byteSize }) => ({
+        mediaId: item.id,
+        semanticFilename: item.name,
+        relativePhysicalPath: `media/${item.name}`,
+        expectedByteSize: byteSize,
+      })),
+      uploads: prepared.flatMap(({ item, blob, upload }) =>
+        upload && blob ? [{ item, blob }] : []
+      ),
+    };
+  }
+
+  private applyCanonicalFilenames(target: Project, canonical: Project): void {
+    const names = new Map(canonical.mediaLibrary.items.map((item) => [item.id, item.name]));
+    target.mediaLibrary.items.forEach((item, index) => {
+      const name = names.get(item.id);
+      if (name && name !== item.name) target.mediaLibrary.items[index] = { ...item, name };
+    });
+  }
+
+  private async loadProjectWithoutConfirming(projectId: string): Promise<Project | null> {
+    try {
+      const response = await fetch(`${BASE_URL}/api/projects/${projectId}`);
+      if (!response.ok) return null;
+      return ((await response.json()) as BackendProjectResponse).project;
+    } catch {
+      return null;
+    }
   }
 
   /**
    * PUT sanitised project JSON to backend. Blobs, fileHandles, and
    * engine-only fields are stripped before sending.
    */
-  async save(project: Project): Promise<void> {
+  async save(project: Project, saveIntent: SaveIntent = "autosave"): Promise<void> {
     if (isClientOnlyProjectId(project.id)) {
-      // Local/offline projects are born with UUIDs. Do not ever send those to
-      // the backend git store; wait until create/import returns the slug id.
       console.debug("[Persistence] skipped client-only project", { projectId: project.id });
       return;
     }
 
     const status = usePersistenceStatusStore.getState();
+    const baseRevision = status.projectId === project.id ? status.baseRevision : null;
     status.markSaving(project.id);
     console.info("[Persistence] save started", {
       projectId: project.id,
@@ -284,57 +442,110 @@ class BackendSaveService {
     });
 
     try {
-      await Promise.all(
-        project.mediaLibrary.items.map(async (item) => {
-          if (await this.hasCurrentBackendMedia(project.id, item.remoteUrl)) {
-            console.debug("[Persistence] media already present; upload skipped", {
-              projectId: project.id,
-              mediaId: item.id,
-            });
-            return;
-          }
-          if (!isMediaBlob(item.blob)) return;
-          return this.uploadMedia(project.id, item.id, item.blob, item.name);
-        }),
-      );
-      console.debug("[Persistence] media stage complete", { projectId: project.id });
+      if (!baseRevision) {
+        throw new Error(`No confirmed base revision is available for project ${project.id}`);
+      }
 
-      const res = await fetch(`${BASE_URL}/api/projects/${project.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(sanitize(project)),
-        signal: AbortSignal.timeout(this.requestDeadlineMs),
-      });
-      if (!res.ok) {
-        const responseText = await res.text();
-        throw new Error(
-          `Backend save failed: HTTP ${res.status}${responseText ? ` — ${responseText}` : ""}`,
-        );
-      }
-      const receipt = await res.json() as ProjectSaveReceipt;
-      if (!receipt.saved || receipt.projectId !== project.id) {
-        throw new Error(`Backend returned an invalid persistence receipt for ${project.id}`);
-      }
-      if (receipt.sourceModifiedAt !== project.modifiedAt) {
-        throw new Error(
-          `Backend persistence receipt timestamp mismatch for ${project.id}: expected ${project.modifiedAt}, received ${receipt.sourceModifiedAt}`,
-        );
-      }
-      if (receipt.committed === false) {
-        usePersistenceStatusStore.getState().markDeferred(project.id);
-        console.info("[Persistence] modifiedAt written but Git commit deferred until a semantic change", receipt);
+      let snapshot = project;
+      let forceLocalIds = new Set<string>();
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const prepared = await this.prepareSnapshot(snapshot, forceLocalIds);
+        snapshot = prepared.project;
+        await Promise.all(prepared.uploads.map(({ item, blob }) =>
+          this.uploadMedia(project.id, item.id, blob, item.name)
+        ));
+        console.debug("[Persistence] media stage complete", { projectId: project.id, attempt });
+
+        const request: ProjectSaveRequest = {
+          projectId: project.id,
+          baseRevision,
+          project: sanitize(snapshot) as ProjectSaveRequest["project"],
+          requiredMediaManifest: prepared.manifest,
+          saveIntent: attempt === 0 ? saveIntent : "recovery",
+        };
+        const res = await fetch(`${BASE_URL}/api/projects/${project.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(request),
+          signal: AbortSignal.timeout(this.requestDeadlineMs),
+        });
+
+        if (!res.ok) {
+          const responseText = await res.text();
+          let body: (SaveErrorBody & { missingItems?: Array<{ mediaId?: string }> }) | null = null;
+          try {
+            body = JSON.parse(responseText) as SaveErrorBody & {
+              missingItems?: Array<{ mediaId?: string }>;
+            };
+          } catch {
+            // Preserve non-JSON response text in the visible failure below.
+          }
+
+          if (body?.code === "MEDIA_INCOMPLETE" && attempt === 0) {
+            const missingIds = body.missingItems
+              ?.map((item) => item.mediaId)
+              .filter((id): id is string => Boolean(id));
+            forceLocalIds = new Set(
+              missingIds?.length ? missingIds : project.mediaLibrary.items.map((item) => item.id),
+            );
+            snapshot = {
+              ...project,
+              mediaLibrary: {
+                ...project.mediaLibrary,
+                items: project.mediaLibrary.items.map((item) => ({ ...item })),
+              },
+            };
+            continue;
+          }
+
+          if (body?.code === "MEDIA_INCOMPLETE") {
+            throw new TerminalPersistenceError(
+              `Backend media recovery retry exhausted for ${project.id}`,
+            );
+          }
+
+          if (body?.code === "PROJECT_CONFLICT") {
+            const serverProject = body.project ?? await this.loadProjectWithoutConfirming(project.id);
+            const message = `Project conflict for ${project.id}; the newer server state was preserved`;
+            usePersistenceStatusStore.getState().markConflict(project.id, message, serverProject);
+            throw new TerminalPersistenceError(message);
+          }
+
+          throw new Error(
+            `Backend save failed: HTTP ${res.status}${responseText ? ` — ${responseText}` : ""}`,
+          );
+        }
+
+        const response = await res.json() as BackendSaveResponse;
+        if (response.committed === false) {
+          if (response.saved !== true
+            || response.projectId !== project.id
+            || response.sourceModifiedAt !== snapshot.modifiedAt) {
+            throw new Error(`Backend returned an invalid deferred persistence response for ${project.id}`);
+          }
+          usePersistenceStatusStore.getState().markDeferred(project.id);
+          console.info(
+            "[Persistence] modifiedAt written but Git commit deferred until a semantic change",
+            response,
+          );
+          return;
+        }
+
+        const receipt = validateCommittedResponse(response, project.id, snapshot.modifiedAt);
+        this.applyCanonicalFilenames(project, response.project);
+        usePersistenceStatusStore.getState().markPersisted(project.id, receipt);
+        console.info("[Persistence] Git persistence confirmed", receipt);
         return;
       }
-      if (!receipt.persistedAt) {
-        throw new Error(`Backend returned a committed receipt without persistedAt for ${project.id}`);
-      }
-      usePersistenceStatusStore
-        .getState()
-        .markPersisted(project.id, receipt.persistedAt, receipt.sourceModifiedAt);
-      console.info("[Persistence] Git persistence confirmed", receipt);
+      throw new Error(`Backend media recovery retry exhausted for ${project.id}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      usePersistenceStatusStore.getState().markFailed(project.id, message);
+      const currentPhase = usePersistenceStatusStore.getState().phase;
+      if (error instanceof MediaOriginalUnavailableError) {
+        usePersistenceStatusStore.getState().markIncomplete(project.id, message);
+      } else if (currentPhase !== "conflict") {
+        usePersistenceStatusStore.getState().markFailed(project.id, message);
+      }
       console.error("[Persistence] save failed", { projectId: project.id, error: message });
       reportRuntimeError(
         `Backend persistence failed for ${project.id}`,
@@ -398,7 +609,10 @@ class BackendSaveService {
         console.warn("[Persistence] project load failed", { projectId, status: res.status });
         return null;
       }
-      const { project, mediaFiles } = (await res.json()) as BackendProjectResponse;
+      const response = await res.json() as BackendProjectResponse;
+      const { project, mediaFiles } = response;
+      const receipt = validateCommittedResponse(response, projectId, project.modifiedAt);
+      usePersistenceStatusStore.getState().confirmReceipt(projectId, receipt);
 
       const items = await Promise.all(
         project.mediaLibrary.items.map(async (item) => {

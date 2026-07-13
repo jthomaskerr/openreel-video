@@ -129,7 +129,9 @@ async function withProjectRouter(
   }
   store.projectDir ??= () => tempRoot;
   store.mediaDir ??= () => join(tempRoot, "media");
+  store.auditSnapshot ??= async () => auditReceipt();
   gitStore.readConfirmedReceipt ??= async () => commitReceipt();
+  gitStore.readCommitTimestamp ??= async () => 1_234;
   gitStore.withProjectTransaction ??= async (projectId, operation) => operation({
     commit: (message, transaction) => gitStore.commit!(projectId, message, transaction),
     stage: async () => undefined,
@@ -155,6 +157,64 @@ async function withProjectRouter(
     await rm(tempRoot, { recursive: true, force: true });
   }
 }
+
+test("GET returns the project with a complete confirmed persistence receipt", async () => {
+  const project = projectFixture("vintage-tokyo", "Loaded Project");
+  await withProjectRouter(
+    {
+      loadProject: async () => project,
+      scanMedia: async () => ({}),
+    },
+    {},
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/projects/vintage-tokyo`);
+      assert.equal(response.status, 200);
+      const body = await response.json() as Record<string, unknown> & { project: Project };
+      assert.equal(body.project.id, project.id);
+      assert.equal(body.saved, true);
+      assert.equal(body.committed, true);
+      assert.equal(body.projectId, project.id);
+      assert.equal(body.persistedAt, 1_234);
+      assert.equal(body.sourceModifiedAt, project.modifiedAt);
+      assert.equal(body.commitSha, commitReceipt().commitSha);
+      assert.equal(body.mediaManifestDigest, auditReceipt().mediaManifestDigest);
+      assert.deepEqual(body.lfsPayloads, auditReceipt().lfsPayloads);
+    },
+  );
+});
+
+test("project creation returns the canonical project with its confirmed persistence receipt", async () => {
+  const project = projectFixture("new-project", "New Project");
+  await withProjectRouter(
+    {
+      createProject: async () => project,
+    },
+    {
+      commit: async () => commitReceipt(),
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: project.name }),
+      });
+
+      assert.equal(response.status, 201);
+      const body = await response.json() as Record<string, unknown> & { project: Project };
+      assert.deepEqual(body.project, project);
+      assert.equal(body.saved, true);
+      assert.equal(body.committed, true);
+      assert.equal(body.projectId, project.id);
+      assert.equal(body.persistedAt, 1_234);
+      assert.equal(body.sourceModifiedAt, project.modifiedAt);
+      assert.equal(body.commitSha, commitReceipt().commitSha);
+      assert.equal(body.treeSha, commitReceipt().treeSha);
+      assert.equal(body.projectBlobSha, commitReceipt().projectBlobSha);
+      assert.equal(body.mediaManifestDigest, auditReceipt().mediaManifestDigest);
+      assert.deepEqual(body.lfsPayloads, auditReceipt().lfsPayloads);
+    },
+  );
+});
 
 test("media upload remains pending without a persistence receipt or commit", async () => {
   const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");
@@ -312,8 +372,18 @@ test("project import canonicalizes client UUID ids to slug worktree ids", async 
     });
 
     assert.equal(response.status, 201);
-    const imported = (await response.json()) as Project;
-    assert.equal(imported.id, "vintage-tokyo");
+    const imported = (await response.json()) as Record<string, unknown> & { project: Project };
+    assert.equal(imported.project.id, "vintage-tokyo");
+    assert.equal(imported.saved, true);
+    assert.equal(imported.committed, true);
+    assert.equal(imported.projectId, "vintage-tokyo");
+    assert.equal(imported.persistedAt, 1_234);
+    assert.equal(imported.sourceModifiedAt, 999);
+    assert.equal(imported.commitSha, commitReceipt().commitSha);
+    assert.equal(imported.treeSha, commitReceipt().treeSha);
+    assert.equal(imported.projectBlobSha, commitReceipt().projectBlobSha);
+    assert.equal(imported.mediaManifestDigest, auditReceipt().mediaManifestDigest);
+    assert.deepEqual(imported.lfsPayloads, auditReceipt().lfsPayloads);
     assert.equal(savedProjects.at(-1)?.id, "vintage-tokyo");
     assert.equal(committedProjectIds.at(-1), "vintage-tokyo");
   });
