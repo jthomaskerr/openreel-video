@@ -443,9 +443,14 @@ class BackendSaveService {
           }
 
           try {
-            const thumbnailUrl = blob
-              ? await generateThumbnailFromBlob(blob, item.type)
-              : await generateThumbnailFromUrl(remoteUrl, item.type);
+            // WebKit can reject object URLs backed by fetched video blobs with
+            // WebKitBlobResource error 1. Persisted videos already have a durable
+            // media URL, so decode that URL directly and reserve blobs for fallback.
+            let thumbnailUrl = item.type === "video"
+              ? await generateThumbnailFromUrl(remoteUrl, item.type)
+              : blob
+                ? await generateThumbnailFromBlob(blob, item.type)
+                : await generateThumbnailFromUrl(remoteUrl, item.type);
             if (thumbnailUrl) {
               console.info("[BackendSave] thumbnail hydration succeeded", {
                 projectId,

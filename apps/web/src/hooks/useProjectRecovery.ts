@@ -35,6 +35,13 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
 
         await autoSaveManager.initialize();
         const saves = await autoSaveManager.checkForRecovery();
+        console.info("[ProjectRecovery] recovery check complete", {
+          requestedProjectId: autoRestoreProjectId ?? null,
+          saveCount: saves.length,
+          matchingSaveCount: autoRestoreProjectId
+            ? saves.filter((save) => save.projectId === autoRestoreProjectId).length
+            : 0,
+        });
 
         if (autoRestoreProjectId) {
           const pendingCreation = autoSaveManager.getPendingProjectCreation(autoRestoreProjectId);
@@ -47,6 +54,10 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
               .filter((save) => save.projectId === autoRestoreProjectId)
               .sort((a, b) => b.timestamp - a.timestamp)[0];
             if (matchingPendingSave) {
+              console.info("[ProjectRecovery] loading pending project from local autosave", {
+                projectId: autoRestoreProjectId,
+                saveId: matchingPendingSave.id,
+              });
               const success = await recoverFromAutoSave(matchingPendingSave.id);
               if (cancelled) return;
               if (success) {
@@ -67,9 +78,20 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
           // Prefer the backend copy when a URL project id is present, but do not
           // strand fresh local work if the backend save has not completed yet
           // (for example after HMR/page refresh shortly after an import).
+          console.info("[ProjectRecovery] loading requested project from backend", {
+            projectId: autoRestoreProjectId,
+          });
           const backendProject = await backendSaveService.load(autoRestoreProjectId);
           if (cancelled) return;
           if (backendProject) {
+            console.info("[ProjectRecovery] backend project hydrated", {
+              projectId: autoRestoreProjectId,
+              mediaCount: backendProject.mediaLibrary.items.length,
+              videoCount: backendProject.mediaLibrary.items.filter((item) => item.type === "video").length,
+              videoThumbnailCount: backendProject.mediaLibrary.items.filter(
+                (item) => item.type === "video" && Boolean(item.thumbnailUrl),
+              ).length,
+            });
             loadProject(backendProject);
             const newerLocalSave = saves
               .filter((save) => save.projectId === autoRestoreProjectId)
@@ -90,6 +112,10 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
             .sort((a, b) => b.timestamp - a.timestamp)[0];
 
           if (matchingSave) {
+            console.warn("[ProjectRecovery] backend load failed; loading local autosave", {
+              projectId: autoRestoreProjectId,
+              saveId: matchingSave.id,
+            });
             const success = await recoverFromAutoSave(matchingSave.id);
             if (cancelled) return;
             if (success) {
@@ -116,6 +142,9 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
         }
 
         if (saves.length > 0) {
+          console.info("[ProjectRecovery] no project requested; showing recovery dialog", {
+            saveCount: saves.length,
+          });
           setState({
             isChecking: false,
             availableSaves: saves,

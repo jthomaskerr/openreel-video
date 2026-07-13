@@ -108,7 +108,7 @@ describe("backendSaveService.load", () => {
     expect(project?.mediaLibrary.items[1]?.remoteUrl).toBeUndefined();
   });
 
-  it("regenerates missing or stale blob thumbnails from downloaded backend media", async () => {
+  it("regenerates persisted video thumbnails from the backend URL instead of a WebKit-incompatible blob URL", async () => {
     const baseProject = makeProject();
     const staleProject: Project = {
       ...baseProject,
@@ -123,7 +123,7 @@ describe("backendSaveService.load", () => {
       },
     };
     const mediaBlob = new Blob(["video"], { type: "video/mp4" });
-    mockGenerateThumbnailFromBlob.mockResolvedValueOnce("blob:regenerated-thumbnail");
+    mockGenerateThumbnailFromUrl.mockResolvedValueOnce("data:image/jpeg;base64,regenerated");
 
     vi.stubGlobal(
       "fetch",
@@ -144,10 +144,13 @@ describe("backendSaveService.load", () => {
 
     const project = await backendSaveService.load("project-1");
 
-    expect(mockGenerateThumbnailFromBlob).toHaveBeenCalledWith(mediaBlob, "video");
-    expect(mockGenerateThumbnailFromUrl).not.toHaveBeenCalled();
+    expect(mockGenerateThumbnailFromUrl).toHaveBeenCalledWith(
+      "http://localhost:4041/api/projects/project-1/media/media-1.mp4",
+      "video",
+    );
+    expect(mockGenerateThumbnailFromBlob).not.toHaveBeenCalled();
     expect(project?.mediaLibrary.items[0]?.thumbnailUrl).toBe(
-      "blob:regenerated-thumbnail",
+      "data:image/jpeg;base64,regenerated",
     );
   });
 

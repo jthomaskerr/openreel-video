@@ -34,6 +34,8 @@ function generateVideoThumbnailFromSource(
     const sourceKind = src.startsWith("blob:") ? "blob" : src.startsWith("data:") ? "data" : "remote";
     const startedAt = performance.now();
     let settled = false;
+    let captureStarted = false;
+    let seekRequested = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     const snapshot = () => ({
@@ -69,6 +71,8 @@ function generateVideoThumbnailFromSource(
     };
 
     const capture = () => {
+      if (settled || captureStarted) return;
+      captureStarted = true;
       try {
         const sourceWidth = video.videoWidth || 320;
         const sourceHeight = video.videoHeight || 180;
@@ -106,20 +110,23 @@ function generateVideoThumbnailFromSource(
 
     video.muted = true;
     video.playsInline = true;
-    video.preload = "metadata";
+    // WebKit honors `metadata` strictly and may never emit loadeddata. We need a
+    // decoded frame, so request media data explicitly and support its event order.
+    video.preload = "auto";
     if (crossOrigin) {
       video.crossOrigin = "anonymous";
     }
 
-    video.onloadeddata = () => {
-      console.info("[ThumbnailRecovery] video loaded data", snapshot());
+    const requestSeekOrCapture = () => {
+      if (settled || captureStarted || seekRequested) return;
       try {
         const seekTime = Number.isFinite(video.duration) && video.duration > 0
           ? Math.min(0.1, video.duration / 2)
           : 0;
         if (seekTime > 0) {
+          seekRequested = true;
           video.currentTime = seekTime;
-        } else {
+        } else if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
           capture();
         }
       } catch (error) {
@@ -131,6 +138,18 @@ function generateVideoThumbnailFromSource(
       }
     };
 
+    video.onloadedmetadata = () => {
+      console.info("[ThumbnailRecovery] video loaded metadata", snapshot());
+      requestSeekOrCapture();
+    };
+    video.onloadeddata = () => {
+      console.info("[ThumbnailRecovery] video loaded data", snapshot());
+      requestSeekOrCapture();
+    };
+    video.oncanplay = () => {
+      console.info("[ThumbnailRecovery] video can play", snapshot());
+      if (!seekRequested) capture();
+    };
     video.onseeked = () => {
       console.info("[ThumbnailRecovery] video seeked", snapshot());
       capture();
@@ -144,6 +163,7 @@ function generateVideoThumbnailFromSource(
     });
     timeoutId = setTimeout(() => finish(null, "timeout"), 5000);
     video.src = src;
+    video.load();
   });
 }
 

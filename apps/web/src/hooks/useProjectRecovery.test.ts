@@ -29,6 +29,7 @@ const {
   mockSaveMediaBlob: vi.fn<unknown[], Promise<void>>().mockResolvedValue(undefined)
 }));
 vi.mock("../services/backend-save", () => ({
+  isClientOnlyProjectId: (projectId: string) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(projectId),
   backendSaveService: {
     load: (...args: unknown[]) => mockBackendLoad(...(args as [string])),
     create: vi.fn().mockResolvedValue({ id: "mock-backend-project", createdAt: 0, modifiedAt: 0 }),
