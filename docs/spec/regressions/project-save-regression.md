@@ -7,6 +7,11 @@ The primary data-loss bug is fixed in the current checkout by commit `0dfec94`
 (`fix(web): preserve edits during backend project creation`). This document is
 an investigation record and acceptance contract, not a product-code change.
 
+The archive-integrity implementation is tracked by the
+[project-save archive plan](../../superpowers/plans/2026-07-13-project-save-archive-integrity-and-dangling-clips.md).
+Use the [operator verification runbook](../../runbooks/project-save-integrity-verification.md)
+to verify a receipt without modifying a project.
+
 The related `{}`-as-Blob recovery failure is a separate downstream defect. It
 is included only where it affects the observed user impact.
 
@@ -16,7 +21,7 @@ When the user creates a project while the orchestrator is reachable:
 
 1. `createNewProject()` synchronously installs `createEmptyProject()` in the
    Zustand store. The project initially has a client-generated UUID.
-2. A fire-and-forget chain calls `backendSaveService.isReachable()`, then
+2. An asynchronous creation chain calls `backendSaveService.isReachable()`, then
    `backendSaveService.create()`, which calls `POST /api/projects`.
 3. The backend returns a newly-created, empty project with a canonical slug ID.
 4. The current code checks that the live project still has the original UUID,
@@ -25,9 +30,38 @@ When the user creates a project while the orchestrator is reachable:
    and other edits, and immediately calls `backendSaveService.save()`.
 5. `backendSaveService.save()` skips UUID IDs, uploads in-memory media for slug
    IDs, sanitizes non-serializable fields, and sends `PUT /api/projects/:id`.
-6. The orchestrator validates that the request path and payload IDs match,
-   rejects UUID IDs, atomically writes `project.json`, awaits the Git commit,
-   and returns a persistence receipt.
+6. The orchestrator validates identity and the submitted base revision, audits the
+   proposed snapshot before mutation, attaches pending uploads, and stages only the
+   audited allowlist. It derives the message from the final staged diff, verifies
+   Git/LFS identities, and only then returns a confirmed persistence receipt.
+
+## Archive-integrity persistence contract
+
+- Media IDs are stable opaque identities. They are never reused as storage
+  basenames. Stored originals use the sanitized semantic source name, normalized
+  to NFC and compared case-insensitively. Collisions take the lowest free suffix
+  before the extension: `clip.mp4`, `clip 1.mp4`, `clip 2.mp4`.
+- Uploads remain pending and do not prove project membership. A save transaction
+  allocates the final semantic name and atomically attaches referenced pending
+  bytes with `project.json`.
+- Before any write, the audit rejects absent originals, duplicate paths, filename
+  or size mismatches, and dangling clip references. A failed audit leaves the
+  last-good JSON, index, worktree, and HEAD unchanged.
+- The transaction compares `baseRevision` with the authoritative commit, tree,
+  project blob, and source modification time. A mismatch returns structured
+  `409 PROJECT_CONFLICT`. Structural shrink also requires an exact current base and
+  `destructiveIntent: true`; otherwise it returns structured
+  `409 DESTRUCTIVE_CHANGE_REQUIRES_INTENT`.
+- Git staging is an explicit audited allowlist. Cached residue or an unexpected
+  staged path fails the save. The commit subject/body and exact path count are
+  generated from that final cached diff.
+- A successful response is confirmed evidence, not queue acceptance. Its receipt
+  identifies `commitSha`, `treeSha`, `projectBlobSha`, `sourceModifiedAt`,
+  `mediaManifestDigest`, and every LFS payload's local/remote state. The server
+  independently resolves those objects from the commit before responding.
+- `409 MEDIA_INCOMPLETE` is non-mutating and lists every missing semantic filename
+  and media ID. The web client may prove/upload recoverable originals and reconcile
+  once; unresolved cases remain visibly failed and retryable.
 
 ## Existing-project persistence regression (2026-07-13)
 

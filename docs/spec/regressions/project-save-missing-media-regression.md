@@ -4,8 +4,9 @@
 
 ## Status and scope
 
-**Status:** Specification only. Do not treat this document as evidence that the
-behavior is implemented.
+**Status:** Implemented contract. Verification evidence is supplied by the focused
+tests and the [operator runbook](../../runbooks/project-save-integrity-verification.md),
+not by this document alone.
 
 This regression covers a project whose `project.json` references media items but
 whose backend `media/` directory lacks one or more corresponding original files.
@@ -13,6 +14,9 @@ It specifies save-time detection, bounded frontend repair, user-facing remediati
 and persistent error markers. It complements
 `docs/spec/backend-persistence-versioning.md` and does not replace the asynchronous
 project-creation regression in `project-save-regression.md`.
+
+The implementation sequence and acceptance checklist are in the
+[project-save archive plan](../../superpowers/plans/2026-07-13-project-save-archive-integrity-and-dangling-clips.md).
 
 ## Observed failure
 
@@ -231,3 +235,12 @@ regression.
 This regression's `missingItems`, markers, counts, and relink workflow apply only to an authoritative GET/PUT audit or verification result that confirms durable absence. A client that cannot reach the audit endpoint has not received a missing verdict. Missing in-memory Blobs, timeouts, refusal, DNS/CORS failures, aborts, offline/HMR interruption, `5xx`, `401`/`403`, thumbnail failures, and decode failures SHALL retain media identity and clips and use the distinct runtime states defined by `backend-outage-false-missing-media-regression.md`.
 
 If GET cannot complete, retain the last confirmed manifest evidence and mark unresolved backend-backed items `verifying` or `temporarily_unavailable`. Relink becomes primary only after authoritative backend absence plus applicable IndexedDB, file-handle, folder, and generated-asset recovery checks. Runtime availability is never serialized into project JSON, and a later successful verification clears transient indicators atomically without requiring reload.
+
+The complete runtime-only state machine is `available`, `verifying`,
+`temporarily_unavailable`, `confirmed_missing`, `decode_error`, and `unauthorized`.
+Only authoritative project/media mapping plus physical-object verification may
+produce `confirmed_missing`; unsupported `HEAD` falls back to a bounded ranged
+`GET`. Transport failures and `5xx` are retryable temporary failures, `401`/`403`
+require re-authentication, and corrupt/truncated bytes are decode/integrity errors.
+Every failure retains the media item and dependent clips and exposes a recovery
+action. None silently removes content or converts uncertainty into absence.

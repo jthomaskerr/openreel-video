@@ -297,3 +297,24 @@ Media availability follows the canonical [Media Assets runtime availability cont
 | `MEDIA_CONFIRMED_MISSING` | Durable missing-media problem | `link_file`, then confirmed removal if chosen |
 
 Timeout, refusal, DNS, CORS-like rejection, abort, offline/HMR interruption, and `5xx` SHALL log structured transport context without incrementing missing counts or creating `missing_media`. Problems and actions are deduplicated per project/media ID. Verify/Retry may target one item or all unresolved items, are bounded and cancellable, and resolve atomically across every UI surface after backend recovery. `401`/`403` require re-authentication. Relink/removal MUST NOT be primary or automatic until authoritative absence and applicable local recovery checks establish `MEDIA_CONFIRMED_MISSING`.
+
+## 8. Project-save integrity failures
+
+Save failures preserve the last confirmed receipt and remain actionable. They MUST
+NOT report `Persisted` merely because a request was queued, an upload completed, or
+bytes were written to a worktree.
+
+| Code or failure | Required treatment | Recovery path |
+|---|---|---|
+| `PROJECT_CONFLICT` | Show submitted/current bases; do not mutate | Reload/merge, then retry from the authoritative receipt |
+| `DESTRUCTIVE_CHANGE_REQUIRES_INTENT` | Show structural deltas; do not mutate | Review and explicitly confirm, then retry with current base/intent |
+| `MEDIA_INCOMPLETE` | List semantic filenames/media IDs; retain last-good JSON/HEAD | Prove/upload or relink originals, then reconcile once |
+| Receipt/object/digest mismatch | Fail persistence; retain prior receipt | Reload authoritative receipt; verify Git/LFS before retry |
+| Cached diff/unexpected staged path | Never broaden the allowlist automatically | Preserve evidence, repair only identified residue, then retry |
+| LFS local/remote failure | Never claim unproved durability | Restore exact OID/size or connectivity/upload, then re-verify |
+
+Logs include project ID, code, receipt identities, expected/actual path lists, and
+affected media IDs, but omit binaries, data URLs, secrets, and absolute paths. See
+the [project-save regression](./regressions/project-save-regression.md),
+[implementation plan](../superpowers/plans/2026-07-13-project-save-archive-integrity-and-dangling-clips.md),
+and [operator runbook](../runbooks/project-save-integrity-verification.md).
