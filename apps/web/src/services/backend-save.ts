@@ -80,8 +80,9 @@ export interface BackendProjectResponse {
 
 interface PersistenceReceipt {
   saved: true;
+  committed?: boolean;
   projectId: string;
-  persistedAt: number;
+  persistedAt?: number;
   sourceModifiedAt: number;
 }
 
@@ -319,13 +320,21 @@ class BackendSaveService {
         );
       }
       const receipt = await res.json() as PersistenceReceipt;
-      if (!receipt.saved || receipt.projectId !== project.id || !receipt.persistedAt) {
+      if (!receipt.saved || receipt.projectId !== project.id) {
         throw new Error(`Backend returned an invalid persistence receipt for ${project.id}`);
       }
       if (receipt.sourceModifiedAt !== project.modifiedAt) {
         throw new Error(
           `Backend persistence receipt timestamp mismatch for ${project.id}: expected ${project.modifiedAt}, received ${receipt.sourceModifiedAt}`,
         );
+      }
+      if (receipt.committed === false) {
+        usePersistenceStatusStore.getState().markDeferred(project.id);
+        console.info("[Persistence] modifiedAt written but Git commit deferred until a semantic change", receipt);
+        return;
+      }
+      if (!receipt.persistedAt) {
+        throw new Error(`Backend returned a committed receipt without persistedAt for ${project.id}`);
       }
       usePersistenceStatusStore
         .getState()

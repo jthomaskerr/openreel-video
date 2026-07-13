@@ -187,6 +187,26 @@ describe("backendSaveService.save", () => {
     }),
   });
 
+  it("treats a modifiedAt-only backend write as deferred rather than Git-persisted", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        saved: true,
+        committed: false,
+        projectId: "vintage-tokyo",
+        sourceModifiedAt: 2,
+      }),
+    }));
+
+    await backendSaveService.save({ ...makeProject(), id: "vintage-tokyo" });
+
+    expect(usePersistenceStatusStore.getState()).toMatchObject({
+      phase: "deferred",
+      projectId: "vintage-tokyo",
+      persistedAt: null,
+    });
+  });
+
   it("schedules a backend PUT without waiting for an IndexedDB save event", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {

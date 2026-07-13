@@ -171,6 +171,7 @@ export const Toolbar: React.FC = () => {
     if (persistedProjectId !== project.id) return "not persisted";
     if (persistencePhase === "pending") return "queued";
     if (persistencePhase === "saving") return "persisting…";
+    if (persistencePhase === "deferred") return "awaiting change";
     if (persistencePhase === "failed") return `failed: ${persistenceError ?? "unknown error"}`;
     if (!persistedAt || persistedModifiedAt !== project.modifiedAt) return "stale";
     const seconds = Math.max(0, Math.floor((statusNow - persistedAt) / 1000));

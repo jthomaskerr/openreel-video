@@ -421,6 +421,14 @@ Multiple changes in a single commit SHALL be joined with `, ` (e.g., `rename →
 
 ---
 
+### 14.9.1 Semantic commit boundary and complete messages
+
+- A `PUT` whose only difference from the backend working copy is `modifiedAt` MUST write the new `project.json` but MUST NOT create a Git commit. The timestamp-only change remains uncommitted in the project worktree until a later semantic change arrives.
+- Timestamp-only receipts MUST report `saved: true` and `committed: false`, and MUST NOT include `persistedAt`. They acknowledge a backend write, not Git persistence.
+- The next semantic save MUST commit the pending `modifiedAt` together with the actual change.
+- Every semantic commit message MUST have a succinct first line describing the substance, followed by a body listing every semantic change across every changed file.
+- If the backend LLM integration generates the message, its prompt MUST state that `ALL semantic changes across ALL <n> changed files` must be captured. A deterministic complete fallback remains mandatory.
+
 ## 14.10 Open Questions
 
 - **Orchestrator authentication:** Is there any authentication or authorization on project routes, or is the orchestrator assumed to be localhost-only?

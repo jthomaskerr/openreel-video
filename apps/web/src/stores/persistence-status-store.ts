@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type PersistencePhase = "idle" | "pending" | "saving" | "persisted" | "failed";
+export type PersistencePhase = "idle" | "pending" | "saving" | "deferred" | "persisted" | "failed";
 
 interface PersistenceStatusState {
   phase: PersistencePhase;
@@ -11,6 +11,7 @@ interface PersistenceStatusState {
   phaseStartedAt: number | null;
   markPending: (projectId: string) => void;
   markSaving: (projectId: string) => void;
+  markDeferred: (projectId: string) => void;
   markPersisted: (projectId: string, persistedAt: number, persistedModifiedAt: number) => void;
   markFailed: (projectId: string, error: string) => void;
   reset: () => void;
@@ -25,6 +26,7 @@ export const usePersistenceStatusStore = create<PersistenceStatusState>((set) =>
   phaseStartedAt: null,
   markPending: (projectId) => set({ phase: "pending", projectId, error: null, phaseStartedAt: Date.now() }),
   markSaving: (projectId) => set({ phase: "saving", projectId, error: null, phaseStartedAt: Date.now() }),
+  markDeferred: (projectId) => set({ phase: "deferred", projectId, error: null, phaseStartedAt: null }),
   markPersisted: (projectId, persistedAt, persistedModifiedAt) =>
     set({ phase: "persisted", projectId, persistedAt, persistedModifiedAt, error: null, phaseStartedAt: null }),
   markFailed: (projectId, error) => set({ phase: "failed", projectId, error, phaseStartedAt: null }),

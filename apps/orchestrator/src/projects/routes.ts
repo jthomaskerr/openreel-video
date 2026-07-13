@@ -6,6 +6,7 @@ import { extname } from "node:path";
 import type { ProjectSettings, Project } from "@openreel/core";
 import { ProjectStore } from "./project-store";
 import { GitStore } from "./git-store";
+import { deterministicCommitMessage, semanticProjectChanges } from "./semantic-commit";
 import {
   assertValidMediaFilename,
   assertValidMediaId,
@@ -20,26 +21,7 @@ function isUuid(value: string): boolean {
 
 // ── Commit message helpers ───────────────────────────────────────────────────
 
-function generateCommitMessage(prev: Project | null, next: Project): string {
-  if (!prev) return `save: initial save of "${next.name}"`;
-  const parts: string[] = [];
-  if (prev.name !== next.name) parts.push(`rename → "${next.name}"`);
-  const prevClips = prev.timeline.tracks.reduce((n, t) => n + t.clips.length, 0);
-  const nextClips = next.timeline.tracks.reduce((n, t) => n + t.clips.length, 0);
-  const clipDelta = nextClips - prevClips;
-  if (clipDelta > 0) parts.push(`+${clipDelta} clip(s)`);
-  else if (clipDelta < 0) parts.push(`${clipDelta} clip(s)`);
-  const nextMedia = next.mediaLibrary.items.length;
-  const prevMedia = prev.mediaLibrary.items.length;
-  const mediaDelta = nextMedia - prevMedia;
-  if (mediaDelta > 0) parts.push(`+${mediaDelta} media item(s)`);
-  const prevActive = new Set(prev.mediaLibrary.items.filter((i) => i.isCurrent).map((i) => i.id));
-  const nextActive = new Set(next.mediaLibrary.items.filter((i) => i.isCurrent).map((i) => i.id));
-  const switched = [...nextActive].filter((id) => !prevActive.has(id));
-  if (switched.length > 0) parts.push(`switch active version (${switched.length} asset(s))`);
-  if (parts.length === 0) parts.push("auto-save");
-  return parts.join(", ");
-}
+
 
 // ── Request validation helpers ───────────────────────────────────────────────
 
@@ -242,12 +224,27 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         tracks: incoming.timeline.tracks.length,
       });
       const saved = await store.saveProject(incoming);
+      const semanticChanges = semanticProjectChanges(prev, saved);
+      if (semanticChanges.length === 0) {
+        console.info("[Persistence] project.json written without commit; modifiedAt-only change remains pending", {
+          projectId: req.params.id,
+          modifiedAt: incoming.modifiedAt,
+        });
+        res.json({
+          saved: true,
+          committed: false,
+          projectId: req.params.id,
+          sourceModifiedAt: incoming.modifiedAt,
+        });
+        return;
+      }
       console.info("[Persistence] project.json written; committing", { projectId: req.params.id });
-      await gitStore.commit(req.params.id, generateCommitMessage(prev, saved));
+      await gitStore.commit(req.params.id, deterministicCommitMessage(semanticChanges));
       const persistedAt = Date.now();
       console.info("[Persistence] Git commit confirmed", { projectId: req.params.id, persistedAt });
       res.json({
         saved: true,
+        committed: true,
         projectId: req.params.id,
         persistedAt,
         sourceModifiedAt: incoming.modifiedAt,

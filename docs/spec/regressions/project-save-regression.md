@@ -145,6 +145,10 @@ slug creation/save completes.
 
 ## Acceptance criteria
 
+- A `modifiedAt`-only save writes `project.json` in the backend worktree without creating a commit, returns `committed: false`, and omits `persistedAt`.
+- That uncommitted timestamp remains pending until an actual semantic change is saved, at which point both changes enter one commit.
+- The commit subject succinctly captures the substance. Its body lists ALL semantic changes across ALL changed files. Any LLM prompt includes the exact `<n>` file count and this completeness requirement.
+
 - Edits made after local creation but before `POST /api/projects` resolves are
   preserved when the canonical slug is installed.
 - The initial post-creation backend save contains the current media library,

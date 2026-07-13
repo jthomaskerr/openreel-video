@@ -113,15 +113,18 @@ test("UUID PUT autosaves are rejected before any project worktree is touched", a
 });
 
 test("PUT confirms persistence only after the Git commit succeeds", async () => {
-  const project = projectFixture("vintage-tokyo", "Vintage Tokyo");
+  const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");
+  const project = { ...previous, name: "Vintage Tokyo Revised", modifiedAt: previous.modifiedAt + 1 };
   let commitFinished = false;
+  let commitMessage = "";
   const store: Partial<ProjectStore> = {
-    loadProject: async () => project,
+    loadProject: async () => previous,
     saveProject: async (incoming: Project) => incoming,
   };
   const gitStore: Partial<GitStore> = {
-    commit: async () => {
+    commit: async (_projectId: string, message: string) => {
       await new Promise((resolve) => setTimeout(resolve, 10));
+      commitMessage = message;
       commitFinished = true;
     },
   };
@@ -136,18 +139,47 @@ test("PUT confirms persistence only after the Git commit succeeds", async () => 
 
     assert.equal(response.status, 200);
     assert.equal(commitFinished, true);
-    assert.deepEqual(
-      { saved: receipt.saved, projectId: receipt.projectId },
-      { saved: true, projectId: "vintage-tokyo" },
-    );
+    assert.equal(receipt.committed, true);
+    assert.match(commitMessage, /^update name\n\n- Update name\n\nFiles changed: 1$/);
     assert.equal(typeof receipt.persistedAt, "number");
   });
 });
 
-test("PUT exposes Git commit failures instead of returning a false success", async () => {
-  const project = projectFixture("vintage-tokyo", "Vintage Tokyo");
+
+test("PUT writes modifiedAt-only changes without creating a Git commit", async () => {
+  const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");
+  const incoming = { ...previous, modifiedAt: previous.modifiedAt + 1 };
+  let commits = 0;
   const store: Partial<ProjectStore> = {
-    loadProject: async () => project,
+    loadProject: async () => previous,
+    saveProject: async (project: Project) => project,
+  };
+  const gitStore: Partial<GitStore> = {
+    commit: async () => { commits += 1; },
+  };
+
+  await withProjectRouter(store, gitStore, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/projects/vintage-tokyo`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(incoming),
+    });
+    const receipt = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(commits, 0);
+    assert.equal(receipt.saved, true);
+    assert.equal(receipt.committed, false);
+    assert.equal(receipt.persistedAt, undefined);
+    assert.equal(receipt.sourceModifiedAt, incoming.modifiedAt);
+  });
+});
+
+test("PUT exposes Git commit failures instead of returning a false success", async () => {
+  const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");
+  const project = { ...previous, name: "Vintage Tokyo Revised", modifiedAt: previous.modifiedAt + 1 };
+  const store: Partial<ProjectStore> = {
+    loadProject: async () => previous,
     saveProject: async (incoming: Project) => incoming,
   };
   const gitStore: Partial<GitStore> = {
@@ -162,9 +194,9 @@ test("PUT exposes Git commit failures instead of returning a false success", asy
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(project),
     });
-    const body = await response.json();
+    const responseBody = await response.json();
 
     assert.equal(response.status, 500);
-    assert.match(body.detail, /git index is locked/);
+    assert.match(responseBody.detail, /git index is locked/);
   });
 });
