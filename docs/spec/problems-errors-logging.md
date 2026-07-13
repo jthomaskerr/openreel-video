@@ -283,3 +283,17 @@ The resolve action handler (`setResolveActionHandler`) MUST be registered by the
 - TODO: Should Problems be auto-detected on project load by scanning all media items for missing files, or only reported when an operation fails?
 - TODO: Should the Problems tab support grouping by kind (e.g., all missing files together)?
 - TODO: Should log entries from the orchestrator backend be forwarded to the web client's log store?
+
+## 7. Media availability problems and actions
+
+Media availability uses structured runtime codes and MUST distinguish durable absence from operational failure:
+
+| Code | Problem/log treatment | Primary action |
+|---|---|---|
+| `MEDIA_VERIFYING` | Non-destructive runtime status; log only if prolonged | `verify_media` / cancel |
+| `MEDIA_TEMPORARILY_UNAVAILABLE` | Recoverable network/system problem; never `missing_media` | `retry_connection` |
+| `MEDIA_UNAUTHORIZED` | Authentication problem; never `missing_media` | `reauthenticate` |
+| `MEDIA_DECODE_ERROR` | Bytes exist but are corrupt/unsupported; never `missing_media` | inspect/replace |
+| `MEDIA_CONFIRMED_MISSING` | Durable missing-media problem | `link_file`, then confirmed removal if chosen |
+
+Timeout, refusal, DNS, CORS-like rejection, abort, offline/HMR interruption, and `5xx` SHALL log structured transport context without incrementing missing counts or creating `missing_media`. Problems and actions are deduplicated per project/media ID. Verify/Retry may target one item or all unresolved items, are bounded and cancellable, and resolve atomically across every UI surface after backend recovery. `401`/`403` require re-authentication. Relink/removal MUST NOT be primary or automatic until authoritative absence and applicable local recovery checks establish `MEDIA_CONFIRMED_MISSING`.

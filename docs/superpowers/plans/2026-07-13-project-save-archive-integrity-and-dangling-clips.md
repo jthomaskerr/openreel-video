@@ -2,13 +2,13 @@
 
 > **Executor:** GPT-5.4-mini. Execute tasks in order. Do not combine tasks or weaken assertions to make tests pass. Read `docs/spec/regressions/project-save-archive-integrity-and-dangling-clips-regression.md` before starting and re-check its acceptance criteria at the final gate.
 
-**Goal:** Make every confirmed project save a complete, conflict-safe, independently verifiable snapshot whose Git commit contains only audited files, whose media use semantic collision-safe filenames, and whose dangling timeline clips are visibly and accessibly marked missing.
+**Goal:** Make every confirmed project save a complete, conflict-safe, independently verifiable snapshot whose Git commit contains only audited files, whose media use semantic collision-safe filenames, and whose timeline clips distinguish confirmed missing media from temporary backend or browser unavailability.
 
-**Architecture:** Introduce a typed save transaction and receipt shared by the orchestrator and web client. The orchestrator audits the proposed project and media manifest before mutation, resolves media filenames inside the transaction, stages an explicit path allowlist, validates the staged diff, creates the commit message from that staged diff, verifies Git/LFS identities, and only then returns success. The client supplies a base revision, treats upload state as a hint rather than proof, reconciles structured conflicts once, and updates its confirmed receipt. Timeline rendering treats a missing media-library target as an explicit error state.
+**Architecture:** Introduce a typed save transaction and receipt shared by the orchestrator and web client. The orchestrator audits the proposed project and media manifest before mutation, resolves media filenames inside the transaction, stages an explicit path allowlist, validates the staged diff, creates the commit message from that staged diff, verifies Git/LFS identities, and only then returns success. The client supplies a base revision, treats upload state as a hint rather than proof, reconciles structured conflicts once, and updates its confirmed receipt. A separate runtime-owned availability state machine verifies backend media with bounded, cancellable requests; transport, authorization, hydration, thumbnail, and decode failures never become durable missing verdicts. Timeline and media views treat a dangling media-library reference as missing, but backend-identified unresolved media as verifying or temporarily unavailable until authoritative absence is confirmed.
 
 **Tech stack:** TypeScript, Express, Node filesystem and child-process APIs, Git/Git LFS, React, Zustand, Vitest/Node test runner, Testing Library, pnpm.
 
-**Measurable outcome:** An incomplete, stale, destructive-without-intent, or unauditable save returns a structured 409 without changing the authoritative snapshot or HEAD. A successful receipt resolves to exactly the audited project JSON and media manifest. Semantic media filenames survive save/reload, collisions use the lowest available ` <n>` suffix, and every clip with a dangling media reference displays a persistent accessible missing marker.
+**Measurable outcome:** An incomplete, stale, destructive-without-intent, or unauditable save returns a structured 409 without changing the authoritative snapshot or HEAD. A successful receipt resolves to exactly the audited project JSON and media manifest. Semantic media filenames survive save/reload, collisions use the lowest available ` <n>` suffix, every clip with a dangling media reference displays a persistent accessible missing marker, and a backend outage preserves media identity while showing a recoverable verifying/unavailable state rather than false missing UI.
 
 ## Execution rules for GPT-5.4-mini
 
@@ -211,6 +211,29 @@
 
 **Commit:** `fix(web): reconcile incomplete and stale project saves`
 
+## Task 12A: Add authoritative media verification and a runtime availability state machine
+
+**Files:**
+- Create: `packages/core/src/media-availability.ts`
+- Test: `packages/core/src/media-availability.test.ts`
+- Modify: `packages/core/src/index.ts`
+- Modify: `apps/orchestrator/src/projects/routes.ts`
+- Test: `apps/orchestrator/src/projects/routes.test.ts`
+- Create: `apps/web/src/services/media-verification.ts`
+- Test: `apps/web/src/services/media-verification.test.ts`
+- Modify: the runtime project/media store discovered through Serena references
+
+**Steps:**
+1. Define runtime-only states `available`, `verifying`, `temporarily_unavailable`, `confirmed_missing`, `decode_error`, and `unauthorized`. Keep them out of semantic project JSON; persist only durable identity/provenance and last confirmed manifest evidence.
+2. Add a project-scoped batch endpoint such as `POST /api/projects/:id/media/verify`. Verify both the project/media mapping and physical object. Return explicit per-ID outcomes, size/ETag or manifest version where available, and authoritative absence only when both mapping/object checks establish `404`/`410`. Recheck a manifest omission once against the object endpoint to avoid a stale-manifest race.
+3. Treat unsupported `HEAD` by falling back to a small ranged `GET`. Reject HTML error bodies returned with `200`, wrong MIME/range metadata, zero/truncated bytes, and cross-project ID/path association. Distinguish corrupt/truncated evidence from absence.
+4. Implement bounded-concurrency, per-project/media deduplicated, cancellable verification with exponential backoff and jitter. Timeout, refusal, DNS, CORS-like rejection, abort, offline/HMR interruption, and `5xx` become `temporarily_unavailable`; `401`/`403` become `unauthorized`; neither increments confirmed-missing counts.
+5. Guard every result with active project ID plus request generation/version so a late response cannot mutate a newly active project. Verify one media item once even when many clips reference it.
+6. On recovery, atomically transition all consumers to `available`, hydrate source/thumbnail without reload, and never overwrite a newer user relink. Thumbnail failure alone remains non-missing; playback/canvas decode failure becomes `decode_error`.
+7. Add deterministic tests for every transport/status class, stale result, cancellation, bounded concurrency, deduplication, multiple clips, HMR outage/recovery, thumbnail failure, decode failure, and serialization exclusion.
+
+**Commit:** `fix(web): distinguish media outages from confirmed absence`
+
 ## Task 13: Mark dangling clips missing and remove UUID-primary labels
 
 **Files:**
@@ -221,9 +244,10 @@
 **Steps:**
 1. Render a clip whose `mediaId` has no media-library row. Assert a persistent Missing/Error marker, accessible explanation, repair action, and semantic manifest title. Assert the UUID prefix is absent from the primary label or appears only as secondary diagnostic text.
 2. Render multiple clips referencing the same missing item and assert every clip is marked.
-3. Define `isMissingMedia` as `!mediaItem || getMediaStatus(mediaItem) is missing/error`. Recover a semantic name from the last confirmed manifest when the library row is absent; otherwise use a clear `Missing media` label, never the ID prefix alone.
+3. Define `isMissingMedia` as `!mediaItem || runtimeAvailability === confirmed_missing`. A backend-identified item with no Blob is `verifying` or `temporarily_unavailable`, never missing. Recover a semantic name from the last confirmed manifest when the library row is absent; otherwise use a clear `Missing media` label, never the ID prefix alone.
 4. Clear markers only after relink plus confirmed persistence receipt, not immediately after selecting a local file.
-5. Cover compact timeline rendering and accessible name/description behavior in component tests.
+5. Render `verifying`, `temporarily_unavailable`, `unauthorized`, and `decode_error` with distinct non-destructive labels/actions. Retry/Verify is primary for unresolved transport state; Relink is primary only for `confirmed_missing` after applicable local recovery checks.
+6. Cover compact timeline rendering and accessible name/description behavior in component tests.
 
 **Commit:** `fix(web): expose dangling timeline media references`
 
@@ -235,9 +259,10 @@
 
 **Steps:**
 1. Add a shared selector/view-model test that classifies absent library targets and manifest-known missing media consistently.
-2. Add focused tests for grid, list, grouped media, search, and missing-only filtering. A missing item must not disappear because a view expects a full `MediaItem` row.
-3. Reuse the same semantic title and repair action semantics as the timeline. Do not create view-specific missing-state rules.
-4. Run the affected web tests and web typecheck.
+2. Add focused tests for grid, list, grouped media, search, and missing-only filtering. A missing item must not disappear because a view expects a full `MediaItem` row; verifying/unavailable/unauthorized/decode states must not enter the confirmed-missing count or filter.
+3. Reuse the same semantic title and availability state/actions as timeline, preview, inspector, and Problems. Update all surfaces atomically from one selector; do not create view-specific rules.
+4. Add one-item and all-unresolved `Verify media`/`Retry connection` actions and assert they cannot mutate semantic project data.
+5. Run the affected web tests and web typecheck.
 
 **Commit:** `fix(web): keep missing media visible across editor views`
 
@@ -248,12 +273,16 @@
 - Modify: `docs/spec/project-lifecycle.md`
 - Modify: `docs/spec/regressions/project-save-regression.md`
 - Modify: `docs/spec/regressions/project-save-missing-media-regression.md`
+- Modify: `docs/spec/regressions/backend-outage-false-missing-media-regression.md` only if implementation discoveries require clarification
+- Modify: `docs/spec/asset-management-ux.md`
+- Modify: `docs/spec/media-import-timeline.md`
+- Modify: `docs/spec/problems-errors-logging.md`
 - Create: `docs/runbooks/project-save-integrity-verification.md`
 
 **Steps:**
 1. Replace UUID-basename requirements with the semantic filename invariant and lowest-free ` <n>` collision rule. State normalization/case policy and stable-ID separation.
 2. Replace fire-and-forget commit language with the confirmed, verifiable receipt contract.
-3. Document pre-write audit, allowlisted staging, staged-diff message generation, LFS payload verification, pending uploads, optimistic concurrency, destructive intent, and structured 409 responses.
+3. Document pre-write audit, allowlisted staging, staged-diff message generation, LFS payload verification, pending uploads, optimistic concurrency, destructive intent, structured 409 responses, authoritative media verification, and the runtime-only availability state machine.
 4. Add read-only receipt verification commands for commit/tree/blob, manifest digest, cached/committed path list, and LFS object availability. Explicitly forbid using `vintage-tokyo` as a fixture.
 5. Cross-link the regression spec and this implementation plan.
 
@@ -272,9 +301,11 @@
 4. Trigger autosave. Verify `409 MEDIA_INCOMPLETE`, visible failed persistence, unchanged last-good JSON, and no new commit.
 5. Relink the original, save, reload, and verify semantic filename/clip title and marker clearing after a confirmed receipt.
 6. Open a stale tab, commit a newer edit elsewhere, then attempt a destructive shrink from the stale tab. Verify `PROJECT_CONFLICT` and preservation of the newer full project.
-7. Import three same-named files and verify `clip.mp4`, `clip 1.mp4`, and `clip 2.mp4` in both project JSON and storage with stable distinct IDs and unchanged bytes.
-8. Inspect the final commit. Verify its message path count, committed paths, receipt identities, manifest digest, and LFS payload state agree exactly.
-9. Record commands, fixture path, browser observations, receipt values, and any unverified remote-LFS assumption below this task. No product restart is required beyond restarting the dev processes; state exact commands if configuration changed.
+7. Stop the backend or abort verification during HMR. Verify persisted media/clip metadata remains, all surfaces show verifying or temporarily unavailable, confirmed-missing counts stay unchanged, Retry is primary, and no relink/removal/autosave mutation occurs. Restart the backend and verify automatic recovery, source hydration, and thumbnails without page reload.
+8. Verify `401`/`403` shows re-authentication, a decode failure shows a corrupt/unsupported diagnostic, and neither is called missing.
+9. Import three same-named files and verify `clip.mp4`, `clip 1.mp4`, and `clip 2.mp4` in both project JSON and storage with stable distinct IDs and unchanged bytes.
+10. Inspect the final commit. Verify its message path count, committed paths, receipt identities, manifest digest, and LFS payload state agree exactly.
+11. Record commands, fixture path, browser observations, receipt values, and any unverified remote-LFS assumption below this task. No product restart is required beyond restarting the dev processes; state exact commands if configuration changed.
 
 **Commit:** `test: verify project archive integrity end to end`
 
@@ -291,6 +322,11 @@
 - [ ] Uploads are pending until atomically attached to a project snapshot.
 - [ ] Client upload cache cannot substitute for authoritative content proof.
 - [ ] Dangling clips and every media-pane variant show persistent accessible missing state with semantic titles.
+- [ ] Backend identity without a Blob starts verifying; transport/`5xx`/offline/HMR failure becomes temporarily unavailable, never confirmed missing.
+- [ ] Only authoritative mapping/object absence, after applicable local recovery checks, becomes confirmed missing and enables primary Relink.
+- [ ] `401`/`403`, decode failure, and thumbnail failure retain distinct non-missing states and actions.
+- [ ] Verification is bounded, deduplicated, cancellable, project/version scoped, and atomically updates every UI consumer.
+- [ ] Runtime availability is excluded from autosave JSON and transient failure never clears durable media identity or clips.
 - [ ] All fixtures are proven beneath their assigned temporary root before any Git/filesystem mutation.
 - [ ] Focused tests, full tests, typecheck, lint, and required browser scenario pass with recorded evidence.
 
@@ -306,4 +342,7 @@
 - Clearing missing UI state before a confirmed receipt can hide an unpersisted repair.
 - Size-only shrink rejection can block legitimate edits; the protected current-base plus explicit-intent path must remain available.
 - Integration tests that construct stores before validating their root can repeat the real-project incident.
-
+- Treating missing in-memory `Blob` state as durable absence creates false missing markers during every backend outage or reload.
+- A stale manifest, proxy-cached `404`, HTML `200`, or unsupported `HEAD` can produce a false verdict unless the verifier uses version evidence and fallback checks.
+- Late verification responses can corrupt the next project unless every request is project/version scoped and cancellable.
+- Relink racing backend recovery can overwrite newer user-selected media unless the state update compares request and media generations.

@@ -406,3 +406,9 @@ All clip and media operations MUST pass through `ActionValidator`. The system MU
 - **Link file UX:** What is the exact user interaction for resolving a missing-file clip? File picker? Drag-and-drop onto the clip?
 - **Overlap resolution:** When a user attempts to place a clip that would overlap, what is the UX? Prevent the drop? Auto-trim? Show an error toast?
 - **Migration path:** Existing Neural Frames imports may have `metadata.shotId` without `metadata.kind === "storyboard-shot"`. The type guard SHOULD temporarily accept `metadata.importSource === "neuralframes" && typeof metadata.shotId === "string"` during migration, but new imports MUST write the explicit marker.
+
+## Backend outage and media availability amendment
+
+Timeline clips and preview SHALL preserve clip structure, semantic media identity, timing, and metadata while media verification or hydration is unavailable. Backend-backed media with no Blob is `verifying`, not missing. Transport/`5xx`/offline/HMR failure is `temporarily_unavailable`; authentication failure is `unauthorized`; playable-byte decode failure is `decode_error`; only authoritative absence after applicable recovery checks is `confirmed_missing`.
+
+Every clip referencing one media item SHALL reflect one shared verification result. Verification is deduplicated, bounded, cancellable, and project/version scoped. Recovery updates timeline, preview, Media pane, inspector, missing filter/count, and Problems atomically without reload. Thumbnail failure does not change source availability. A transient state MUST NOT remove or alter a clip, trigger relink, or enter autosave JSON. Relink is the primary action only for `confirmed_missing`; verifying/unavailable states use Verify/Retry, and unauthorized uses re-authentication.

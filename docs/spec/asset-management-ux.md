@@ -378,3 +378,18 @@ Characters exist as `MetadataBlock` entries (`kind: "continuity_note"`) on a "Ch
   - ProRes
   - Image sequences
   - Audio-only
+
+## Media availability and recovery states
+
+The Media pane SHALL use the runtime state model from `regressions/backend-outage-false-missing-media-regression.md` across grid, list, grouped, search, and filtered views.
+
+| State | Presentation | Primary action | Missing count/filter |
+|---|---|---|---|
+| `available` | Normal asset | Normal asset actions | Excluded |
+| `verifying` | Non-destructive checking indicator; metadata remains visible | Verify/Cancel where applicable | Excluded |
+| `temporarily_unavailable` | Connection/unavailable indicator; metadata remains visible | Retry connection | Excluded |
+| `unauthorized` | Authentication-required indicator | Re-authenticate | Excluded |
+| `decode_error` | Unsupported/corrupt diagnostic | Inspect/replace as appropriate | Excluded |
+| `confirmed_missing` | Persistent accessible missing marker | Relink after recovery sources are exhausted | Included |
+
+All views, counts, Problems, preview, inspector, and timeline SHALL derive from one atomically updated runtime availability source. A missing Blob, failed thumbnail, backend outage, timeout, `5xx`, CORS failure, or HMR restart MUST NOT show Missing or offer Relink as the primary action. Users SHALL be able to verify/retry one asset or all unresolved assets. Runtime states are session-owned and MUST NOT be persisted into project JSON.

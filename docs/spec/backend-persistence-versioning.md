@@ -439,3 +439,16 @@ Multiple changes in a single commit SHALL be joined with `, ` (e.g., `rename →
 - **Git garbage collection:** Should the orchestrator ever run `git gc` on project repositories? Under what conditions?
 - **Media file cleanup on version delete:** If a user explicitly deletes a specific version of an asset, should the corresponding media file be removed, or should all files remain forever?
 - **Large media upload resilience:** Should media uploads support resumable/chunked upload for very large files?
+
+## 15. Runtime media availability and authoritative absence
+
+This section is a normative amendment derived from `regressions/backend-outage-false-missing-media-regression.md` and controls wherever older text equates an absent browser `Blob`, failed hydration, or failed request with missing durable media.
+
+- Snapshot completeness and runtime availability are separate facts. Completeness is established by the committed manifest/object audit. Availability describes the current session's ability to verify, fetch, and decode those bytes.
+- The runtime states are `available`, `verifying`, `temporarily_unavailable`, `confirmed_missing`, `decode_error`, and `unauthorized`. They MUST NOT be serialized into semantic project JSON or alter durable media identity/provenance.
+- Backend-identified media with no current Blob begins `verifying`. Timeout, refusal, DNS, CORS-like rejection, abort, offline/HMR interruption, and `5xx` produce `temporarily_unavailable`; `401`/`403` produce `unauthorized`; decode/corruption produces `decode_error`. None is missing.
+- A batch verification endpoint SHALL scope requests by project and media ID, verify both mapping and object, and return version/ETag/size evidence when available. Only authoritative `404`/`410` for mapping/object, rechecked once when a manifest race is possible, may establish backend absence.
+- If `HEAD` is unsupported, verification SHALL fall back to a small ranged `GET`. HTML error bodies with `200`, invalid MIME/range metadata, zero/truncated objects, stale cache evidence, and project-ID mismatches cannot establish availability.
+- Verification is bounded, deduplicated per project/media ID, cancellable, retryable with exponential backoff and jitter, and guarded by active project plus request generation. Late responses MUST NOT mutate another project or overwrite a newer relink.
+- Transient verification failure MUST NOT clear media identity, remove clips, trigger relink, increment confirmed-missing counts, or be autosaved as semantic missing state. Recovery SHALL atomically update every UI consumer and hydrate media/thumbnails without requiring reload.
+- Save-time `MEDIA_INCOMPLETE` remains authoritative for the audited transaction. A client-side transport failure while asking for that audit is availability uncertainty, not evidence that the media is missing.

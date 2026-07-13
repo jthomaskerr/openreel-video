@@ -223,3 +223,9 @@ regression.
   different dangling-reference bug.
 - Persisting the error only in React component state loses it on reload; GET audit
   is the durable source of truth.
+
+## Backend-outage clarification
+
+This regression's `missingItems`, markers, counts, and relink workflow apply only to an authoritative GET/PUT audit or verification result that confirms durable absence. A client that cannot reach the audit endpoint has not received a missing verdict. Missing in-memory Blobs, timeouts, refusal, DNS/CORS failures, aborts, offline/HMR interruption, `5xx`, `401`/`403`, thumbnail failures, and decode failures SHALL retain media identity and clips and use the distinct runtime states defined by `backend-outage-false-missing-media-regression.md`.
+
+If GET cannot complete, retain the last confirmed manifest evidence and mark unresolved backend-backed items `verifying` or `temporarily_unavailable`. Relink becomes primary only after authoritative backend absence plus applicable IndexedDB, file-handle, folder, and generated-asset recovery checks. Runtime availability is never serialized into project JSON, and a later successful verification clears transient indicators atomically without requiring reload.
