@@ -1,0 +1,118 @@
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { test } from "node:test";
+import { config } from "../env";
+import { GitStore } from "./git-store";
+import { ProjectStore } from "./project-store";
+import { ensureSafeTestProjectRoot } from "./test-project-root";
+
+const execFileAsync = promisify(execFile);
+
+process.env.GIT_AUTHOR_NAME ??= "OpenReel Tests";
+process.env.GIT_AUTHOR_EMAIL ??= "openreel-tests@example.com";
+process.env.GIT_COMMITTER_NAME ??= "OpenReel Tests";
+process.env.GIT_COMMITTER_EMAIL ??= "openreel-tests@example.com";
+
+async function makeStore(): Promise<{ fixtureRoot: string; repoDir: string; gitStore: GitStore; projectStore: ProjectStore }> {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), "openreel-git-store-allowlist-"));
+  const repoDir = await mkdtemp(join(fixtureRoot, "repo-"));
+  await ensureSafeTestProjectRoot(repoDir, {
+    assignedTempRoot: fixtureRoot,
+    userProjectsRoot: config.projectsRepo,
+  });
+  const gitStore = new GitStore(repoDir);
+  const projectStore = new ProjectStore(gitStore);
+  await gitStore.ensureSharedRepo();
+  return { fixtureRoot, repoDir, gitStore, projectStore };
+}
+
+async function currentHead(repoDir: string, projectId: string): Promise<{ commitSha: string; treeSha: string; projectBlobSha: string }> {
+  const { stdout: commitSha } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: join(repoDir, projectId) });
+  const { stdout: treeSha } = await execFileAsync("git", ["rev-parse", "HEAD^{tree}"], { cwd: join(repoDir, projectId) });
+  const { stdout: projectBlobSha } = await execFileAsync("git", ["rev-parse", "HEAD:project.json"], { cwd: join(repoDir, projectId) });
+  return {
+    commitSha: commitSha.trim(),
+    treeSha: treeSha.trim(),
+    projectBlobSha: projectBlobSha.trim(),
+  };
+}
+
+test("commit returns verified identities from the created commit", async () => {
+  const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
+  try {
+    const project = await projectStore.createProject("Receipt Check");
+    const receipt = await gitStore.commit(project.id, "test: create project", {
+      allowlist: ["project.json"],
+      expectedEntries: [{ status: "A", path: "project.json" }],
+    });
+
+    const head = await currentHead(repoDir, project.id);
+    assert.equal(receipt.commitSha, head.commitSha);
+    assert.equal(receipt.treeSha, head.treeSha);
+    assert.equal(receipt.projectBlobSha, head.projectBlobSha);
+    assert.match(receipt.mediaManifestDigest ?? "", /^sha256:/);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("empty allowlists return the last confirmed identities without inventing new ones", async () => {
+  const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
+  try {
+    const project = await projectStore.createProject("No-op Receipt");
+    const initialReceipt = await gitStore.commit(project.id, "test: create project", {
+      allowlist: ["project.json"],
+      expectedEntries: [{ status: "A", path: "project.json" }],
+    });
+
+    const noOpReceipt = await gitStore.commit(project.id, "test: no-op", {
+      allowlist: [],
+      expectedEntries: [],
+    });
+
+    const head = await currentHead(repoDir, project.id);
+    assert.equal(noOpReceipt.commitSha, head.commitSha);
+    assert.equal(noOpReceipt.treeSha, head.treeSha);
+    assert.equal(noOpReceipt.projectBlobSha, head.projectBlobSha);
+    assert.equal(noOpReceipt.commitSha, initialReceipt.commitSha);
+    assert.equal(noOpReceipt.mediaManifestDigest, initialReceipt.mediaManifestDigest);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("mismatched expected entries abort commit confirmation and leave HEAD unchanged", async () => {
+  const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
+  try {
+    const project = await projectStore.createProject("Mismatch Check");
+    await gitStore.commit(project.id, "test: create project", {
+      allowlist: ["project.json"],
+      expectedEntries: [{ status: "A", path: "project.json" }],
+    });
+
+    const updated = await projectStore.saveProject({ ...project, name: "Mismatch Check Updated" });
+    assert.equal(updated.name, "Mismatch Check Updated");
+
+    const headBefore = await currentHead(repoDir, project.id);
+    await assert.rejects(
+      async () => {
+        await gitStore.commit(project.id, "test: mismatched entries", {
+          allowlist: ["project.json"],
+          expectedEntries: [{ status: "A", path: "project.json" }],
+        });
+      },
+      /Cached diff did not match/,
+    );
+
+    const headAfter = await currentHead(repoDir, project.id);
+    assert.equal(headAfter.commitSha, headBefore.commitSha);
+    assert.equal(headAfter.treeSha, headBefore.treeSha);
+    assert.equal(headAfter.projectBlobSha, headBefore.projectBlobSha);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});

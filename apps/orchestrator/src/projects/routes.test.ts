@@ -3,7 +3,7 @@ import { test } from "node:test";
 import express, { type Response } from "express";
 import type { Project } from "@openreel/core";
 import { createProjectRouter, handleMediaSendError } from "./routes";
-import type { GitStore } from "./git-store";
+import type { GitCommitReceipt, GitStore } from "./git-store";
 import type { ProjectStore } from "./project-store";
 
 function projectFixture(id: string, name: string): Project {
@@ -21,6 +21,16 @@ function projectFixture(id: string, name: string): Project {
     },
     mediaLibrary: { items: [] },
     timeline: { tracks: [], subtitles: [], markers: [], duration: 0 },
+  };
+}
+
+function commitReceipt(overrides: Partial<GitCommitReceipt> = {}): GitCommitReceipt {
+  return {
+    commitSha: "0123456789abcdef0123456789abcdef01234567",
+    treeSha: "89abcdef0123456789abcdef0123456789abcdef",
+    projectBlobSha: "fedcba9876543210fedcba9876543210fedcba98",
+    mediaManifestDigest: "sha256:manifest-digest",
+    ...overrides,
   };
 }
 
@@ -101,8 +111,9 @@ test("project import canonicalizes client UUID ids to slug worktree ids", async 
     },
   };
   const gitStore: Partial<GitStore> = {
-    commit: async (projectId: string) => {
+    commit: async (projectId: string, _message: string, _transaction?: unknown) => {
       committedProjectIds.push(projectId);
+      return commitReceipt();
     },
   };
 
@@ -134,8 +145,9 @@ test("UUID PUT autosaves are rejected before any project worktree is touched", a
     },
   };
   const gitStore: Partial<GitStore> = {
-    commit: async () => {
+    commit: async (_projectId: string, _message: string, _transaction?: unknown) => {
       commitCalls += 1;
+      return commitReceipt();
     },
   };
 
@@ -159,15 +171,22 @@ test("PUT confirms persistence only after the Git commit succeeds", async () => 
   const project = { ...previous, name: "Vintage Tokyo Revised", modifiedAt: previous.modifiedAt + 1 };
   let commitFinished = false;
   let commitMessage = "";
+  const expectedReceipt = commitReceipt({
+    commitSha: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    treeSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    projectBlobSha: "cccccccccccccccccccccccccccccccccccccccc",
+    mediaManifestDigest: "sha256:semantic-diff",
+  });
   const store: Partial<ProjectStore> = {
     loadProject: async () => previous,
     saveProject: async (incoming: Project) => incoming,
   };
   const gitStore: Partial<GitStore> = {
-    commit: async (_projectId: string, message: string) => {
+    commit: async (_projectId: string, message: string, _transaction?: unknown) => {
       await new Promise((resolve) => setTimeout(resolve, 10));
       commitMessage = message;
       commitFinished = true;
+      return expectedReceipt;
     },
   };
 
@@ -177,13 +196,20 @@ test("PUT confirms persistence only after the Git commit succeeds", async () => 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(project),
     });
-    const receipt = await response.json();
+    const responseReceipt = await response.json();
 
     assert.equal(response.status, 200);
     assert.equal(commitFinished, true);
-    assert.equal(receipt.committed, true);
-    assert.match(commitMessage, /^update name\n\n- Update name\n\nFiles changed: 1$/);
-    assert.equal(typeof receipt.persistedAt, "number");
+    assert.equal(responseReceipt.committed, true);
+    assert.equal(responseReceipt.commitSha, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    assert.equal(responseReceipt.treeSha, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+    assert.equal(responseReceipt.projectBlobSha, "cccccccccccccccccccccccccccccccccccccccc");
+    assert.equal(responseReceipt.mediaManifestDigest, "sha256:semantic-diff");
+    assert.match(
+      commitMessage,
+      /^update name\n\n- Update name\n\nFiles staged:\n- Update project\.json\n\nFiles changed: 1$/,
+    );
+    assert.equal(typeof responseReceipt.persistedAt, "number");
   });
 });
 
@@ -192,12 +218,22 @@ test("PUT writes modifiedAt-only changes without creating a Git commit", async (
   const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");
   const incoming = { ...previous, modifiedAt: previous.modifiedAt + 1 };
   let commits = 0;
+  const deferredReceipt = commitReceipt({
+    commitSha: "dddddddddddddddddddddddddddddddddddddddd",
+    treeSha: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    projectBlobSha: "ffffffffffffffffffffffffffffffffffffffff",
+    mediaManifestDigest: "sha256:confirmed-diff",
+  });
   const store: Partial<ProjectStore> = {
     loadProject: async () => previous,
     saveProject: async (project: Project) => project,
   };
   const gitStore: Partial<GitStore> = {
-    commit: async () => { commits += 1; },
+    commit: async (_projectId: string, _message: string, _transaction?: unknown) => {
+      commits += 1;
+      return deferredReceipt;
+    },
+    readConfirmedReceipt: async () => deferredReceipt,
   };
 
   await withProjectRouter(store, gitStore, async (baseUrl) => {
@@ -212,7 +248,11 @@ test("PUT writes modifiedAt-only changes without creating a Git commit", async (
     assert.equal(commits, 0);
     assert.equal(receipt.saved, true);
     assert.equal(receipt.committed, false);
-    assert.equal(receipt.persistedAt, undefined);
+    assert.equal(receipt.commitSha, "dddddddddddddddddddddddddddddddddddddddd");
+    assert.equal(receipt.treeSha, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+    assert.equal(receipt.projectBlobSha, "ffffffffffffffffffffffffffffffffffffffff");
+    assert.equal(receipt.mediaManifestDigest, "sha256:confirmed-diff");
+    assert.equal(receipt.persistedAt, null);
     assert.equal(receipt.sourceModifiedAt, incoming.modifiedAt);
   });
 });
@@ -225,7 +265,7 @@ test("PUT exposes Git commit failures instead of returning a false success", asy
     saveProject: async (incoming: Project) => incoming,
   };
   const gitStore: Partial<GitStore> = {
-    commit: async () => {
+    commit: async (_projectId: string, _message: string, _transaction?: unknown) => {
       throw new Error("git index is locked");
     },
   };

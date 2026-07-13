@@ -3,9 +3,14 @@ import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
 import { mkdirSync } from "node:fs";
 import { extname } from "node:path";
-import type { ProjectSettings, Project } from "@openreel/core";
+import type { ProjectSettings, Project, ProjectSaveReceipt } from "@openreel/core";
 import { ProjectStore } from "./project-store";
-import { GitStore } from "./git-store";
+import {
+  GitStore,
+  type GitCommitReceipt,
+  type GitCommitTransaction,
+  type GitStagedNameStatusEntry,
+} from "./git-store";
 import { deterministicCommitMessage, semanticProjectChanges } from "./semantic-commit";
 import {
   assertValidMediaFilename,
@@ -17,6 +22,43 @@ import {
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isUuid(value: string): boolean {
   return UUID_RE.test(value);
+}
+
+function stagedEntry(
+  status: GitStagedNameStatusEntry["status"],
+  path: string,
+): GitStagedNameStatusEntry {
+  return { status, path };
+}
+
+function commitTransaction(
+  allowlist: readonly string[],
+  expectedEntries: readonly GitStagedNameStatusEntry[],
+): GitCommitTransaction {
+  return {
+    allowlist,
+    expectedEntries,
+  };
+}
+
+function projectSaveReceipt(
+  projectId: string,
+  sourceModifiedAt: number,
+  receipt: GitCommitReceipt | null,
+  persistedAt: number | null,
+  committed: boolean,
+): ProjectSaveReceipt {
+  return {
+    saved: true,
+    projectId,
+    persistedAt,
+    sourceModifiedAt,
+    commitSha: receipt?.commitSha ?? null,
+    treeSha: receipt?.treeSha ?? null,
+    projectBlobSha: receipt?.projectBlobSha ?? null,
+    mediaManifestDigest: receipt?.mediaManifestDigest ?? null,
+    committed,
+  };
 }
 
 // ── Commit message helpers ───────────────────────────────────────────────────
@@ -162,7 +204,14 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       }
       const project = await store.createProject(name.trim(), settings);
       console.info("[Persistence] project created; committing", { projectId: project.id });
-      await gitStore.commit(project.id, `init: create project "${project.name}"`);
+      await gitStore.commit(
+        project.id,
+        `init: create project "${project.name}"`,
+        commitTransaction(
+          ["project.json"],
+          [stagedEntry("A", "project.json")],
+        ),
+      );
       console.info("[Persistence] initial commit confirmed", { projectId: project.id });
       res.status(201).json(project);
     } catch (err) {
@@ -198,7 +247,14 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       // convert UUIDs to the same slug assigned by POST /api/projects.
       const id = canonicalProjectId(project);
       const saved = await store.saveProject({ ...project, id });
-      await gitStore.commit(saved.id, `import: create from file "${saved.name}"`);
+      await gitStore.commit(
+        saved.id,
+        `import: create from file "${saved.name}"`,
+        commitTransaction(
+          ["project.json"],
+          [stagedEntry("A", "project.json")],
+        ),
+      );
       res.status(201).json(saved);
     } catch (err) {
       console.error("[POST /api/projects/import] failed:", err);
@@ -231,29 +287,26 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       const saved = await store.saveProject(incoming);
       const semanticChanges = semanticProjectChanges(prev, saved);
       if (semanticChanges.length === 0) {
+        const confirmed = await gitStore.readConfirmedReceipt(req.params.id);
         console.info("[Persistence] project.json written without commit; modifiedAt-only change remains pending", {
           projectId: req.params.id,
           modifiedAt: incoming.modifiedAt,
         });
-        res.json({
-          saved: true,
-          committed: false,
-          projectId: req.params.id,
-          sourceModifiedAt: incoming.modifiedAt,
-        });
+        res.json(projectSaveReceipt(req.params.id, incoming.modifiedAt, confirmed, null, false));
         return;
       }
       console.info("[Persistence] project.json written; committing", { projectId: req.params.id });
-      await gitStore.commit(req.params.id, deterministicCommitMessage(semanticChanges));
+      const receipt = await gitStore.commit(
+        req.params.id,
+        deterministicCommitMessage(
+          semanticChanges,
+          [stagedEntry("M", "project.json")],
+        ),
+        commitTransaction(["project.json"], [stagedEntry("M", "project.json")]),
+      );
       const persistedAt = Date.now();
-      console.info("[Persistence] Git commit confirmed", { projectId: req.params.id, persistedAt });
-      res.json({
-        saved: true,
-        committed: true,
-        projectId: req.params.id,
-        persistedAt,
-        sourceModifiedAt: incoming.modifiedAt,
-      });
+      console.info("[Persistence] Git commit confirmed", { projectId: req.params.id, persistedAt, commitSha: receipt.commitSha });
+      res.json(projectSaveReceipt(req.params.id, incoming.modifiedAt, receipt, persistedAt, true));
     } catch (err) {
       console.error("[PUT /api/projects/:id] save failed:", err);
       res.status(500).json({ error: "Failed to save project", detail: String(err) });
@@ -274,7 +327,17 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         res.status(404).json({ error: "Project not found" });
         return;
       }
-      await gitStore.commit(project.id, `rename → "${project.name}"`);
+      const expectedEntries = project.id === req.params.id
+        ? [stagedEntry("M", "project.json")]
+        : [stagedEntry("A", "project.json")];
+      await gitStore.commit(
+        project.id,
+        `rename → "${project.name}"`,
+        commitTransaction(
+          expectedEntries.map((entry) => entry.path),
+          expectedEntries,
+        ),
+      );
       res.json(project);
     } catch (err) {
       res.status(500).json({ error: "Failed to rename project", detail: String(err) });
@@ -320,6 +383,10 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         await gitStore.commit(
           req.params.id,
           `media: add ${req.file.originalname} (${req.params.mediaId})`,
+          commitTransaction(
+            [`media/${req.file.filename}`],
+            [stagedEntry("A", `media/${req.file.filename}`)],
+          ),
         );
         res.json({ filename: req.file.filename });
       } catch (err) {
