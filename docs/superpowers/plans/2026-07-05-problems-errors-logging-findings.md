@@ -1,5 +1,7 @@
 # Problems, Errors & Logging Implementation Findings
 
+> **Audit status (2026-07-13): FINDINGS ONLY, NOT COMPLETE.** Canonical owner: `docs/spec/problems-errors-logging.md`. Problems and log panels exist, but no `ProblemBus` symbol was found and this document records a retry-resolution defect rather than a completed fix with regression coverage. It is not an executable implementation plan.
+
 **Date:** 2026-07-05  
 **Spec Reference:** `docs/spec/problems-errors-logging.md` (§1–5)  
 **Critical Finding:** AUTO-RESOLVE BUG in retry_generation action

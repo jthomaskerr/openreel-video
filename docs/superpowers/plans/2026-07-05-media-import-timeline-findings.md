@@ -1,5 +1,7 @@
 # Media Import Timeline Implementation Findings
 
+> **Audit status (2026-07-13): FINDINGS ONLY, INCOMPLETE.** Canonical owners: `docs/spec/media-assets.md`, `docs/spec/timeline.md`, and `docs/spec/music-video-workflow.md`. The document reports partial investigation and does not cover every import entry point, placement invariant, regression test, or browser scenario required by the canonical specs.
+
 **Date:** 2026-07-05  
 **Spec Reference:** `docs/spec/media-import-timeline.md`  
 **Related Plan:** `2026-06-28-music-video-timeline-native.md`

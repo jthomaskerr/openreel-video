@@ -1,5 +1,7 @@
 # AI Generation & Providers — Implementation Plan
 
+> **Audit status (2026-07-13): INCOMPLETE DECOMPOSITION, NOT EXECUTABLE.** Canonical owner: `docs/spec/generation.md`; the referenced `docs/spec/ai-generation-providers.md` is now a redirect. A normalized generation-job store, WaveSpeed pieces, and server repository exist, but this document does not define a complete implementation sequence or prove provider-boundary, finalization, recovery, observability, and browser requirements.
+
 **Date:** 2026-07-05  
 **Spec:** `docs/spec/ai-generation-providers.md`  
 **Status:** Decomposition phase — identifying gaps between spec and codebase  

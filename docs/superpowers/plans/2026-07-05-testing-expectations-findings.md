@@ -1,5 +1,7 @@
 # Testing Expectations Implementation Findings
 
+> **Audit status (2026-07-13): FINDINGS ONLY, INCOMPLETE.** Canonical owner: `docs/spec/testing-expectations.md`. The document explicitly leaves coverage, package gates, evals, and browser verification unverified. It is neither an executable plan nor evidence that the testing specification is satisfied.
+
 **Date:** 2026-07-05  
 **Spec Reference:** `docs/spec/testing-expectations.md`  
 **Type:** Process/CI mandate (not a feature)

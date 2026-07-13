@@ -1,5 +1,7 @@
 # SRT Drag/Drop Stall Fix
 
+> **Audit status (2026-07-13): PARTIAL AND NONCONFORMANT, NOT COMPLETE.** Canonical owner: `docs/spec/audio-analysis-subtitles.md`. SRT parsing and import tests exist, but imports still target legacy text clips rather than first-class subtitle clips, VTT and bounded parsing requirements are not covered, subtitle CRUD/export tests remain skipped, and no required browser evidence is recorded.
+
 **Status:** planned  
 **Inbox:** #4  
 **Date:** 2026-07-08

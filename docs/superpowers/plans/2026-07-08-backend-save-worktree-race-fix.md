@@ -1,5 +1,7 @@
 # Plan: Fix backend-save worktree creation race + client-UUID project IDs
 
+> **Audit status (2026-07-13): PARTIAL AND NONCONFORMANT, NOT COMPLETE.** Canonical owner: `docs/spec/project.md`. Per-project locking, race regression tests, orchestrator-assigned IDs, and `backendSaveService.create()` exist. However, `createNewProject()` still marks the local UUID project explicitly created before the backend responds and performs creation fire-and-forget, contrary to the canonical identity gate; the plan's unchecked browser and validation evidence is also absent.
+
 > Spec: `docs/spec/2026-07-08-backend-save-worktree-race-fix.md`
 > Inbox: #2
 

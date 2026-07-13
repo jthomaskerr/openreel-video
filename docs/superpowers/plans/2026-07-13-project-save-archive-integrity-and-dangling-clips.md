@@ -1,5 +1,7 @@
 # Project Save Archive Integrity and Dangling Clips Implementation Plan
 
+> **Audit status (2026-07-13): IMPLEMENTATION IN PROGRESS, NOT COMPLETE.** Canonical owners: `docs/spec/project.md`, `docs/spec/media-assets.md`, and `docs/spec/timeline.md`; regression contract: `docs/spec/regressions/project-save-archive-integrity-and-dangling-clips-regression.md`. Uncommitted contracts, guards, semantic filenames, manifests, allowlisted staging, commit-message work, and tests cover only Tasks 1-6. Receipts, LFS payload proof, atomic conflict-safe saves, destructive-intent protection, pending uploads, runtime availability, dangling-clip UI, full gates, and browser verification remain open.
+
 > **Executor:** GPT-5.4-mini. Execute tasks in order. Do not combine tasks or weaken assertions to make tests pass. Read `docs/spec/regressions/project-save-archive-integrity-and-dangling-clips-regression.md` before starting and re-check its acceptance criteria at the final gate.
 
 **Goal:** Make every confirmed project save a complete, conflict-safe, independently verifiable snapshot whose Git commit contains only audited files, whose media use semantic collision-safe filenames, and whose timeline clips distinguish confirmed missing media from temporary backend or browser unavailability.

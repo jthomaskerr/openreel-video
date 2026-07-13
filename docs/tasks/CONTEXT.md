@@ -19,7 +19,7 @@ before starting a new one.
 |---|---|
 | Operational specs | `docs/spec/*.md` |
 | Implementation plans | `docs/superpowers/plans/*.md` |
-| Prior alignment analysis | `docs/superpowers/plans/alignment.md` |
+| Prior alignment analysis | `docs/superpowers/plans/2026-07-08-alignment.md` |
 
 ## Conventions
 

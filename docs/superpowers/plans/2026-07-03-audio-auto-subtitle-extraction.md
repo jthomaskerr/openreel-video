@@ -1,5 +1,7 @@
 # Audio Auto-Subtitle Extraction Implementation Plan
 
+> **Audit status (2026-07-13): NOT COMPLETE; NONCONFORMANT AS WRITTEN.** Canonical owner: `docs/spec/audio-analysis-subtitles.md`. Transcription primitives and selected-clip caption UI exist, but the planned durable job store/proxy/import pipeline is absent and current project tests still use legacy text clips on a Captions track. Completion requires first-class subtitle clips, reload/retry/idempotency tests, eval thresholds, and browser verification.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** When a user imports an audio file (MP3, WAV, AAC, OGG, FLAC) into the media library, automatically transcribe it using the existing GPU transcription service and persist the resulting subtitles into the project timeline.

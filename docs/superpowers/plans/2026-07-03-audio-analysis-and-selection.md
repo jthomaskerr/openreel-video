@@ -1,5 +1,7 @@
 # Audio Analysis and Manual Selection Implementation Plan
 
+> **Audit status (2026-07-13): NOT IMPLEMENTED, NOT COMPLETE.** Canonical owners: `docs/spec/audio-analysis-subtitles.md` and `docs/spec/song-sections.md`. No audio-analysis service, bridge, store actions, inspector controls, overlays, deterministic cache tests, eval results, or browser evidence are present. The plan is directionally conformant but must use the canonical section-evidence and validation contracts.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build an audio analysis pipeline (genre classification, beat grid, section-aligned sentiment series, mood, librosa energy features) with a Python/librosa sidecar service, and a UI for manually picking which analysis results to apply as timeline metadata (beat markers, energy segments, section sentiment curves, mood labels, genre tags).

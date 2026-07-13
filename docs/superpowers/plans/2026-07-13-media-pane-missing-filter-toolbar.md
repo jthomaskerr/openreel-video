@@ -1,5 +1,7 @@
 # Media Pane Missing-Filter and Single-Toolbar Implementation Plan
 
+> **Audit status (2026-07-13): NOT IMPLEMENTED, NOT COMPLETE.** Canonical owner: `docs/spec/media-assets.md`; regression contract: `docs/spec/regressions/media-pane-missing-filter-toolbar-regression.md`. No corresponding `AssetsPanel.tsx` or `AssetsPanel.test.tsx` worktree changes or verified state-transition/browser evidence were found.
+
 > **Executor:** This plan is written for GPT-5.4-mini. Follow tasks in order, keep changes scoped, and do not declare the UI fixed until the exact browser scenario passes.
 
 **Goal:** Automatically cancel missing-only mode when no missing media remains, and consolidate every Media-pane-level button/dropdown into the single toolbar row containing Search media.

@@ -1,5 +1,7 @@
 # Storyboard UI Implementation Plan
 
+> **Audit status (2026-07-13): NOT IMPLEMENTED, NOT COMPLETE.** Canonical owners: `docs/spec/storyboard.md`, `docs/spec/music-video-workflow.md`, and `docs/spec/timeline.md`. `StoryboardShot` domain data exists, but no `StoryboardPanel`, shot-card UI, panel registration, selection synchronization, reordering tests, or browser verification is present.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a visual storyboard panel to the editor that displays all `StoryboardShot` entries as shot cards, supports selection and editing, and links every realized or imported shot to its storyboard-specialized video clip in the timeline.

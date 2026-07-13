@@ -1,5 +1,7 @@
 # Section Identification Flow Implementation Plan
 
+> **Audit status (2026-07-13): PARTIAL, NOT COMPLETE.** Canonical owner: `docs/spec/song-sections.md`. Basic `SongSection` types exist, but lyric/audio inference, evidence merging, confirmation/edit state, section meta-track UI, storyboard handoff, deterministic tests, evals, and browser evidence are absent.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Detect, display, confirm, and edit song sections so storyboard generation and alteration receive confirmed section boundaries as first-class creative structure.

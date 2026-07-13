@@ -1,5 +1,7 @@
 # Editor Header Layout and Menu Implementation Plan
 
+> **Audit status (2026-07-13): IMPLEMENTATION IN PROGRESS, NOT COMPLETE.** Canonical owners: `docs/spec/project.md`, `docs/spec/inspector-shell.md`, and `docs/spec/regressions/editor-header-layout-and-menu-regression.md`. Uncommitted `Toolbar.tsx` and regression-test changes exist, but required focused/full gates and exact wide/narrow browser scenarios have not been independently verified in this audit.
+
 **Implementer:** GPT-5.4-mini  
 **Specification:** `docs/spec/regressions/editor-header-layout-and-menu-regression.md`  
 **Primary file:** `apps/web/src/components/editor/Toolbar.tsx`

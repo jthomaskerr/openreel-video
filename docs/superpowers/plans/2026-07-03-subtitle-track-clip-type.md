@@ -1,5 +1,7 @@
 # New Subtitles Track/Clip Type Implementation Plan
 
+> **Audit status (2026-07-13): NOT IMPLEMENTED, NOT COMPLETE.** Canonical owner: `docs/spec/audio-analysis-subtitles.md`. No first-class `SubtitleClip` implementation is present; current tests explicitly skip subtitle CRUD/export and document the legacy text-clip workaround. Migration, editing, preview/export parity, deterministic tests, and browser verification remain open.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the current workaround (subtitles stored as a flat array on Timeline + text clips on a "Captions" track) with a first-class subtitle track type and subtitle clip type that have dedicated rendering, editing, and persistence.

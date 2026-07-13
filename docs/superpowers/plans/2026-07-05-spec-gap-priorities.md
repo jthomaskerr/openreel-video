@@ -1,5 +1,7 @@
 # Spec Gap — Prioritized Plan List
 
+> **Audit status (2026-07-13): HISTORICAL INDEX, NOT AN IMPLEMENTATION PLAN.** Canonical ownership is now defined by `docs/spec/index.md`. The listed percentages and priorities predate spec consolidation and are not completion evidence; linked findings and plans must use their individual 2026-07-13 audit statuses.
+
 **Date:** 2026-07-05
 **Task:** DOC-001 (Step 4)
 **Scope:** Every plan relevant to closing spec gaps — both the new plans written

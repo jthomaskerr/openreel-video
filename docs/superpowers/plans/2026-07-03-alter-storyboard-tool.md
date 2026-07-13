@@ -1,5 +1,7 @@
 # Alter Storyboard Tool Implementation Plan
 
+> **Audit status (2026-07-13): NOT IMPLEMENTED; REVISION REQUIRED.** Canonical owner: `docs/spec/storyboard.md`. No `AlterStoryboard` domain, route, validator, dialog, or tests are present. The planned hosted API call also conflicts with the repository rule requiring reusable LLM work to use local Claude Code unless explicitly authorized.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build an alter-storyboard tool that accepts "what to change" and "how to change it" params, receives confirmed song sections as structural context, generates a diff-driven preview, and applies changes only after user acceptance.

@@ -1,5 +1,7 @@
 # Inspector Shell Implementation Findings
 
+> **Audit status (2026-07-13): FINDINGS ONLY, NOT COMPLETE.** Canonical owner: `docs/spec/inspector-shell.md`. Inspector, Problems, Log, metadata, and asset-inspector components exist, but this document itself leaves asset routing, update mechanics, filtering, and full clip-kind coverage unverified. It is not an implementation plan and cannot be archived as one.
+
 **Date:** 2026-07-05  
 **Spec Reference:** `docs/spec/inspector-shell.md` (§1–12)  
 **Investigation Files:**

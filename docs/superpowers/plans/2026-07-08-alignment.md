@@ -1,3 +1,7 @@
+# Specification Alignment Review
+
+> **Audit status (2026-07-13): HISTORICAL, NOT AN IMPLEMENTATION PLAN.** This 2026-07-08 review predates canonical-spec consolidation and is no longer an authoritative alignment report. Its recommendations to consolidate audio specifications and standardize redirects were completed in `docs/spec/index.md`; its implementation claims were not accepted as completion evidence.
+
  I have completed a thorough analysis of the operational specs located in docs/spec/.
 
  Here is the breakdown of consistency, dependencies, and alignment with best practices and the actual codebase implementation:
@@ -38,4 +42,3 @@
  1. Consolidate Audio Specs: Merge audio-analysis-subtitles.md, audio-auto-subtitle-extraction.md, and subtitle-track-clip-type.md into a single, cohesive source of truth for all things Subtitles/Audio.
  2. Standardize Titles: Rename the older § specs to match the standard <Domain> — Operational Spec naming convention.
  3. Explicit Cross-Linking: Rather than implicit references, use direct Markdown links (e.g., [Backend Spec](./backend-persistence-versioning.md)) when referencing neighboring domains.
-

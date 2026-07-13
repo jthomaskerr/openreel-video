@@ -1,5 +1,7 @@
 # Media Title From Metadata Implementation Plan
 
+> **Audit status (2026-07-13): PARTIAL, NOT COMPLETE.** Canonical owner: `docs/spec/media-assets.md` section 3. `filenameToTitle`, container-title extraction, main-import population, display fallbacks, and tests exist. The plan requires every import/version/replacement path, rename behavior, full-suite gates, and real browser verification; current code evidence shows title derivation only on the main processed-media import path, so archival is premature.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** When a media file carries a title in its container metadata (ID3, MP4/QuickTime atoms, WebM tags, Vorbis comments, RIFF INFO, FLAC comments), use that as the media item's display name instead of the raw filename. When no such title exists, derive a readable title from the filename (strip extension, convert snake_case/kebab-case to spaces, sentence-case).

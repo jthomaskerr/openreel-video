@@ -1,5 +1,7 @@
 # WaveSpeed Image and Video Generation Implementation Plan
 
+> **Audit status (2026-07-13): PARTIAL, NOT COMPLETE.** Canonical owner: `docs/spec/generation.md`. Shared contracts, schema normalization, sanitization, a server repository, job-store/poller behavior, and deterministic tests exist. The plan itself records browser/provider gates as pending, and no current paid-provider eval, cancellation proof, full restart/recovery evidence, or end-to-end browser result was found.
+
 **Date:** 2026-07-10  
 **Spec:** `docs/spec/wavespeed-generation.md`  
 **Status:** Deterministic implementation complete; browser/provider gates pending  

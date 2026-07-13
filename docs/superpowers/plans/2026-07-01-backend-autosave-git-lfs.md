@@ -1,5 +1,7 @@
 # Backend Auto-Save with Git LFS Implementation Plan
 
+> **Audit status (2026-07-13): PARTIAL AND NONCONFORMANT, NOT COMPLETE.** Canonical owner: `docs/spec/project.md`. Git worktrees, save services, and regression tests exist, but project creation currently marks `explicitlyCreated` before backend identity is established and swaps a client UUID after a fire-and-forget request. That contradicts the canonical creation gate, and snapshot completeness, conflict receipts, LFS payload proof, and allowlisted transaction work remain open.
+
 > Status: backend autosave/git-lfs gap pass implemented and verified on 2026-07-08. The implementation intentionally goes beyond the original flat per-project-repo plan by using a shared git repository with project worktrees/branches.
 
 ## Goal

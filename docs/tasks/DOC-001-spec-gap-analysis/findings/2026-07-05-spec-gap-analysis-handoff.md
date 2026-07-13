@@ -289,7 +289,7 @@ Based on the priority list in `docs/superpowers/plans/2026-07-05-spec-gap-priori
 - All files in `docs/spec/` directory
 
 **Alignment/Context:**
-- `docs/superpowers/plans/alignment.md` — pre-existing analysis (cross-reference, don't repeat)
+- `docs/superpowers/plans/2026-07-08-alignment.md` — pre-existing analysis (cross-reference, don't repeat)
 
 ---
 

@@ -1,5 +1,7 @@
 # Export Pipeline Implementation Findings
 
+> **Audit status (2026-07-13): FINDINGS ONLY, INCOMPLETE.** Canonical owners: `docs/spec/export.md` and `docs/spec/audio-analysis-subtitles.md`. This document records unresolved sequence-export, progress, subtitle, UI, and test gaps; it is not an executable plan and contains no current browser or export-artifact evidence.
+
 **Date:** 2026-07-05  
 **Spec Reference:** `docs/spec/export.md` (§1–18)  
 **Implementation Files Analyzed:**

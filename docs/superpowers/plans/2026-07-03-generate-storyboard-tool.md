@@ -1,5 +1,7 @@
 # Generate Storyboard Tool Implementation Plan
 
+> **Audit status (2026-07-13): NOT IMPLEMENTED; REVISION REQUIRED.** Canonical owner: `docs/spec/storyboard.md`. `StoryboardShot` exists, but no generation schemas, prompt implementation, route, typed client, dialog, or tests named by this plan are present. The hosted Anthropic design also conflicts with the repository's current local-Claude-Code policy unless Joseph explicitly authorizes it.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a backend storyboard generation tool that calls an LLM (Claude via Anthropic API) with a specialized prompt combining the creative brief, confirmed song sections, timing analysis, metadata tracks, and optional lyrics, and returns validated `StoryboardShot[]` ready for display in the StoryboardPanel.

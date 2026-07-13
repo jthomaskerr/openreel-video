@@ -1,5 +1,7 @@
 # Atlascloud AI Provider Support Implementation Plan
 
+> **Audit status (2026-07-13): NOT IMPLEMENTED; NONCONFORMANT AS WRITTEN.** Canonical owner: `docs/spec/generation.md` section 9.3. No Atlascloud adapter symbols or tests are present. The canonical spec requires undocumented endpoint, schema, retry, cancellation, and webhook behavior to remain unsupported until verified from authoritative provider documentation, so this plan must be revised before execution.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Integrate Atlascloud (atlascloud.ai) as a new AI generation provider alongside the existing WaveSpeed and KieAI providers, following the orchestrator-proxy pattern.

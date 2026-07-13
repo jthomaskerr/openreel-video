@@ -1,5 +1,7 @@
 # Timeline-native AI Music Video Implementation Plan
 
+> **Audit status (2026-07-13): PARTIAL, NOT COMPLETE.** Canonical owners: `docs/spec/music-video-workflow.md`, `docs/spec/timeline.md`, `docs/spec/storyboard.md`, and `docs/spec/generation.md`. Persistent generation jobs and `MetadataClipInspector` exist with tests, but the planned `StoryboardPanel`, grouped timeline, storyboard meta-track, and full end-to-end browser verification are absent. Keep active.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the new timeline-native Music Video workflow without dummy media IDs, wizard UI, or dialog-local generation jobs.

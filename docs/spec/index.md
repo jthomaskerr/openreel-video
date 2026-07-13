@@ -37,13 +37,36 @@ This directory uses one canonical functional specification per subsystem. Redire
 | [Audio Auto-Subtitle Extraction](./audio-auto-subtitle-extraction.md) | [Audio Analysis & Subtitles](./audio-analysis-subtitles.md) |
 | [Subtitle Track/Clip Type](./subtitle-track-clip-type.md) | [Audio Analysis & Subtitles](./audio-analysis-subtitles.md) |
 | [Auto Captions — Selected Clip Input Support](./2026-07-08-auto-caption-clip-input-spec.md) | [Audio Analysis & Subtitles](./audio-analysis-subtitles.md) |
+| [Music Video Timeline Native Decisions](./music-video-timeline-native/decisions.md) | [Music Video Workflow](./music-video-workflow.md) |
+| [Music Video Timeline Native Tasks](./music-video-timeline-native/tasks.md) | [Music Video Workflow](./music-video-workflow.md) |
 
 ## Supporting Documents
 
 - [Operational Spec Update Summary](./OPERATIONAL-SPEC-UPDATE-SUMMARY.md) records historical provenance and is not normative.
 - [Media Title from Metadata Design](./2026-07-10-media-title-from-metadata-design.md) records the detailed source investigation behind [Media Assets](./media-assets.md#3-display-titles).
 - [Known Issues](./known-issues.md) remains the issue register and is not modified by specification consolidation.
-- [Regression specifications](./regressions/) preserve incident evidence, acceptance criteria, and regression-test requirements. Their functional-spec links identify current ownership.
+
+## Regression Contracts
+
+Regression records preserve incident evidence, acceptance criteria, and regression-test requirements. A record's status describes the incident investigation, not implementation completion.
+
+| Regression | Canonical owner(s) |
+|---|---|
+| [Backend outage false missing media](./regressions/backend-outage-false-missing-media-regression.md) | [Media Assets](./media-assets.md), [Project](./project.md) |
+| [Editor header layout and menu](./regressions/editor-header-layout-and-menu-regression.md) | [Project](./project.md), [Inspector](./inspector-shell.md) |
+| [Import video](./regressions/import-video-regression.md) | [Media Assets](./media-assets.md), [Timeline](./timeline.md) |
+| [Media pane missing filter and toolbar](./regressions/media-pane-missing-filter-toolbar-regression.md) | [Media Assets](./media-assets.md) |
+| [Project save archive integrity and dangling clips](./regressions/project-save-archive-integrity-and-dangling-clips-regression.md) | [Project](./project.md), [Media Assets](./media-assets.md), [Timeline](./timeline.md) |
+| [Project save missing media](./regressions/project-save-missing-media-regression.md) | [Project](./project.md), [Media Assets](./media-assets.md) |
+| [Project save async creation](./regressions/project-save-regression.md) | [Project](./project.md) |
+| [Subtitle and caption](./regressions/subtitle-caption-regression.md) | [Audio Analysis & Subtitles](./audio-analysis-subtitles.md) |
+| [Timeline and media thumbnails](./regressions/timeline-and-media-thumbnail-regression.md) | [Media Assets](./media-assets.md), [Timeline](./timeline.md) |
+| [Timeline clip placement and context menu](./regressions/timeline-clip-placement-and-context-menu-regression.md) | [Timeline](./timeline.md) |
+| [Image preview and video thumbnail](./regressions/video-preview-broken-for-images-regression.md) | [Media Assets](./media-assets.md) |
+
+## Implementation Plans
+
+Plans under [`../superpowers/plans/`](../superpowers/plans/) are execution records, not specifications. Their audit status must be derived from current code, deterministic tests, required evals, and browser evidence. A plan moves to `plans/completed/` only when its scoped outcome conforms to the canonical specifications and every required verification gate has current evidence.
 
 ## Ownership Rule
 

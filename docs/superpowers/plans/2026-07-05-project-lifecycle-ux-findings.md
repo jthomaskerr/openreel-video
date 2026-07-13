@@ -1,5 +1,7 @@
 # Project Lifecycle UX Implementation Findings
 
+> **Audit status (2026-07-13): FINDINGS ONLY, INCOMPLETE.** Canonical owner: `docs/spec/project.md`. This copy reports partial investigation and does not prove the canonical backend-identity gate, save-state presentation, lifecycle actions, conflict handling, or browser flows. Current creation code also violates the canonical sequence by setting `explicitlyCreated` before backend identity exists.
+
 **Date:** 2026-07-05  
 **Spec Reference:** `docs/spec/project-lifecycle.md`  
 **Related Plan:** `2026-07-01-backend-autosave-git-lfs.md` (backend persistence)

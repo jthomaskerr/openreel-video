@@ -1,5 +1,7 @@
 # Thumbnails & Fallbacks — Complete Investigation Findings
 
+> **Audit status (2026-07-13): INVESTIGATION RECORD, IMPLEMENTATION INCOMPLETE.** Canonical owners: `docs/spec/media-assets.md` and `docs/spec/timeline.md`. Several fallback paths exist, but the findings themselves identify missing status badges, color stripes, fallback behavior, and tests. The document is not an implementation plan and the scoped product outcome is not complete.
+
 **Date:** 2026-07-06  
 **Investigation:** Complete analysis of `docs/spec/thumbnails-fallbacks.md` against actual implementation  
 **Scope:** Missing-file fallbacks, video frame extraction (filmstrip), non-video thumbnails, effectiveThumbnailUrl chain, caching, lazy loading  
