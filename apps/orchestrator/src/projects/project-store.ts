@@ -5,6 +5,10 @@ import crypto from "node:crypto";
 import type { Project, ProjectSettings } from "@openreel/core";
 import type { GitStore } from "./git-store";
 import {
+  auditProjectMediaManifest,
+  type ProjectMediaManifestSnapshot,
+} from "./media-manifest";
+import {
   assertValidProjectId,
   isValidMediaFilename,
   isValidMediaId,
@@ -317,7 +321,10 @@ export class ProjectStore {
       // commit tries to operate on it.
       await writeFile(join(newDir, "project.json"), JSON.stringify(project, null, 2), "utf-8");
       await this.gitStore.ensureWorktree(newSlug);
-      await this.gitStore.commit(newSlug, "chore: migrate legacy project worktree");
+      await this.gitStore.commit(newSlug, "chore: migrate legacy project worktree", {
+        allowlist: ["project.json"],
+        expectedEntries: [{ status: "A", path: "project.json" }],
+      });
     };
 
     const entries = await readdir(repoDir, { withFileTypes: true });
@@ -351,5 +358,10 @@ export class ProjectStore {
       result[mediaId] = file;
     }
     return result;
+  }
+
+  async auditSnapshot(project: Project): Promise<ProjectMediaManifestSnapshot> {
+    assertValidProjectId(project.id);
+    return auditProjectMediaManifest(project, this.mediaDir(project.id));
   }
 }

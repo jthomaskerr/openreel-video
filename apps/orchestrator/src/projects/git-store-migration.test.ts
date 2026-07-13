@@ -51,6 +51,28 @@ async function makeStore(): Promise<{ fixtureRoot: string; repoDir: string; gitS
   return { fixtureRoot, repoDir, gitStore, projectStore };
 }
 
+function commitProjectJsonTransaction(status: "A" | "M" = "M", includeAttributes = false) {
+  return includeAttributes
+    ? {
+        allowlist: [".gitattributes", "project.json"],
+        expectedEntries: [
+          { status: "A", path: ".gitattributes" },
+          { status, path: "project.json" },
+        ],
+      }
+    : {
+        allowlist: ["project.json"],
+        expectedEntries: [{ status, path: "project.json" }],
+      };
+}
+
+function commitAttributesTransaction() {
+  return {
+    allowlist: [".gitattributes"],
+    expectedEntries: [{ status: "A", path: ".gitattributes" }],
+  };
+}
+
 async function writeLegacyProject(repoDir: string, relativeDir: string, id: string, name: string): Promise<void> {
   const projectDir = join(repoDir, relativeDir);
   await mkdir(join(projectDir, "media"), { recursive: true });
@@ -78,7 +100,11 @@ test("migrated root and nested UUID projects are promoted to commit-capable work
       assert.equal(project.id, slug);
 
       await projectStore.saveProject({ ...project, name: `${project.name} Updated` });
-      await gitStore.commit(slug, `test: commit ${slug} after migration`);
+      await gitStore.commit(
+        slug,
+        `test: commit ${slug} after migration`,
+        commitProjectJsonTransaction(),
+      );
       const { stdout } = await execFileAsync("git", ["log", "--oneline", "-1"], { cwd: worktreeDir });
       assert.match(stdout, new RegExp(`commit ${slug} after migration`));
     }
@@ -91,7 +117,11 @@ test("missing registered slug worktrees are pruned and recreated", async () => {
   const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
   try {
     const project = await projectStore.createProject("Vintage Tokyo");
-    await gitStore.commit(project.id, "test: create project");
+    await gitStore.commit(
+      project.id,
+      "test: create project",
+      commitProjectJsonTransaction("A"),
+    );
 
     const worktreeDir = join(repoDir, project.id);
     await rm(worktreeDir, { recursive: true, force: true });
@@ -100,7 +130,11 @@ test("missing registered slug worktrees are pruned and recreated", async () => {
 
     assert.equal(existsSync(join(worktreeDir, ".git")), true);
     await projectStore.saveProject({ ...project, name: "Vintage Tokyo Repaired" });
-    await gitStore.commit(project.id, "test: commit after stale worktree repair");
+    await gitStore.commit(
+      project.id,
+      "test: commit after stale worktree repair",
+      commitProjectJsonTransaction(),
+    );
     const { stdout } = await execFileAsync("git", ["log", "--oneline", "-1"], { cwd: worktreeDir });
     assert.match(stdout, /commit after stale worktree repair/);
   } finally {
@@ -112,7 +146,11 @@ test("broken slug worktree git files are promoted to valid worktrees", async () 
   const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
   try {
     const project = await projectStore.createProject("Broken Tokyo");
-    await gitStore.commit(project.id, "test: create project");
+    await gitStore.commit(
+      project.id,
+      "test: create project",
+      commitProjectJsonTransaction("A"),
+    );
 
     const worktreeDir = join(repoDir, project.id);
     await writeFile(join(worktreeDir, "project.json"), JSON.stringify({ ...project, name: "Broken Tokyo Updated" }, null, 2), "utf-8");
@@ -123,7 +161,11 @@ test("broken slug worktree git files are promoted to valid worktrees", async () 
     const repaired = await projectStore.loadProject(project.id);
     assert.ok(repaired);
     assert.equal(repaired.name, "Broken Tokyo Updated");
-    await gitStore.commit(project.id, "test: commit after broken git repair");
+    await gitStore.commit(
+      project.id,
+      "test: commit after broken git repair",
+      commitProjectJsonTransaction(),
+    );
     const { stdout } = await execFileAsync("git", ["log", "--oneline", "-1"], { cwd: worktreeDir });
     assert.match(stdout, /commit after broken git repair/);
   } finally {
@@ -135,7 +177,11 @@ test("existing project worktrees repair the Git LFS media rule before commits", 
   const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
   try {
     const project = await projectStore.createProject("LFS Repair");
-    await gitStore.commit(project.id, "test: create project");
+    await gitStore.commit(
+      project.id,
+      "test: create project",
+      commitProjectJsonTransaction("A"),
+    );
 
     const worktreeDir = join(repoDir, project.id);
     await execFileAsync("git", ["rm", ".gitattributes"], { cwd: worktreeDir });
@@ -146,7 +192,11 @@ test("existing project worktrees repair the Git LFS media rule before commits", 
     const lfsRule = "media/** filter=lfs diff=lfs merge=lfs -text";
     assert.equal(repaired.split(/\r?\n/).filter((line) => line === lfsRule).length, 1);
 
-    await gitStore.commit(project.id, "test: repair lfs attributes");
+    await gitStore.commit(
+      project.id,
+      "test: repair lfs attributes",
+      commitAttributesTransaction(),
+    );
     const { stdout } = await execFileAsync("git", ["show", "--stat", "--oneline", "HEAD"], { cwd: worktreeDir });
     assert.match(stdout, /repair lfs attributes/);
     assert.match(stdout, /.gitattributes/);

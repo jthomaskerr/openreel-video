@@ -66,7 +66,10 @@ test("ensureWorktree racing a commit for the same new project does not deadlock 
 
     const results = await Promise.allSettled([
       gitStore.ensureWorktree(projectId),
-      gitStore.commit(projectId, "test: concurrent create"),
+      gitStore.commit(projectId, "test: concurrent create", {
+        allowlist: [],
+        expectedEntries: [],
+      }),
     ]);
 
     for (const result of results) {
