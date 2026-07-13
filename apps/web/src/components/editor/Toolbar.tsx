@@ -1,17 +1,15 @@
 import React, { useCallback, useState, useEffect, useMemo, useRef } from "react";
 import {
-  ChevronDown,
   FileVideo,
   Film,
   Music,
   Sun,
   Moon,
   SunMoon,
-  Loader2,
   X,
-  Check,
   FileCode,
   FolderOpen,
+  FolderKanban,
   Settings,
   Zap,
   Circle,
@@ -23,11 +21,11 @@ import {
   Undo2,
   Redo2,
   MessageSquare,
-  Star,
   Upload,
-  MoreHorizontal,
   Command,
   Search,
+  Menu,
+  Import,
 } from "lucide-react";
 import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
@@ -63,6 +61,9 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   Tooltip,
   TooltipTrigger,
   TooltipContent,
@@ -96,7 +97,6 @@ export const Toolbar: React.FC = () => {
     project,
     undo,
     redo,
-    renameProject,
   } = useProjectStore();
   const {
     openModal,
@@ -111,7 +111,6 @@ export const Toolbar: React.FC = () => {
   const { mode: themeMode, toggleTheme } = useThemeStore();
   const { navigate } = useRouter();
   const { openSettings } = useSettingsStore();
-  const [isExportOpen, setIsExportOpen] = useState(false);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   const [isRecorderOpen, setIsRecorderOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
@@ -149,12 +148,6 @@ export const Toolbar: React.FC = () => {
   }, [persistencePhase, persistencePhaseStartedAt, project.id, statusNow]);
 
   const neuralFramesImportRef = useRef<NeuralFramesImportTabHandle>(null);
-  // Local editable project name (committed onBlur / Enter)
-  const [projectNameDraft, setProjectNameDraft] = useState(project.name);
-  useEffect(() => {
-    setProjectNameDraft(project.name);
-  }, [project.name]);
-
   // Autosave timestamp from the project's modifiedAt date.
   const autosaveLabel = useMemo(() => {
     const ts = project.modifiedAt ?? Date.now();
@@ -194,15 +187,6 @@ export const Toolbar: React.FC = () => {
       : persistenceOperating
         ? "bg-amber-400"
         : "bg-zinc-500";
-
-  const commitProjectName = useCallback(() => {
-    const next = projectNameDraft.trim();
-    if (next && next !== project.name) {
-      void renameProject(next);
-    } else {
-      setProjectNameDraft(project.name);
-    }
-  }, [projectNameDraft, project.name, renameProject]);
 
   const handleUndo = useCallback(() => {
     void undo();
@@ -281,7 +265,7 @@ export const Toolbar: React.FC = () => {
 
   const handleOpenProjectManager = useCallback(() => {
     setProjectManagerOpen(true);
-  }, []);
+  }, [setProjectManagerOpen]);
 
   // selectedItems drives related UX in the editor (e.g. inspector context).
   // Kept on the destructure list so future tweaks don't have to rewire it.
@@ -306,10 +290,9 @@ export const Toolbar: React.FC = () => {
   }, [exportState.isExporting, exportState.progress, exportState.phase, setGlobalExportState]);
 
   useEffect(() => {
-    if (isExportOpen && !deviceProfile) {
-      getDeviceProfile().then(setDeviceProfile);
-    }
-  }, [isExportOpen, deviceProfile]);
+    if (deviceProfile) return;
+    void getDeviceProfile().then(setDeviceProfile);
+  }, [deviceProfile]);
 
   useEffect(() => {
     if (!deviceProfile || !project.timeline?.duration) {
@@ -464,8 +447,6 @@ export const Toolbar: React.FC = () => {
 
   const handleExport = useCallback(
     async (type: ExportType) => {
-      setIsExportOpen(false);
-
       try {
         if (type === "wav") {
           const writable = await showSavePicker(`${project.name || "export"}.wav`, "wav");
@@ -523,7 +504,11 @@ export const Toolbar: React.FC = () => {
               duration: project.timeline?.duration ?? 0,
             });
           } else {
-            try { await writable.abort(); } catch {}
+            try {
+              await writable.abort();
+            } catch (error) {
+              void error;
+            }
             throw new Error(finalResult?.error?.message || "Export failed");
           }
         } else {
@@ -576,18 +561,6 @@ export const Toolbar: React.FC = () => {
     },
     [project, track, runExport, showSavePicker],
   );
-
-  const handleCancelExport = useCallback(() => {
-    const engine = getExportEngine();
-    engine.cancel();
-    setExportState({
-      isExporting: false,
-      progress: 0,
-      phase: "",
-      error: null,
-      complete: false,
-    });
-  }, []);
 
   const handleCustomExport = useCallback(
     async (settings: VideoExportSettings) => {
@@ -762,9 +735,9 @@ export const Toolbar: React.FC = () => {
   ];
 
   return (
-    <header className="h-topbar grid grid-cols-[1fr_auto_1fr] items-center gap-2.5 px-3 bg-bg border-b border-border shrink-0 z-30 relative">
+    <header className="h-topbar grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2.5 px-3 bg-bg border-b border-border shrink-0 z-30 relative">
       {/* ─── Left: window dots + autosave ─────────────────────── */}
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2 overflow-hidden">
         <button
           onClick={() => navigate("welcome")}
           className="flex items-center gap-1.5 pr-1.5"
@@ -775,7 +748,7 @@ export const Toolbar: React.FC = () => {
           <span className="w-[11px] h-[11px] rounded-full bg-[oklch(0.7_0.15_145)]" />
         </button>
 
-        <span className="text-[11px] text-fg-3 flex items-center gap-1.5">
+        <span className="text-[11px] text-fg-3 flex min-w-0 items-center gap-1.5">
           <span className={`w-2 h-2 rounded-full bg-accent motion-reduce:animate-none ${persistenceOperating ? "animate-pulse" : ""}`} />
           {exportState.isExporting
             ? `Exporting… ${Math.round(exportState.progress)}%`
@@ -783,7 +756,7 @@ export const Toolbar: React.FC = () => {
         </span>
         {!exportState.isExporting && (
           <span
-            className="text-[11px] text-fg-3 flex items-center gap-1.5 max-w-[260px]"
+            className="text-[11px] text-fg-3 flex min-w-0 items-center gap-1.5 max-w-[260px]"
             title={persistenceError ?? "Confirmed only after the backend Git commit completes"}
           >
             <span className={`w-2 h-2 shrink-0 rounded-full motion-reduce:animate-none ${persistenceDotClass} ${persistenceOperating ? "animate-pulse" : ""}`} />
@@ -793,28 +766,12 @@ export const Toolbar: React.FC = () => {
       </div>
 
       {/* ─── Center: project name ────────────────────────────── */}
-      <div className="flex items-center gap-1.5 text-[12.5px] font-medium tracking-tight">
-        <input
-          value={projectNameDraft}
-          onChange={(e) => setProjectNameDraft(e.target.value)}
-          onBlur={commitProjectName}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              (e.currentTarget as HTMLInputElement).blur();
-            } else if (e.key === "Escape") {
-              setProjectNameDraft(project.name);
-              (e.currentTarget as HTMLInputElement).blur();
-            }
-          }}
-          size={Math.max(projectNameDraft.length, 6)}
-          spellCheck={false}
-          className="bg-transparent border-0 text-center font-medium text-[12.5px] tracking-tight text-fg px-2 py-0.5 rounded min-w-[60px] focus:bg-bg-2 focus:outline-none"
-        />
+      <div className="flex min-w-0 items-center justify-center gap-1.5 overflow-hidden text-[12.5px] font-medium tracking-tight">
         <ProjectSwitcher />
       </div>
 
       {/* ─── Right: undo/redo, history, comments, pro, export ── */}
-      <div className="flex items-center justify-end gap-1.5">
+      <div className="flex min-w-0 flex-nowrap items-center justify-end gap-1.5">
         {/* Quick search (preserved from existing flow) */}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -907,19 +864,6 @@ export const Toolbar: React.FC = () => {
           <TooltipContent>Audio mixer</TooltipContent>
         </Tooltip>
 
-        {/* Neural Frames Import */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={() => neuralFramesImportRef.current?.openFilePicker()}
-              className="w-[26px] h-[26px] grid place-items-center rounded-md text-fg-2 hover:bg-hover hover:text-fg transition-colors"
-            >
-              <Upload size={14} />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Import Neural Frames</TooltipContent>
-        </Tooltip>
-
         {/* Chat panel */}
         <Tooltip>
           <TooltipTrigger asChild>
@@ -936,31 +880,16 @@ export const Toolbar: React.FC = () => {
           </TooltipTrigger>
           <TooltipContent>Chat</TooltipContent>
         </Tooltip>
-
-
-        {/* Project manager button */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={handleOpenProjectManager}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-medium text-fg-2 hover:bg-hover hover:text-fg transition-colors"
-            >
-              <FileVideo size={14} />
-              <span className="hidden xl:inline">Projects</span>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>Manage projects</TooltipContent>
-        </Tooltip>
-
         <div className="w-px h-4 bg-border mx-1" />
 
         {/* Pro pill — opens more menu (theme, settings, tours, recorder) */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[12px] font-medium text-fg-2 hover:bg-hover hover:text-fg transition-colors"
+              aria-label="Open editor menu"
+              className="w-[26px] h-[26px] grid place-items-center rounded-md text-fg-2 hover:bg-hover hover:text-fg transition-colors"
             >
-              <Star size={14} />
+              <Menu size={14} />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
@@ -990,6 +919,11 @@ export const Toolbar: React.FC = () => {
               <HelpCircle size={14} />
               <span>Help & shortcuts (press ?)</span>
             </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleOpenProjectManager} className="gap-2">
+              <FolderKanban size={14} />
+              <span>Projects</span>
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={() => openModal("scriptView")} className="gap-2">
               <FileCode size={14} />
               <span>Project JSON</span>
@@ -1005,6 +939,90 @@ export const Toolbar: React.FC = () => {
             >
               <FolderOpen size={14} />
               <span>{isImportingFile ? "Opening..." : "Open Project from File"}</span>
+            </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="gap-2">
+                <Upload size={14} />
+                <span>Export</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-60">
+                <div className="space-y-0.5 max-h-[360px] overflow-y-auto">
+                  {exportOptions.map((option, index) =>
+                    option.separator ? (
+                      <DropdownMenuSeparator key={`sep-${index}`} />
+                    ) : (
+                      <DropdownMenuItem
+                        key={option.type + index}
+                        className={`flex items-start gap-2 rounded-md px-2 py-2 cursor-pointer hover:bg-hover focus:bg-hover ${
+                          option.recommended ? "bg-accent-soft" : ""
+                        }`}
+                        onClick={() => handleExport(option.type)}
+                      >
+                        <div
+                          className={`shrink-0 p-1 rounded-md transition-colors ${
+                            option.recommended
+                              ? "bg-accent-soft text-accent"
+                              : "bg-bg-2 text-fg-2"
+                          }`}
+                        >
+                          <option.icon size={16} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div
+                            className={`text-sm font-medium leading-tight ${
+                              option.recommended ? "text-accent" : "text-fg"
+                            }`}
+                          >
+                            {option.label}
+                            {option.recommended && (
+                              <span className="ml-2 text-[10px] bg-accent-soft text-accent px-1.5 py-0.5 rounded">
+                                Best match
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] text-fg-muted mt-0.5 leading-snug">
+                            {option.desc}
+                          </div>
+                          {exportEstimates.get(option.type) && (
+                            <div className="text-[10px] text-fg-3 mt-1 leading-none">
+                              Est. {exportEstimates.get(option.type)?.formatted}
+                            </div>
+                          )}
+                        </div>
+                      </DropdownMenuItem>
+                    ),
+                  )}
+
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="flex items-start gap-2 rounded-md px-2 py-2 cursor-pointer hover:bg-hover focus:bg-hover"
+                    onClick={() => setIsExportDialogOpen(true)}
+                  >
+                    <div className="shrink-0 p-1 bg-accent-soft rounded-md text-accent">
+                      <Settings size={16} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-accent leading-tight">
+                        Custom export…
+                      </div>
+                      <div className="text-[11px] text-fg-muted mt-0.5 leading-snug">
+                        Full settings with AI upscaling
+                      </div>
+                    </div>
+                  </DropdownMenuItem>
+                </div>
+                <div className="bg-bg-2 px-2.5 py-1.5 text-[10px] text-center text-fg-muted border-t border-border">
+                  {project.settings.width}×{project.settings.height} •{" "}
+                  {project.settings.frameRate}fps
+                </div>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+            <DropdownMenuItem
+              onClick={() => neuralFramesImportRef.current?.openFilePicker()}
+              className="gap-2"
+            >
+              <Import size={14} />
+              <span>Import Neural Frames</span>
             </DropdownMenuItem>
             <DropdownMenuItem className="gap-2 text-fg-muted">
               <Command size={14} />
@@ -1022,119 +1040,6 @@ export const Toolbar: React.FC = () => {
           onChange={handleFileImportSelected}
         />
       </div>
-
-        {/* Export */}
-        {exportState.isExporting ? (
-          <div className="relative">
-            <button
-              onClick={handleCancelExport}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent-soft text-accent text-[12.5px] font-semibold"
-            >
-              <Loader2 size={13} className="animate-spin" />
-              <span>{Math.round(exportState.progress)}%</span>
-              <X size={11} className="ml-1 opacity-70" />
-            </button>
-          </div>
-        ) : exportState.error ? (
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md border border-status-error/40 bg-status-error/10 text-status-error text-[11px]">
-            <span className="max-w-[180px] truncate">{exportState.error}</span>
-            <button
-              onClick={() => setExportState((p) => ({ ...p, error: null }))}
-              className="opacity-70 hover:opacity-100"
-            >
-              <X size={11} />
-            </button>
-          </div>
-        ) : exportState.complete ? (
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-accent-soft text-accent text-[12.5px]">
-            <Check size={13} />
-            <span className="font-medium">Saved!</span>
-          </div>
-        ) : (
-          <DropdownMenu open={isExportOpen} onOpenChange={setIsExportOpen}>
-            <DropdownMenuTrigger asChild>
-              <button
-                className="relative inline-flex items-center gap-1.5 px-3.5 py-[5px] rounded-md bg-accent text-accent-fg font-semibold text-[12.5px] shadow-glow hover:bg-accent-strong transition-colors"
-              >
-                <Upload size={13} />
-                <span>Export</span>
-                <ChevronDown size={12} className={`transition-transform ${isExportOpen ? "rotate-180" : ""}`} />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-72 p-0 rounded-xl bg-bg-1 border-border">
-              <div className="p-3 space-y-1 max-h-[400px] overflow-y-auto">
-                {exportOptions.map((option, index) =>
-                  option.separator ? (
-                    <DropdownMenuSeparator key={`sep-${index}`} />
-                  ) : (
-                    <DropdownMenuItem
-                      key={option.type + index}
-                      className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-hover focus:bg-hover ${
-                        option.recommended ? "bg-accent-soft" : ""
-                      }`}
-                      onClick={() => handleExport(option.type)}
-                    >
-                      <div
-                        className={`p-2 rounded-lg transition-colors ${
-                          option.recommended
-                            ? "bg-accent-soft text-accent"
-                            : "bg-bg-2 text-fg-2"
-                        }`}
-                      >
-                        <option.icon size={18} />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div
-                          className={`text-sm font-medium ${
-                            option.recommended ? "text-accent" : "text-fg"
-                          }`}
-                        >
-                          {option.label}
-                          {option.recommended && (
-                            <span className="ml-2 text-[10px] bg-accent-soft text-accent px-1.5 py-0.5 rounded">
-                              Best match
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-xs text-fg-muted mt-0.5">
-                          {option.desc}
-                        </div>
-                        {exportEstimates.get(option.type) && (
-                          <div className="text-[10px] text-fg-3 mt-1">
-                            Est. {exportEstimates.get(option.type)?.formatted}
-                          </div>
-                        )}
-                      </div>
-                    </DropdownMenuItem>
-                  ),
-                )}
-
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="flex items-center gap-3 p-3 rounded-lg cursor-pointer hover:bg-hover focus:bg-hover"
-                  onClick={() => setIsExportDialogOpen(true)}
-                >
-                  <div className="p-2 bg-accent-soft rounded-lg text-accent">
-                    <Settings size={18} />
-                  </div>
-                  <div className="flex-1">
-                    <div className="text-sm font-medium text-accent">
-                      Custom export…
-                    </div>
-                    <div className="text-xs text-fg-muted mt-0.5">
-                      Full settings with AI upscaling
-                    </div>
-                  </div>
-                  <MoreHorizontal size={14} className="text-fg-muted" />
-                </DropdownMenuItem>
-              </div>
-              <div className="bg-bg-2 px-3 py-2.5 text-xs text-center text-fg-muted border-t border-border">
-                {project.settings.width}×{project.settings.height} •{" "}
-                {project.settings.frameRate}fps
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
 
       {/* ─── Auxiliary popups & dialogs ───────────────────────── */}
       <ExportDialog

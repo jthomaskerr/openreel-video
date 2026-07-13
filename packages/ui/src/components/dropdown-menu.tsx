@@ -18,6 +18,129 @@ const DropdownMenuSub = DropdownMenuPrimitive.Sub
 
 const DropdownMenuRadioGroup = DropdownMenuPrimitive.RadioGroup
 
+type DropdownMenuPlacementSide = "top" | "right" | "bottom" | "left"
+type DropdownMenuPlacementAlign = "start" | "center" | "end"
+
+const applyDropdownMenuFallbackPosition = (
+  node: HTMLDivElement,
+  {
+    side,
+    align,
+    sideOffset,
+    alignOffset = 0,
+  }: {
+    side: DropdownMenuPlacementSide
+    align: DropdownMenuPlacementAlign
+    sideOffset: number
+    alignOffset?: number
+  },
+) => {
+  const wrapper = node.closest(
+    "[data-radix-popper-content-wrapper]",
+  ) as HTMLDivElement | null
+  if (!wrapper) return false
+
+  const wrapperRect = wrapper.getBoundingClientRect()
+  const transform = wrapper.style.transform
+  const stuckAtOrigin =
+    transform === "" ||
+    transform === "translate(0px, 0px)" ||
+    transform === "translate3d(0px, 0px, 0px)" ||
+    (Math.abs(wrapperRect.x) < 1 && Math.abs(wrapperRect.y) < 1)
+  if (!stuckAtOrigin) return false
+
+  const triggerId = node.getAttribute("aria-labelledby")
+  const trigger = triggerId ? document.getElementById(triggerId) : null
+  if (!trigger) return false
+
+  const triggerRect = trigger.getBoundingClientRect()
+  const menuWidth = node.offsetWidth || wrapper.offsetWidth || 200
+  const menuHeight = node.offsetHeight || wrapper.offsetHeight || 200
+
+  const alignOnMainAxis = () => {
+    if (align === "end") {
+      return triggerRect.bottom - menuHeight + alignOffset
+    }
+    if (align === "center") {
+      return (
+        triggerRect.top +
+        triggerRect.height / 2 -
+        menuHeight / 2 +
+        alignOffset
+      )
+    }
+    return triggerRect.top + alignOffset
+  }
+
+  const alignOnCrossAxis = () => {
+    if (align === "end") {
+      return triggerRect.right - menuWidth + alignOffset
+    }
+    if (align === "center") {
+      return (
+        triggerRect.left +
+        triggerRect.width / 2 -
+        menuWidth / 2 +
+        alignOffset
+      )
+    }
+    return triggerRect.left + alignOffset
+  }
+
+  let x = triggerRect.left
+  let y = triggerRect.bottom + sideOffset
+
+  switch (side) {
+    case "left":
+      x = triggerRect.left - menuWidth - sideOffset
+      y = alignOnMainAxis()
+      break
+    case "right":
+      x = triggerRect.right + sideOffset
+      y = alignOnMainAxis()
+      break
+    case "top":
+      x = alignOnCrossAxis()
+      y = triggerRect.top - menuHeight - sideOffset
+      break
+    case "bottom":
+      x = alignOnCrossAxis()
+      y = triggerRect.bottom + sideOffset
+      break
+  }
+
+  x = Math.max(8, Math.min(x, window.innerWidth - menuWidth - 8))
+  y = Math.max(8, Math.min(y, window.innerHeight - menuHeight - 8))
+
+  wrapper.style.minWidth = "0"
+  wrapper.style.setProperty(
+    "--radix-popper-available-width",
+    `${window.innerWidth}px`,
+  )
+  wrapper.style.setProperty(
+    "--radix-popper-available-height",
+    `${window.innerHeight}px`,
+  )
+  wrapper.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`
+
+  return true
+}
+
+const scheduleDropdownMenuFallbackPosition = (
+  node: HTMLDivElement | null,
+  options: Parameters<typeof applyDropdownMenuFallbackPosition>[1],
+) => {
+  if (!node) return
+
+  const applyFallbackPosition = () => {
+    applyDropdownMenuFallbackPosition(node, options)
+  }
+
+  requestAnimationFrame(applyFallbackPosition)
+  window.setTimeout(applyFallbackPosition, 0)
+  window.setTimeout(applyFallbackPosition, 50)
+}
+
 const DropdownMenuSubTrigger = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubTrigger>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & {
@@ -42,9 +165,14 @@ DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayNam
 const DropdownMenuSubContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
->(({ className, ...props }, ref) => (
+>(({ className, style, ...props }, ref) => (
   <DropdownMenuPrimitive.SubContent
     ref={ref}
+    sideOffset={0}
+    style={{
+      ...style,
+      marginLeft: "calc(-100% - var(--radix-popper-anchor-width) - 8px)",
+    }}
     className={cn(
       "z-[9999] min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
       className
@@ -63,47 +191,11 @@ const DropdownMenuContent = React.forwardRef<
 >(({ className, sideOffset = 4, align = "center", ...props }, ref) => {
   const positionFallback = React.useCallback(
     (node: HTMLDivElement | null) => {
-      if (!node) return;
-
-      const applyFallbackPosition = () => {
-        const wrapper = node.closest(
-          "[data-radix-popper-content-wrapper]",
-        ) as HTMLDivElement | null;
-        if (!wrapper) return;
-
-        const wrapperRect = wrapper.getBoundingClientRect();
-        const transform = wrapper.style.transform;
-        const stuckAtOrigin =
-          transform === "" ||
-          transform === "translate(0px, 0px)" ||
-          (Math.abs(wrapperRect.x) < 1 && Math.abs(wrapperRect.y) < 1);
-        if (!stuckAtOrigin) return;
-
-        const triggerId = node.getAttribute("aria-labelledby");
-        const trigger = triggerId ? document.getElementById(triggerId) : null;
-        if (!trigger) return;
-
-        const triggerRect = trigger.getBoundingClientRect();
-        const menuWidth = node.offsetWidth || wrapper.offsetWidth || 200;
-        let x =
-          align === "end"
-            ? triggerRect.right - menuWidth
-            : align === "start"
-              ? triggerRect.left
-              : triggerRect.left + triggerRect.width / 2 - menuWidth / 2;
-        x = Math.max(8, Math.min(x, window.innerWidth - menuWidth - 8));
-
-        wrapper.style.minWidth = "0";
-        wrapper.style.setProperty("--radix-popper-available-width", `${window.innerWidth}px`);
-        wrapper.style.setProperty("--radix-popper-available-height", `${window.innerHeight}px`);
-        wrapper.style.transform = `translate(${Math.round(x)}px, ${Math.round(
-          triggerRect.bottom + sideOffset,
-        )}px)`;
-      };
-
-      requestAnimationFrame(applyFallbackPosition);
-      window.setTimeout(applyFallbackPosition, 0);
-      window.setTimeout(applyFallbackPosition, 50);
+      scheduleDropdownMenuFallbackPosition(node, {
+        side: "bottom",
+        align,
+        sideOffset,
+      })
     },
     [align, sideOffset],
   );

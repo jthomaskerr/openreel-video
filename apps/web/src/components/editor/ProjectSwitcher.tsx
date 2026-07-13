@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
-  ChevronDown,
   Plus,
   FolderOpen,
   Clock,
@@ -137,11 +136,6 @@ export const ProjectSwitcher: React.FC = () => {
         <span className="text-sm font-medium text-text-primary truncate">
           {project.name}
         </span>
-        <ChevronDown
-          className={`w-3.5 h-3.5 text-text-muted transition-transform duration-200 shrink-0 ${
-            isOpen ? "rotate-180" : ""
-          }`}
-        />
       </button>
 
       {isOpen && (
