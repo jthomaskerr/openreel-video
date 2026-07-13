@@ -1,10 +1,10 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Search, Image as ImageIcon, Film, Music, Plus, Upload, Trash2,
   Square, Circle, Triangle, Star, ArrowRight, Hexagon, FileCode, AlertTriangle,
   RefreshCw, Palette, LayoutGrid, Grid2x2, List, Sparkles, Video,
   Type, Shapes, Wand2, LayoutTemplate, Zap, Shuffle, Pencil, Settings,
-  ChevronsUpDown,
+  SlidersHorizontal, ChevronsDownUp, ChevronsUpDown,
 } from "lucide-react";
 import {
   BACKGROUND_PRESETS,
@@ -860,6 +860,11 @@ export const AssetsPanel: React.FC = () => {
     () => mediaItems.filter((item) => getMediaStatus(item) === MediaStatus.MISSING).length,
     [mediaItems],
   );
+  useEffect(() => {
+    if (missingAssetsCount === 0 && showOnlyMissing) {
+      setShowOnlyMissing(false);
+    }
+  }, [missingAssetsCount, showOnlyMissing]);
   // Filter media items by search query across all metadata fields (memoized)
   const filteredItems = useMemo(() => {
     const query = searchQuery.toLowerCase();
@@ -1185,18 +1190,121 @@ export const AssetsPanel: React.FC = () => {
       case "media":
         return (
           <div className="flex min-h-0 flex-1 flex-col border-t border-border/70">
-            <div className="px-4 pt-3 pb-3 flex items-center gap-2">
-              <div className="relative flex-1">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted z-10" />
-                <Input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search media"
-                  className="pl-9 text-xs bg-background-tertiary border-border text-text-primary h-9"
-                />
+            <div
+              role="toolbar"
+              aria-label="Media controls"
+              className="flex flex-nowrap items-center gap-1 overflow-x-auto px-4 py-3"
+            >
+              <div className="min-w-0 flex flex-1 items-center">
+                <div className="relative min-w-[96px] flex-1">
+                  <Search size={14} className="absolute left-3 top-1/2 z-10 -translate-y-1/2 text-text-muted" />
+                  <Input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search media"
+                    aria-label="Search media"
+                    className="h-8 bg-background-tertiary pl-9 text-xs text-text-primary border-border"
+                  />
+                </div>
               </div>
-              <div className="flex items-center bg-background-tertiary border border-border rounded-lg p-0.5">
+
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={triggerFileInput}
+                  title="Import media"
+                  aria-label="Import media"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background-tertiary text-text-secondary transition-colors hover:bg-background-elevated hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+                >
+                  <Upload size={13} />
+                </button>
+                {missingAssetsCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowOnlyMissing((current) => !current)}
+                    title="Show only missing assets"
+                    aria-label="Show only missing assets"
+                    aria-pressed={showOnlyMissing}
+                    className={`inline-flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background ${
+                      showOnlyMissing
+                        ? "border-yellow-500 bg-yellow-500/10 text-yellow-500"
+                        : "border-border bg-background-tertiary text-text-secondary hover:border-yellow-500/50 hover:text-text-primary"
+                    }`}
+                  >
+                    <AlertTriangle size={13} />
+                    <span>Missing</span>
+                    <span
+                      aria-hidden="true"
+                      className="rounded-full bg-yellow-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-black"
+                    >
+                      {missingAssetsCount}
+                    </span>
+                  </button>
+                )}
+                {missingAssetsCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleRelinkFromFolder}
+                    disabled={isImporting}
+                    title="Relink from folder"
+                    aria-label="Relink from folder"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-yellow-500/40 bg-yellow-500/5 px-2 text-xs font-medium text-yellow-500 transition-colors hover:bg-yellow-500/15 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <RefreshCw size={13} />
+                    <span>Relink</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                <Select value={groupBy} onValueChange={(v) => setGroupBy(v as GroupBy)}>
+                  <SelectTrigger
+                    aria-label="Group media by"
+                    title="Group media by"
+                    className="inline-flex h-8 w-11 items-center justify-center rounded-md border border-border bg-background-tertiary px-3 text-text-secondary transition-colors hover:bg-background-elevated hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background [&>span]:sr-only"
+                  >
+                    <SlidersHorizontal size={13} />
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-background-secondary border-border">
+                    {([
+                      { value: "none", label: "None" },
+                      { value: "tag", label: "Tag" },
+                      { value: "type", label: "Type" },
+                      { value: "status", label: "Status" },
+                    ] as const).map(({ value, label }) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="inline-flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-background-tertiary p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => assetBucketsRef.current?.collapseAll()}
+                    title="Collapse all buckets"
+                    aria-label="Collapse all buckets"
+                    disabled={groupBy === "none"}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:bg-background-elevated hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <ChevronsDownUp size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => assetBucketsRef.current?.expandAll()}
+                    title="Expand all buckets"
+                    aria-label="Expand all buckets"
+                    disabled={groupBy === "none"}
+                    className="inline-flex h-7 w-7 items-center justify-center rounded-sm text-text-secondary transition-colors hover:bg-background-elevated hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <ChevronsUpDown size={13} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="inline-flex shrink-0 items-center gap-0.5 rounded-md border border-border bg-background-tertiary p-0.5">
                 {([
                   { mode: "large" as const, icon: LayoutGrid, title: "Large icons" },
                   { mode: "small" as const, icon: Grid2x2, title: "Small icons" },
@@ -1204,12 +1312,15 @@ export const AssetsPanel: React.FC = () => {
                 ]).map(({ mode, icon: ViewIcon, title }) => (
                   <button
                     key={mode}
+                    type="button"
                     onClick={() => setMediaViewMode(mode)}
                     title={title}
-                    className={`p-1.5 rounded transition-colors ${
+                    aria-label={title}
+                    aria-pressed={mediaViewMode === mode}
+                    className={`inline-flex h-7 w-7 items-center justify-center rounded-sm transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background ${
                       mediaViewMode === mode
                         ? "bg-background-elevated text-text-primary"
-                        : "text-text-muted hover:text-text-secondary"
+                        : "bg-background-tertiary text-text-secondary hover:bg-background-elevated hover:text-text-primary"
                     }`}
                   >
                     <ViewIcon size={13} />
@@ -1217,80 +1328,6 @@ export const AssetsPanel: React.FC = () => {
                 ))}
               </div>
             </div>
-
-            <div className="px-4 pb-2 flex items-center gap-2">
-              <button
-                onClick={() => assetBucketsRef.current?.collapseAll()}
-                title="Collapse all"
-                aria-label="Collapse all buckets"
-                disabled={groupBy === "none"}
-                className={`p-1.5 rounded bg-background-tertiary border border-border text-text-muted transition-colors ${
-                  groupBy === "none"
-                    ? "opacity-40 cursor-not-allowed"
-                    : "hover:text-text-secondary"
-                }`}
-              >
-                <ChevronsUpDown size={13} className="rotate-180" />
-              </button>
-              <button
-                onClick={() => assetBucketsRef.current?.expandAll()}
-                title="Expand all"
-                aria-label="Expand all buckets"
-                disabled={groupBy === "none"}
-                className={`p-1.5 rounded bg-background-tertiary border border-border text-text-muted transition-colors ${
-                  groupBy === "none"
-                    ? "opacity-40 cursor-not-allowed"
-                    : "hover:text-text-secondary"
-                }`}
-              >
-                <ChevronsUpDown size={13} />
-              </button>
-              <Select value={groupBy} onValueChange={(v) => setGroupBy(v as GroupBy)}>
-                <SelectTrigger className="h-8 text-xs bg-background-tertiary border-border text-text-primary w-[105px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-background-secondary border-border">
-                  {([
-                    { value: "none", label: "None" },
-                    { value: "tag", label: "Tag" },
-                    { value: "type", label: "Type" },
-                    { value: "status", label: "Status" },
-                  ] as const).map(({ value, label }) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {missingAssetsCount > 0 && (
-              <div className="px-4 pb-3 space-y-2">
-                <button
-                  onClick={() => setShowOnlyMissing(!showOnlyMissing)}
-                  className={`w-full px-3 py-2 rounded-lg border text-xs font-medium transition-all flex items-center justify-between ${
-                    showOnlyMissing
-                      ? "bg-yellow-500/10 border-yellow-500 text-yellow-500"
-                      : "bg-background-tertiary border-border text-text-secondary hover:border-yellow-500/50"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle size={14} />
-                    <span>Show Only Missing Assets</span>
-                  </div>
-                  <div className="px-2 py-0.5 rounded-full bg-yellow-500 text-black text-[10px] font-bold">
-                    {missingAssetsCount}
-                  </div>
-                </button>
-                <button
-                  onClick={handleRelinkFromFolder}
-                  className="w-full px-3 py-2 rounded-lg border border-yellow-500/40 bg-yellow-500/5 text-yellow-500 text-xs font-medium transition-all hover:bg-yellow-500/15 flex items-center gap-2"
-                >
-                  <RefreshCw size={14} />
-                  <span>Relink from Folder…</span>
-                </button>
-              </div>
-            )}
 
             <ScrollArea
               className={`min-h-0 flex-1 ${isDragOver ? "bg-primary/5" : ""}`}
@@ -1800,16 +1837,6 @@ export const AssetsPanel: React.FC = () => {
           <p className="text-[11px] text-fg-muted line-clamp-1">
             {ASSETS_TABS.find((t) => t.value === activeTab)?.description}
           </p>
-          {activeTab === "media" && (
-            <button
-              onClick={triggerFileInput}
-              title="Import media"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-accent text-accent-fg font-semibold text-[11.5px] hover:bg-accent-strong transition-colors"
-            >
-              <Plus size={12} />
-              <span>Import</span>
-            </button>
-          )}
         </div>
 
         <input
