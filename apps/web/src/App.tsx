@@ -47,7 +47,7 @@ function App() {
     modalData?.tab === "import" ? "import" : "export";
 
   // Pass the projectId from the URL so the recovery hook auto-restores silently.
-  const { showDialog, availableSaves, recover, dismiss, clearAll } = useProjectRecovery(
+  const { showDialog, availableSaves, recover, dismiss, clearAll, hasBackendConflict } = useProjectRecovery(
     route === "editor" ? params.projectId : undefined,
   );
 
@@ -169,6 +169,7 @@ function App() {
             }}
             onDismiss={dismiss}
             onClearAll={clearAll}
+            hasBackendConflict={hasBackendConflict}
           />
         )}
       </div>

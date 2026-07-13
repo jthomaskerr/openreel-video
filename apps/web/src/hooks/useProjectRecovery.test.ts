@@ -361,6 +361,38 @@ describe("useProjectRecovery hook", () => {
     expect(result.current.error).toBeNull();
   });
 
+  it("prompts before replacing a backend project with a newer local autosave", async () => {
+    const backendProject = makeProject({ name: "Backend Cut" });
+    const newerLocalSave = makeSave({ timestamp: backendProject.modifiedAt + 1 });
+    mockCheckForRecovery.mockResolvedValue([newerLocalSave]);
+    mockBackendLoad.mockResolvedValue(backendProject);
+
+    const { result } = renderHook(() => useProjectRecovery(backendProject.id));
+
+    await waitFor(() => expect(result.current.isChecking).toBe(false));
+
+    expect(useProjectStore.getState().project.name).toBe("Backend Cut");
+    expect(mockAutoSaveRecover).not.toHaveBeenCalled();
+    expect(result.current.showDialog).toBe(true);
+    expect(result.current.hasBackendConflict).toBe(true);
+    expect(result.current.availableSaves).toEqual([newerLocalSave]);
+  });
+
+  it("keeps the backend project without prompting when the local autosave is older", async () => {
+    const backendProject = makeProject({ name: "Backend Cut" });
+    mockCheckForRecovery.mockResolvedValue([
+      makeSave({ timestamp: backendProject.modifiedAt - 1 }),
+    ]);
+    mockBackendLoad.mockResolvedValue(backendProject);
+
+    const { result } = renderHook(() => useProjectRecovery(backendProject.id));
+
+    await waitFor(() => expect(result.current.isChecking).toBe(false));
+
+    expect(result.current.showDialog).toBe(false);
+    expect(result.current.hasBackendConflict).toBe(false);
+  });
+
   it("falls back to the matching IDB auto-save when backend restore is unavailable", async () => {
     mockCheckForRecovery.mockResolvedValue([
       makeSave({ id: "other-save", projectId: "other-project-id", timestamp: 1000 }),

@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Project } from "@openreel/core";
 import { generateThumbnailFromBlob, generateThumbnailFromUrl } from "../utils/media-recovery";
 import { backendSaveService } from "./backend-save";
+import { useNotificationStore } from "../stores/notification-store";
+import { usePersistenceStatusStore } from "../stores/persistence-status-store";
 
 vi.mock("../utils/media-recovery", () => ({
   generateThumbnailFromBlob: vi.fn().mockResolvedValue(null),
@@ -175,9 +177,30 @@ describe("backendSaveService.load", () => {
 });
 
 describe("backendSaveService.save", () => {
+  const persistedResponse = () => ({
+    ok: true,
+    json: async () => ({
+      saved: true,
+      projectId: "vintage-tokyo",
+      persistedAt: 1234,
+      sourceModifiedAt: 2,
+    }),
+  });
+
   it("schedules a backend PUT without waiting for an IndexedDB save event", async () => {
     vi.useFakeTimers();
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      return {
+        ok: true,
+        json: async () => ({
+          saved: true,
+          projectId: "vintage-tokyo",
+          persistedAt: 1234,
+          sourceModifiedAt: body.modifiedAt,
+        }),
+      };
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     backendSaveService.scheduleSave({ ...makeProject(), id: "vintage-tokyo" }, 100);
@@ -190,11 +213,66 @@ describe("backendSaveService.save", () => {
     );
   });
 
+  it("cannot starve a backend PUT when project mutations keep resetting the debounce", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      return {
+        ok: true,
+        json: async () => ({
+          saved: true,
+          projectId: "vintage-tokyo",
+          persistedAt: 1234,
+          sourceModifiedAt: body.modifiedAt,
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    for (let second = 0; second < 8; second += 1) {
+      backendSaveService.scheduleSave(
+        { ...makeProject(), id: "vintage-tokyo", modifiedAt: second },
+        2_000,
+      );
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:4041/api/projects/vintage-tokyo",
+      expect.objectContaining({ method: "PUT" }),
+    );
+  });
+
+  it("fails visibly if a queued save exceeds its deadline", async () => {
+    vi.useFakeTimers();
+    const service = backendSaveService as unknown as { maxScheduleWaitMs: number };
+    service.maxScheduleWaitMs = 10_000;
+    useNotificationStore.getState().clearAll();
+
+    backendSaveService.scheduleSave(
+      { ...makeProject(), id: "vintage-tokyo" },
+      10_000,
+    );
+    await vi.advanceTimersByTimeAsync(7_000);
+
+    expect(usePersistenceStatusStore.getState()).toMatchObject({
+      phase: "failed",
+      projectId: "vintage-tokyo",
+      error: expect.stringContaining("no backend PUT began"),
+    });
+    expect(useNotificationStore.getState().notifications.at(-1)).toMatchObject({
+      type: "error",
+      title: "Backend persistence queue timed out",
+    });
+    service.maxScheduleWaitMs = 5_000;
+  });
+
   it("retries a failed scheduled PUT without requiring another edit", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new Error("temporary outage"))
-      .mockResolvedValue({ ok: true });
+      .mockResolvedValue(persistedResponse());
     vi.stubGlobal("fetch", fetchMock);
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
@@ -219,7 +297,7 @@ describe("backendSaveService.save", () => {
   });
 
   it("PUTs slug project ids to the backend", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    const fetchMock = vi.fn().mockResolvedValue(persistedResponse());
     vi.stubGlobal("fetch", fetchMock);
 
     await backendSaveService.save({ ...makeProject(), id: "vintage-tokyo" });
@@ -231,7 +309,7 @@ describe("backendSaveService.save", () => {
   });
 
   it("persists durable filmstrip thumbnails but strips page-scoped blob URLs", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    const fetchMock = vi.fn().mockResolvedValue(persistedResponse());
     vi.stubGlobal("fetch", fetchMock);
 
     await backendSaveService.save({
@@ -271,7 +349,7 @@ describe("backendSaveService.save", () => {
     const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
       if (init?.method === "POST") calls.push("media");
       if (init?.method === "PUT") calls.push("project");
-      return { ok: true };
+      return init?.method === "PUT" ? persistedResponse() : { ok: true };
     });
     vi.stubGlobal("fetch", fetchMock);
 
@@ -299,6 +377,56 @@ describe("backendSaveService.save", () => {
       "http://localhost:4041/api/projects/vintage-tokyo",
       expect.objectContaining({ method: "PUT" }),
     );
+  });
+
+  it("does not re-upload blobs that were loaded from the same backend project", async () => {
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) =>
+      init?.method === "HEAD" ? { ok: true, status: 200 } : persistedResponse()
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await backendSaveService.save({
+      ...makeProject(),
+      id: "vintage-tokyo",
+      mediaLibrary: {
+        items: [{
+          ...makeProject().mediaLibrary.items[0]!,
+          blob: new Blob(["already remote"], { type: "video/mp4" }),
+          remoteUrl: "http://localhost:4041/api/projects/vintage-tokyo/media/media-1.mp4",
+        }],
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:4041/api/projects/vintage-tokyo",
+      expect.objectContaining({ method: "PUT" }),
+    );
+  });
+
+  it("re-uploads a blob when its backend URL is no longer current", async () => {
+    const methods: string[] = [];
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      methods.push(init?.method ?? "GET");
+      if (init?.method === "HEAD") return { ok: false, status: 404 };
+      if (init?.method === "POST") return { ok: true };
+      return persistedResponse();
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await backendSaveService.save({
+      ...makeProject(),
+      id: "vintage-tokyo",
+      mediaLibrary: {
+        items: [{
+          ...makeProject().mediaLibrary.items[0]!,
+          blob: new Blob(["needs upload"], { type: "video/mp4" }),
+          remoteUrl: "http://localhost:4041/api/projects/vintage-tokyo/media/media-1.mp4",
+        }],
+      },
+    });
+
+    expect(methods).toEqual(["HEAD", "POST", "PUT"]);
   });
 });
 
@@ -373,7 +501,7 @@ describe("backendSaveService.create", () => {
       vi.fn().mockResolvedValue({
         ok: false,
         status: 500,
-        json: async () => ({ error: "Failed to create", detail: "branch collision" }),
+        text: async () => "branch collision",
       }),
     );
 
@@ -388,9 +516,7 @@ describe("backendSaveService.create", () => {
       vi.fn().mockResolvedValue({
         ok: false,
         status: 502,
-        json: async () => {
-          throw new Error("not json");
-        },
+        text: async () => "",
       }),
     );
 

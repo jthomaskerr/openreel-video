@@ -86,9 +86,13 @@ All files under `media/` SHALL be tracked by git-lfs via the `.gitattributes` ru
 - git-lfs deduplicates identical content automatically — if two versions of an asset happen to produce the same binary, only one copy is stored.
 - The git repository itself remains lightweight, containing only `project.json` and metadata.
 
-### 14.2.4 Fire-and-Forget Commits
+### 14.2.4 Confirmed Commits
 
-Git commits SHALL be fire-and-forget: the `commitAsync` method SHALL never block the HTTP response. Commit failures SHALL be logged to stderr but MUST NOT propagate to the API caller. The "nothing to commit" case (no changes staged) SHALL be silently ignored, not treated as an error.
+Persistence API responses SHALL wait for the corresponding Git commit. A successful
+`PUT /api/projects/:id` response means both `project.json` and the Git history contain
+the submitted state. Commit failures SHALL return HTTP 500 with a detailed `detail`
+field and MUST propagate to the web client. The "nothing to commit" case remains a
+successful idempotent persistence result.
 
 ---
 
@@ -108,7 +112,7 @@ The web app SHALL upload media blobs to the orchestrator via `POST /api/projects
 
 1. Accept the file via multer with disk storage.
 2. Write the file to `<projectDir>/media/<mediaId><ext>`.
-3. Fire a git commit for the new media file.
+3. Await a git commit for the new media file.
 4. Return `{ filename: "<mediaId><ext>" }`.
 
 ### 14.3.3 Upload Deduplication
@@ -116,6 +120,10 @@ The web app SHALL upload media blobs to the orchestrator via `POST /api/projects
 The `BackendSaveService` on the web side SHALL maintain a per-session `uploadedIds: Set<string>`. Before uploading a media blob, the service SHALL check whether the `mediaId` is already in this set:
 
 - If present, the upload SHALL be skipped (idempotent).
+- If a media item has a `remoteUrl` under the current backend project media route,
+  the client SHALL issue `HEAD` for that exact URL. Only HTTP 200 proves the immutable
+  media ID is current and permits skipping upload. Missing, malformed, or unreachable
+  URLs SHALL fall back to uploading the Blob before PUT.
 - If absent, the `mediaId` SHALL be optimistically added to the set before the upload fires.
 - On upload failure, the `mediaId` SHALL be removed from the set to allow retry.
 
@@ -197,6 +205,146 @@ Additionally, engine-side ephemeral clip arrays SHALL be stripped from the top-l
 
 The sanitization function SHALL produce a plain object suitable for `JSON.stringify`, with no circular references or non-serializable types.
 
+### 14.5.4 Media Completeness Handshake
+
+Project JSON and the project `media/` directory SHALL be treated as one
+persistence unit. A backend save MUST NOT report success or commit a project
+snapshot that references required media binaries which are absent from the
+project's `media/` directory.
+
+Before writing or committing `project.json`, `PUT /api/projects/:id` SHALL compare
+every file-backed `MediaItem` in the incoming media library with the authoritative
+result of `scanMedia(projectId)`. This audit is by media ID, not filename. Image,
+video, audio, and subtitle items require a stored binary unless a future typed
+media-storage contract explicitly marks the item as external or virtual. A
+thumbnail, `sourceFile` hint, stale `blob:` URL, or frontend-only `remoteUrl` is
+not proof that the original binary is stored.
+
+If any required media item is missing, the backend SHALL leave the existing
+`project.json` and Git history unchanged and return HTTP `409`:
+
+```json
+{
+  "saved": false,
+  "code": "MEDIA_INCOMPLETE",
+  "projectId": "vintage-tokyo",
+  "missingItems": [
+    {
+      "mediaId": "1358784e-5cd4-434a-9690-62584bb3c650",
+      "name": "nf9.jpeg",
+      "type": "image",
+      "reason": "file-not-found",
+      "sourceFile": { "name": "nf9.jpeg", "size": 162717, "lastModified": 1782516508000 }
+    }
+  ]
+}
+```
+
+The response SHALL include all missing items in deterministic media-library order.
+It MUST NOT include absolute server paths or claim that a thumbnail is the original
+file. Unexpected audit failures return HTTP `500`; an empty or malformed media ID
+remains a request-validation error.
+
+The frontend save sequence SHALL be:
+
+1. Upload every new local media Blob and await every upload result.
+2. PUT the sanitized project JSON.
+3. If the backend returns `MEDIA_INCOMPLETE`, match each missing ID to the live
+   media library and attempt to obtain its original bytes from, in order: a valid
+   in-memory Blob, a readable `FileSystemFileHandle`, or another already-supported
+   durable source that yields the original binary rather than a thumbnail.
+4. Upload every recoverable missing item, await completion, then retry the PUT once.
+5. If any item cannot be supplied, any upload fails, or the retry still reports
+   missing media, stop. Do not loop, do not display `Persisted`, and do not discard
+   the user's local project state.
+
+Automatic recovery SHALL be silent only when the retry succeeds. Otherwise the
+header persistence state becomes failed, the Problems/Log surfaces receive a
+structured entry, and a finite-lived summary toast states the missing-item count.
+Each affected media-browser item and every timeline clip that references it SHALL
+show a persistent error marker until a later confirmed save proves that the binary
+exists. The marker's accessible label and tooltip SHALL name the problem, for
+example `Original media missing from saved project: nf9.jpeg`.
+
+Selecting an affected item SHALL show actionable instructions:
+
+- **Relink original file**: open a file picker, verify the selected file against
+  available `sourceFile` name/size/last-modified hints, replace or rehydrate the
+  item's Blob, upload it, and retry save.
+- **Locate containing folder**: where the File System Access API is available,
+  let the user choose a folder and search for matching `sourceFile` hints.
+- **Remove missing item**: only after explicit confirmation, remove the media item
+  and all dependent clips/references, then save the intentionally changed project.
+- For generated or externally sourced media, instruct the user to download or
+  regenerate the original asset and then relink it. A thumbnail is insufficient.
+
+The UI MUST state that local edits remain available but the backend save is
+incomplete. It MUST NOT recommend refreshing, clearing storage, or dismissing the
+warning as a repair. Error markers clear only after a successful persistence receipt
+for a snapshot in which the backend audit finds the item present, or after the user
+explicitly removes the item and its references.
+
+`GET /api/projects/:id` SHALL also return a read-only `missingItems` audit alongside
+`project` and `mediaFiles`. This exposes legacy incomplete projects immediately on
+load. Loading remains allowed so the user can relink or remove affected items, but
+the returned missing IDs SHALL populate the same item and clip error markers. A
+subsequent save still uses the authoritative PUT audit; the GET audit is not a
+substitute for save-time validation.
+
+### 14.5.5 Persistence Receipt and UI Status
+
+`PUT /api/projects/:id` SHALL return only after Git commit completion:
+
+```json
+{ "saved": true, "projectId": "vintage-tokyo", "persistedAt": 1783890000000, "sourceModifiedAt": 1783889999000 }
+```
+
+The editor header SHALL show separate local and backend states:
+
+- `Auto saved: <time>` means the local editor/IndexedDB stage completed.
+- A larger success dot and `Persisted <human duration> ago` means the backend receipt
+  confirmed a Git commit for the current project.
+- Dots SHALL pulse only while their stage is operating and respect reduced-motion.
+- Queued, persisting, failed, and not-yet-persisted states SHALL never be presented as
+  successful persistence.
+- The persistence dot SHALL be green only when the receipt project ID matches the
+  current project and `sourceModifiedAt` exactly matches the current frontend
+  `project.modifiedAt`. All other states are neutral, amber, or red.
+- A recovered project with a client UUID SHALL NOT enter the persistence queue.
+  The client first lists backend projects and reconciles only a unique exact-name
+  match to its slug, migrates the local autosave identity, and then saves. Zero or
+  multiple matches are a visible identity-reconciliation failure; the client MUST
+  NOT invent a slug or overwrite an arbitrary project.
+
+### 14.5.6 Failure Feedback, Timeout, and Logging
+
+- Every backend persistence failure SHALL set the header state to failed and produce a
+  detailed error toast containing the HTTP or Git failure detail and retry behavior.
+- Toasts SHALL expire using `toastDurationMs` from the persisted `openreel-settings`
+  store. The supported UI choices are 3, 5, 6, 10, and 15 seconds; programmatic values
+  are clamped to 1–30 seconds.
+- Frontend logs SHALL cover queueing, save start, media completion, PUT response,
+  confirmed Git persistence, retry, and failure. Operational messages use
+  `console.debug`/`console.info`; failures use `console.error` and the runtime error bus.
+- Backend logs SHALL cover request validation, atomic project write, commit start,
+  commit success, and failure with project ID and relevant timestamps/counts.
+- Media completeness logs SHALL include project ID, missing media IDs/count, the
+  upload-and-retry attempt number, and the final outcome. They MUST NOT include
+  binary contents, data URLs, file handles, or absolute user filesystem paths.
+- Persistence errors MUST NOT be swallowed. Expected reachability probes and
+  idempotent skips MAY return a fallback value only after emitting a diagnostic log.
+- Console-to-problem capture SHALL capture `console.error` only. Debug and info
+  persistence telemetry MUST NOT create problem toasts.
+- Backend save debounce SHALL have a five-second maximum queue age. Continuous
+  project mutations MUST NOT postpone the PUT indefinitely; the latest snapshot at
+  the deadline is persisted, and later changes schedule the next serialized save.
+- A queued operation that has not begun a PUT within seven seconds SHALL transition
+  to failed and emit a detailed error toast. A started PUT has a twenty-second request
+  deadline and SHALL likewise fail visibly rather than remain in an operating state.
+- The header SHALL independently watchdog operating-state timestamps. A queued or
+  saving state that survives HMR without its owning operation is immediately failed
+  with a detailed toast.
+
 ---
 
 ## 14.6 Project Restore
@@ -243,9 +391,9 @@ The orchestrator's `DELETE /api/projects/:id` endpoint SHALL perform a recursive
 |---|---|---|
 | `GET` | `/api/projects/config` | Return `{ autosaveIntervalMs }` |
 | `GET` | `/api/projects` | List all projects (summaries) |
-| `GET` | `/api/projects/:id` | Load project + `mediaFiles` map |
+| `GET` | `/api/projects/:id` | Load project + `mediaFiles` map + missing-item audit |
 | `POST` | `/api/projects` | Create project (`{ name, settings? }`) |
-| `PUT` | `/api/projects/:id` | Upsert `project.json` + git commit |
+| `PUT` | `/api/projects/:id` | Audit media completeness, then upsert `project.json` + Git commit; return `409 MEDIA_INCOMPLETE` without mutation when required binaries are absent |
 | `PATCH` | `/api/projects/:id` | Rename project (`{ name }`) |
 | `DELETE` | `/api/projects/:id` | Remove entire project directory |
 | `POST` | `/api/projects/:id/media/:mediaId` | Upload media file (multipart) |

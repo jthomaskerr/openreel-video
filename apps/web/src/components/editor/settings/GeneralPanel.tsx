@@ -19,10 +19,12 @@ export const GeneralPanel: React.FC = () => {
   const {
     autoSave,
     autoSaveInterval,
+    toastDurationMs,
     defaultTtsProvider,
     configuredServices,
     setAutoSave,
     setAutoSaveInterval,
+    setToastDurationMs,
     setDefaultTtsProvider,
   } = useSettingsStore();
 
@@ -162,6 +164,28 @@ export const GeneralPanel: React.FC = () => {
           >
             Apply
           </button>
+        </div>
+      </div>
+
+      <div className="h-px bg-border" />
+
+      <div className="space-y-3">
+        <h3 className="text-sm font-medium text-text-primary">Notifications</h3>
+        <div className="flex items-center gap-3">
+          <Label className="text-sm text-text-secondary whitespace-nowrap">
+            Toast timeout
+          </Label>
+          <select
+            value={toastDurationMs}
+            onChange={(event) => setToastDurationMs(Number(event.target.value))}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value={3000}>3 seconds</option>
+            <option value={5000}>5 seconds</option>
+            <option value={6000}>6 seconds</option>
+            <option value={10000}>10 seconds</option>
+            <option value={15000}>15 seconds</option>
+          </select>
         </div>
       </div>
 

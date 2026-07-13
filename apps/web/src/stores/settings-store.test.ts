@@ -80,3 +80,15 @@ describe("settings-store LLM instances", () => {
     expect(useSettingsStore.getState().defaultLlmInstanceId).toBeNull();
   });
 });
+
+describe("settings-store notifications", () => {
+  it("clamps and persists the configurable toast timeout", () => {
+    useSettingsStore.getState().setToastDurationMs(10_000);
+    expect(useSettingsStore.getState().toastDurationMs).toBe(10_000);
+    expect(JSON.parse(localStorage.getItem("openreel-settings") ?? "{}").state.toastDurationMs)
+      .toBe(10_000);
+
+    useSettingsStore.getState().setToastDurationMs(100);
+    expect(useSettingsStore.getState().toastDurationMs).toBe(1000);
+  });
+});

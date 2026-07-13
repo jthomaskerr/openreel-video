@@ -18,6 +18,7 @@ interface RecoveryDialogProps {
   onRecover: (saveId: string) => void;
   onDismiss: () => void;
   onClearAll?: () => void;
+  hasBackendConflict?: boolean;
 }
 
 function formatTimeAgo(timestamp: number): string {
@@ -50,6 +51,7 @@ export const RecoveryDialog: React.FC<RecoveryDialogProps> = ({
   onRecover,
   onDismiss,
   onClearAll,
+  hasBackendConflict = false,
 }) => {
   const [showOlderSaves, setShowOlderSaves] = useState(false);
   const [selectedSave, setSelectedSave] = useState<string | null>(null);
@@ -80,10 +82,12 @@ export const RecoveryDialog: React.FC<RecoveryDialogProps> = ({
             </div>
             <div>
               <DialogTitle className="text-base font-semibold text-text-primary">
-                Recover Your Work
+                {hasBackendConflict ? "Newer Local Changes Found" : "Recover Your Work"}
               </DialogTitle>
               <DialogDescription className="text-sm text-text-secondary mt-0.5">
-                We found an unsaved project
+                {hasBackendConflict
+                  ? "Restore these changes and update the backend project?"
+                  : "We found an unsaved project"}
               </DialogDescription>
             </div>
           </div>
@@ -117,14 +121,16 @@ export const RecoveryDialog: React.FC<RecoveryDialogProps> = ({
               onClick={onDismiss}
               className="flex-1"
             >
-              Start Fresh
+              {hasBackendConflict ? "Keep Backend Version" : "Start Fresh"}
             </Button>
             <Button
               onClick={() => handleRecover(mostRecent.id)}
               disabled={selectedSave === mostRecent.id}
               className="flex-1"
             >
-              {selectedSave === mostRecent.id ? "Recovering..." : "Recover Project"}
+              {selectedSave === mostRecent.id
+                ? hasBackendConflict ? "Restoring..." : "Recovering..."
+                : hasBackendConflict ? "Restore & Update Backend" : "Recover Project"}
             </Button>
           </div>
 

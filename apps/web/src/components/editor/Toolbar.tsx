@@ -52,8 +52,9 @@ import { HistoryPanel } from "./inspector/HistoryPanel";
 import { ProjectSwitcher } from "./ProjectSwitcher";
 import { SettingsDialog } from "./settings/SettingsDialog";
 import { ProjectManagerDialog } from "./ProjectManagerDialog";
-import { toast } from "../../stores/notification-store";
+import { reportRuntimeError, toast } from "../../stores/notification-store";
 import { useSettingsStore } from "../../stores/settings-store";
+import { usePersistenceStatusStore } from "../../stores/persistence-status-store";
 import { useAnalytics, AnalyticsEvents } from "../../hooks/useAnalytics";
 import { startTour, ONBOARDING_KEY, startMoGraphTour, MOGRAPH_TOUR_KEY } from "./tour";
 import {
@@ -116,6 +117,36 @@ export const Toolbar: React.FC = () => {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const { importMedia } = useProjectStore();
   const { track } = useAnalytics();
+  const persistencePhase = usePersistenceStatusStore((state) => state.phase);
+  const persistedProjectId = usePersistenceStatusStore((state) => state.projectId);
+  const persistedAt = usePersistenceStatusStore((state) => state.persistedAt);
+  const persistedModifiedAt = usePersistenceStatusStore((state) => state.persistedModifiedAt);
+  const persistenceError = usePersistenceStatusStore((state) => state.error);
+  const persistencePhaseStartedAt = usePersistenceStatusStore((state) => state.phaseStartedAt);
+  const [statusNow, setStatusNow] = useState(Date.now());
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setStatusNow(Date.now()), 1000);
+    return () => window.clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (persistencePhase !== "pending" && persistencePhase !== "saving") return;
+    const deadlineMs = persistencePhase === "pending" ? 7_000 : 20_000;
+    const elapsed = persistencePhaseStartedAt ? statusNow - persistencePhaseStartedAt : deadlineMs;
+    if (elapsed < deadlineMs) return;
+
+    const message = persistencePhaseStartedAt
+      ? `${persistencePhase} persistence timed out after ${deadlineMs}ms for project ${project.id}`
+      : `${persistencePhase} persistence state for project ${project.id} survived HMR without an active operation`;
+    usePersistenceStatusStore.getState().markFailed(project.id, message);
+    console.error("[Persistence] header watchdog detected a stale operation", {
+      projectId: project.id,
+      phase: persistencePhase,
+      elapsed,
+    });
+    reportRuntimeError("Backend persistence stalled", new Error(message), "persistence-status.watchdog");
+  }, [persistencePhase, persistencePhaseStartedAt, project.id, statusNow]);
 
   const neuralFramesImportRef = useRef<NeuralFramesImportTabHandle>(null);
   // Local editable project name (committed onBlur / Enter)
@@ -135,6 +166,33 @@ export const Toolbar: React.FC = () => {
       hour12: false,
     });
   }, [project.modifiedAt]);
+
+  const persistenceLabel = useMemo(() => {
+    if (persistedProjectId !== project.id) return "not persisted";
+    if (persistencePhase === "pending") return "queued";
+    if (persistencePhase === "saving") return "persisting…";
+    if (persistencePhase === "failed") return `failed: ${persistenceError ?? "unknown error"}`;
+    if (!persistedAt || persistedModifiedAt !== project.modifiedAt) return "stale";
+    const seconds = Math.max(0, Math.floor((statusNow - persistedAt) / 1000));
+    if (seconds < 2) return "just now";
+    if (seconds < 60) return `${seconds}s ago`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    return `${Math.floor(minutes / 60)}h ago`;
+  }, [persistedAt, persistedModifiedAt, persistedProjectId, persistenceError, persistencePhase, project.id, project.modifiedAt, statusNow]);
+
+  const persistenceOperating = persistencePhase === "pending" || persistencePhase === "saving";
+  const persistenceConfirmed =
+    persistencePhase === "persisted" &&
+    persistedProjectId === project.id &&
+    persistedModifiedAt === project.modifiedAt;
+  const persistenceDotClass = persistencePhase === "failed"
+    ? "bg-red-500"
+    : persistenceConfirmed
+      ? "bg-emerald-500"
+      : persistenceOperating
+        ? "bg-amber-400"
+        : "bg-zinc-500";
 
   const commitProjectName = useCallback(() => {
     const next = projectNameDraft.trim();
@@ -717,11 +775,20 @@ export const Toolbar: React.FC = () => {
         </button>
 
         <span className="text-[11px] text-fg-3 flex items-center gap-1.5">
-          <span className="w-[5px] h-[5px] rounded-full bg-accent" />
+          <span className={`w-2 h-2 rounded-full bg-accent motion-reduce:animate-none ${persistenceOperating ? "animate-pulse" : ""}`} />
           {exportState.isExporting
             ? `Exporting… ${Math.round(exportState.progress)}%`
             : `Auto saved: ${autosaveLabel}`}
         </span>
+        {!exportState.isExporting && (
+          <span
+            className="text-[11px] text-fg-3 flex items-center gap-1.5 max-w-[260px]"
+            title={persistenceError ?? "Confirmed only after the backend Git commit completes"}
+          >
+            <span className={`w-2 h-2 shrink-0 rounded-full motion-reduce:animate-none ${persistenceDotClass} ${persistenceOperating ? "animate-pulse" : ""}`} />
+            <span className="truncate">Persisted {persistenceLabel}</span>
+          </span>
+        )}
       </div>
 
       {/* ─── Center: project name ────────────────────────────── */}

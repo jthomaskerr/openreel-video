@@ -92,7 +92,7 @@ const ToastItem = React.forwardRef<HTMLDivElement, ToastItemProps>(
     document.documentElement.classList.contains("dark");
   const theme = isDark ? "dark" : "light";
   const config = THEME_CONFIG[notification.type][theme];
-  const duration = notification.duration || 4000;
+  const duration = notification.duration ?? 4000;
 
   useEffect(() => {
     if (duration <= 0) return;

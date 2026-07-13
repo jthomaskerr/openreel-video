@@ -7,6 +7,7 @@ import {
 } from "../utils/media-recovery";
 import { reportRuntimeError } from "../stores/notification-store";
 import { isMediaBlob } from "../utils/media-blob";
+import { usePersistenceStatusStore } from "../stores/persistence-status-store";
 
 interface ProjectSummary {
   id: string;
@@ -20,7 +21,7 @@ const BASE_URL: string =
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function isClientOnlyProjectId(projectId: string): boolean {
+export function isClientOnlyProjectId(projectId: string): boolean {
   return UUID_RE.test(projectId);
 }
 
@@ -77,6 +78,13 @@ export interface BackendProjectResponse {
   mediaFiles: Record<string, string>;
 }
 
+interface PersistenceReceipt {
+  saved: true;
+  projectId: string;
+  persistedAt: number;
+  sourceModifiedAt: number;
+}
+
 class BackendSaveService {
   /** Media uploads successfully completed this session. Cleared on project switch. */
   private uploadedIds = new Set<string>();
@@ -84,16 +92,27 @@ class BackendSaveService {
   private uploadPromises = new Map<string, Promise<void>>();
   private scheduledProject: Project | null = null;
   private scheduledSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private queueDeadlineTimer: ReturnType<typeof setTimeout> | null = null;
+  private scheduledSaveStartedAt: number | null = null;
   private saveChain: Promise<void> = Promise.resolve();
+  private readonly maxScheduleWaitMs = 5_000;
+  private readonly queueDeadlineMs = 7_000;
+  private readonly requestDeadlineMs = 20_000;
 
   resetForProject(): void {
     this.uploadedIds.clear();
     this.uploadPromises.clear();
     this.scheduledProject = null;
+    this.scheduledSaveStartedAt = null;
     if (this.scheduledSaveTimer) {
       clearTimeout(this.scheduledSaveTimer);
       this.scheduledSaveTimer = null;
     }
+    if (this.queueDeadlineTimer) {
+      clearTimeout(this.queueDeadlineTimer);
+      this.queueDeadlineTimer = null;
+    }
+    usePersistenceStatusStore.getState().reset();
   }
 
   /**
@@ -102,21 +121,52 @@ class BackendSaveService {
    * retried even if the user makes no further edit.
    */
   scheduleSave(project: Project, delayMs: number = 2_000): void {
+    console.debug("[Persistence] queued", { projectId: project.id, delayMs, modifiedAt: project.modifiedAt });
+    usePersistenceStatusStore.getState().markPending(project.id);
     this.scheduledProject = project;
+    const now = Date.now();
+    this.scheduledSaveStartedAt ??= now;
+    if (!this.queueDeadlineTimer) {
+      const queuedProjectId = project.id;
+      this.queueDeadlineTimer = setTimeout(() => {
+        this.queueDeadlineTimer = null;
+        if (!this.scheduledProject || this.scheduledProject.id !== queuedProjectId) return;
+        const error = new Error(
+          `Persistence queue timed out after ${this.queueDeadlineMs}ms for project ${queuedProjectId}; no backend PUT began`,
+        );
+        usePersistenceStatusStore.getState().markFailed(queuedProjectId, error.message);
+        console.error("[Persistence] queue deadline exceeded", {
+          projectId: queuedProjectId,
+          deadlineMs: this.queueDeadlineMs,
+        });
+        reportRuntimeError("Backend persistence queue timed out", error, "backend-save.queue-timeout");
+      }, this.queueDeadlineMs);
+    }
     if (this.scheduledSaveTimer) clearTimeout(this.scheduledSaveTimer);
+    const queueAge = now - this.scheduledSaveStartedAt;
+    const effectiveDelay = Math.max(
+      0,
+      Math.min(delayMs, this.maxScheduleWaitMs - queueAge),
+    );
     this.scheduledSaveTimer = setTimeout(() => {
       this.scheduledSaveTimer = null;
+      this.scheduledSaveStartedAt = null;
+      if (this.queueDeadlineTimer) {
+        clearTimeout(this.queueDeadlineTimer);
+        this.queueDeadlineTimer = null;
+      }
       const pending = this.scheduledProject;
       this.scheduledProject = null;
       if (!pending) return;
 
       const run = this.saveChain
-        .catch(() => undefined)
+        .catch((previousError) => {
+          console.debug("[Persistence] continuing after reported save failure", previousError);
+        })
         .then(() => this.save(pending));
       this.saveChain = run;
       void run.catch((error) => {
         console.error("[BackendSave] scheduled save failed; retrying:", error);
-        reportRuntimeError("Backend auto-save failed", error, "backend-save.scheduled-save");
         if (!this.scheduledProject) this.scheduledProject = pending;
         if (!this.scheduledSaveTimer) {
           this.scheduledSaveTimer = setTimeout(() => {
@@ -126,11 +176,32 @@ class BackendSaveService {
           }, 5_000);
         }
       });
-    }, delayMs);
+    }, effectiveDelay);
   }
 
   private getUploadKey(projectId: string, mediaId: string): string {
     return `${projectId}:${mediaId}`;
+  }
+
+  private async hasCurrentBackendMedia(projectId: string, remoteUrl: string | undefined): Promise<boolean> {
+    const persistedMediaPrefix = `${BASE_URL}/api/projects/${projectId}/media/`;
+    if (!remoteUrl?.startsWith(persistedMediaPrefix)) return false;
+    try {
+      const response = await fetch(remoteUrl, { method: "HEAD" });
+      console.debug("[Persistence] backend media freshness checked", {
+        projectId,
+        remoteUrl,
+        status: response.status,
+      });
+      return response.ok;
+    } catch (error) {
+      console.warn("[Persistence] backend media freshness check failed; upload required", {
+        projectId,
+        remoteUrl,
+        error,
+      });
+      return false;
+    }
   }
 
   private async uploadMedia(
@@ -173,7 +244,8 @@ class BackendSaveService {
     try {
       const res = await fetch(`${BASE_URL}/api/health`, { method: "HEAD" });
       return res.ok;
-    } catch {
+    } catch (error) {
+      console.debug("[Persistence] orchestrator health check failed", error);
       return false;
     }
   }
@@ -191,13 +263,7 @@ class BackendSaveService {
       body: JSON.stringify({ name, settings }),
     });
     if (!res.ok) {
-      let detail = "";
-      try {
-        const body = await res.json() as { error?: string; detail?: string };
-        detail = body.detail ?? body.error ?? "";
-      } catch {
-        // ignore parse errors
-      }
+      const detail = await res.text();
       throw new Error(`Backend create failed: HTTP ${res.status}${detail ? ` — ${detail}` : ""}`);
     }
     return (await res.json()) as Project;
@@ -211,30 +277,70 @@ class BackendSaveService {
     if (isClientOnlyProjectId(project.id)) {
       // Local/offline projects are born with UUIDs. Do not ever send those to
       // the backend git store; wait until create/import returns the slug id.
+      console.debug("[Persistence] skipped client-only project", { projectId: project.id });
       return;
     }
 
-    await Promise.all(
-      project.mediaLibrary.items.map((item) => {
-        if (!isMediaBlob(item.blob)) return Promise.resolve();
-        return this.uploadMedia(project.id, item.id, item.blob, item.name);
-      }),
-    );
-
-    const res = await fetch(`${BASE_URL}/api/projects/${project.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(sanitize(project)),
+    const status = usePersistenceStatusStore.getState();
+    status.markSaving(project.id);
+    console.info("[Persistence] save started", {
+      projectId: project.id,
+      modifiedAt: project.modifiedAt,
+      mediaItems: project.mediaLibrary.items.length,
+      tracks: project.timeline.tracks.length,
     });
-    if (!res.ok) {
-      let detail = "";
-      try {
-        const body = await res.json() as { error?: string; detail?: string };
-        detail = body.detail ?? body.error ?? "";
-      } catch {
-        // ignore parse errors
+
+    try {
+      await Promise.all(
+        project.mediaLibrary.items.map(async (item) => {
+          if (await this.hasCurrentBackendMedia(project.id, item.remoteUrl)) {
+            console.debug("[Persistence] media already present; upload skipped", {
+              projectId: project.id,
+              mediaId: item.id,
+            });
+            return;
+          }
+          if (!isMediaBlob(item.blob)) return;
+          return this.uploadMedia(project.id, item.id, item.blob, item.name);
+        }),
+      );
+      console.debug("[Persistence] media stage complete", { projectId: project.id });
+
+      const res = await fetch(`${BASE_URL}/api/projects/${project.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sanitize(project)),
+        signal: AbortSignal.timeout(this.requestDeadlineMs),
+      });
+      if (!res.ok) {
+        const responseText = await res.text();
+        throw new Error(
+          `Backend save failed: HTTP ${res.status}${responseText ? ` — ${responseText}` : ""}`,
+        );
       }
-      throw new Error(`Backend save failed: HTTP ${res.status}${detail ? ` — ${detail}` : ""}`);
+      const receipt = await res.json() as PersistenceReceipt;
+      if (!receipt.saved || receipt.projectId !== project.id || !receipt.persistedAt) {
+        throw new Error(`Backend returned an invalid persistence receipt for ${project.id}`);
+      }
+      if (receipt.sourceModifiedAt !== project.modifiedAt) {
+        throw new Error(
+          `Backend persistence receipt timestamp mismatch for ${project.id}: expected ${project.modifiedAt}, received ${receipt.sourceModifiedAt}`,
+        );
+      }
+      usePersistenceStatusStore
+        .getState()
+        .markPersisted(project.id, receipt.persistedAt, receipt.sourceModifiedAt);
+      console.info("[Persistence] Git persistence confirmed", receipt);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      usePersistenceStatusStore.getState().markFailed(project.id, message);
+      console.error("[Persistence] save failed", { projectId: project.id, error: message });
+      reportRuntimeError(
+        `Backend persistence failed for ${project.id}`,
+        error,
+        "backend-save.save",
+      );
+      throw error;
     }
   }
 
@@ -256,9 +362,13 @@ class BackendSaveService {
   async listProjects(): Promise<ProjectSummary[] | null> {
     try {
       const res = await fetch(`${BASE_URL}/api/projects`);
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.warn("[Persistence] project list failed", { status: res.status });
+        return null;
+      }
       return (await res.json()) as ProjectSummary[];
-    } catch {
+    } catch (error) {
+      console.warn("[Persistence] project list request failed", error);
       return null;
     }
   }
@@ -270,7 +380,8 @@ class BackendSaveService {
         method: "DELETE",
       });
       return res.ok;
-    } catch {
+    } catch (error) {
+      console.error("[Persistence] project delete request failed", { projectId, error });
       return false;
     }
   }
@@ -282,7 +393,10 @@ class BackendSaveService {
   async load(projectId: string): Promise<Project | null> {
     try {
       const res = await fetch(`${BASE_URL}/api/projects/${projectId}`);
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.warn("[Persistence] project load failed", { projectId, status: res.status });
+        return null;
+      }
       const { project, mediaFiles } = (await res.json()) as BackendProjectResponse;
 
       const items = await Promise.all(
@@ -327,7 +441,8 @@ class BackendSaveService {
       );
 
       return { ...project, mediaLibrary: { ...project.mediaLibrary, items } };
-    } catch {
+    } catch (error) {
+      console.error("[Persistence] project load request failed", { projectId, error });
       return null;
     }
   }

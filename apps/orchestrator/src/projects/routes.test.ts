@@ -59,7 +59,7 @@ test("project import canonicalizes client UUID ids to slug worktree ids", async 
     },
   };
   const gitStore: Partial<GitStore> = {
-    commitAsync: (projectId: string) => {
+    commit: async (projectId: string) => {
       committedProjectIds.push(projectId);
     },
   };
@@ -92,7 +92,7 @@ test("UUID PUT autosaves are rejected before any project worktree is touched", a
     },
   };
   const gitStore: Partial<GitStore> = {
-    commitAsync: () => {
+    commit: async () => {
       commitCalls += 1;
     },
   };
@@ -109,5 +109,62 @@ test("UUID PUT autosaves are rejected before any project worktree is touched", a
     assert.match((await response.json()).error, /UUID project ids are not allowed/);
     assert.equal(saveCalls, 0);
     assert.equal(commitCalls, 0);
+  });
+});
+
+test("PUT confirms persistence only after the Git commit succeeds", async () => {
+  const project = projectFixture("vintage-tokyo", "Vintage Tokyo");
+  let commitFinished = false;
+  const store: Partial<ProjectStore> = {
+    loadProject: async () => project,
+    saveProject: async (incoming: Project) => incoming,
+  };
+  const gitStore: Partial<GitStore> = {
+    commit: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      commitFinished = true;
+    },
+  };
+
+  await withProjectRouter(store, gitStore, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/projects/vintage-tokyo`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(project),
+    });
+    const receipt = await response.json();
+
+    assert.equal(response.status, 200);
+    assert.equal(commitFinished, true);
+    assert.deepEqual(
+      { saved: receipt.saved, projectId: receipt.projectId },
+      { saved: true, projectId: "vintage-tokyo" },
+    );
+    assert.equal(typeof receipt.persistedAt, "number");
+  });
+});
+
+test("PUT exposes Git commit failures instead of returning a false success", async () => {
+  const project = projectFixture("vintage-tokyo", "Vintage Tokyo");
+  const store: Partial<ProjectStore> = {
+    loadProject: async () => project,
+    saveProject: async (incoming: Project) => incoming,
+  };
+  const gitStore: Partial<GitStore> = {
+    commit: async () => {
+      throw new Error("git index is locked");
+    },
+  };
+
+  await withProjectRouter(store, gitStore, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/projects/vintage-tokyo`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(project),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 500);
+    assert.match(body.detail, /git index is locked/);
   });
 });

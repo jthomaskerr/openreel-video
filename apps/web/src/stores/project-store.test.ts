@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useProjectStore } from "./project-store";
 import { useEngineStore } from "./engine-store";
 import { backendSaveService } from "../services/backend-save";
+import { autoSaveManager, initializeAutoSave as initializeAutoSaveStorage } from "../services/auto-save";
 import { getMediaBridge } from "../bridges/media-bridge";
 import type { Project, Clip, MediaItem, Transition } from "@openreel/core";
 
@@ -111,6 +112,10 @@ const {
 
 vi.mock("../services/auto-save", () => ({
   autoSaveManager: {
+    isStarted: vi.fn().mockReturnValue(false),
+    on: vi.fn(),
+    start: vi.fn(),
+    markDirty: vi.fn(),
     markPendingProjectCreation: vi.fn(),
     clearPendingProjectCreation: vi.fn(),
     migrateProjectId: vi.fn().mockResolvedValue(undefined),
@@ -235,6 +240,16 @@ describe("ProjectStore", () => {
     });
 
     describe("backend project creation", () => {
+      it("does not reconcile a freshly created UUID by project name", async () => {
+        const listSpy = vi.spyOn(backendSaveService, "listProjects");
+        vi.spyOn(backendSaveService, "isReachable").mockResolvedValue(false);
+
+        useProjectStore.getState().createNewProject("Fresh Local Project");
+        await Promise.resolve();
+
+        expect(listSpy).not.toHaveBeenCalled();
+      });
+
       it("keeps local UUID id when backend is unreachable", async () => {
         // Simulate unreachable backend — the createNewProject above already ran
         // with backendSaveService in its default unreachable state before any
@@ -336,6 +351,73 @@ describe("ProjectStore", () => {
         createSpy.mockRestore();
         saveSpy.mockRestore();
       });
+    });
+  });
+
+  describe("backend autosave binding", () => {
+    it("schedules edits to an existing backend project when IndexedDB initialization fails", async () => {
+      vi.mocked(initializeAutoSaveStorage).mockRejectedValueOnce(
+        new Error("IndexedDB blocked"),
+      );
+      const scheduleSaveSpy = vi
+        .spyOn(backendSaveService, "scheduleSave")
+        .mockImplementation(() => undefined);
+
+      await expect(
+        useProjectStore.getState().initializeAutoSave(),
+      ).rejects.toThrow("IndexedDB blocked");
+
+      const existing = useProjectStore.getState().project;
+      useProjectStore.getState().loadProject({
+        ...existing,
+        id: "existing-backend-project",
+      });
+      await useProjectStore.getState().addTrack("video");
+      const trackId = useProjectStore.getState().project.timeline.tracks[0]!.id;
+      scheduleSaveSpy.mockClear();
+
+      useProjectStore.getState().renameTrack(trackId, "Persisted track");
+
+      expect(autoSaveManager.markDirty).toHaveBeenCalled();
+      expect(scheduleSaveSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "existing-backend-project",
+          timeline: expect.objectContaining({
+            tracks: [expect.objectContaining({ name: "Persisted track" })],
+          }),
+        }),
+        0,
+      );
+    });
+
+    it("reconciles a recovered UUID project to its unique backend slug before saving", async () => {
+      const listSpy = vi.spyOn(backendSaveService, "listProjects").mockResolvedValue([
+        { id: "vintage-tokyo", name: "Vintage Tokyo", createdAt: 1, modifiedAt: 2 },
+      ]);
+      const scheduleSaveSpy = vi
+        .spyOn(backendSaveService, "scheduleSave")
+        .mockImplementation(() => undefined);
+      const recovered = {
+        ...useProjectStore.getState().project,
+        id: "14aec9eb-469f-4db6-9652-00dee0d243fc",
+        name: "Vintage Tokyo",
+      };
+
+      useProjectStore.getState().loadProject(recovered);
+
+      await vi.waitFor(() => {
+        expect(useProjectStore.getState().project.id).toBe("vintage-tokyo");
+      });
+      expect(autoSaveManager.migrateProjectId).toHaveBeenCalledWith(
+        recovered.id,
+        "vintage-tokyo",
+      );
+      expect(scheduleSaveSpy).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "vintage-tokyo", name: "Vintage Tokyo" }),
+        0,
+      );
+      listSpy.mockRestore();
+      scheduleSaveSpy.mockRestore();
     });
   });
 

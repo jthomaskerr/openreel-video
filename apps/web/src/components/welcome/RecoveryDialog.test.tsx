@@ -140,4 +140,19 @@ describe("RecoveryDialog", () => {
     fireEvent.click(screen.getByText("Recover Project"));
     expect(screen.getByText("Recovering...")).toBeInTheDocument();
   });
+
+  it("prompts to update the backend when local changes are newer", () => {
+    render(
+      <RecoveryDialog
+        saves={[createSave()]}
+        onRecover={vi.fn()}
+        onDismiss={vi.fn()}
+        hasBackendConflict
+      />,
+    );
+
+    expect(screen.getByText("Newer Local Changes Found")).toBeInTheDocument();
+    expect(screen.getByText("Keep Backend Version")).toBeInTheDocument();
+    expect(screen.getByText("Restore & Update Backend")).toBeInTheDocument();
+  });
 });

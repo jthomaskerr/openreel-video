@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { logBus } from "./log-store";
+import { useSettingsStore } from "./settings-store";
 
 export type NotificationType = "success" | "error" | "warning" | "info";
 
@@ -28,7 +29,7 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
     const id = `notification-${++notificationId}`;
     const newNotification: Notification = {
       id,
-      duration: 4000,
+      duration: useSettingsStore.getState().toastDurationMs,
       dismissible: true,
       ...notification,
     };
@@ -87,7 +88,7 @@ export function reportRuntimeError(title: string, error: unknown, source: string
 
   useNotificationStore
     .getState()
-    .addNotification({ type: "error", title, message, duration: 10000 });
+    .addNotification({ type: "error", title, message });
 }
 
 export const toast = {
@@ -111,7 +112,7 @@ export const toast = {
     });
     return useNotificationStore
       .getState()
-      .addNotification({ type: "error", title, message, duration: 6000 });
+      .addNotification({ type: "error", title, message });
   },
   warning: (title: string, message?: string) => {
     logBus.entry({

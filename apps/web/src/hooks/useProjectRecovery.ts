@@ -9,6 +9,7 @@ interface RecoveryState {
   availableSaves: AutoSaveMetadata[];
   showDialog: boolean;
   error: string | null;
+  hasBackendConflict?: boolean;
 }
 
 export function useProjectRecovery(autoRestoreProjectId?: string) {
@@ -17,6 +18,7 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
     availableSaves: [],
     showDialog: false,
     error: null,
+    hasBackendConflict: false,
   });
 
   const recoverFromAutoSave = useProjectStore((s) => s.recoverFromAutoSave);
@@ -69,7 +71,17 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
           if (cancelled) return;
           if (backendProject) {
             loadProject(backendProject);
-            setState({ isChecking: false, availableSaves: [], showDialog: false, error: null });
+            const newerLocalSave = saves
+              .filter((save) => save.projectId === autoRestoreProjectId)
+              .sort((a, b) => b.timestamp - a.timestamp)
+              .find((save) => save.timestamp > backendProject.modifiedAt);
+            setState({
+              isChecking: false,
+              availableSaves: newerLocalSave ? [newerLocalSave] : [],
+              showDialog: Boolean(newerLocalSave),
+              error: null,
+              hasBackendConflict: Boolean(newerLocalSave),
+            });
             return;
           }
 
@@ -172,6 +184,7 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
     availableSaves: state.availableSaves,
     showDialog: state.showDialog,
     error: state.error,
+    hasBackendConflict: Boolean(state.hasBackendConflict),
     recover,
     dismiss,
     clearAll,

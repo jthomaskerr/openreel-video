@@ -174,7 +174,9 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         return;
       }
       const project = await store.createProject(name.trim(), settings);
-      gitStore.commitAsync(project.id, `init: create project "${project.name}"`);
+      console.info("[Persistence] project created; committing", { projectId: project.id });
+      await gitStore.commit(project.id, `init: create project "${project.name}"`);
+      console.info("[Persistence] initial commit confirmed", { projectId: project.id });
       res.status(201).json(project);
     } catch (err) {
       res.status(500).json({ error: "Failed to create project", detail: String(err) });
@@ -209,7 +211,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       // convert UUIDs to the same slug assigned by POST /api/projects.
       const id = canonicalProjectId(project);
       const saved = await store.saveProject({ ...project, id });
-      gitStore.commitAsync(saved.id, `import: create from file "${saved.name}"`);
+      await gitStore.commit(saved.id, `import: create from file "${saved.name}"`);
       res.status(201).json(saved);
     } catch (err) {
       console.error("[POST /api/projects/import] failed:", err);
@@ -233,9 +235,23 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       }
 
       const prev = await store.loadProject(req.params.id);
+      console.info("[Persistence] PUT validated", {
+        projectId: req.params.id,
+        modifiedAt: incoming.modifiedAt,
+        mediaItems: incoming.mediaLibrary.items.length,
+        tracks: incoming.timeline.tracks.length,
+      });
       const saved = await store.saveProject(incoming);
-      gitStore.commitAsync(req.params.id, generateCommitMessage(prev, saved));
-      res.json({ saved: true });
+      console.info("[Persistence] project.json written; committing", { projectId: req.params.id });
+      await gitStore.commit(req.params.id, generateCommitMessage(prev, saved));
+      const persistedAt = Date.now();
+      console.info("[Persistence] Git commit confirmed", { projectId: req.params.id, persistedAt });
+      res.json({
+        saved: true,
+        projectId: req.params.id,
+        persistedAt,
+        sourceModifiedAt: incoming.modifiedAt,
+      });
     } catch (err) {
       console.error("[PUT /api/projects/:id] save failed:", err);
       res.status(500).json({ error: "Failed to save project", detail: String(err) });
@@ -256,7 +272,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         res.status(404).json({ error: "Project not found" });
         return;
       }
-      gitStore.commitAsync(project.id, `rename → "${project.name}"`);
+      await gitStore.commit(project.id, `rename → "${project.name}"`);
       res.json(project);
     } catch (err) {
       res.status(500).json({ error: "Failed to rename project", detail: String(err) });
@@ -299,7 +315,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
           res.status(400).json({ error: "No file uploaded" });
           return;
         }
-        gitStore.commitAsync(
+        await gitStore.commit(
           req.params.id,
           `media: add ${req.file.originalname} (${req.params.mediaId})`,
         );

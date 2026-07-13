@@ -51,6 +51,7 @@ export interface SettingsState {
   // General preferences
   autoSave: boolean;
   autoSaveInterval: number;
+  toastDurationMs: number;
   language: string;
 
   // AI/Service preferences
@@ -76,6 +77,7 @@ export interface SettingsState {
   // Actions
   setAutoSave: (enabled: boolean) => void;
   setAutoSaveInterval: (minutes: number) => void;
+  setToastDurationMs: (milliseconds: number) => void;
   setLanguage: (lang: string) => void;
   setDefaultTtsProvider: (provider: TtsProvider) => void;
   addLlmInstance: (partial: LlmInstanceInput) => string;
@@ -105,6 +107,7 @@ export const useSettingsStore = create<SettingsState>()(
       (set, get) => ({
         autoSave: true,
         autoSaveInterval: 5,
+        toastDurationMs: 6000,
         language: "en",
 
         defaultTtsProvider: "elevenlabs" as TtsProvider,
@@ -128,6 +131,8 @@ export const useSettingsStore = create<SettingsState>()(
 
         setAutoSaveInterval: (minutes: number) =>
           set({ autoSaveInterval: Math.max(1, Math.min(30, minutes)) }),
+        setToastDurationMs: (milliseconds: number) =>
+          set({ toastDurationMs: Math.max(1000, Math.min(30000, milliseconds)) }),
 
         setLanguage: (lang: string) => set({ language: lang }),
 
@@ -244,10 +249,11 @@ export const useSettingsStore = create<SettingsState>()(
       }),
       {
         name: "openreel-settings",
-        version: 2,
+        version: 3,
         partialize: (state) => ({
           autoSave: state.autoSave,
           autoSaveInterval: state.autoSaveInterval,
+          toastDurationMs: state.toastDurationMs,
           language: state.language,
           defaultTtsProvider: state.defaultTtsProvider,
           llmInstances: state.llmInstances,
@@ -275,6 +281,7 @@ export const useSettingsStore = create<SettingsState>()(
             chatApiProxyUrl: state.chatApiProxyUrl ?? null,
             wavespeedHasApiKey: state.wavespeedHasApiKey ?? false,
             kieaiHasApiKey: state.kieaiHasApiKey ?? false,
+            toastDurationMs: state.toastDurationMs ?? 6000,
           };
         },
       },

@@ -77,10 +77,11 @@ import {
   scanDirectoryRecursive,
 } from "../services/media-storage";
 import { parseSRT } from "./project/subtitle-helpers";
-import { backendSaveService } from "../services/backend-save";
+import { backendSaveService, isClientOnlyProjectId } from "../services/backend-save";
 import { blobToDataUrl, restoreMediaItem } from "../utils/media-recovery";
 import { projectManager } from "../services/project-manager";
 import { reportRuntimeError, toast } from "./notification-store";
+import { usePersistenceStatusStore } from "./persistence-status-store";
 
 function getImportedFileName(item: MediaItem): string {
   return item.sourceFile?.name ?? item.name;
@@ -121,6 +122,88 @@ function preserveUserMediaMetadata(
 }
 
 let autoSaveBindingsInitialized = false;
+const identityReconciliations = new Set<string>();
+
+async function reconcileBackendIdentity(
+  temporaryId: string,
+  getProjectState: () => ProjectState,
+): Promise<void> {
+  if (identityReconciliations.has(temporaryId)) return;
+  identityReconciliations.add(temporaryId);
+  try {
+    const snapshot = getProjectState().project;
+    console.info("[Persistence] reconciling client project identity", {
+      temporaryId,
+      projectName: snapshot.name,
+    });
+    const projects = await backendSaveService.listProjects();
+    if (!projects) throw new Error("Backend project list is unavailable");
+    const normalizedName = snapshot.name.trim().toLocaleLowerCase();
+    const matches = projects.filter(
+      (project) => project.name.trim().toLocaleLowerCase() === normalizedName,
+    );
+    if (matches.length !== 1) {
+      throw new Error(
+        `Expected one backend project named "${snapshot.name}", found ${matches.length}; UUID ${temporaryId} was not persisted`,
+      );
+    }
+    const current = getProjectState().project;
+    if (current.id !== temporaryId) return;
+    await autoSaveManager.migrateProjectId(temporaryId, matches[0]!.id);
+    useProjectStore.setState({
+      project: { ...current, id: matches[0]!.id, modifiedAt: Date.now() },
+    });
+    console.info("[Persistence] project identity reconciled", {
+      temporaryId,
+      projectId: matches[0]!.id,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    usePersistenceStatusStore.getState().markFailed(temporaryId, message);
+    console.error("[Persistence] project identity reconciliation failed", {
+      temporaryId,
+      error: message,
+    });
+    reportRuntimeError(
+      "Backend project identity reconciliation failed",
+      error,
+      "backend-save.identity-reconciliation",
+    );
+  } finally {
+    identityReconciliations.delete(temporaryId);
+  }
+}
+
+function ensureAutoSaveBindings(getProjectState: () => ProjectState): void {
+  if (autoSaveBindingsInitialized) return;
+
+  const pushCurrentProjectToBackend = () => {
+    const project = getProjectState().project;
+    backendSaveService.scheduleSave(project, 0);
+  };
+
+  autoSaveManager.on("saved", pushCurrentProjectToBackend);
+  autoSaveManager.on("syncRequested", pushCurrentProjectToBackend);
+
+  // Backend persistence must not depend on IndexedDB initialization. Browsers
+  // can block or fail IndexedDB while the orchestrator remains reachable.
+  useProjectStore.subscribe(
+    (state) => state.project,
+    () => {
+      const state = getProjectState();
+      if (!state.explicitlyCreated) return;
+      autoSaveManager.markDirty();
+      if (isClientOnlyProjectId(state.project.id)) {
+        console.debug("[Persistence] client-only project is awaiting backend identity", {
+          projectId: state.project.id,
+        });
+        return;
+      }
+      backendSaveService.scheduleSave(state.project, 0);
+    },
+  );
+  autoSaveBindingsInitialized = true;
+}
 
 /**
  * ProjectState - Complete state interface for project management
@@ -1576,6 +1659,7 @@ export const useProjectStore = create<ProjectState>()(
           error: null,
           explicitlyCreated: true,
         });
+
         backendSaveService.resetForProject();
 
         // Fire-and-forget: if the orchestrator is reachable, create the
@@ -1688,6 +1772,10 @@ export const useProjectStore = create<ProjectState>()(
           error: null,
           explicitlyCreated: true,
         });
+
+        if (isClientOnlyProjectId(fixedProject.id)) {
+          void reconcileBackendIdentity(fixedProject.id, get);
+        }
 
         // Auto-restore placeholder assets from saved FileSystemFileHandles (same machine)
         const placeholders = fixedProject.mediaLibrary.items.filter(
@@ -4856,36 +4944,14 @@ export const useProjectStore = create<ProjectState>()(
 
       // Auto-save methods
       initializeAutoSave: async () => {
+        // Install the backend change listener synchronously. It must continue
+        // to work even when local IndexedDB initialization fails or stalls.
+        ensureAutoSaveBindings(get);
+
         // Guard against double-initialisation (e.g. React StrictMode
         // double-invoking effects with no cleanup, or multiple mounts).
         if (autoSaveManager.isStarted()) return;
         await initializeAutoSave();
-
-        if (!autoSaveBindingsInitialized) {
-          const pushCurrentProjectToBackend = () => {
-            const project = get().project;
-            if (!project) return;
-            backendSaveService.scheduleSave(project, 0);
-          };
-
-          // Push immediately after a local save and retry the latest current
-          // project on every autosave interval. A transient failed PUT must not
-          // leave the backend stale until the user makes another edit.
-          autoSaveManager.on("saved", pushCurrentProjectToBackend);
-          autoSaveManager.on("syncRequested", pushCurrentProjectToBackend);
-
-          // Trigger local auto-save whenever the project object changes.
-          useProjectStore.subscribe(
-            (state) => state.project,
-            () => {
-              if (get().explicitlyCreated) {
-                autoSaveManager.markDirty();
-                backendSaveService.scheduleSave(get().project);
-              }
-            },
-          );
-          autoSaveBindingsInitialized = true;
-        }
 
         autoSaveManager.start(() => {
           const { project } = get();
@@ -5037,6 +5103,10 @@ export const useProjectStore = create<ProjectState>()(
             error: null,
             explicitlyCreated: true,
           });
+
+          if (isClientOnlyProjectId(projectWithMedia.id)) {
+            void reconcileBackendIdentity(projectWithMedia.id, get);
+          }
 
           await projectManager.addToRecent(projectWithMedia);
           return true;
