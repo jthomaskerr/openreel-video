@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Project } from "@openreel/core";
+import type { Project, ProjectSaveReceipt } from "@openreel/core";
 import { generateThumbnailFromBlob, generateThumbnailFromUrl } from "../utils/media-recovery";
 import { backendSaveService } from "./backend-save";
 import { useNotificationStore } from "../stores/notification-store";
@@ -70,6 +70,21 @@ const makeProject = (): Project => ({
     ],
   },
   timeline: { tracks: [], subtitles: [], duration: 0, markers: [] },
+});
+
+const makeReceipt = (
+  overrides: Partial<ProjectSaveReceipt> = {},
+): ProjectSaveReceipt => ({
+  saved: true,
+  projectId: "vintage-tokyo",
+  persistedAt: 1_234,
+  sourceModifiedAt: 2,
+  commitSha: "0123456789abcdef0123456789abcdef01234567",
+  treeSha: "89abcdef0123456789abcdef0123456789abcdef",
+  projectBlobSha: "fedcba9876543210fedcba9876543210fedcba98",
+  mediaManifestDigest: "sha256:manifest-digest",
+  committed: true,
+  ...overrides,
 });
 
 afterEach(() => {
@@ -182,22 +197,19 @@ describe("backendSaveService.load", () => {
 describe("backendSaveService.save", () => {
   const persistedResponse = () => ({
     ok: true,
-    json: async () => ({
-      saved: true,
-      projectId: "vintage-tokyo",
-      persistedAt: 1234,
-      sourceModifiedAt: 2,
-    }),
+    json: async () => makeReceipt(),
   });
 
   it("treats a modifiedAt-only backend write as deferred rather than Git-persisted", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({
-        saved: true,
+      json: async () => makeReceipt({
         committed: false,
-        projectId: "vintage-tokyo",
-        sourceModifiedAt: 2,
+        persistedAt: null,
+        commitSha: null,
+        treeSha: null,
+        projectBlobSha: null,
+        mediaManifestDigest: null,
       }),
     }));
 
@@ -216,12 +228,7 @@ describe("backendSaveService.save", () => {
       const body = JSON.parse(String(init?.body));
       return {
         ok: true,
-        json: async () => ({
-          saved: true,
-          projectId: "vintage-tokyo",
-          persistedAt: 1234,
-          sourceModifiedAt: body.modifiedAt,
-        }),
+        json: async () => makeReceipt({ sourceModifiedAt: body.modifiedAt }),
       };
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -243,12 +250,7 @@ describe("backendSaveService.save", () => {
       const body = JSON.parse(String(init?.body));
       return {
         ok: true,
-        json: async () => ({
-          saved: true,
-          projectId: "vintage-tokyo",
-          persistedAt: 1234,
-          sourceModifiedAt: body.modifiedAt,
-        }),
+        json: async () => makeReceipt({ sourceModifiedAt: body.modifiedAt }),
       };
     });
     vi.stubGlobal("fetch", fetchMock);

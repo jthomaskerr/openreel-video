@@ -190,35 +190,40 @@ export function clearCache(clipId?: string): void {
   }
 }
 
-const workerSelf = self as unknown as {
-  onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null;
-  postMessage: (
-    message: unknown,
-    options?: { transfer?: Transferable[] },
-  ) => void;
-};
+const workerSelf =
+  typeof self !== "undefined"
+    ? (self as unknown as {
+        onmessage: ((event: MessageEvent<WorkerRequest>) => void) | null;
+        postMessage: (
+          message: unknown,
+          options?: { transfer?: Transferable[] },
+        ) => void;
+      })
+    : null;
 
-workerSelf.onmessage = async (event: MessageEvent<WorkerRequest>) => {
-  const request = event.data;
+if (workerSelf) {
+  workerSelf.onmessage = async (event: MessageEvent<WorkerRequest>) => {
+    const request = event.data;
 
-  switch (request.type) {
-    case "init":
-      workerId = Math.floor(Math.random() * 10000);
-      await loadMediaBunny();
-      const initResponse: InitResponse = { type: "ready", workerId };
-      workerSelf.postMessage(initResponse);
-      break;
+    switch (request.type) {
+      case "init":
+        workerId = Math.floor(Math.random() * 10000);
+        await loadMediaBunny();
+        const initResponse: InitResponse = { type: "ready", workerId };
+        workerSelf.postMessage(initResponse);
+        break;
 
-    case "decode":
-      const response = await decodeFrame(request);
-      if (response.bitmap) {
-        workerSelf.postMessage(response, { transfer: [response.bitmap] });
-      } else {
-        workerSelf.postMessage(response);
-      }
-      break;
-  }
-};
+      case "decode":
+        const response = await decodeFrame(request);
+        if (response.bitmap) {
+          workerSelf.postMessage(response, { transfer: [response.bitmap] });
+        } else {
+          workerSelf.postMessage(response);
+        }
+        break;
+    }
+  };
+}
 
 export const decodeWorkerCode = `
 const resourceCache = new Map();

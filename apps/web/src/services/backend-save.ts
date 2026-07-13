@@ -1,5 +1,5 @@
 // apps/web/src/services/backend-save.ts
-import type { Project, MediaItem, ProjectSettings } from "@openreel/core";
+import type { Project, MediaItem, ProjectSaveReceipt, ProjectSettings } from "@openreel/core";
 import {
   generateThumbnailFromBlob,
   generateThumbnailFromUrl,
@@ -76,14 +76,6 @@ export interface BackendProjectResponse {
   project: Project;
   /** Map of mediaId → stored filename (e.g. "abc123.mp4") */
   mediaFiles: Record<string, string>;
-}
-
-interface PersistenceReceipt {
-  saved: true;
-  committed?: boolean;
-  projectId: string;
-  persistedAt?: number;
-  sourceModifiedAt: number;
 }
 
 class BackendSaveService {
@@ -319,7 +311,7 @@ class BackendSaveService {
           `Backend save failed: HTTP ${res.status}${responseText ? ` — ${responseText}` : ""}`,
         );
       }
-      const receipt = await res.json() as PersistenceReceipt;
+      const receipt = await res.json() as ProjectSaveReceipt;
       if (!receipt.saved || receipt.projectId !== project.id) {
         throw new Error(`Backend returned an invalid persistence receipt for ${project.id}`);
       }

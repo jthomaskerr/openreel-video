@@ -1,4 +1,5 @@
 export * from "./types";
+export * from "./project-persistence";
 export * from "./utils";
 export * from "./actions";
 export * from "./storage";
