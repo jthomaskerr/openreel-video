@@ -72,47 +72,13 @@ export interface StoryboardShot {
 - `outputs`: Array of `GenerationAttempt` records (one per generation/regeneration).
 - `selected`: Optional boolean for UI multi-select state (client-side only).
 
-### StoryboardClipMetadata
+### Timeline Projection
 
-Timeline clips that represent storyboard shots carry specialized metadata.
-
-**Location:** `packages/core/src/types/timeline.ts`
-
-**Contract:**
-```typescript
-metadata: {
-  kind: "storyboard-shot";
-  shotId: string;           // Foreign key to StoryboardShot.id
-  shotIndex?: number;       // Denormalized shot index for UI
-  label?: string;           // Denormalized label
-  prompt?: string;          // Denormalized prompt (for quick preview)
-  referenceImageUrl?: string; // Thumbnail URL
-  generatedAssetIds?: string[];
-  source?: "generated" | "imported"; // Origin: AI generation or Neural Frames import
-}
-```
-
-**Constraints:**
-- `kind = "storyboard-shot"` is the discriminator.
-- `shotId` MUST reference an existing `StoryboardShot.id` in the project.
-- Denormalized fields (label, prompt, referenceImageUrl) are for display only; truth lives in `StoryboardShot`.
-- Clips with this metadata appear in the storyboard panel and timeline.
-
-### StoryboardClipLink
-
-Join record connecting a timeline Clip to its source StoryboardShot.
-
-**Purpose:** Enables bidirectional navigation and selection sync.
-
-**Usage:**
-```typescript
-interface StoryboardClipLink {
-  clipId: string;      // Clip.id in timeline
-  shotId: string;      // StoryboardShot.id
-  createdAt: string;   // ISO timestamp
-  source: "timeline" | "storyboard"; // Origin of the link
-}
-```
+Timeline clips reference storyboard shots through the canonical
+[Storyboard Clip Projection contract](./timeline.md#13-storyboard-clip-projection).
+This specification owns `StoryboardShot` creative state; [Timeline](./timeline.md)
+owns clip metadata, placement, grouping, and selection projection. No second
+`StoryboardClipMetadata` or clip-link contract is defined here.
 
 ---
 
@@ -189,7 +155,7 @@ interface ShotCardProps {
   - "processing" → blue
   - "failed" → red
 - **Timing:** Displays `startSeconds`–`endSeconds` and calculated duration.
-- **Prompt preview:** First 2 lines of `shot.prompt`, truncated. Character/reference `@token` mentions in the prompt MUST render as inline pills per `inspector-shell.md` §3.8 (Character Pills in Prompt Fields), consistent with the full-size prompt editor.
+- **Prompt preview:** First 2 lines of `shot.prompt`, truncated. Character/reference `@token` mentions in the prompt MUST render as inline pills per [Inspector Shell](./inspector-shell.md#5-character-and-asset-reference-pills), consistent with the full-size prompt editor.
 
 **Styling:**
 - Border color: `border-border` (default) → `border-accent` (hover/selected).
@@ -630,7 +596,7 @@ Checks:
 
 **Workflow:**
 1. User opens the dialog (from inspector or storyboard panel).
-2. Enters natural-language instruction and selects shots to alter. Character/reference `@token` mentions typed into the instruction text field or shown in shot prompt previews within the dialog MUST render as inline pills per `inspector-shell.md` §3.8.
+2. Enters natural-language instruction and selects shots to alter. Character/reference `@token` mentions typed into the instruction text field or shown in shot prompt previews within the dialog MUST render as inline pills per [Inspector Shell](./inspector-shell.md#5-character-and-asset-reference-pills).
 3. Clicks "Preview" → calls `POST /api/tools/alter-storyboard`.
 4. Dialog shows a diff view with before/after for each changed field.
 5. User can accept or reject:
@@ -715,14 +681,14 @@ All imported shots use the same `metadata.shotId` linkage as generated shots, en
 
 ### Section Identification Flow
 
-The storyboard generation workflow depends on confirmed song sections from the [Section Identification Flow plan](../superpowers/plans/2026-07-03-section-identification-flow.md) and the [Sections Identification spec](./sections-identification.md):
+The storyboard generation workflow depends on confirmed song sections from the [Section Identification Flow plan](../superpowers/plans/2026-07-03-section-identification-flow.md) and the canonical [Song Sections spec](./song-sections.md):
 - User infers or manually defines sections (intro, verse, chorus, bridge, outro).
 - Sections must be confirmed before generation is triggered.
 - LLM prompt includes section boundaries to guide shot creation.
 
 ### Track Grouping and Timeline Layout
 
-The storyboard panel integrates with track grouping (from the [Track Grouping Expansion plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md) and [Track Grouping spec](./track-grouping.md)):
+The storyboard panel integrates with track grouping through the canonical [Timeline spec](./timeline.md), with implementation context in the [Track Grouping Expansion plan](../superpowers/plans/2026-07-03-track-grouping-expansion.md):
 - Storyboard shots can be grouped into "shot groups" by section.
 - Timeline track grouping allows collapsing/expanding shot groups.
 - Shots appear both in the storyboard panel grid and as clips in the timeline.
@@ -816,7 +782,7 @@ TODO:
 ## File Inventory
 
 **Created:**
-- `/Volumes/Joseph/Projects1/ai-agents/openreel-video/docs/spec/storyboard.md` (this file)
+- [Storyboard](./storyboard.md) (this file)
 
 **Referenced (not modified):**
 - `packages/music-video-domain/src/types.ts` — StoryboardShot, related types

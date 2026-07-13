@@ -1,5 +1,7 @@
 # Operational Spec Update Summary
 
+> **Historical provenance only.** Current canonical ownership is listed in the [OpenReel Functional Specifications index](./index.md). Links below may resolve through compatibility redirects.
+
 **Date:** 2026-07-04
 
 ## Source Files Used
@@ -8,9 +10,9 @@
 |---|---|
 | `openreel-user-messages-collected.jsonl` | 506 user messages extracted from all sessions under `~/.omp/agent/sessions/*openreel*` |
 | [OpenReel Spec Implications report](../superpowers/plans/spec-update/openreel-spec-implications-report.json) | Categorized implications derived from user messages |
-| `spec/asset-management-ux.md` | Existing authoritative spec (sections 1–8 preserved) |
-| `spec/music-video-timeline-native/decisions.md` | Existing music-video decisions (read, not modified) |
-| `spec/music-video-timeline-native/tasks.md` | Existing music-video tasks (read, not modified) |
+| [Asset & Project Management](./asset-management-ux.md) | Historical source, now a compatibility redirect |
+| [Music Video Timeline Native Decisions](./music-video-timeline-native/decisions.md) | Historical decisions, now incorporated into the functional workflow |
+| [Music Video Timeline Native Tasks](./music-video-timeline-native/tasks.md) | Historical task index, now a compatibility redirect to the plan |
 
 ## Total User Messages Analyzed
 

@@ -286,7 +286,7 @@ The resolve action handler (`setResolveActionHandler`) MUST be registered by the
 
 ## 7. Media availability problems and actions
 
-Media availability uses structured runtime codes and MUST distinguish durable absence from operational failure:
+Media availability follows the canonical [Media Assets runtime availability contract](./media-assets.md#6-runtime-availability). Problems and logs use its structured codes and MUST distinguish durable absence from operational failure:
 
 | Code | Problem/log treatment | Primary action |
 |---|---|---|
