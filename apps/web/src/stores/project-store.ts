@@ -82,6 +82,7 @@ import { blobToDataUrl, restoreMediaItem } from "../utils/media-recovery";
 import { projectManager } from "../services/project-manager";
 import { reportRuntimeError, toast } from "./notification-store";
 import { usePersistenceStatusStore } from "./persistence-status-store";
+import { mediaAvailabilityRuntime } from "../services/media-verification";
 
 function getImportedFileName(item: MediaItem): string {
   return item.sourceFile?.name ?? item.name;
@@ -7075,3 +7076,57 @@ export const useProjectStore = create<ProjectState>()(
     };
   }),
 );
+
+const mediaRecoveryInflight = new Set<string>();
+
+// Recovery is runtime-only: it updates the active media object atomically after a
+// bounded verifier retry, without adding availability fields to Project JSON.
+mediaAvailabilityRuntime.subscribe((snapshot) => {
+  const state = useProjectStore.getState();
+  if (state.project.id !== snapshot.projectId) return;
+
+  for (const outcome of snapshot.outcomes.values()) {
+    if (outcome.status !== "available") continue;
+    const item = state.project.mediaLibrary.items.find(candidate => candidate.id === outcome.mediaId);
+    if (!item?.remoteUrl || item.blob) continue;
+    const expectedUrl = item.remoteUrl;
+    const key = `${snapshot.projectId}\0${item.id}\0${expectedUrl}`;
+    if (mediaRecoveryInflight.has(key)) continue;
+    mediaRecoveryInflight.add(key);
+
+    void (async () => {
+      try {
+        const response = await fetch(expectedUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        let recovered: MediaItem;
+        try {
+          recovered = await restoreMediaItem(item, blob);
+        } catch (error) {
+          // A thumbnail is optional evidence, not a media decode result. Retain the
+          // recovered source and leave decode_error for an actual playback failure.
+          console.warn(`[ProjectStore] Thumbnail recovery failed (${item.id}):`, error);
+          recovered = { ...item, blob };
+        }
+
+        const current = useProjectStore.getState().project;
+        const currentItem = current.mediaLibrary.items.find(candidate => candidate.id === item.id);
+        if (current.id !== snapshot.projectId || currentItem !== item || currentItem.remoteUrl !== expectedUrl || currentItem.blob) return;
+        useProjectStore.setState({
+          project: {
+            ...current,
+            mediaLibrary: {
+              ...current.mediaLibrary,
+              items: current.mediaLibrary.items.map(candidate =>
+                candidate.id === item.id ? recovered : candidate),
+            },
+          },
+        });
+      } catch (error) {
+        console.warn(`[ProjectStore] Automatic media recovery failed (${item.id}):`, error);
+      } finally {
+        mediaRecoveryInflight.delete(key);
+      }
+    })();
+  }
+});

@@ -97,6 +97,71 @@ test("media send errors do not write a second response after headers are sent", 
   assert.equal(jsonCalls, 0);
 });
 
+test("batch media verification freshly proves mapping, absence, corruption, and cross-project association", async () => {
+  const mediaRoot = await mkdtemp(join(tmpdir(), "openreel-media-proof-"));
+  const availableId = "11111111-1111-4111-8111-111111111111";
+  const corruptId = "22222222-2222-4222-8222-222222222222";
+  const missingId = "33333333-3333-4333-8333-333333333333";
+  const foreignId = "44444444-4444-4444-8444-444444444444";
+  const project = projectFixture("project-one", "Project One");
+  const item = (id: string, name: string, size: number) => ({ id, name, type: "video" as const, fileHandle: null, blob: null, thumbnailUrl: null, metadata: { duration: 1, width: 1, height: 1, frameRate: 1, codec: "h264", sampleRate: 0, channels: 0, fileSize: size } });
+  const mappedProject = { ...project, mediaLibrary: { items: [item(availableId, "Interview.mp4", 4), item(corruptId, "Damaged.mp4", 6), item(missingId, "Gone.mp4", 4)] } };
+  await Promise.all(["Interview.mp4", "Damaged.mp4"].map(name => writeFile(join(mediaRoot, name), new Uint8Array([1, 2, 3, 4]))));
+  try {
+    await withProjectRouter({
+      loadProject: async () => mappedProject,
+      mediaDir: () => mediaRoot,
+    }, {}, async baseUrl => {
+      const verify = async (ids: string[]) => {
+        const response = await fetch(`${baseUrl}/api/projects/project-one/verify-media`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mediaIds: ids }) });
+        assert.equal(response.status, 200);
+        return (await response.json()) as { outcomes: Array<{ mediaId: string; status: string }> };
+      };
+      const first = await verify([availableId, corruptId, missingId, foreignId, availableId]);
+      assert.deepEqual(first.outcomes.map(value => value.status), ["available", "decode_error", "confirmed_missing", "confirmed_missing"]);
+      await writeFile(join(mediaRoot, "Gone.mp4"), new Uint8Array([1, 2, 3, 4]));
+      assert.equal((await verify([missingId])).outcomes[0]?.status, "available");
+    });
+  } finally {
+    await rm(mediaRoot, { recursive: true, force: true });
+  }
+});
+
+test("batch media verification rechecks one stale manifest omission before confirming absence", async () => {
+  const emptyRoot = await mkdtemp(join(tmpdir(), "openreel-media-proof-empty-"));
+  const mediaRoot = await mkdtemp(join(tmpdir(), "openreel-media-proof-race-"));
+  const mediaId = "55555555-5555-4555-8555-555555555555";
+  const filename = "Interview 1.mp4";
+  const project = projectFixture("project-one", "Project One");
+  const mappedProject = {
+    ...project,
+    mediaLibrary: {
+      items: [{ id: mediaId, name: filename, type: "video" as const, fileHandle: null, blob: null, thumbnailUrl: null, metadata: { duration: 1, width: 1, height: 1, frameRate: 1, codec: "h264", sampleRate: 0, channels: 0, fileSize: 4 } }],
+    },
+  };
+  let mediaDirReads = 0;
+  await writeFile(join(mediaRoot, filename), new Uint8Array([1, 2, 3, 4]));
+  try {
+    await withProjectRouter({
+      loadProject: async () => mappedProject,
+      mediaDir: () => ++mediaDirReads === 1 ? emptyRoot : mediaRoot,
+    }, {}, async baseUrl => {
+      const response = await fetch(`${baseUrl}/api/projects/project-one/verify-media`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mediaIds: [mediaId] }),
+      });
+      assert.equal(response.status, 200);
+      const body = await response.json() as { outcomes: Array<{ status: string }> };
+      assert.equal(body.outcomes[0]?.status, "available");
+      assert.equal(mediaDirReads, 2);
+    });
+  } finally {
+    await rm(emptyRoot, { recursive: true, force: true });
+    await rm(mediaRoot, { recursive: true, force: true });
+  }
+});
+
 test("media send errors return 404 before headers are sent", () => {
   let statusCode: number | undefined;
   let body: unknown;

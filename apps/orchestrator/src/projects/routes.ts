@@ -4,7 +4,10 @@ import multer from "multer";
 import crypto from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import type {
+  MediaVerificationBatchRequest,
+  MediaVerificationOutcome,
   ProjectSettings,
   Project,
   ProjectSaveRequest,
@@ -449,6 +452,70 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
     res.sendFile(filePath, (err) => {
       handleMediaSendError(res, err);
     });
+  });
+
+  // POST /api/projects/:id/verify-media — authoritative project-scoped mapping + object proof.
+  router.post("/:id/verify-media", async (req: Request, res: Response) => {
+    if (rejectInvalidProjectId(req, res)) return;
+    const body = req.body as Partial<MediaVerificationBatchRequest> | undefined;
+    if (!Array.isArray(body?.mediaIds) || body.mediaIds.length > 100) {
+      res.status(400).json({ error: "mediaIds must be an array of at most 100 ids" });
+      return;
+    }
+    try {
+      for (const mediaId of body.mediaIds) assertValidMediaId(mediaId);
+    } catch {
+      res.status(400).json({ error: "Invalid media id" });
+      return;
+    }
+
+    const project = await store.loadProject(req.params.id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+
+    const requestedMediaIds = [...new Set(body.mediaIds)];
+    const items = new Map(project.mediaLibrary.items.map(item => [item.id, item]));
+    const outcomes: MediaVerificationOutcome[] = [];
+    for (const mediaId of requestedMediaIds) {
+      const item = items.get(mediaId);
+      const mapping = item ? "present" as const : "absent" as const;
+      if (!item) {
+        outcomes.push({ mediaId, status: "confirmed_missing", evidence: { authoritative: true, mapping, object: "absent", reason: "media id is not associated with this project" } });
+        continue;
+      }
+
+      const filename = item.name;
+      const expectedBytes = item.metadata.fileSize;
+      let statError: unknown;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const info = await stat(resolveContainedPath(store.mediaDir(req.params.id), filename));
+          const actualBytes = info.size;
+          const corrupt = !info.isFile() || actualBytes <= 0 || (expectedBytes > 0 && actualBytes !== expectedBytes);
+          outcomes.push({
+            mediaId,
+            status: corrupt ? "decode_error" : "available",
+            evidence: { authoritative: true, mapping, object: "present", filename, expectedBytes, actualBytes, reason: corrupt ? "zero, truncated, or size-mismatched object" : undefined },
+          });
+          statError = undefined;
+          break;
+        } catch (error) {
+          statError = error;
+          const code = error && typeof error === "object" && "code" in error ? String(error.code) : undefined;
+          if (attempt === 0 && (code === "ENOENT" || code === "ENOTDIR")) continue;
+          break;
+        }
+      }
+      if (statError) {
+        const code = statError && typeof statError === "object" && "code" in statError ? String(statError.code) : undefined;
+        outcomes.push(code === "ENOENT" || code === "ENOTDIR"
+          ? { mediaId, status: "confirmed_missing", evidence: { authoritative: true, mapping, object: "absent", filename, expectedBytes } }
+          : { mediaId, status: "temporarily_unavailable", evidence: { authoritative: false, mapping, object: "unknown", filename, expectedBytes, reason: `media stat failed${code ? ` (${code})` : ""}` } });
+      }
+    }
+    res.json({ projectId: req.params.id, outcomes });
   });
 
   // ═══ History ══════════════════════════════════════════════════════════════

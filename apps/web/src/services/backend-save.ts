@@ -15,6 +15,7 @@ import {
 import { reportRuntimeError } from "../stores/notification-store";
 import { isMediaBlob } from "../utils/media-blob";
 import { usePersistenceStatusStore } from "../stores/persistence-status-store";
+import { mediaAvailabilityRuntime } from "./media-verification";
 
 interface ProjectSummary {
   id: string;
@@ -603,6 +604,7 @@ class BackendSaveService {
    * Populates remoteUrl on each media item that has a stored file.
    */
   async load(projectId: string): Promise<Project | null> {
+    mediaAvailabilityRuntime.reset();
     try {
       const res = await fetch(`${BASE_URL}/api/projects/${projectId}`);
       if (!res.ok) {
@@ -614,8 +616,24 @@ class BackendSaveService {
       const receipt = validateCommittedResponse(response, projectId, project.modifiedAt);
       usePersistenceStatusStore.getState().confirmReceipt(projectId, receipt);
 
+      const mediaIds = new Set(project.mediaLibrary.items.map(item => item.id));
+      for (const track of project.timeline.tracks) {
+        for (const clip of track.clips) mediaIds.add(clip.mediaId);
+      }
+      const verification = new Map((await mediaAvailabilityRuntime.verify(
+        projectId,
+        [...mediaIds],
+        { currentUrl: mediaId => project.mediaLibrary.items.find(item => item.id === mediaId)?.remoteUrl },
+      )).map(outcome => [outcome.mediaId, outcome]));
+
       const items = await Promise.all(
         project.mediaLibrary.items.map(async (item) => {
+          const availability = verification.get(item.id)?.status;
+          if (availability === "confirmed_missing" || availability === "unauthorized" || availability === "decode_error") {
+            return item.thumbnailUrl?.startsWith("blob:")
+              ? { ...item, thumbnailUrl: null, filmstripThumbnails: undefined }
+              : item;
+          }
           const filename = mediaFiles[item.id];
           if (!filename) {
             return item.thumbnailUrl?.startsWith("blob:")

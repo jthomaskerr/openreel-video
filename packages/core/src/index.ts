@@ -17,6 +17,7 @@ export * from "./ai";
 export * from "./animation";
 export * from "./effects";
 export * from "./device";
+export * from "./media-availability";
 export {
   ExportEngine,
   getExportEngine,
