@@ -1,6 +1,6 @@
 # Subtitle Track/Clip Type — Operational Spec (Redirect)
 
-> **Canonical source:** [Audio Analysis & Subtitles — Operational Spec](./audio-analysis-subtitles.md#4-subtitles-as-first-class-trackclip-type) and [Subtitle Track/Clip Type Contract](./audio-analysis-subtitles.md#81-subtitle-trackclip-type-contract).
+> **Canonical source:** [Audio Analysis & Subtitles — Subtitle Domain Model](./audio-analysis-subtitles.md#3-subtitle-domain-model).
 >
 > This file is retained as a compatibility redirect for older links. It MUST NOT contain separate normative requirements. Update the canonical audio/subtitles spec instead.
 
