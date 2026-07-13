@@ -108,7 +108,9 @@ function normalizeExpectedEntry(entry: GitStagedNameStatusEntry): GitStagedNameS
 }
 
 function normalizeExpectedEntries(entries: readonly GitStagedNameStatusEntry[]): GitStagedNameStatusEntry[] {
-  return entries.map((entry) => normalizeExpectedEntry(entry));
+  return entries
+    .map((entry) => normalizeExpectedEntry(entry))
+    .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
 }
 
 function parseNameStatusEntryTokens(tokens: string[], index: number): [GitStagedNameStatusEntry, number] {

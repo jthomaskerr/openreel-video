@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -55,6 +55,30 @@ test("commit returns verified identities from the created commit", async () => {
     assert.equal(receipt.treeSha, head.treeSha);
     assert.equal(receipt.projectBlobSha, head.projectBlobSha);
     assert.match(receipt.mediaManifestDigest ?? "", /^sha256:/);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("expected cached entries are order-independent", async () => {
+  const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
+  try {
+    const project = await projectStore.createProject("Order Independent");
+    const worktree = join(repoDir, project.id);
+    await mkdir(join(worktree, "media"), { recursive: true });
+    await writeFile(join(worktree, "media", "z.jpeg"), "z");
+    await writeFile(join(worktree, "media", "a.jpeg"), "a");
+
+    const receipt = await gitStore.commit(project.id, "test: accept reordered entries", {
+      allowlist: ["media/z.jpeg", "project.json", "media/a.jpeg"],
+      expectedEntries: [
+        { status: "A", path: "media/z.jpeg" },
+        { status: "A", path: "project.json" },
+        { status: "A", path: "media/a.jpeg" },
+      ],
+    });
+
+    assert.ok(receipt.commitSha);
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }
