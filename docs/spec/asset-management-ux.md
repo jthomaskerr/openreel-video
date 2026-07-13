@@ -5,6 +5,32 @@
 ### Layout
 Three density modes (large grid / small grid / list) with a continuous zoom slider replacing the three-button toggle. `Ctrl+scroll` anywhere in the panel zooms thumbnails.
 
+### Media toolbar
+
+The Media pane MUST have exactly one pane-level toolbar row. The row MUST contain the search field and every pane-level button or dropdown; controls MUST NOT be split into a second row or a missing-media action block below the toolbar. Asset-card actions, context-menu items, and empty-state actions are item/content actions and are outside this toolbar rule.
+
+The toolbar contains, in visual/tab order:
+
+1. Search media field. It is the only flexible-width control and MUST use `min-width: 0` so it yields space before the action controls.
+2. Import files button.
+3. Missing-only toggle with the current missing count. It is shown only while at least one missing asset exists. Its pressed state MUST be exposed with `aria-pressed` and MUST be identifiable without relying on yellow color alone.
+4. Relink from folder button. It is shown only while at least one missing asset exists.
+5. Group-by dropdown.
+6. Collapse-all and expand-all bucket buttons. Both are disabled when grouping is `none`.
+7. Large-grid, small-grid, and list view controls in one segmented control, with the active option exposed semantically.
+
+The toolbar MUST remain one physical line and MUST NOT wrap. Use the shared compact control height, border, radius, icon size, hover/pressed/disabled colors, and focus-ring tokens for all controls. Prefer icon-only buttons with concise tooltips and unique accessible names where a persistent text label would waste horizontal space. Touch/click targets MUST remain at least 32 CSS pixels in this dense desktop editor; the hit area MAY exceed the visible icon button. Controls MUST preserve at least 4 CSS pixels between unrelated groups. The search field MUST retain a usable width of at least 96 CSS pixels at the minimum supported pane width. If the supported pane becomes too narrow for that invariant, the toolbar MAY scroll horizontally as a single row; it MUST NOT wrap, clip controls, or move controls into another row.
+
+The toolbar MUST not change height when missing assets appear or disappear. Showing or removing the two missing-media controls MUST not move the asset content vertically by more than the fixed toolbar height, steal focus, or alter the search, grouping, bucket expansion, or view-mode state.
+
+### Missing-only state invariant
+
+`showOnlyMissing` is valid only while `missingAssetsCount > 0`. Whenever the count transitions to zero for any reason, including individual replacement, folder relink, import reconciliation, project replacement, undo/redo, or external store hydration, the Media pane MUST synchronously or in the next React effect commit set `showOnlyMissing` to `false`.
+
+The invariant is based on the complete media library before search filtering. Search results MUST NOT activate or cancel missing-only mode. Once the last missing asset is resolved, the normal media collection MUST become visible automatically without requiring the user to find or operate a control that has disappeared. If missing assets later reappear, the missing-only control returns unpressed; the prior mode MUST NOT be restored implicitly.
+
+When missing-only mode is active and at least one missing asset remains, replacing one missing asset MUST keep the mode active and show the remaining missing assets. Resolving the final missing asset MUST cancel the mode and show all assets that match the current search query. An empty-state caused by a search query remains a search empty-state and MUST provide the existing search-clear recovery path rather than presenting the library as having no media.
+
 ### Buckets (collapsible sections)
 Auto-generated from asset metadata. Multiple expandable simultaneously. Collapse-all / expand-all button in the header bar.
 
