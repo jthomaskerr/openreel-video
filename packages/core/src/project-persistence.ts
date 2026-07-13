@@ -56,6 +56,7 @@ export interface ProjectSaveRequest {
   readonly baseRevision: ProjectBaseRevision;
   readonly project: SaveProjectSnapshot;
   readonly requiredMediaManifest: readonly RequiredMediaManifestEntry[];
+  readonly saveIntent?: "autosave" | "user" | "retry" | "recovery";
   readonly destructiveIntent?: boolean;
 }
 

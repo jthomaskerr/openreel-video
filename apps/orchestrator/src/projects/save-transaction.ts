@@ -5,6 +5,7 @@ import type {
   Project,
   ProjectBaseRevision,
   ProjectSaveConflictResponse,
+  ProjectSaveDestructiveChangeRequiresIntentResponse,
   ProjectSaveMediaIncompleteResponse,
   ProjectSaveReceipt,
   ProjectSaveRequest,
@@ -14,8 +15,15 @@ import type { GitCommitReceipt, GitProjectTransaction, GitStore } from "./git-st
 import { ProjectMediaManifestAuditError } from "./media-manifest";
 import type { ProjectStore } from "./project-store";
 import { deterministicCommitMessage, semanticProjectChanges } from "./semantic-commit";
+import {
+  assessDestructiveChange,
+  authorizeDestructiveChange,
+  type ServerRemovalManifest,
+} from "./destructive-change";
 
-type SaveConflictBody = ProjectSaveConflictResponse | ProjectSaveMediaIncompleteResponse;
+type SaveConflictBody = ProjectSaveConflictResponse
+  | ProjectSaveDestructiveChangeRequiresIntentResponse
+  | ProjectSaveMediaIncompleteResponse;
 
 export class SaveTransactionError extends Error {
   constructor(readonly status: 409, readonly body: SaveConflictBody, cause?: unknown) {
@@ -33,6 +41,7 @@ export interface SaveTransactionOptions {
   readonly beforeCommit?: () => Promise<void>;
   readonly expectedEntries?: readonly { status: string; path: string }[];
   readonly simulateCrashAt?: "before-ref-update" | "after-ref-update";
+  readonly serverRemovalManifest?: ServerRemovalManifest;
 }
 
 interface SaveJournal {
@@ -193,6 +202,22 @@ export async function executeSaveTransaction(
         projectId: request.projectId,
         submittedBaseRevision: request.baseRevision,
         currentBaseRevision,
+      });
+    }
+
+    const destructiveChange = assessDestructiveChange(currentProject, request.project as Project);
+    if (!authorizeDestructiveChange(destructiveChange, {
+      saveIntent: request.saveIntent,
+      destructiveIntent: request.destructiveIntent,
+      serverRemovalManifest: options.serverRemovalManifest,
+    })) {
+      throw new SaveTransactionError(409, {
+        saved: false,
+        code: "DESTRUCTIVE_CHANGE_REQUIRES_INTENT",
+        projectId: request.projectId,
+        submittedBaseRevision: request.baseRevision,
+        currentBaseRevision,
+        ...destructiveChange.deltas,
       });
     }
 
