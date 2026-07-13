@@ -1,4 +1,5 @@
 import type { Project } from "@openreel/core";
+import type { GitStagedNameStatusEntry } from "./git-store";
 
 export interface SemanticChange { path: string; before: unknown; after: unknown }
 
@@ -45,12 +46,70 @@ function describe(change: SemanticChange): string {
   return `${verb} ${change.path}`;
 }
 
-export function deterministicCommitMessage(changes: SemanticChange[], fileCount = 1): string {
-  const headline = changes.length === 1 ? describe(changes[0]!).toLowerCase() : `update project with ${changes.length} semantic changes`;
-  return `${headline}\n\n${changes.map((change) => `- ${describe(change)}`).join("\n")}\n\nFiles changed: ${fileCount}`;
+function describeStagedEntry(entry: GitStagedNameStatusEntry): string {
+  const status = entry.status.toUpperCase();
+  const verb = status.startsWith("A")
+    ? "Add"
+    : status.startsWith("D")
+      ? "Remove"
+      : status.startsWith("R")
+        ? "Rename"
+        : status.startsWith("C")
+          ? "Copy"
+          : status.startsWith("M")
+            ? "Update"
+            : status;
+
+  if (entry.fromPath) {
+    return `${verb} ${entry.fromPath} → ${entry.path}`;
+  }
+  return `${verb} ${entry.path}`;
 }
 
-export function buildSemanticCommitPrompt(diff: string, fileCount: number): string {
+function distinctStagedPathCount(entries: readonly GitStagedNameStatusEntry[]): number {
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    seen.add(entry.path);
+    if (entry.fromPath) seen.add(entry.fromPath);
+  }
+  return seen.size;
+}
+
+export function deterministicCommitMessage(
+  changes: SemanticChange[],
+  stagedEntries: readonly GitStagedNameStatusEntry[] = [],
+): string {
+  const headline = changes.length === 1
+    ? describe(changes[0]!).toLowerCase()
+    : changes.length > 1
+      ? `update project with ${changes.length} semantic changes`
+      : stagedEntries.length === 1
+        ? describeStagedEntry(stagedEntries[0]!).toLowerCase()
+        : stagedEntries.length > 1
+          ? `update project with ${stagedEntries.length} staged changes`
+          : "update project";
+
+  const body: string[] = [];
+  body.push(...changes.map((change) => `- ${describe(change)}`));
+  if (stagedEntries.length > 0) {
+    if (body.length > 0) body.push("");
+    body.push("Files staged:");
+    body.push(...stagedEntries.map((entry) => `- ${describeStagedEntry(entry)}`));
+    body.push("");
+    body.push(`Files changed: ${distinctStagedPathCount(stagedEntries)}`);
+  } else {
+    if (body.length > 0) body.push("");
+    body.push("Files changed: 0");
+  }
+
+  return `${headline}\n\n${body.join("\n")}`;
+}
+
+export function buildSemanticCommitPrompt(
+  diff: string,
+  stagedEntries: readonly GitStagedNameStatusEntry[],
+): string {
+  const fileCount = distinctStagedPathCount(stagedEntries);
   return [
     "Write a Git commit message for the supplied staged diff.",
     "The first line must succinctly capture the substance of the commit.",
