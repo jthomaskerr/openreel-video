@@ -143,10 +143,10 @@ describe("ClipComponent", () => {
     expect(container.innerHTML).toContain("data:image/png;base64,thumb");
   });
 
-  it("never renders a stale blob: URL for video thumbnails (single-thumbnail fallback)", () => {
+  it("renders a current-session blob: URL for the video thumbnail fallback", () => {
     const media: MediaItem = {
       ...mediaItem("media-1"),
-      thumbnailUrl: "blob:http://localhost/dead-uuid",
+      thumbnailUrl: "blob:http://localhost/live-thumbnail",
     };
     useProjectStore.setState((state) => ({
       project: { ...state.project, mediaLibrary: { items: [media] } },
@@ -172,17 +172,17 @@ describe("ClipComponent", () => {
       </div>,
     );
 
-    expect(container.innerHTML).not.toContain("blob:http://localhost/dead-uuid");
+    expect(container.innerHTML).toContain("blob:http://localhost/live-thumbnail");
   });
 
-  it("never renders a stale blob: URL for video thumbnails (filmstrip tiles)", () => {
+  it("renders current-session blob: URLs for video filmstrip tiles", () => {
     const media: MediaItem = {
       ...mediaItem("media-1"),
-      thumbnailUrl: "blob:http://localhost/dead-uuid",
+      thumbnailUrl: "blob:http://localhost/live-thumbnail",
       filmstripThumbnails: [
-        { timestamp: 0, url: "blob:http://localhost/dead-frame-0" },
-        { timestamp: 2.5, url: "blob:http://localhost/dead-frame-1" },
-        { timestamp: 5, url: "blob:http://localhost/dead-frame-2" },
+        { timestamp: 0, url: "blob:http://localhost/live-frame-0" },
+        { timestamp: 2.5, url: "blob:http://localhost/live-frame-1" },
+        { timestamp: 5, url: "blob:http://localhost/live-frame-2" },
       ],
     };
     useProjectStore.setState((state) => ({
@@ -209,7 +209,7 @@ describe("ClipComponent", () => {
       </div>,
     );
 
-    expect(container.innerHTML).not.toContain("blob:http://localhost/dead-frame");
+    expect(container.innerHTML).toContain("blob:http://localhost/live-frame");
   });
 
   it("falls back to clip referenceAssetIds when the media item has no file and no thumbnail", () => {

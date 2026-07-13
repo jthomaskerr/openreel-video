@@ -740,7 +740,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
 
             {/* Video: time-accurate filmstrip (frames selected by inPoint + tile position) */}
             {mediaType === "video" && (() => {
-              const liveThumbs = mediaItem?.filmstripThumbnails?.filter((t) => !t.url.startsWith("blob:")) ?? [];
+              const liveThumbs = mediaItem?.filmstripThumbnails ?? [];
               if (liveThumbs.length === 0) return null;
               return (
                 <div className="absolute inset-0 flex opacity-70">
@@ -766,9 +766,8 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
 
             {/* Video: single thumbnail fallback — repeat-fill */}
             {mediaType === "video" &&
-              !mediaItem?.filmstripThumbnails?.some((t) => !t.url.startsWith("blob:")) &&
-              effectiveThumbnailUrl &&
-              !effectiveThumbnailUrl.startsWith("blob:") && (
+              !mediaItem?.filmstripThumbnails?.length &&
+              effectiveThumbnailUrl && (
                 <div
                   className="absolute inset-0 opacity-60"
                   style={{ backgroundImage: `url(${effectiveThumbnailUrl})`, backgroundRepeat: "repeat-x", backgroundSize: "auto 100%" }}

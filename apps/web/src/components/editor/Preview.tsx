@@ -79,6 +79,7 @@ import {
   resolvePlaceholderColors,
 } from "./preview/index";
 import { getAudioPlaybackClips } from "./preview-audio-playback";
+import { createMediaImageBitmap } from "./preview/media-image-source";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 import {
   getPersonSegmentationEngine,
@@ -1664,7 +1665,7 @@ export const Preview: React.FC = () => {
 
       if (mediaItem.type === "image") {
         try {
-          return await createImageBitmap(effectiveBlob!);
+          return await createMediaImageBitmap(mediaItem);
         } catch {
           return null;
         }
@@ -2730,9 +2731,9 @@ export const Preview: React.FC = () => {
       const imageBitmapCache = new Map<string, ImageBitmap>();
       for (const { clip } of imageClips) {
         const mediaItem = getMediaItem(clip.mediaId);
-        if (mediaItem?.type === "image" && getMediaSourceBlob(mediaItem)) {
+        if (mediaItem?.type === "image") {
           try {
-            const bitmap = await createImageBitmap(getMediaSourceBlob(mediaItem)!);
+            const bitmap = await createMediaImageBitmap(mediaItem);
             imageBitmapCache.set(clip.id, bitmap);
           } catch (error) {
             console.warn(`Failed to cache image bitmap for ${clip.id}:`, error);
@@ -3908,9 +3909,9 @@ export const Preview: React.FC = () => {
           if (imageBitmapCacheRef.current.has(clip.id)) continue;
 
           const mediaItem = getMediaItem(clip.mediaId);
-          if (mediaItem?.type === "image" && getMediaSourceBlob(mediaItem)) {
+          if (mediaItem?.type === "image") {
             try {
-              const bitmap = await createImageBitmap(getMediaSourceBlob(mediaItem)!);
+              const bitmap = await createMediaImageBitmap(mediaItem);
               imageBitmapCacheRef.current.set(clip.id, bitmap);
             } catch (error) {
               console.warn(
