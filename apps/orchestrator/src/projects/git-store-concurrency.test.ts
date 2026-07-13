@@ -6,7 +6,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { test } from "node:test";
+import { config } from "../env";
 import { GitStore } from "./git-store";
+import { ensureSafeTestProjectRoot } from "./test-project-root";
 
 const execFileAsync = promisify(execFile);
 
@@ -15,11 +17,16 @@ process.env.GIT_AUTHOR_EMAIL ??= "openreel-tests@example.com";
 process.env.GIT_COMMITTER_NAME ??= "OpenReel Tests";
 process.env.GIT_COMMITTER_EMAIL ??= "openreel-tests@example.com";
 
-async function makeGitStore(): Promise<{ repoDir: string; gitStore: GitStore }> {
-  const repoDir = await mkdtemp(join(tmpdir(), "openreel-git-store-race-test-"));
+async function makeGitStore(): Promise<{ fixtureRoot: string; repoDir: string; gitStore: GitStore }> {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), "openreel-git-store-race-test-"));
+  const repoDir = await mkdtemp(join(fixtureRoot, "repo-"));
+  await ensureSafeTestProjectRoot(repoDir, {
+    assignedTempRoot: fixtureRoot,
+    userProjectsRoot: config.projectsRepo,
+  });
   const gitStore = new GitStore(repoDir);
   await gitStore.ensureSharedRepo();
-  return { repoDir, gitStore };
+  return { fixtureRoot, repoDir, gitStore };
 }
 
 async function branchCount(repoDir: string, branch: string): Promise<number> {
@@ -28,7 +35,7 @@ async function branchCount(repoDir: string, branch: string): Promise<number> {
 }
 
 test("concurrent ensureWorktree calls for a brand new project do not race on branch creation", async () => {
-  const { repoDir, gitStore } = await makeGitStore();
+  const { fixtureRoot, repoDir, gitStore } = await makeGitStore();
   try {
     const projectId = "concurrent-project-a";
 
@@ -48,12 +55,12 @@ test("concurrent ensureWorktree calls for a brand new project do not race on bra
     assert.equal(existsSync(join(worktreeDir, ".git")), true, "worktree should exist");
     assert.equal(await branchCount(repoDir, `project/${projectId}`), 1, "exactly one branch should exist");
   } finally {
-    await rm(repoDir, { recursive: true, force: true });
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
 
 test("ensureWorktree racing a commit for the same new project does not deadlock or fail", async () => {
-  const { repoDir, gitStore } = await makeGitStore();
+  const { fixtureRoot, repoDir, gitStore } = await makeGitStore();
   try {
     const projectId = "concurrent-project-b";
 
@@ -70,12 +77,12 @@ test("ensureWorktree racing a commit for the same new project does not deadlock 
     assert.equal(existsSync(join(worktreeDir, ".git")), true, "worktree should exist");
     assert.equal(await branchCount(repoDir, `project/${projectId}`), 1, "exactly one branch should exist");
   } finally {
-    await rm(repoDir, { recursive: true, force: true });
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
 
 test("many concurrent ensureWorktree calls for the same new project all succeed", async () => {
-  const { repoDir, gitStore } = await makeGitStore();
+  const { fixtureRoot, repoDir, gitStore } = await makeGitStore();
   try {
     const projectId = "concurrent-project-c";
 
@@ -89,6 +96,6 @@ test("many concurrent ensureWorktree calls for the same new project all succeed"
 
     assert.equal(await branchCount(repoDir, `project/${projectId}`), 1, "exactly one branch should exist");
   } finally {
-    await rm(repoDir, { recursive: true, force: true });
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 });

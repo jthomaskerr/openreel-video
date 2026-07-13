@@ -78,7 +78,7 @@ async function withProjectRouter(
     createProjectRouter(store as unknown as ProjectStore, gitStore as unknown as GitStore),
   );
 
-  const server = app.listen(0);
+  const server = app.listen(0, "127.0.0.1");
   try {
     await new Promise<void>((resolve) => server.once("listening", resolve));
     const address = server.address();

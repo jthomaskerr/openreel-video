@@ -7,8 +7,10 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { test } from "node:test";
 import type { Project } from "@openreel/core";
+import { config } from "../env";
 import { GitStore } from "./git-store";
 import { ProjectStore } from "./project-store";
+import { ensureSafeTestProjectRoot } from "./test-project-root";
 
 const execFileAsync = promisify(execFile);
 
@@ -36,12 +38,17 @@ function projectFixture(id: string, name: string): Project {
   };
 }
 
-async function makeStore(): Promise<{ repoDir: string; gitStore: GitStore; projectStore: ProjectStore }> {
-  const repoDir = await mkdtemp(join(tmpdir(), "openreel-git-store-test-"));
+async function makeStore(): Promise<{ fixtureRoot: string; repoDir: string; gitStore: GitStore; projectStore: ProjectStore }> {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), "openreel-git-store-test-"));
+  const repoDir = await mkdtemp(join(fixtureRoot, "repo-"));
+  await ensureSafeTestProjectRoot(repoDir, {
+    assignedTempRoot: fixtureRoot,
+    userProjectsRoot: config.projectsRepo,
+  });
   const gitStore = new GitStore(repoDir);
   const projectStore = new ProjectStore(gitStore);
   await gitStore.ensureSharedRepo();
-  return { repoDir, gitStore, projectStore };
+  return { fixtureRoot, repoDir, gitStore, projectStore };
 }
 
 async function writeLegacyProject(repoDir: string, relativeDir: string, id: string, name: string): Promise<void> {
@@ -52,7 +59,7 @@ async function writeLegacyProject(repoDir: string, relativeDir: string, id: stri
 }
 
 test("migrated root and nested UUID projects are promoted to commit-capable worktrees", async () => {
-  const { repoDir, gitStore, projectStore } = await makeStore();
+  const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
   try {
     const rootUuid = "11111111-1111-4111-8111-111111111111";
     const nestedUuid = "22222222-2222-4222-8222-222222222222";
@@ -76,12 +83,12 @@ test("migrated root and nested UUID projects are promoted to commit-capable work
       assert.match(stdout, new RegExp(`commit ${slug} after migration`));
     }
   } finally {
-    await rm(repoDir, { recursive: true, force: true });
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
 
 test("missing registered slug worktrees are pruned and recreated", async () => {
-  const { repoDir, gitStore, projectStore } = await makeStore();
+  const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
   try {
     const project = await projectStore.createProject("Vintage Tokyo");
     await gitStore.commit(project.id, "test: create project");
@@ -97,12 +104,12 @@ test("missing registered slug worktrees are pruned and recreated", async () => {
     const { stdout } = await execFileAsync("git", ["log", "--oneline", "-1"], { cwd: worktreeDir });
     assert.match(stdout, /commit after stale worktree repair/);
   } finally {
-    await rm(repoDir, { recursive: true, force: true });
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
 
 test("broken slug worktree git files are promoted to valid worktrees", async () => {
-  const { repoDir, gitStore, projectStore } = await makeStore();
+  const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
   try {
     const project = await projectStore.createProject("Broken Tokyo");
     await gitStore.commit(project.id, "test: create project");
@@ -120,12 +127,12 @@ test("broken slug worktree git files are promoted to valid worktrees", async () 
     const { stdout } = await execFileAsync("git", ["log", "--oneline", "-1"], { cwd: worktreeDir });
     assert.match(stdout, /commit after broken git repair/);
   } finally {
-    await rm(repoDir, { recursive: true, force: true });
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
 
 test("existing project worktrees repair the Git LFS media rule before commits", async () => {
-  const { repoDir, gitStore, projectStore } = await makeStore();
+  const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
   try {
     const project = await projectStore.createProject("LFS Repair");
     await gitStore.commit(project.id, "test: create project");
@@ -144,6 +151,6 @@ test("existing project worktrees repair the Git LFS media rule before commits", 
     assert.match(stdout, /repair lfs attributes/);
     assert.match(stdout, /.gitattributes/);
   } finally {
-    await rm(repoDir, { recursive: true, force: true });
+    await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
