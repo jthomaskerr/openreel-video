@@ -3,6 +3,46 @@ import type { MediaItem } from "@openreel/core";
 type FetchMedia = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 type CreateBitmap = (image: ImageBitmapSource) => Promise<ImageBitmap>;
 
+export function isImagePlaybackClip(
+  trackType: string,
+  clipType: string,
+  mediaType?: string,
+): boolean {
+  return trackType === "image" || clipType === "image" || mediaType === "image";
+}
+
+export function getCachedImagePlaybackFrame(
+  trackType: string,
+  clipType: string,
+  mediaType: string | undefined,
+  clipId: string,
+  cache: ReadonlyMap<string, ImageBitmap>,
+): ImageBitmap | null {
+  if (!isImagePlaybackClip(trackType, clipType, mediaType)) return null;
+  return cache.get(clipId) ?? null;
+}
+
+export function collectImagePlaybackClips<
+  TClip extends { id: string; type: string; mediaId: string },
+  TTrack extends { type: string; hidden?: boolean; clips: TClip[] },
+>(
+  tracks: TTrack[],
+  getMediaType: (mediaId: string) => string | undefined,
+): Array<{ clip: TClip; trackIndex: number }> {
+  const imageClips: Array<{ clip: TClip; trackIndex: number }> = [];
+
+  tracks.forEach((track, trackIndex) => {
+    if (track.hidden) return;
+    for (const clip of track.clips) {
+      if (isImagePlaybackClip(track.type, clip.type, getMediaType(clip.mediaId))) {
+        imageClips.push({ clip, trackIndex });
+      }
+    }
+  });
+
+  return imageClips;
+}
+
 /**
  * Decode an image media item for canvas playback.
  *

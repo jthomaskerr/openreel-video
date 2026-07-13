@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { MediaItem } from "@openreel/core";
-import { createMediaImageBitmap } from "./media-image-source";
+import {
+  collectImagePlaybackClips,
+  createMediaImageBitmap,
+  getCachedImagePlaybackFrame,
+  isImagePlaybackClip,
+} from "./media-image-source";
 
 function imageItem(overrides: Partial<MediaItem> = {}): MediaItem {
   return {
@@ -77,5 +82,41 @@ describe("createMediaImageBitmap", () => {
     await expect(
       createMediaImageBitmap(imageItem(), vi.fn(), vi.fn()),
     ).rejects.toThrow("has no loadable source");
+  });
+});
+
+describe("image playback classification", () => {
+  it("classifies an image clip on a video track as an image during playback", () => {
+    expect(isImagePlaybackClip("video", "image", "image")).toBe(true);
+  });
+
+  it("collects an image clip on a video track for native playback", () => {
+    const imageClip = { id: "image-clip", type: "image", mediaId: "image-1" };
+    const tracks = [
+      { type: "video", hidden: false, clips: [imageClip] },
+    ];
+
+    expect(
+      collectImagePlaybackClips(tracks, () => "image"),
+    ).toEqual([{ clip: imageClip, trackIndex: 0 }]);
+  });
+
+  it("returns the cached bitmap for an image clip on a video track", () => {
+    const bitmap = {} as ImageBitmap;
+    const cache = new Map([["image-clip", bitmap]]);
+
+    expect(
+      getCachedImagePlaybackFrame(
+        "video",
+        "image",
+        "image",
+        "image-clip",
+        cache,
+      ),
+    ).toBe(bitmap);
+  });
+
+  it("does not treat a video clip on a video track as an image", () => {
+    expect(isImagePlaybackClip("video", "video", "video")).toBe(false);
   });
 });

@@ -79,7 +79,12 @@ import {
   resolvePlaceholderColors,
 } from "./preview/index";
 import { getAudioPlaybackClips } from "./preview-audio-playback";
-import { createMediaImageBitmap } from "./preview/media-image-source";
+import {
+  collectImagePlaybackClips,
+  createMediaImageBitmap,
+  getCachedImagePlaybackFrame,
+  isImagePlaybackClip,
+} from "./preview/media-image-source";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 import {
   getPersonSegmentationEngine,
@@ -2683,17 +2688,10 @@ export const Preview: React.FC = () => {
       // They are rendered using CPU canvas2D after the video frame
 
       // Collect image clips for background compositing (don't disable native playback)
-      const imageTracks = tracks.filter((t) => t.type === "image" && !t.hidden);
-      const imageClips: Array<{
-        clip: (typeof tracks)[0]["clips"][0];
-        trackIndex: number;
-      }> = [];
-      imageTracks.forEach((track) => {
-        const trackIndex = tracks.indexOf(track);
-        for (const clip of track.clips) {
-          imageClips.push({ clip, trackIndex });
-        }
-      });
+      const imageClips = collectImagePlaybackClips(
+        tracks,
+        (mediaId) => getMediaItem(mediaId)?.type,
+      );
 
       return { canUse: true, clips: allVideoClips, imageClips };
     },
@@ -3900,16 +3898,17 @@ export const Preview: React.FC = () => {
 
     const preCacheAllImageBitmaps = async () => {
       const tracks = timelineTracksRef.current;
-      const imageTracks = tracks.filter(
-        (t) => t.type === "image" && !t.hidden,
-      );
+      const imageTracks = tracks.filter((track) => !track.hidden);
 
       for (const track of imageTracks) {
         for (const clip of track.clips) {
           if (imageBitmapCacheRef.current.has(clip.id)) continue;
 
           const mediaItem = getMediaItem(clip.mediaId);
-          if (mediaItem?.type === "image") {
+          if (
+            mediaItem?.type === "image"
+            && isImagePlaybackClip(track.type, clip.type, mediaItem.type)
+          ) {
             try {
               const bitmap = await createMediaImageBitmap(mediaItem);
               imageBitmapCacheRef.current.set(clip.id, bitmap);
@@ -4432,8 +4431,21 @@ export const Preview: React.FC = () => {
               };
             }
 
-            if (track.type === "image") {
-              const cachedBitmap = imageBitmapCacheRef.current.get(clip.id);
+            const playbackMediaItem = getMediaItem(clip.mediaId);
+            if (
+              isImagePlaybackClip(
+                track.type,
+                clip.type,
+                playbackMediaItem?.type,
+              )
+            ) {
+              const cachedBitmap = getCachedImagePlaybackFrame(
+                track.type,
+                clip.type,
+                playbackMediaItem?.type,
+                clip.id,
+                imageBitmapCacheRef.current,
+              );
               if (cachedBitmap) {
                 imageClipFrames.push({ clip, transform, frame: cachedBitmap });
               }
