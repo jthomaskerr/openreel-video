@@ -292,6 +292,25 @@ export async function executeSaveTransaction(
       };
     });
     const proposedBytes = Buffer.from(JSON.stringify(proposed, null, 2), "utf8");
+    if (pendingMoves.length === 0
+      && proposedBytes.equals(previousBytes)
+      && currentReceipt.projectBlobSha === gitBlobSha(previousBytes)) {
+      const audit = await store.auditSnapshot(proposed);
+      assertReceipt(currentReceipt);
+      return {
+        saved: true,
+        committed: true,
+        projectId: request.projectId,
+        persistedAt: await gitStore.readCommitTimestamp(request.projectId, currentReceipt.commitSha),
+        sourceModifiedAt: proposed.modifiedAt,
+        commitSha: currentReceipt.commitSha,
+        treeSha: currentReceipt.treeSha,
+        projectBlobSha: currentReceipt.projectBlobSha,
+        mediaManifestDigest: audit.mediaManifestDigest,
+        lfsPayloads: audit.lfsPayloads,
+        project: proposed,
+      };
+    }
     const expectedEntries = options.expectedEntries ?? [
       ...pendingMoves.map((move) => ({ status: "A", path: move.relativeMediaPath })),
       { status: "M", path: "project.json" },

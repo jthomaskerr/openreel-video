@@ -1,6 +1,6 @@
 import { readFile, writeFile, readdir, rm, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, extname, basename } from "node:path";
+import { join } from "node:path";
 import crypto from "node:crypto";
 import type { Project, ProjectSettings } from "@openreel/core";
 import type { GitStore } from "./git-store";
@@ -356,17 +356,15 @@ export class ProjectStore {
   // ── Media files ──────────────────────────────────────────────────────────
 
   /** Scan the media directory and return { [mediaId]: storedFilename }. */
-  async scanMedia(projectId: string): Promise<Record<string, string>> {
-    assertValidProjectId(projectId);
-    const dir = this.mediaDir(projectId);
+  async scanMedia(project: Project): Promise<Record<string, string>> {
+    assertValidProjectId(project.id);
+    const dir = this.mediaDir(project.id);
     if (!existsSync(dir)) return {};
-    const files = await readdir(dir);
+    const files = new Set(await readdir(dir));
     const result: Record<string, string> = {};
-    for (const file of files) {
-      if (!isValidMediaFilename(file)) continue;
-      const mediaId = basename(file, extname(file));
-      if (!isValidMediaId(mediaId)) continue;
-      result[mediaId] = file;
+    for (const item of project.mediaLibrary.items) {
+      if (!isValidMediaId(item.id) || !isValidMediaFilename(item.name)) continue;
+      if (files.has(item.name)) result[item.id] = item.name;
     }
     return result;
   }

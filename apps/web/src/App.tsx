@@ -15,6 +15,8 @@ import { useKieAIPoller } from "./hooks/useKieAIPoller";
 import { useGenerationJobPoller } from "./hooks/useGenerationJobPoller";
 import { SOCIAL_MEDIA_PRESETS, type SocialMediaCategory } from "@openreel/core";
 import { TooltipProvider } from "@openreel/ui";
+import { isClientOnlyProjectId } from "./services/backend-save";
+import { shouldSyncProjectIdToUrl } from "./services/project-url-identity";
 
 const EditorInterface = lazy(() =>
   import("./components/editor/EditorInterface").then((m) => ({
@@ -47,7 +49,7 @@ function App() {
     modalData?.tab === "import" ? "import" : "export";
 
   // Pass the projectId from the URL so the recovery hook auto-restores silently.
-  const { showDialog, availableSaves, recover, dismiss, clearAll, hasBackendConflict } = useProjectRecovery(
+  const { showDialog, availableSaves, recover, dismiss, clearAll, hasBackendConflict, isChecking: recoveryIsChecking } = useProjectRecovery(
     route === "editor" ? params.projectId : undefined,
   );
 
@@ -105,12 +107,17 @@ function App() {
   // Keep the project ID in the URL while the editor is open so that a page
   // reload can silently restore the correct project without a dialog.
   useEffect(() => {
-    if (route === "editor" && explicitlyCreated && project.id) {
-      if (params.projectId !== project.id) {
-        updateParams({ projectId: project.id });
-      }
+    if (shouldSyncProjectIdToUrl({
+      route,
+      requestedProjectId: params.projectId,
+      currentProjectId: project.id,
+      explicitlyCreated,
+      recoveryIsChecking,
+      currentProjectIsClientOnly: isClientOnlyProjectId(project.id),
+    })) {
+      updateParams({ projectId: project.id });
     }
-  }, [route, explicitlyCreated, project.id, params.projectId, updateParams]);
+  }, [route, explicitlyCreated, project.id, params.projectId, recoveryIsChecking, updateParams]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {

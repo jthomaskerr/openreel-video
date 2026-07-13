@@ -151,7 +151,7 @@ class BackendSaveService {
   private readonly queueDeadlineMs = 7_000;
   private readonly requestDeadlineMs = 20_000;
 
-  resetForProject(): void {
+  resetForProject(preserveReceiptForProjectId?: string): void {
     this.uploadPromises.clear();
     this.scheduledProject = null;
     this.scheduledSaveStartedAt = null;
@@ -163,7 +163,11 @@ class BackendSaveService {
       clearTimeout(this.queueDeadlineTimer);
       this.queueDeadlineTimer = null;
     }
-    usePersistenceStatusStore.getState().reset();
+    const status = usePersistenceStatusStore.getState();
+    const hasMatchingConfirmedBase = preserveReceiptForProjectId != null
+      && status.projectId === preserveReceiptForProjectId
+      && status.baseRevision != null;
+    if (!hasMatchingConfirmedBase) status.reset();
   }
 
   /**

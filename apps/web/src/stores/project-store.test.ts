@@ -5,6 +5,7 @@ import { backendSaveService } from "../services/backend-save";
 import { autoSaveManager, initializeAutoSave as initializeAutoSaveStorage } from "../services/auto-save";
 import { getMediaBridge } from "../bridges/media-bridge";
 import type { Project, Clip, MediaItem, Transition } from "@openreel/core";
+import { usePersistenceStatusStore } from "./persistence-status-store";
 
 const {
   mockEffectsBridge,
@@ -391,17 +392,26 @@ describe("ProjectStore", () => {
     });
 
     it("reconciles a recovered UUID project to its unique backend slug before saving", async () => {
-      const listSpy = vi.spyOn(backendSaveService, "listProjects").mockResolvedValue([
-        { id: "vintage-tokyo", name: "Vintage Tokyo", createdAt: 1, modifiedAt: 2 },
-      ]);
-      const scheduleSaveSpy = vi
-        .spyOn(backendSaveService, "scheduleSave")
-        .mockImplementation(() => undefined);
       const recovered = {
         ...useProjectStore.getState().project,
         id: "14aec9eb-469f-4db6-9652-00dee0d243fc",
         name: "Vintage Tokyo",
       };
+      const listSpy = vi.spyOn(backendSaveService, "listProjects").mockResolvedValue([
+        { id: "vintage-tokyo", name: "Vintage Tokyo", createdAt: 1, modifiedAt: 2 },
+      ]);
+      const loadSpy = vi.spyOn(backendSaveService, "load").mockImplementation(async () => {
+        usePersistenceStatusStore.getState().confirmReceipt("vintage-tokyo", {
+          saved: true, projectId: "vintage-tokyo", persistedAt: 2,
+          sourceModifiedAt: recovered.modifiedAt, commitSha: "a".repeat(40),
+          treeSha: "b".repeat(40), projectBlobSha: "c".repeat(40),
+          mediaManifestDigest: "sha256:test", lfsPayloads: [], committed: true,
+        });
+        return { ...recovered, id: "vintage-tokyo" };
+      });
+      const scheduleSaveSpy = vi
+        .spyOn(backendSaveService, "scheduleSave")
+        .mockImplementation(() => undefined);
 
       useProjectStore.getState().loadProject(recovered);
 
@@ -417,11 +427,35 @@ describe("ProjectStore", () => {
         0,
       );
       listSpy.mockRestore();
+      loadSpy.mockRestore();
       scheduleSaveSpy.mockRestore();
     });
   });
 
   describe("project loading", () => {
+    it("retains the confirmed backend base revision for the loaded project", () => {
+      const existing = useProjectStore.getState().project;
+      usePersistenceStatusStore.getState().confirmReceipt("backend-project", {
+        saved: true,
+        projectId: "backend-project",
+        persistedAt: 10,
+        sourceModifiedAt: existing.modifiedAt,
+        commitSha: "a".repeat(40),
+        treeSha: "b".repeat(40),
+        projectBlobSha: "c".repeat(40),
+        mediaManifestDigest: "sha256:test",
+        lfsPayloads: [],
+        committed: true,
+      });
+
+      useProjectStore.getState().loadProject({ ...existing, id: "backend-project" });
+
+      expect(usePersistenceStatusStore.getState()).toMatchObject({
+        projectId: "backend-project",
+        baseRevision: { commitSha: "a".repeat(40) },
+      });
+    });
+
     it("should load an existing project", () => {
       const existingProject: Project = {
         id: "existing-project-id",

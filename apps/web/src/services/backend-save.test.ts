@@ -118,6 +118,17 @@ afterEach(() => {
 });
 
 describe("backendSaveService.load", () => {
+  it("preserves a matching confirmed base while clearing project-scoped queues", () => {
+    const receipt = makeReceipt();
+    usePersistenceStatusStore.getState().confirmReceipt("project-1", receipt);
+
+    backendSaveService.resetForProject("project-1");
+    expect(usePersistenceStatusStore.getState().baseRevision?.commitSha).toBe(receipt.commitSha);
+
+    backendSaveService.resetForProject("another-project");
+    expect(usePersistenceStatusStore.getState().baseRevision).toBeNull();
+  });
+
   it("populates remoteUrl and blob for media files returned by the backend", async () => {
     const mediaBlob = new Blob(["video"], { type: "video/mp4" });
     vi.stubGlobal(

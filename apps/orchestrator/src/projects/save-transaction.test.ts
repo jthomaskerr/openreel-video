@@ -155,6 +155,32 @@ test("pending media is LFS-audited from the index before one atomic snapshot com
   }
 });
 
+test("an identical snapshot returns the confirmed receipt without creating a commit", async () => {
+  const f = await fixture();
+  try {
+    const worktree = f.store.projectDir(f.project.id);
+    const before = await state(f);
+    let commitCalled = false;
+
+    const receipt = await executeSaveTransaction(f.store, f.gitStore, request(f, f.project), {
+      commit: async () => {
+        commitCalled = true;
+        throw new Error("no-op save must not commit");
+      },
+    });
+
+    assert.equal(commitCalled, false);
+    assert.equal(receipt.commitSha, f.baseRevision.commitSha);
+    assert.equal(receipt.projectBlobSha, f.baseRevision.projectBlobSha);
+    assert.equal(receipt.sourceModifiedAt, f.project.modifiedAt);
+    assert.deepEqual(receipt.project, f.project);
+    assert.equal((await git(worktree, ["rev-parse", "HEAD"])).trim(), f.baseRevision.commitSha);
+    await assertUnchanged(f, before);
+  } finally {
+    await rm(f.fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("recovery unstages and returns promoted media to pending before ref update", async () => {
   const f = await fixture();
   try {

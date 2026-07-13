@@ -148,6 +148,10 @@ async function reconcileBackendIdentity(
         `Expected one backend project named "${snapshot.name}", found ${matches.length}; UUID ${temporaryId} was not persisted`,
       );
     }
+    const canonicalProject = await backendSaveService.load(matches[0]!.id);
+    if (!canonicalProject) {
+      throw new Error(`Backend project ${matches[0]!.id} could not provide a confirmed base revision`);
+    }
     const current = getProjectState().project;
     if (current.id !== temporaryId) return;
     await autoSaveManager.migrateProjectId(temporaryId, matches[0]!.id);
@@ -1701,7 +1705,7 @@ export const useProjectStore = create<ProjectState>()(
             syncProjectEffectsBridge(merged, previousProject);
             syncProjectTransitionsBridge(merged, previousProject);
             set({ project: merged });
-            backendSaveService.resetForProject();
+            backendSaveService.resetForProject(merged.id);
             try {
               await autoSaveManager.migrateProjectId(snapshotId, backendProject.id);
             } catch (migrationError) {
@@ -1729,7 +1733,7 @@ export const useProjectStore = create<ProjectState>()(
       },
 
       loadProject: (project: Project) => {
-        backendSaveService.resetForProject();
+        backendSaveService.resetForProject(project.id);
         const previousProject = get().project;
         const titleEngine = useEngineStore.getState().getTitleEngine();
         const graphicsEngine = useEngineStore.getState().getGraphicsEngine();
@@ -5015,7 +5019,7 @@ export const useProjectStore = create<ProjectState>()(
           // Upload every locally stored blob to the backend.
           const reachable = await backendSaveService.isReachable();
           if (reachable) {
-            backendSaveService.resetForProject();
+            backendSaveService.resetForProject(projectToRecover.id);
             for (const record of storedMedia) {
               if (!record.blob) continue;
               const item = projectToRecover.mediaLibrary.items.find((i) => i.id === record.id);
