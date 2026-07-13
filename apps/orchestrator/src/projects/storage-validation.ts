@@ -2,15 +2,13 @@ import { resolve, sep } from "node:path";
 
 const PROJECT_ID_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
 const MEDIA_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
-const MEDIA_FILENAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,255}$/;
-
 function hasTraversalOrSeparators(value: string): boolean {
   return (
     value.length === 0 ||
-    value.includes("..") ||
     value.includes("/") ||
     value.includes("\\") ||
-    value.includes("%")
+    value === "." ||
+    value === ".."
   );
 }
 
@@ -26,7 +24,7 @@ export function isValidMediaId(value: string): boolean {
 
 /** Return whether a generated stored media filename is safe to serve from media/. */
 export function isValidMediaFilename(value: string): boolean {
-  return !hasTraversalOrSeparators(value) && MEDIA_FILENAME_PATTERN.test(value);
+  return !hasTraversalOrSeparators(value) && !value.includes("\0");
 }
 
 export function assertValidProjectId(value: string): void {
