@@ -1,6 +1,22 @@
 # Atlascloud AI Provider Support Implementation Plan
 
-> **Audit status (2026-07-13): NOT IMPLEMENTED; NONCONFORMANT AS WRITTEN.** Canonical owner: `docs/spec/generation.md` section 9.3. No Atlascloud adapter symbols or tests are present. The canonical spec requires undocumented endpoint, schema, retry, cancellation, and webhook behavior to remain unsupported until verified from authoritative provider documentation, so this plan must be revised before execution.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** NOT STARTED; NONCONFORMANT AS WRITTEN. Canonical owner: [Generation](../../spec/generation.md#93-atlascloud). No Atlascloud implementation symbol or test was found.
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 1 provider domain types | Not started | Atlascloud is absent from the implemented provider contracts. |
+| 2 environment config | Not started | No Atlascloud secret/config boundary exists. |
+| 3 orchestrator route | Blocked on authoritative docs | Endpoint, schema, output, rate-limit, retry, cancellation, and webhook facts are unverified. |
+| 4 web client | Not started | No Atlascloud client exists. |
+| 5 job lifecycle | Not started | No Atlascloud submit/poll/finalize adapter exists. |
+| 6 model picker/badge | Not started | No Atlascloud UI integration exists. |
+| 7 settings/default provider | Not started | No Atlascloud registry/settings entry exists. |
+| 8 tests | Not started | No normalization, route, retry, redaction, or UI tests exist. |
+| 9 verification | Not verified | No provider sandbox or browser evidence exists. |
+
+**Conformance blocker:** canonical section 9.3 requires unknown provider behavior to remain explicitly unsupported. **Next action:** obtain and record authoritative provider documentation, then rewrite Tasks 1-8 using only verified capabilities.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

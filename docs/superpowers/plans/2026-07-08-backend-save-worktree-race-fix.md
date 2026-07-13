@@ -1,6 +1,20 @@
 # Plan: Fix backend-save worktree creation race + client-UUID project IDs
 
-> **Audit status (2026-07-13): PARTIAL AND NONCONFORMANT, NOT COMPLETE.** Canonical owner: `docs/spec/project.md`. Per-project locking, race regression tests, orchestrator-assigned IDs, and `backendSaveService.create()` exist. However, `createNewProject()` still marks the local UUID project explicitly created before the backend responds and performs creation fire-and-forget, contrary to the canonical identity gate; the plan's unchecked browser and validation evidence is also absent.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** RACE FIX IMPLEMENTED; IDENTITY FLOW NONCONFORMANT. Canonical owner: [Project Lifecycle and Persistence](../../spec/project.md).
+
+| Step | State | Current evidence and remaining work |
+|---|---|---|
+| 1 serialize worktree creation | Implemented | `GitStore.#withLock/#ensureWorktreeInner` serialize and recover worktree setup. |
+| 2 race regression test | Implemented/verified | Three concurrency tests cover duplicate creation, commit race, and many callers. |
+| 3 backend `create()` | Implemented | `BackendSaveService.create()` returns the orchestrator-assigned project. |
+| 4 backend-first project creation | Nonconformant | Store currently creates/marks a UUID project first and swaps identity asynchronously. |
+| 5 autosave idempotency | Partial | Save serialization exists, but the planned EditorInterface initialization guard is no longer the active architecture and no equivalent browser proof is recorded. |
+| 6 web tests | Partial | Backend create and project creation race tests exist; they currently encode the local-UUID fallback that conflicts with the canonical spec. |
+| 7 docs | Implemented | Canonical project spec records the required backend identity and worktree race behavior. |
+
+**Verification:** concurrency suite passed 3/3 during the 2026-07-13 audit. Browser create/reload evidence is absent. **Next action:** rewrite Step 4 and its tests to keep offline work as an identity-less draft.
 
 > Spec: `docs/spec/2026-07-08-backend-save-worktree-race-fix.md`
 > Inbox: #2

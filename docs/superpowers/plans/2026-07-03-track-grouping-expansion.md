@@ -1,6 +1,22 @@
 # Track Grouping and Storyboard Expansion Implementation Plan
 
-> **Audit status (2026-07-13): NOT IMPLEMENTED, NOT COMPLETE.** Canonical owners: `docs/spec/timeline.md`, `docs/spec/storyboard.md`, and `docs/spec/music-video-workflow.md`. No track-group state, group headers, storyboard meta-track, grouped rendering, integration tests, or browser evidence is present.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** NOT STARTED BEYOND GENERIC SCENE METADATA. Canonical owners: [Timeline](../../spec/timeline.md), [Storyboard](../../spec/storyboard.md), and [Music Video Workflow](../../spec/music-video-workflow.md).
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 01 storyboard clip metadata | Partial | Scene metadata and `StoryboardShot` exist, but no formal storyboard-specialized clip discriminator/helper exists. |
+| 02 timeline helpers | Not started | No storyboard-clip join/query helpers exist. |
+| 03 expansion state | Not started | No persisted/UI track-group expansion state exists. |
+| 04 grouping rules | Not started | No logical grouping derivation exists. |
+| 05 group header | Not started | No `TrackGroupHeader` exists. |
+| 06 shot meta-track | Not started | No expanded storyboard metadata row exists. |
+| 07 grouped Timeline render | Not started | Timeline remains ungrouped. |
+| 08 StoryboardPanel integration | Blocked | `StoryboardPanel` is absent. |
+| 09 integration smoke | Not verified | No grouped-timeline tests or browser evidence exists. |
+
+**Next action:** lock the Task 1 discriminator against canonical timeline metadata, then implement pure grouping helpers before UI.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

@@ -1,6 +1,25 @@
 # Generate Storyboard Tool Implementation Plan
 
-> **Audit status (2026-07-13): NOT IMPLEMENTED; REVISION REQUIRED.** Canonical owner: `docs/spec/storyboard.md`. `StoryboardShot` exists, but no generation schemas, prompt implementation, route, typed client, dialog, or tests named by this plan are present. The hosted Anthropic design also conflicts with the repository's current local-Claude-Code policy unless Joseph explicitly authorizes it.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** NOT STARTED; REVISION REQUIRED. Canonical owner: [Storyboard](../../spec/storyboard.md). The base `StoryboardShot` domain exists, but no storyboard-generation workflow artifact exists.
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 01 shared generation types | Not started | No request/result contract exists. |
+| 02 Zod schemas | Not started | No request/output validation schema exists. |
+| 03 prompt templates | Not started | No prompt builder/parser or eval exists. |
+| 04 route handler | Not started | No storyboard-generation endpoint exists. |
+| 05 route/dependencies | Not started | Nothing is mounted. |
+| 06 store apply action | Not started | No `applyStoryboardGeneration` action exists. |
+| 07 dialog | Not started | No `GenerateStoryboardDialog` exists. |
+| 08 web client | Not started | No typed endpoint client exists. |
+| 09 panel button | Blocked by missing panel | `StoryboardPanel` itself is absent. |
+| 10 backend tests | Not started | No schema, prompt, or mocked-LLM route tests exist. |
+| 11 frontend tests | Not started | No store/dialog tests exist. |
+| 12 smoke/eval | Not verified | No browser or probabilistic eval evidence exists. |
+
+**Conformance blocker:** direct hosted Anthropic use conflicts with the repository's local-Claude-Code policy unless explicitly authorized. **Next action:** define the approved typed LLM boundary, deterministic validator, and eval threshold before implementation.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

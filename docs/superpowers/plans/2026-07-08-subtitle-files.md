@@ -1,7 +1,29 @@
 
- Plan: Update Auto Captions to Support Audio/Video Clip Input
+Plan: Update Auto Captions to Support Audio/Video Clip Input
 
- ### Goal
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall state:** Substantially implemented, but not complete or specification-conformant.
+
+**Canonical specifications:** [Auto-caption clip input](../../spec/2026-07-08-auto-caption-clip-input-spec.md), [subtitle track and clip type](../../spec/subtitle-track-clip-type.md), and [audio analysis/subtitles](../../spec/audio-analysis-subtitles.md).
+
+| Plan area | Audited result | Implementation evidence | Remaining work |
+|---|---|---|---|
+| 1. Selected-clip awareness | Implemented | `AutoCaptionPanel` resolves exactly one selected timeline clip and recognizes audio/video clips | Browser verification remains |
+| 2. Clip transcription mode | Implemented | The panel exposes selected-clip and microphone source modes with appropriate primary actions | Browser verification remains |
+| 3. `TranscriptionService` wiring | Implemented | Selected media is passed to `transcribeClip`; progress, returned captions, errors, and style application are handled | Real backend/browser boundary remains unverified |
+| 4. Microphone path | Preserved in code | Existing live transcription, stop, segment preview, and apply paths remain | Regression proof in a supported browser remains |
+| 5. Disabled/error states | Implemented | Missing selection, wrong type, missing media, and service rejection states are represented and component-tested | Exact rendered behavior remains browser-unverified |
+| 6. Backend transcription reuse | Implemented at the client boundary | The panel initializes the existing transcription service and uses its clip API | Provider/backend availability was not exercised |
+| 7. Copy and layout | Implemented | Source selector, selected-clip guidance, progress, and action copy are present | Responsive visual verification remains |
+| 8. Tests | Substantially implemented | `AutoCaptionPanel.test.tsx` covers selection, service invocation, returned captions, missing media, rejection, and progress behavior | A fresh focused run was not part of this documentation audit |
+| 9. Browser verification | Not evidenced | No current audit evidence demonstrates the plan's manual scenarios | Run every listed browser scenario against audio and video clips |
+
+**Conformance blockers:** The flow calls `addSubtitle`, but the repository still lacks the canonical first-class `SubtitleClip` model and complete subtitle CRUD/export conformance. Browser and real transcription-boundary evidence are also absent.
+
+**Next action:** Complete the first-class subtitle model, rerun the focused deterministic suite, and execute the plan's browser matrix without regressing microphone transcription.
+
+### Goal
 
  Update the Auto Captions tool so users can generate captions from an existing selected audio or video clip, not only from live microphone recording.
 

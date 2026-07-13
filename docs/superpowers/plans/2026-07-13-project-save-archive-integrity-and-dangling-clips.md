@@ -1,6 +1,30 @@
 # Project Save Archive Integrity and Dangling Clips Implementation Plan
 
-> **Audit status (2026-07-13): IMPLEMENTATION IN PROGRESS, NOT COMPLETE.** Canonical owners: `docs/spec/project.md`, `docs/spec/media-assets.md`, and `docs/spec/timeline.md`; regression contract: `docs/spec/regressions/project-save-archive-integrity-and-dangling-clips-regression.md`. Uncommitted contracts, guards, semantic filenames, manifests, allowlisted staging, commit-message work, and tests cover only Tasks 1-6. Receipts, LFS payload proof, atomic conflict-safe saves, destructive-intent protection, pending uploads, runtime availability, dangling-clip UI, full gates, and browser verification remain open.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** TASKS 1-7 IMPLEMENTED; TASKS 8-16 OPEN OR PARTIAL. Canonical owners: [Project](../../spec/project.md), [Media Assets](../../spec/media-assets.md), and [Timeline](../../spec/timeline.md); regression contract: [archive integrity and dangling clips](../../spec/regressions/project-save-archive-integrity-and-dangling-clips-regression.md).
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 1 persistence contracts | Implemented | Shared request, manifest, conflict, destructive-intent, incomplete-media, base-revision, and receipt types exist with tests. |
+| 2 temp-root guard | Implemented | Fixture/root validation fails closed with regression coverage. |
+| 3 semantic filenames | Implemented | Collision-safe semantic allocation exists with tests. |
+| 4 manifest audit | Implemented | Required manifest, duplicate/missing/size/filename/dangling checks, and digest calculation exist with tests. |
+| 5 allowlisted Git staging | Implemented | Git commit transaction validates explicit staged entries and rejects residue. |
+| 6 truthful messages | Implemented | Deterministic/semantic messages use final staged entries and exact path counts. |
+| 7 verifiable receipts | Implemented | Commit/tree/project-blob/manifest identities are resolved and reverified from committed Git objects; commit `609181b` added this layer. |
+| 8 LFS payload proof | Not started | No proof that every referenced LFS object payload is locally available. |
+| 9 atomic optimistic save | Not started | `saveProject()` still writes/renames `project.json` before a transaction-level base-revision/commit rollback boundary. |
+| 10 destructive shrink | Not started | Structural shrink is not gated by current base plus explicit intent. |
+| 11 pending uploads | Not started | Upload commits are not modeled as pending until snapshot attachment. |
+| 12 web prove/reconcile | Partial | Web checks remote media and validates basic receipt fields, but does not submit/verify the full manifest/base revision exactly once. |
+| 12A runtime availability | Not started | No canonical verifying/available/temporary/confirmed-missing state machine exists. |
+| 13 dangling-clip UI | Partial | Manifest detects dangling clips and semantic titles exist; every timeline/media UI state is not implemented or tested. |
+| 14 media views/filtering | Partial | Missing-only toolbar behavior is implemented; all availability-state variants and dangling clips are not covered. |
+| 15 docs/operator verification | Partial | Specs and plan status are updated; operator verification script and receipt/LFS procedure remain absent. |
+| 16 full verification | Not complete | Focused subsets have passed historically; full tests, lint, typecheck, Git-object checks, and browser scenario are not complete. |
+
+**Critical failure modes still live:** false green saves without LFS payload proof, stale overwrite, destructive shrink, upload/snapshot separation, backend outage misclassified as missing, and partial mutation before failure. **Next action:** Tasks 8-12A in order, then UI Tasks 13-14 and full gate 16.
 
 > **Executor:** GPT-5.4-mini. Execute tasks in order. Do not combine tasks or weaken assertions to make tests pass. Read `docs/spec/regressions/project-save-archive-integrity-and-dangling-clips-regression.md` before starting and re-check its acceptance criteria at the final gate.
 

@@ -1,8 +1,20 @@
 # SRT Drag/Drop Stall Fix
 
-> **Audit status (2026-07-13): PARTIAL AND NONCONFORMANT, NOT COMPLETE.** Canonical owner: `docs/spec/audio-analysis-subtitles.md`. SRT parsing and import tests exist, but imports still target legacy text clips rather than first-class subtitle clips, VTT and bounded parsing requirements are not covered, subtitle CRUD/export tests remain skipped, and no required browser evidence is recorded.
+## Current State (Audited 2026-07-13 16:16 AEST)
 
-**Status:** planned  
+**Overall:** STALL PATH PARTIALLY FIXED; OUTPUT MODEL NONCONFORMANT. Canonical owner: [Audio Analysis & Subtitles](../../spec/audio-analysis-subtitles.md).
+
+| Step | State | Current evidence and remaining work |
+|---|---|---|
+| 1 SRT import bypass | Implemented | SRT is recognized without media decoding and has import regression coverage. |
+| 2 route to subtitle track | Implemented | `addClipToNewTrack` selects `trackType = "subtitle"` for SRT media. |
+| 3 parse cues | Partial/nonconformant | SRT parsing works, but generated cues are text clips rather than first-class subtitle clips. |
+| 4 internal asset-panel drop | Partial | Store/timeline routing exists; exact internal drag/drop integration lacks a dedicated current test. |
+| 5 browser verification | Not verified | No timestamped drag/drop browser run or large-file stall measurement exists. |
+
+**Additional canonical gaps:** VTT, bounded/off-main-render parsing, explicit partial-failure policy, and first-class subtitle migration. **Next action:** complete the subtitle model plan, then rerun SRT/VTT browser and performance scenarios.
+
+**Status:** Partial implementation; nonconformant with the canonical first-class subtitle model.
 **Inbox:** #4  
 **Date:** 2026-07-08
 

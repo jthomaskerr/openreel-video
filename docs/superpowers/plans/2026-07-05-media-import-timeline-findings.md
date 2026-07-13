@@ -1,6 +1,19 @@
 # Media Import Timeline Implementation Findings
 
-> **Audit status (2026-07-13): FINDINGS ONLY, INCOMPLETE.** Canonical owners: `docs/spec/media-assets.md`, `docs/spec/timeline.md`, and `docs/spec/music-video-workflow.md`. The document reports partial investigation and does not cover every import entry point, placement invariant, regression test, or browser scenario required by the canonical specs.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Document type:** PARTIAL HISTORICAL FINDINGS, NOT AN EXECUTABLE PLAN. Canonical owners: [Media Assets](../../spec/media-assets.md), [Timeline](../../spec/timeline.md), and [Music Video Workflow](../../spec/music-video-workflow.md).
+
+| Area | Current state |
+|---|---|
+| Standard file import | Implemented through project-store/media processing with metadata and thumbnail extraction. |
+| Music-video/Neural Frames import | Substantially implemented with real metadata media and tests. |
+| SRT import | Partial; stall bypass exists but output uses legacy text clips. |
+| Timeline placement | Multiple placement paths exist, including generated shot placement; a single selected-track/time/context-menu invariant is not proven across all entry points. |
+| Folder/replacement/version import | Implemented in parts; title, collision, and availability consistency are not fully covered. |
+| Browser evidence | No comprehensive picker, drag/drop, folder, SRT, generated, selected-track, and reload matrix is recorded. |
+
+**Next action:** create a focused general-import/placement remediation plan after closing the subtitle and runtime-availability contracts.
 
 **Date:** 2026-07-05  
 **Spec Reference:** `docs/spec/media-import-timeline.md`  

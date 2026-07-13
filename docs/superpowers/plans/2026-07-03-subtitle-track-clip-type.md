@@ -1,6 +1,24 @@
 # New Subtitles Track/Clip Type Implementation Plan
 
-> **Audit status (2026-07-13): NOT IMPLEMENTED, NOT COMPLETE.** Canonical owner: `docs/spec/audio-analysis-subtitles.md`. No first-class `SubtitleClip` implementation is present; current tests explicitly skip subtitle CRUD/export and document the legacy text-clip workaround. Migration, editing, preview/export parity, deterministic tests, and browser verification remain open.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** PARTIAL TRACK SUPPORT, FIRST-CLASS CLIP MODEL NOT IMPLEMENTED. Canonical owner: [Audio Analysis & Subtitles](../../spec/audio-analysis-subtitles.md).
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 1 domain/migration | Partial | `Track.type` includes `subtitle`, but no `SubtitleClip` type or legacy migration exists. |
+| 2 manager/CRUD | Not started | No `SubtitleClipManager` exists. |
+| 3 project-store migration | Nonconformant legacy | Store actions still consolidate subtitles into text clips and legacy flat-array APIs remain. |
+| 4 timeline component | Not started | No dedicated `SubtitleClipComponent` exists. |
+| 5 preview | Partial workaround | Video engine renders text clips on subtitle tracks; no first-class subtitle clip route exists. |
+| 6 export | Partial workaround | Export relies on text/subtitle workarounds; parity is not proven. |
+| 7 inspector | Not started | No `SubtitleInspectorPanel` exists. |
+| 8 persistence | Partial workaround | Generic text clips serialize, but no first-class subtitle schema/migration exists. |
+| 9 remove flat array | Not started | `Timeline.subtitles` and subtitle actions remain. |
+| 10 tests | Incomplete | Subtitle CRUD/export tests are explicitly skipped. |
+| 11 SRT drop | Partial | SRT creates a subtitle track populated by text clips; VTT, bounded parsing, and first-class clips are absent. |
+
+**Next action:** implement Tasks 1-3 as one migration boundary, then update timeline/preview/export/inspector and unskip the regression suite.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

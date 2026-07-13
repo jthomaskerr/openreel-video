@@ -1,6 +1,20 @@
 # Media Title From Metadata Implementation Plan
 
-> **Audit status (2026-07-13): PARTIAL, NOT COMPLETE.** Canonical owner: `docs/spec/media-assets.md` section 3. `filenameToTitle`, container-title extraction, main-import population, display fallbacks, and tests exist. The plan requires every import/version/replacement path, rename behavior, full-suite gates, and real browser verification; current code evidence shows title derivation only on the main processed-media import path, so archival is premature.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** MOSTLY IMPLEMENTED; IMPORT-PATH AND BROWSER GAPS REMAIN. Canonical owner: [Media Assets](../../spec/media-assets.md#3-display-titles).
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 1 `filenameToTitle` | Implemented/verified | Pure helper and property/table tests exist; focused suite passed in the audit. |
+| 2 package export | Implemented | Exported from the core media surface. |
+| 3 embedded title extraction | Implemented/verified | `MediaBunnyEngine.extractMetadata()` trims title tags; focused tests passed. |
+| 4 populate every import path | Partial | Main processed-media import sets `title`; SRT, replacement, folder/version, and other constructors are not all proven to derive it consistently. |
+| 5 rename writes title | Implemented | AssetsPanel calls `updateMediaMetadata(..., {title})` without changing filename. |
+| 6 display fallbacks | Mostly implemented | Media cards, inspector, reference picker, and version list use `title || name`; a repository-wide proof of every user-facing label is absent. |
+| 7 docs/manual verification | Partial | Canonical semantics are documented; full typecheck and real import/rename/reload browser evidence are not recorded here. |
+
+**Verification:** filename/metadata focused suites passed 64/64 during the audit. **Next action:** centralize display-name derivation, cover every media constructor with tests, then run the planned browser matrix.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

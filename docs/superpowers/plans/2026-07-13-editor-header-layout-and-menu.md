@@ -1,6 +1,19 @@
 # Editor Header Layout and Menu Implementation Plan
 
-> **Audit status (2026-07-13): IMPLEMENTATION IN PROGRESS, NOT COMPLETE.** Canonical owners: `docs/spec/project.md`, `docs/spec/inspector-shell.md`, and `docs/spec/regressions/editor-header-layout-and-menu-regression.md`. Uncommitted `Toolbar.tsx` and regression-test changes exist, but required focused/full gates and exact wide/narrow browser scenarios have not been independently verified in this audit.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** IMPLEMENTATION IN WORKTREE; VERIFICATION AND DELIVERY INCOMPLETE. Owners: [Project](../../spec/project.md), [Inspector](../../spec/inspector-shell.md), and the [header regression contract](../../spec/regressions/editor-header-layout-and-menu-regression.md).
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 1 regression test | Implemented in worktree | `Toolbar.test.tsx` covers menu/toolbar structure. |
+| 2 menu semantics | Implemented in worktree | Toolbar/ProjectSwitcher changes place project actions in the menu and preserve command handlers. |
+| 3 non-wrapping layout | Implemented in worktree | Toolbar classes and compact controls were changed for shrink-safe single-row layout. |
+| 4 deterministic verification | Pending rerun | Prior focused results are not sufficient after subsequent worktree edits; run focused tests, typecheck, and full web tests. |
+| 5 browser verification | Not verified | Required 1440x900, narrow-width, menu, keyboard, and console scenarios have no current timestamped evidence. |
+| 6 review/delivery | Not complete | Changes remain mixed with unrelated worktree work and are not delivered as an isolated verified fix. |
+
+**Next action:** run Task 4, perform the exact browser matrix in Task 5, then isolate and deliver Task 6.
 
 **Implementer:** GPT-5.4-mini  
 **Specification:** `docs/spec/regressions/editor-header-layout-and-menu-regression.md`  

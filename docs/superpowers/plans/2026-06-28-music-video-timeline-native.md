@@ -1,6 +1,32 @@
 # Timeline-native AI Music Video Implementation Plan
 
-> **Audit status (2026-07-13): PARTIAL, NOT COMPLETE.** Canonical owners: `docs/spec/music-video-workflow.md`, `docs/spec/timeline.md`, `docs/spec/storyboard.md`, and `docs/spec/generation.md`. Persistent generation jobs and `MetadataClipInspector` exist with tests, but the planned `StoryboardPanel`, grouped timeline, storyboard meta-track, and full end-to-end browser verification are absent. Keep active.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** PARTIAL. Tasks 1-6 and 8-16 have implementation evidence; Task 7 is narrower than planned and Task 17 has no current browser evidence. Canonical owners are [Music Video Workflow](../../spec/music-video-workflow.md), [Timeline](../../spec/timeline.md), [Storyboard](../../spec/storyboard.md), and [Generation](../../spec/generation.md).
+
+This section is authoritative. Unchecked boxes below are execution instructions, not current status.
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 01 metadata media factory | Implemented | `createMetadataMedia` and deterministic tests exist in `features/music-video/timeline/metadata-media.*`. |
+| 02 generated-media insertion | Implemented | `ProjectState.addGeneratedMedia` and project-store tests create durable media records. |
+| 03 metadata clip helper | Implemented | `addTimelineClip` creates/finds tracks, creates real metadata media, and adds clips with tests. |
+| 04 music-video audio import | Implemented | `createMusicVideoFlow` creates audio and full-duration metadata clips; tests cover the flow. |
+| 05 AI-tab tool actions | Implemented | `AIGenTab` exposes music-video and Neural Frames file actions plus generation/jobs surfaces. |
+| 06 metadata inspector routing | Implemented | `MetadataClipInspector` routes music-video, scene, character, style, note, and director-note kinds; routing tests exist. |
+| 07 music-video inspector workflow | Partial | `MusicVideoMetadataInspector` exists, but it is a compact metadata/create surface rather than the complete workflow described by this task. |
+| 08 Neural Frames metadata import | Implemented | `importNeuralFramesFile` and `NeuralFramesImportTab` use real generated media; the component suite covers metadata import. |
+| 09 scene/character/style inspectors | Implemented | Dedicated scene, character, and style metadata inspectors exist. |
+| 10 asset-group versions | Implemented | `MediaItem.assetGroupId`, add/switch-version store actions, and version tests exist. |
+| 11 generated timeline placement | Implemented | `placeGeneratedAssetOnTimeline` and tests cover shot-timed image/video placement. |
+| 12 persistent generation jobs | Implemented | Persisted `useGenerationJobStore` and shared generation contracts exist. |
+| 13 polling outside dialogs | Implemented | `useGenerationJobPoller` owns polling/finalization outside `GenerateAssetDialog`. |
+| 14 job management | Implemented | `JobManagementPanel` provides retry/cancel/status UI with component tests. |
+| 15 reference selection/upload | Implemented | `ReferenceImagePicker` supports library selection/upload and has tests. |
+| 16 project recovery | Implemented, browser-unverified | `useProjectRecovery` and its regression suite cover backend/local recovery paths; no current real-browser recovery record was found. |
+| 17 end-to-end smoke flow | Not verified | No timestamped browser run proves the complete import, inspect, generate, poll, version, place, save, and reload workflow. |
+
+**Conformance gaps:** Task 7 needs the full selected-music-video workflow; generation completion must continue to satisfy the canonical server-secret and idempotency contracts. **Next action:** finish Task 7, then execute and record Task 17 before archival.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

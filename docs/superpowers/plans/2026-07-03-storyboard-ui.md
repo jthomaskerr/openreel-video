@@ -1,6 +1,22 @@
 # Storyboard UI Implementation Plan
 
-> **Audit status (2026-07-13): NOT IMPLEMENTED, NOT COMPLETE.** Canonical owners: `docs/spec/storyboard.md`, `docs/spec/music-video-workflow.md`, and `docs/spec/timeline.md`. `StoryboardShot` domain data exists, but no `StoryboardPanel`, shot-card UI, panel registration, selection synchronization, reordering tests, or browser verification is present.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** NOT STARTED. Canonical owners: [Storyboard](../../spec/storyboard.md), [Music Video Workflow](../../spec/music-video-workflow.md), and [Timeline](../../spec/timeline.md). `StoryboardShot` exists, but the planned UI does not.
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 01 panel registration | Not started | No storyboard panel ID/default state exists. |
+| 02 shot card | Not started | No `ShotCard` exists. |
+| 03 storyboard panel | Not started | No `StoryboardPanel` exists. |
+| 04 editor wiring | Not started | EditorInterface has no storyboard panel branch. |
+| 05 toolbar toggle | Not started | No storyboard toggle exists. |
+| 06 bidirectional link | Not started | No `useStoryboardLink` exists. |
+| 07 inline editing | Not started | No storyboard editing UI exists. |
+| 08 reordering | Not started | No drag reorder or index-update tests exist. |
+| 09 smoke test | Not verified | No component integration or browser evidence exists. |
+
+**Next action:** implement panel registration and read-only rendering first; add timeline linkage before editing/reorder.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

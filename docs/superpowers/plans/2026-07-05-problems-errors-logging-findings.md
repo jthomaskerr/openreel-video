@@ -1,6 +1,20 @@
 # Problems, Errors & Logging Implementation Findings
 
-> **Audit status (2026-07-13): FINDINGS ONLY, NOT COMPLETE.** Canonical owner: `docs/spec/problems-errors-logging.md`. Problems and log panels exist, but no `ProblemBus` symbol was found and this document records a retry-resolution defect rather than a completed fix with regression coverage. It is not an executable implementation plan.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Document type:** HISTORICAL FINDINGS, NOT AN EXECUTABLE PLAN. Canonical owner: [Problems, Errors & Logging](../../spec/problems-errors-logging.md). The prior audit incorrectly reported that `problemBus` was absent; it exists as a constant in `problem-store.ts`.
+
+| Area | Current state |
+|---|---|
+| Problem model/store/bus | Implemented with report, resolve, resolve-by-kind, subscribe, and selectors. |
+| Problems panel | Implemented with action dispatch. |
+| Log panel | Implemented with filtering/presentation. |
+| Recovery actions | Partial; link-file and retry-generation handlers exist. |
+| Retry lifecycle defect | Open and nonconformant: `retry_generation` calls `problemBus.resolve(problem.id)` immediately after enqueueing retry instead of waiting for successful completion. |
+| Regression coverage | No focused test proves retry failure keeps the problem active and retry success resolves it. |
+| Browser/observability evidence | No current end-to-end problem lifecycle and log-correlation run is recorded. |
+
+**Next action:** write/fix the retry lifecycle regression first, then verify deduplication, action outcomes, and log correlation.
 
 **Date:** 2026-07-05  
 **Spec Reference:** `docs/spec/problems-errors-logging.md` (§1–5)  

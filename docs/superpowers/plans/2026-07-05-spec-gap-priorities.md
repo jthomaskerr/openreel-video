@@ -1,6 +1,21 @@
 # Spec Gap — Prioritized Plan List
 
-> **Audit status (2026-07-13): HISTORICAL INDEX, NOT AN IMPLEMENTATION PLAN.** Canonical ownership is now defined by `docs/spec/index.md`. The listed percentages and priorities predate spec consolidation and are not completion evidence; linked findings and plans must use their individual 2026-07-13 audit statuses.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Document type:** HISTORICAL PRIORITY INDEX, NOT AN IMPLEMENTATION PLAN. Canonical ownership is defined by [the specification index](../../spec/index.md), and current cross-plan status is defined by [status.md](./status.md).
+
+| Historical area | Current disposition |
+|---|---|
+| Export | Core exists; unresolved packaging, subtitle parity, UI, and artifact verification require a new remediation plan. |
+| Problems/logging | Core panels/bus exist; retry auto-resolution defect remains open. |
+| Thumbnails/fallbacks | Common rendering exists; canonical runtime availability and complete browser matrix remain open. |
+| Asset/project management | Split across media-title, Media-pane, backend identity, and project-save plans. |
+| Media import/timeline | Music-video paths are substantial; general import/placement and SRT conformance remain incomplete. |
+| Inspector shell | Substantially implemented; complete accessibility/all-kind browser verification remains. |
+| Project lifecycle | Backend routes exist; identity, conflicts, destructive intent, and verified persistence remain incomplete. |
+| Testing expectations | Tooling exists; coverage enforcement, evals, skipped tests, and browser evidence are incomplete. |
+
+**Priority now:** project-save Tasks 8-12A, first-class subtitles, and required browser/eval gates. Percentages below are retained only as historical provenance.
 
 **Date:** 2026-07-05
 **Task:** DOC-001 (Step 4)

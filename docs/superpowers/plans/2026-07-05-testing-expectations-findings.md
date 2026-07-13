@@ -1,6 +1,20 @@
 # Testing Expectations Implementation Findings
 
-> **Audit status (2026-07-13): FINDINGS ONLY, INCOMPLETE.** Canonical owner: `docs/spec/testing-expectations.md`. The document explicitly leaves coverage, package gates, evals, and browser verification unverified. It is neither an executable plan nor evidence that the testing specification is satisfied.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Document type:** PARTIAL HISTORICAL FINDINGS, NOT AN EXECUTABLE PLAN. Canonical owner: [Testing Expectations](../../spec/testing-expectations.md).
+
+| Area | Current state |
+|---|---|
+| Unit/integration tooling | Vitest and Node test suites exist across core, web, domain, and orchestrator packages. |
+| Regression tests | Many targeted regressions exist, but several subtitle tests remain skipped and plan-level gates are inconsistent. |
+| Coverage enforcement | Not proven by this audit; no repository-wide threshold evidence was found. |
+| Probabilistic evals | Missing for storyboard, section inference, transcription quality, and paid-provider behavior. |
+| Browser verification | Required by policy but absent from many UI plan records. |
+| Gate duration/flakiness | Not systematically reported; concurrency tests are deterministic but exceed the preferred two-second total gate. |
+| Traceability | Improved by individual Current State tables and `status.md`, but no automated status/evidence generator exists. |
+
+**Next action:** create one executable testing-compliance plan covering thresholds, skipped-test elimination, eval registry, browser evidence format, and CI enforcement.
 
 **Date:** 2026-07-05  
 **Spec Reference:** `docs/spec/testing-expectations.md`  

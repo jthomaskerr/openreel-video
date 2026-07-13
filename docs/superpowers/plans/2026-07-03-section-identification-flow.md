@@ -1,6 +1,22 @@
 # Section Identification Flow Implementation Plan
 
-> **Audit status (2026-07-13): PARTIAL, NOT COMPLETE.** Canonical owner: `docs/spec/song-sections.md`. Basic `SongSection` types exist, but lyric/audio inference, evidence merging, confirmation/edit state, section meta-track UI, storyboard handoff, deterministic tests, evals, and browser evidence are absent.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** DOMAIN SKELETON ONLY. Canonical owner: [Song Sections](../../spec/song-sections.md).
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 01 evidence/domain types | Partial | `SongSection` and `SongSectionType` exist, but the planned evidence, confidence, edit, and confirmation model is incomplete. |
+| 02 lyric repetition inference | Not started | No deterministic inference implementation or tests exist. |
+| 03 song-form/energy merge | Not started | No merge algorithm or evidence arbitration exists. |
+| 04 CRUD/confirmation | Not started | No section editing/confirmation state exists. |
+| 05 arranger meta-track | Not started | No section timeline surface exists. |
+| 06 confirmation panel | Not started | No `SectionConfirmationPanel` exists. |
+| 07 lyrics selection | Not started | No planned lyrics input surfaces exist. |
+| 08 storyboard handoff | Not started | Generated/altered storyboards do not receive confirmed sections. |
+| 09 integration/eval | Not verified | No deterministic inference suite, quality eval, or browser evidence exists. |
+
+**Next action:** complete Task 1's canonical evidence contract, then implement deterministic inference with eval fixtures before UI work.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

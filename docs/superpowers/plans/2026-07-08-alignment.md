@@ -1,6 +1,19 @@
 # Specification Alignment Review
 
-> **Audit status (2026-07-13): HISTORICAL, NOT AN IMPLEMENTATION PLAN.** This 2026-07-08 review predates canonical-spec consolidation and is no longer an authoritative alignment report. Its recommendations to consolidate audio specifications and standardize redirects were completed in `docs/spec/index.md`; its implementation claims were not accepted as completion evidence.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Document type:** HISTORICAL ALIGNMENT REVIEW, NOT AN IMPLEMENTATION PLAN. Current authority is [the specification index](../../spec/index.md) and [the comprehensive plan status](./status.md).
+
+| Original conclusion | Current disposition |
+|---|---|
+| Consolidate audio/subtitle specs | Completed in canonical `audio-analysis-subtitles.md`. |
+| Standardize redirects/ownership | Completed in `docs/spec/index.md`. |
+| Inspector fully implemented | Substantially true, but full accessibility/all-kind browser verification remains absent. |
+| Audio/subtitles aligned | False as a completion claim: first-class subtitle clips, migration, CRUD/export tests, and job pipeline remain incomplete. |
+| Storyboard domain aligned | Domain types exist, but storyboard UI/generation/alteration plans are unimplemented. |
+| Backend spec foundational | Replaced by canonical `project.md`; current identity and transaction gaps remain. |
+
+The original prose below is retained as provenance and must not be used for implementation status.
 
  I have completed a thorough analysis of the operational specs located in docs/spec/.
 
@@ -41,4 +54,4 @@
 
  1. Consolidate Audio Specs: Merge audio-analysis-subtitles.md, audio-auto-subtitle-extraction.md, and subtitle-track-clip-type.md into a single, cohesive source of truth for all things Subtitles/Audio.
  2. Standardize Titles: Rename the older § specs to match the standard <Domain> — Operational Spec naming convention.
- 3. Explicit Cross-Linking: Rather than implicit references, use direct Markdown links (e.g., [Backend Spec](./backend-persistence-versioning.md)) when referencing neighboring domains.
+3. Explicit Cross-Linking: Rather than implicit references, use direct Markdown links (e.g., [Backend Spec](../../spec/backend-persistence-versioning.md)) when referencing neighboring domains.

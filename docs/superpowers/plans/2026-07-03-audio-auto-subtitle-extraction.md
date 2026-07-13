@@ -1,6 +1,21 @@
 # Audio Auto-Subtitle Extraction Implementation Plan
 
-> **Audit status (2026-07-13): NOT COMPLETE; NONCONFORMANT AS WRITTEN.** Canonical owner: `docs/spec/audio-analysis-subtitles.md`. Transcription primitives and selected-clip caption UI exist, but the planned durable job store/proxy/import pipeline is absent and current project tests still use legacy text clips on a Captions track. Completion requires first-class subtitle clips, reload/retry/idempotency tests, eval thresholds, and browser verification.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** NOT STARTED AS A JOB PIPELINE; NONCONFORMANT OUTPUT MODEL. Canonical owner: [Audio Analysis & Subtitles](../../spec/audio-analysis-subtitles.md). Core transcription utilities and selected-clip caption UI exist, but none of this plan's durable import-triggered job architecture exists.
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 01 orchestrator proxy | Not started | No transcription route/job endpoint exists in the orchestrator. |
+| 02 job store | Not started | No `TranscriptionJobStore` exists. |
+| 03 web API client | Not started | No planned transcription client exists. |
+| 04 import trigger | Not started | `importMedia` does not enqueue durable transcription jobs. |
+| 05 poller | Not started | No `useTranscriptionJobPoller` exists. |
+| 06 AssetsPanel status | Not started | No import-triggered transcription badge/action exists. |
+| 07 retry/error flow | Not started | No durable retry/cancel/reload behavior exists. |
+| 08 subtitle integration | Partial, nonconformant | SRT import creates legacy text clips on a subtitle track; first-class subtitle clips and idempotent job finalization are absent. |
+
+**Verification gaps:** no fixed-audio transcription eval, reload/cancel/retry suite, or browser flow. **Next action:** implement the first-class subtitle model before wiring job completion.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

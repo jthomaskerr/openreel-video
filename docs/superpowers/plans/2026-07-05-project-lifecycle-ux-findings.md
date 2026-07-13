@@ -1,6 +1,20 @@
 # Project Lifecycle UX Implementation Findings
 
-> **Audit status (2026-07-13): FINDINGS ONLY, INCOMPLETE.** Canonical owner: `docs/spec/project.md`. This copy reports partial investigation and does not prove the canonical backend-identity gate, save-state presentation, lifecycle actions, conflict handling, or browser flows. Current creation code also violates the canonical sequence by setting `explicitlyCreated` before backend identity exists.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Document type:** HISTORICAL FINDINGS, NOT AN EXECUTABLE PLAN. Canonical owner: [Project Lifecycle and Persistence](../../spec/project.md). The original completion percentage is superseded.
+
+| Area | Current state |
+|---|---|
+| Picker/list/create/load/rename/delete | Routes and UI surfaces exist with targeted tests. |
+| Backend identity | Nonconformant: local UUID is marked explicitly created before asynchronous backend identity replacement. |
+| Save-state presentation | Backend save queue and error reporting exist; canonical queued/persisting/confirmed/conflict states are not completely modeled. |
+| Git history/restore | Implemented in backend routes/services; browser restore evidence is incomplete. |
+| Conflict/destructive intent | Not implemented. |
+| Offline draft/reconciliation | Incomplete; local UUID fallback is not the canonical identity-less draft flow. |
+| Browser lifecycle matrix | Not recorded for create, failure, reload, rename, delete, restore, and conflict. |
+
+**Next action:** execute project-save Tasks 8-12A and rewrite creation identity before a UX-completion claim.
 
 **Date:** 2026-07-05  
 **Spec Reference:** `docs/spec/project-lifecycle.md`  

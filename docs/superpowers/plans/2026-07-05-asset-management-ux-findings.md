@@ -1,6 +1,20 @@
 # Asset Management UX Implementation Findings
 
-> **Audit status (2026-07-13): FINDINGS ONLY, INCOMPLETE.** Canonical owners: `docs/spec/media-assets.md` and `docs/spec/project.md`. This is not an implementation plan and reports only partial investigation. It provides no complete task sequence or verification evidence and remains in the active directory until replaced or incorporated into a conformant plan.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Document type:** PARTIAL HISTORICAL FINDINGS, NOT AN EXECUTABLE PLAN. Canonical owners: [Media Assets](../../spec/media-assets.md) and [Project](../../spec/project.md). Percentages and handoff claims below describe the 2026-07-05 investigation only.
+
+| Area | Current state |
+|---|---|
+| Display titles/rename | Mostly implemented; metadata extraction, filename fallback, and title-only rename exist, but every constructor/display path is not proven. |
+| Asset versions | Implemented for grouped immutable versions with current-version switching and tests. |
+| Asset inspector | Implemented with tabs, metadata, versions, and preview surfaces. |
+| Media-pane controls | Single toolbar and missing-only reset have deterministic tests; browser evidence remains open. |
+| Runtime availability/relink | Partial; no canonical temporary-vs-confirmed-missing state machine. |
+| Project identity/storage | Nonconformant backend identity flow and incomplete save transaction remain owned by the project-save plan. |
+| Verification | No comprehensive asset-management browser matrix or consolidated plan-level gate exists. |
+
+**Next action:** use the media-title, Media-pane, and project-save plans for executable work; do not implement from the stale percentages below.
 
 **Date:** 2026-07-05  
 **Spec Reference:** `docs/spec/asset-management-ux.md`

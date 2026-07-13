@@ -1,6 +1,20 @@
 # Export Pipeline Implementation Findings
 
-> **Audit status (2026-07-13): FINDINGS ONLY, INCOMPLETE.** Canonical owners: `docs/spec/export.md` and `docs/spec/audio-analysis-subtitles.md`. This document records unresolved sequence-export, progress, subtitle, UI, and test gaps; it is not an executable plan and contains no current browser or export-artifact evidence.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Document type:** HISTORICAL FINDINGS, NOT AN EXECUTABLE PLAN. Canonical owners: [Export](../../spec/export.md) and [Audio Analysis & Subtitles](../../spec/audio-analysis-subtitles.md). Component statuses below remain investigation evidence unless restated here.
+
+| Area | Current state |
+|---|---|
+| Core video/audio/frame export | Implemented in `ExportEngine` with unit coverage. |
+| Presets/profiles/upscaling/cancellation | Implemented or substantially present, as recorded below. |
+| Image-sequence packaging | Unresolved; collected blobs do not by themselves prove the canonical deliverable/archive contract. |
+| Bitrate/container behavior | Historical divergence remains unclosed by a dedicated regression test. |
+| Subtitle export | Nonconformant legacy text/flat-subtitle workaround; first-class subtitle parity is not complete. |
+| Worker/progress/UI | Worker exists; full UI, progress, cancel, and browser behavior is not currently verified. |
+| End-to-end evidence | No current exported-artifact matrix proves codecs, duration, A/V sync, subtitles, cancellation, and sequence output. |
+
+**Next action:** write a dedicated export remediation plan from unresolved canonical requirements; retain this file as evidence only.
 
 **Date:** 2026-07-05  
 **Spec Reference:** `docs/spec/export.md` (§1–18)  

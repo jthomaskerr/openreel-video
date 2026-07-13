@@ -1,6 +1,20 @@
 # Media Pane Missing-Filter and Single-Toolbar Implementation Plan
 
-> **Audit status (2026-07-13): NOT IMPLEMENTED, NOT COMPLETE.** Canonical owner: `docs/spec/media-assets.md`; regression contract: `docs/spec/regressions/media-pane-missing-filter-toolbar-regression.md`. No corresponding `AssetsPanel.tsx` or `AssetsPanel.test.tsx` worktree changes or verified state-transition/browser evidence were found.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** DETERMINISTIC IMPLEMENTATION PRESENT; BROWSER/DELIVERY GATES OPEN. Canonical owner: [Media Assets](../../spec/media-assets.md); regression contract: [Media Pane Missing-Filter and Toolbar](../../spec/regressions/media-pane-missing-filter-toolbar-regression.md).
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 1 state-transition tests | Implemented | Tests cover final resolution, partial resolution, reappearing missing media, and search independence. |
+| 2 missing-only invariant | Implemented | AssetsPanel cancels missing-only when authoritative missing count reaches zero. |
+| 3 toolbar tests | Implemented | Tests assert one named toolbar, control containment, pressed states, grouping behavior, and layout classes. |
+| 4 toolbar consolidation | Implemented | Search, import, missing/relink, grouping, collapse/expand, and view controls share one non-wrapping toolbar. |
+| 5 quality gates | Pending current run | Focused tests exist, but current full web test/typecheck/lint evidence must be recorded after all related changes. |
+| 6 browser verification | Not verified | Replacement transitions, minimum-width overflow, keyboard order, focus, screenshots, and console checks lack current evidence. |
+| 7 review/delivery | Not complete | No audit record proves the final diff, atomic commit, and push for this plan alone. |
+
+**Next action:** run Task 5 and the exact browser checklist in Task 6; archive only after Task 7 records the evidence.
 
 > **Executor:** This plan is written for GPT-5.4-mini. Follow tasks in order, keep changes scoped, and do not declare the UI fixed until the exact browser scenario passes.
 

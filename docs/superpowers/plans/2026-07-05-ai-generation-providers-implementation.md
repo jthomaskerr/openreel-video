@@ -1,10 +1,26 @@
 # AI Generation & Providers — Implementation Plan
 
-> **Audit status (2026-07-13): INCOMPLETE DECOMPOSITION, NOT EXECUTABLE.** Canonical owner: `docs/spec/generation.md`; the referenced `docs/spec/ai-generation-providers.md` is now a redirect. A normalized generation-job store, WaveSpeed pieces, and server repository exist, but this document does not define a complete implementation sequence or prove provider-boundary, finalization, recovery, observability, and browser requirements.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** PARTIAL HISTORICAL DECOMPOSITION, NOT A COMPLETE EXECUTION PLAN. Canonical owner: [Generation](../../spec/generation.md); the original spec link below is now a redirect.
+
+| Phase | State | Current evidence and remaining work |
+|---|---|---|
+| 1 core type alignment | Partial | Shared generation contracts, migrations, and job schemas exist; provider coverage is incomplete. |
+| 2 Atlascloud | Not started/blocked | No implementation exists and authoritative provider facts are still missing. |
+| 3 settings/registry | Partial | KieAI/WaveSpeed settings exist; normalized provider registry and Atlascloud coverage are incomplete. |
+| 4 job management | Implemented, limited | Persistent job store, poller, and `JobManagementPanel` exist; full recovery/cancellation semantics remain incomplete. |
+| 5 model schemas/forms | Partial | WaveSpeed schema normalization/sanitization exists; cross-provider schema validation is incomplete. |
+| 6 references/provider mapping | Implemented for current flow | `ReferenceImagePicker` and deterministic reference resolution exist; provider-wide mapping remains incomplete. |
+| 7 timeline placement | Implemented | `placeGeneratedAssetOnTimeline` has deterministic tests. |
+| 8 character pills | Implemented | Scene metadata inspector parses/renders character references. |
+| 9 multi-instance configuration | Not implemented | No complete multi-instance provider model exists. |
+
+**Document gap:** this file does not define acceptance tests, eval thresholds, or browser gates for all phases. **Next action:** replace it with provider-specific plans governed by the canonical generation contract; use the WaveSpeed and Atlascloud files for scoped work.
 
 **Date:** 2026-07-05  
 **Spec:** `docs/spec/ai-generation-providers.md`  
-**Status:** Decomposition phase — identifying gaps between spec and codebase  
+**Status:** Historical partial decomposition; superseded by the Current State section above.
 
 ---
 

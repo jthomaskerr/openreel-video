@@ -1,6 +1,20 @@
 # Inspector Shell Implementation Findings
 
-> **Audit status (2026-07-13): FINDINGS ONLY, NOT COMPLETE.** Canonical owner: `docs/spec/inspector-shell.md`. Inspector, Problems, Log, metadata, and asset-inspector components exist, but this document itself leaves asset routing, update mechanics, filtering, and full clip-kind coverage unverified. It is not an implementation plan and cannot be archived as one.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Document type:** HISTORICAL FINDINGS, NOT AN EXECUTABLE PLAN. Canonical owner: [Inspector Shell](../../spec/inspector-shell.md). The original “70%” estimate is stale.
+
+| Area | Current state |
+|---|---|
+| Four primary tabs | Implemented: Inspector, Edit, Problems, and Log. |
+| Clip-kind routing/sub-tabs | Implemented for current clip types, including metadata routing; exhaustive canonical clip-kind coverage lacks a single matrix test. |
+| Scene/character/style/note metadata | Implemented with dedicated inspectors and inline character references. |
+| Asset inspector | Implemented as `AssetInspectorWithTabs` with targeted audio/preview tests. |
+| Problems/Log panels | Implemented and wired into the shell. |
+| Selection/update behavior | Present through store subscriptions, but no complete cross-panel refresh/focus/browser suite is recorded. |
+| Accessibility/browser evidence | Incomplete; keyboard, narrow-width, focus retention, and all-kind navigation need a dedicated verification pass. |
+
+**Next action:** replace remaining questions below with a focused inspector-shell verification plan if canonical gaps are confirmed.
 
 **Date:** 2026-07-05  
 **Spec Reference:** `docs/spec/inspector-shell.md` (§1–12)  

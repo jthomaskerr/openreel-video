@@ -1,8 +1,25 @@
 # Backend Auto-Save with Git LFS Implementation Plan
 
-> **Audit status (2026-07-13): PARTIAL AND NONCONFORMANT, NOT COMPLETE.** Canonical owner: `docs/spec/project.md`. Git worktrees, save services, and regression tests exist, but project creation currently marks `explicitlyCreated` before backend identity is established and swaps a client UUID after a fire-and-forget request. That contradicts the canonical creation gate, and snapshot completeness, conflict receipts, LFS payload proof, and allowlisted transaction work remain open.
+## Current State (Audited 2026-07-13 16:16 AEST)
 
-> Status: backend autosave/git-lfs gap pass implemented and verified on 2026-07-08. The implementation intentionally goes beyond the original flat per-project-repo plan by using a shared git repository with project worktrees/branches.
+**Overall:** PARTIAL AND NONCONFORMANT. Canonical owner: [Project Lifecycle and Persistence](../../spec/project.md). This section supersedes the older “implemented and verified” banner and validation checkboxes below.
+
+| Area | State | Current evidence and remaining work |
+|---|---|---|
+| Shared repository/worktrees | Implemented | `GitStore` creates serialized project worktrees and migration/concurrency tests exist. |
+| Project and media routes | Implemented | Orchestrator create/load/save/history/media routes and route tests exist. |
+| Web save queue | Implemented | `BackendSaveService` serializes saves, uploads media, and validates basic save receipts. |
+| Backend-only recovery | Implemented, browser-unverified | `useProjectRecovery` rejects silent IndexedDB fallback and has deterministic tests; no current browser run is recorded. |
+| Canonical project identity | Nonconformant | `createNewProject()` sets `explicitlyCreated: true`, mints a local UUID, then asynchronously swaps in the backend slug. The spec requires backend identity before the project enters backend persistence. |
+| Snapshot completeness | Partial | Manifest audit and explicit Git allowlisting exist, but the save transaction is not yet conflict-safe and client requests do not carry the complete canonical manifest/base revision contract. |
+| Git receipt verification | Implemented | Commit, tree, project-blob, and manifest digest receipts are resolved and verified from Git objects. |
+| Git LFS durability | Not implemented | Pointer presence is not sufficient; object-payload availability is not yet verified. |
+| Optimistic concurrency/destructive intent | Not implemented | No atomic base-revision conflict gate or destructive-shrink intent enforcement is active. |
+| Validation | Partial | Historical typecheck/unit results are recorded below. Required create/import/LFS/restore/version-switch browser scenarios remain unchecked. |
+
+**Next action:** implement the canonical backend-first identity flow and remaining transaction/LFS gates in the project-save plan; then rerun every unchecked validation item. Historical checked boxes below are evidence from their original pass, not proof of current full conformance.
+
+> Historical status (superseded): the 2026-07-08 backend autosave/git-lfs gap pass was implemented, but the current canonical persistence contract is not complete.
 
 ## Goal
 

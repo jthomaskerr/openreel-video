@@ -1,6 +1,20 @@
 # Thumbnails & Fallbacks — Complete Investigation Findings
 
-> **Audit status (2026-07-13): INVESTIGATION RECORD, IMPLEMENTATION INCOMPLETE.** Canonical owners: `docs/spec/media-assets.md` and `docs/spec/timeline.md`. Several fallback paths exist, but the findings themselves identify missing status badges, color stripes, fallback behavior, and tests. The document is not an implementation plan and the scoped product outcome is not complete.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Document type:** INVESTIGATION RECORD, NOT AN EXECUTABLE PLAN. Canonical owners: [Media Assets](../../spec/media-assets.md) and [Timeline](../../spec/timeline.md).
+
+| Area | Current state |
+|---|---|
+| Media-card thumbnails | Implemented with generated/remote/local fallbacks in common views. |
+| Timeline clip thumbnails | Implemented in common clip rendering paths. |
+| Video/image preview fallback | Targeted missing/preview components and tests exist. |
+| Runtime availability semantics | Nonconformant/incomplete; backend outage can still be confused with missing media without the planned state machine. |
+| Status badges/color stripes | Incomplete as recorded by the findings. |
+| Cache/lazy loading/fallback consistency | Partial and not proven across every view. |
+| Browser matrix | Missing for reload, offline, confirmed missing, decode failure, thumbnail failure, and relink recovery. |
+
+**Next action:** fold remaining fallback work into project-save Task 12A and Tasks 13-14 rather than creating another competing availability model.
 
 **Date:** 2026-07-06  
 **Investigation:** Complete analysis of `docs/spec/thumbnails-fallbacks.md` against actual implementation  

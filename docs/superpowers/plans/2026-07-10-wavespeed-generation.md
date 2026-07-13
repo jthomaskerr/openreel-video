@@ -1,10 +1,27 @@
 # WaveSpeed Image and Video Generation Implementation Plan
 
-> **Audit status (2026-07-13): PARTIAL, NOT COMPLETE.** Canonical owner: `docs/spec/generation.md`. Shared contracts, schema normalization, sanitization, a server repository, job-store/poller behavior, and deterministic tests exist. The plan itself records browser/provider gates as pending, and no current paid-provider eval, cancellation proof, full restart/recovery evidence, or end-to-end browser result was found.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** DETERMINISTIC FOUNDATION PARTIAL; RELEASE GATES OPEN. Canonical owner: [Generation](../../spec/generation.md#92-wavespeed). This section supersedes the earlier claim that deterministic implementation is complete.
+
+| Work package | State | Current evidence and remaining work |
+|---|---|---|
+| 1 contracts/migrations | Implemented | Shared job contracts, schemas, migrations, and tests exist. |
+| 2 deterministic context | Implemented | Timing, character-token, and reference resolvers exist with focused tests. |
+| 3 schema normalization | Implemented | Model normalization and input sanitization have deterministic tests. |
+| 4 server boundary | Partial | File job repository and orchestrator services exist; full restart/redaction/upload lifecycle proof is incomplete. |
+| 5 timed audio/cache | Not implemented | No planned exact-range PCM WAV extraction/cache artifact was found. |
+| 6 submission coordinator | Partial | `submitGeneration` exists with basic tests; complete failure-injection and placeholder-integrity matrix is absent. |
+| 7 idempotent finalization/placement | Partial | Poller, asset-version creation, and placement tests exist; explicit checkpointed finalizer and every replay/concurrency case are incomplete. |
+| 8 inspector experience | Partial | `GenerateAssetDialog` is substantial, but the complete shot-aware controller/accessibility/browser contract is unproven. |
+| 9 regenerate/cancel/recovery | Partial | Basic retry/cancel UI exists; provider cancellation, attempt history, needs-attention migration, and stage-specific recovery are incomplete. |
+| 10 observability/full verification | Not complete | No paid-provider eval, browser matrix, release-flag evidence, or complete observability proof exists. |
+
+**Next action:** implement timed audio, checkpointed finalization/recovery, and failure-injection suites before browser and paid-provider gates.
 
 **Date:** 2026-07-10  
 **Spec:** `docs/spec/wavespeed-generation.md`  
-**Status:** Deterministic implementation complete; browser/provider gates pending  
+**Status:** Partial deterministic implementation; browser/provider/recovery gates pending.
 **Outcome:** A shot-aware WaveSpeed image/video generation flow resolves stable references and exact shot audio, survives reload/retry, finalizes one versioned asset, and applies an explicit idempotent timeline placement policy.
 
 ## Current-state findings

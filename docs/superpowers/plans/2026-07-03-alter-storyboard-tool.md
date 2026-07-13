@@ -1,6 +1,22 @@
 # Alter Storyboard Tool Implementation Plan
 
-> **Audit status (2026-07-13): NOT IMPLEMENTED; REVISION REQUIRED.** Canonical owner: `docs/spec/storyboard.md`. No `AlterStoryboard` domain, route, validator, dialog, or tests are present. The planned hosted API call also conflicts with the repository rule requiring reusable LLM work to use local Claude Code unless explicitly authorized.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** NOT STARTED; REVISION REQUIRED. Canonical owner: [Storyboard](../../spec/storyboard.md). No planned `AlterStoryboard` symbols or tests are present.
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 01 shared diff/request types | Not started | No `StoryboardDiff` or alter-request contract exists. |
+| 02 LLM diff prompt | Not started | No prompt/parser implementation or eval exists. |
+| 03 orchestrator route | Not started | No `/api/tools/alter-storyboard` route exists. |
+| 04 dialog | Not started | No `AlterStoryboardDialog` exists. |
+| 05 inspector integration | Not started | No alter-storyboard entry point exists. |
+| 06 accept/reject diff preview | Not started | No preview/apply flow exists. |
+| 07 patch-safety validation | Not started | No guard layer or malicious-output regression suite exists. |
+| 08 tests | Not started | No domain, route, validator, or dialog tests exist. |
+| 09 end-to-end smoke | Not verified | No browser or LLM eval evidence exists. |
+
+**Conformance blocker:** the plan calls a hosted Anthropic API directly. Repository policy requires reusable LLM work to use a typed local Claude Code service unless Joseph explicitly authorizes hosted access. **Next action:** revise Tasks 2-3 around the approved LLM boundary before implementation.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 

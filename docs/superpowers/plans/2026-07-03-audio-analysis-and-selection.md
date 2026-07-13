@@ -1,6 +1,24 @@
 # Audio Analysis and Manual Selection Implementation Plan
 
-> **Audit status (2026-07-13): NOT IMPLEMENTED, NOT COMPLETE.** Canonical owners: `docs/spec/audio-analysis-subtitles.md` and `docs/spec/song-sections.md`. No audio-analysis service, bridge, store actions, inspector controls, overlays, deterministic cache tests, eval results, or browser evidence are present. The plan is directionally conformant but must use the canonical section-evidence and validation contracts.
+## Current State (Audited 2026-07-13 16:16 AEST)
+
+**Overall:** NOT STARTED. Canonical owners: [Audio Analysis & Subtitles](../../spec/audio-analysis-subtitles.md) and [Song Sections](../../spec/song-sections.md). Existing beat-sync analysis is adjacent functionality and does not satisfy this plan.
+
+| Task | State | Current evidence and remaining work |
+|---|---|---|
+| 01 metadata fields | Not started | Planned genre, mood, energy, and section-sentiment fields are absent from media metadata. |
+| 02 shared analysis types | Not started | No `AudioAnalysisResult` contract exists. |
+| 03 librosa service | Not started | No `infra/audio-analysis` service or deterministic fixture suite exists. |
+| 04 orchestrator proxy | Not started | No audio-analysis route/cache boundary exists. |
+| 05 frontend bridge | Not started | No `AudioAnalysisBridge` exists; `BeatSyncBridge` only covers beat analysis. |
+| 06 project-store actions | Not started | No `analyzeAudio`/`applyAudioAnalysis` actions exist. |
+| 07 clip inspector UI | Not started | No `AudioAnalysisSection` exists. |
+| 08 asset inspector UI | Not started | Audio tab has no planned analysis controls. |
+| 09 timeline overlays | Not started | No energy/section overlay exists. |
+| 10 apply wiring | Not started | No selective persistence path exists. |
+| 11 integration/eval | Not verified | No deterministic cache tests, classifier eval, or browser evidence exists. |
+
+**Next action:** define the canonical analysis/evidence contracts and eval thresholds before building the service.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
