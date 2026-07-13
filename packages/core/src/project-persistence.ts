@@ -33,6 +33,24 @@ export interface RequiredMediaManifestEntry {
   readonly lfsOid?: string;
 }
 
+export interface ProjectSaveLfsPayloadVerification {
+  readonly mediaId: string;
+  readonly semanticFilename: string;
+  readonly relativePhysicalPath: string;
+  readonly oid: `sha256:${string}`;
+  readonly pointerSize: number;
+  readonly local:
+    | { readonly state: "verified"; readonly actualSize: number }
+    | { readonly state: "missing"; readonly actualSize: null }
+    | { readonly state: "size-mismatch" | "oid-mismatch"; readonly actualSize: number };
+  readonly remote:
+    | { readonly state: "local-only"; readonly remote: null }
+    | {
+        readonly state: "durable" | "upload-required" | "unreachable";
+        readonly remote: string;
+      };
+}
+
 export interface ProjectSaveRequest {
   readonly projectId: string;
   readonly baseRevision: ProjectBaseRevision;
@@ -50,6 +68,7 @@ export interface ProjectSaveReceipt {
   readonly treeSha: string | null;
   readonly projectBlobSha: string | null;
   readonly mediaManifestDigest: string | null;
+  readonly lfsPayloads: readonly ProjectSaveLfsPayloadVerification[];
   readonly committed?: boolean;
 }
 

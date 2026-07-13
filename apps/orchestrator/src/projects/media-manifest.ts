@@ -6,6 +6,11 @@ import {
   serializeRequiredMediaManifest,
   type RequiredMediaManifestEntry,
 } from "../../../../packages/core/src/project-persistence";
+import {
+  verifyGitLfsPayloads,
+  type LfsPayloadVerification,
+  type LfsVerificationOptions,
+} from "./lfs-integrity";
 
 interface MediaFileInfo {
   readonly filename: string;
@@ -48,11 +53,18 @@ export interface ProjectMediaManifestDanglingClip {
 export interface ProjectMediaManifestSnapshot {
   readonly mediaManifestDigest: string | null;
   readonly requiredMediaManifest: readonly RequiredMediaManifestEntry[];
+  /** Availability evidence; excluded from mediaManifestDigest by design. */
+  readonly lfsPayloads: readonly LfsPayloadVerification[];
   readonly missingEntries: readonly ProjectMediaManifestMissingEntry[];
   readonly duplicateIssues: readonly ProjectMediaManifestDuplicateIssue[];
   readonly filenameMismatches: readonly ProjectMediaManifestFilenameMismatch[];
   readonly byteSizeMismatches: readonly ProjectMediaManifestByteSizeMismatch[];
   readonly danglingClips: readonly ProjectMediaManifestDanglingClip[];
+}
+
+export interface ProjectMediaManifestAuditOptions extends LfsVerificationOptions {
+  /** Worktree containing the committed LFS pointers for the manifest. */
+  readonly lfsRepoDir?: string;
 }
 
 export class ProjectMediaManifestAuditError extends Error {
@@ -186,6 +198,7 @@ function detectDanglingClips(project: Project): ProjectMediaManifestDanglingClip
 export async function auditProjectMediaManifest(
   project: Project,
   mediaDir: string,
+  options: ProjectMediaManifestAuditOptions = {},
 ): Promise<ProjectMediaManifestSnapshot> {
   const requiredMediaManifest = buildRequiredMediaManifest(project);
   const duplicateIssues = detectDuplicateIssues(requiredMediaManifest);
@@ -226,6 +239,12 @@ export async function auditProjectMediaManifest(
   }
 
   const danglingClips = detectDanglingClips(project);
+  const lfsPayloads = options.lfsRepoDir
+    ? await verifyGitLfsPayloads(options.lfsRepoDir, requiredMediaManifest, {
+        remote: options.remote,
+        checkRemoteObject: options.checkRemoteObject,
+      })
+    : [];
 
   const mediaManifestDigest =
     duplicateIssues.length === 0
@@ -237,6 +256,7 @@ export async function auditProjectMediaManifest(
   const snapshot: ProjectMediaManifestSnapshot = {
     mediaManifestDigest,
     requiredMediaManifest,
+    lfsPayloads,
     missingEntries,
     duplicateIssues,
     filenameMismatches,
@@ -249,7 +269,12 @@ export async function auditProjectMediaManifest(
     duplicateIssues.length > 0 ||
     filenameMismatches.length > 0 ||
     byteSizeMismatches.length > 0 ||
-    danglingClips.length > 0
+    danglingClips.length > 0 ||
+    lfsPayloads.some(
+      (payload) =>
+        payload.local.state !== "verified" ||
+        (options.remote != null && payload.remote.state !== "durable"),
+    )
   ) {
     throw new ProjectMediaManifestAuditError(snapshot);
   }

@@ -3,7 +3,12 @@ import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
 import { mkdirSync } from "node:fs";
 import { extname } from "node:path";
-import type { ProjectSettings, Project, ProjectSaveReceipt } from "@openreel/core";
+import type {
+  ProjectSettings,
+  Project,
+  ProjectSaveLfsPayloadVerification,
+  ProjectSaveReceipt,
+} from "@openreel/core";
 import { ProjectStore } from "./project-store";
 import {
   GitStore,
@@ -47,6 +52,7 @@ function projectSaveReceipt(
   receipt: GitCommitReceipt | null,
   persistedAt: number | null,
   committed: boolean,
+  lfsPayloads: readonly ProjectSaveLfsPayloadVerification[],
 ): ProjectSaveReceipt {
   return {
     saved: true,
@@ -57,6 +63,7 @@ function projectSaveReceipt(
     treeSha: receipt?.treeSha ?? null,
     projectBlobSha: receipt?.projectBlobSha ?? null,
     mediaManifestDigest: receipt?.mediaManifestDigest ?? null,
+    lfsPayloads,
     committed,
   };
 }
@@ -288,11 +295,21 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       const semanticChanges = semanticProjectChanges(prev, saved);
       if (semanticChanges.length === 0) {
         const confirmed = await gitStore.readConfirmedReceipt(req.params.id);
+        const audit = await store.auditSnapshot(saved);
         console.info("[Persistence] project.json written without commit; modifiedAt-only change remains pending", {
           projectId: req.params.id,
           modifiedAt: incoming.modifiedAt,
         });
-        res.json(projectSaveReceipt(req.params.id, incoming.modifiedAt, confirmed, null, false));
+        res.json(
+          projectSaveReceipt(
+            req.params.id,
+            incoming.modifiedAt,
+            confirmed,
+            null,
+            false,
+            audit.lfsPayloads,
+          ),
+        );
         return;
       }
       console.info("[Persistence] project.json written; committing", { projectId: req.params.id });
@@ -304,9 +321,19 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         ),
         commitTransaction(["project.json"], [stagedEntry("M", "project.json")]),
       );
+      const audit = await store.auditSnapshot(saved);
       const persistedAt = Date.now();
       console.info("[Persistence] Git commit confirmed", { projectId: req.params.id, persistedAt, commitSha: receipt.commitSha });
-      res.json(projectSaveReceipt(req.params.id, incoming.modifiedAt, receipt, persistedAt, true));
+      res.json(
+        projectSaveReceipt(
+          req.params.id,
+          incoming.modifiedAt,
+          receipt,
+          persistedAt,
+          true,
+          audit.lfsPayloads,
+        ),
+      );
     } catch (err) {
       console.error("[PUT /api/projects/:id] save failed:", err);
       res.status(500).json({ error: "Failed to save project", detail: String(err) });

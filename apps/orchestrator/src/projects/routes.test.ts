@@ -5,6 +5,30 @@ import type { Project } from "@openreel/core";
 import { createProjectRouter, handleMediaSendError } from "./routes";
 import type { GitCommitReceipt, GitStore } from "./git-store";
 import type { ProjectStore } from "./project-store";
+import type { ProjectMediaManifestSnapshot } from "./media-manifest";
+
+const verifiedLfsPayload = {
+  mediaId: "media-1",
+  semanticFilename: "Interview.mp4",
+  relativePhysicalPath: "media/media-1.mp4",
+  oid: `sha256:${"a".repeat(64)}` as const,
+  pointerSize: 42,
+  local: { state: "verified" as const, actualSize: 42 },
+  remote: { state: "local-only" as const, remote: null },
+};
+
+function auditReceipt(): ProjectMediaManifestSnapshot {
+  return {
+    mediaManifestDigest: "sha256:manifest-digest",
+    requiredMediaManifest: [],
+    lfsPayloads: [verifiedLfsPayload],
+    missingEntries: [],
+    duplicateIssues: [],
+    filenameMismatches: [],
+    byteSizeMismatches: [],
+    danglingClips: [],
+  };
+}
 
 function projectFixture(id: string, name: string): Project {
   return {
@@ -180,6 +204,7 @@ test("PUT confirms persistence only after the Git commit succeeds", async () => 
   const store: Partial<ProjectStore> = {
     loadProject: async () => previous,
     saveProject: async (incoming: Project) => incoming,
+    auditSnapshot: async () => auditReceipt(),
   };
   const gitStore: Partial<GitStore> = {
     commit: async (_projectId: string, message: string, _transaction?: unknown) => {
@@ -205,6 +230,7 @@ test("PUT confirms persistence only after the Git commit succeeds", async () => 
     assert.equal(responseReceipt.treeSha, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
     assert.equal(responseReceipt.projectBlobSha, "cccccccccccccccccccccccccccccccccccccccc");
     assert.equal(responseReceipt.mediaManifestDigest, "sha256:semantic-diff");
+    assert.deepEqual(responseReceipt.lfsPayloads, [verifiedLfsPayload]);
     assert.match(
       commitMessage,
       /^update name\n\n- Update name\n\nFiles staged:\n- Update project\.json\n\nFiles changed: 1$/,
@@ -227,6 +253,7 @@ test("PUT writes modifiedAt-only changes without creating a Git commit", async (
   const store: Partial<ProjectStore> = {
     loadProject: async () => previous,
     saveProject: async (project: Project) => project,
+    auditSnapshot: async () => auditReceipt(),
   };
   const gitStore: Partial<GitStore> = {
     commit: async (_projectId: string, _message: string, _transaction?: unknown) => {
@@ -252,6 +279,7 @@ test("PUT writes modifiedAt-only changes without creating a Git commit", async (
     assert.equal(receipt.treeSha, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
     assert.equal(receipt.projectBlobSha, "ffffffffffffffffffffffffffffffffffffffff");
     assert.equal(receipt.mediaManifestDigest, "sha256:confirmed-diff");
+    assert.deepEqual(receipt.lfsPayloads, [verifiedLfsPayload]);
     assert.equal(receipt.persistedAt, null);
     assert.equal(receipt.sourceModifiedAt, incoming.modifiedAt);
   });

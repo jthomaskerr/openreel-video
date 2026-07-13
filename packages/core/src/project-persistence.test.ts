@@ -178,6 +178,7 @@ describe("project persistence contracts", () => {
       treeSha: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       projectBlobSha: "ffffffffffffffffffffffffffffffffffffffff",
       mediaManifestDigest: "sha256:manifest-digest",
+      lfsPayloads: [],
       committed: true,
     } satisfies ProjectSaveReceipt;
 

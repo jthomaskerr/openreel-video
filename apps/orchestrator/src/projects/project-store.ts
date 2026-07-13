@@ -4,6 +4,7 @@ import { join, extname, basename } from "node:path";
 import crypto from "node:crypto";
 import type { Project, ProjectSettings } from "@openreel/core";
 import type { GitStore } from "./git-store";
+import type { LfsRemoteObjectCheck } from "./lfs-integrity";
 import {
   auditProjectMediaManifest,
   type ProjectMediaManifestSnapshot,
@@ -20,6 +21,12 @@ export interface ProjectSummary {
   readonly name: string;
   readonly createdAt: number;
   readonly modifiedAt: number;
+}
+
+export interface ProjectMediaAuditOptions {
+  /** Defaults to true; false is reserved for lower-level manifest-only checks. */
+  readonly verifyLfs?: boolean;
+  readonly checkRemoteObject?: LfsRemoteObjectCheck;
 }
 
 function defaultSettings(): ProjectSettings {
@@ -360,8 +367,19 @@ export class ProjectStore {
     return result;
   }
 
-  async auditSnapshot(project: Project): Promise<ProjectMediaManifestSnapshot> {
+  async auditSnapshot(
+    project: Project,
+    options: ProjectMediaAuditOptions = {},
+  ): Promise<ProjectMediaManifestSnapshot> {
     assertValidProjectId(project.id);
-    return auditProjectMediaManifest(project, this.mediaDir(project.id));
+    if (options.verifyLfs === false) {
+      return auditProjectMediaManifest(project, this.mediaDir(project.id));
+    }
+    const { remote } = await this.gitStore.getConfig();
+    return auditProjectMediaManifest(project, this.mediaDir(project.id), {
+      lfsRepoDir: this.projectDir(project.id),
+      remote: remote ? "origin" : null,
+      checkRemoteObject: options.checkRemoteObject,
+    });
   }
 }
