@@ -62,7 +62,6 @@ export const StartFromScratch: React.FC<StartFromScratchProps> = ({
   initialPreset,
 }) => {
   const createNewProject = useProjectStore((state) => state.createNewProject);
-  const updateSettings = useProjectStore((state) => state.updateSettings);
   const { track } = useAnalytics();
   const [selectedPreset, setSelectedPreset] =
     useState<SocialMediaCategory>(initialPreset ?? "youtube-video");
@@ -76,8 +75,14 @@ export const StartFromScratch: React.FC<StartFromScratchProps> = ({
     setIsCreating(true);
 
     const settings = createProjectSettingsFromPreset(preset);
-    createNewProject(projectName.trim() || `${info?.name || "New"} Project`);
-    await updateSettings(settings);
+    const created = await createNewProject(
+      projectName.trim() || `${info?.name || "New"} Project`,
+      settings,
+    );
+    if (!created) {
+      setIsCreating(false);
+      return;
+    }
 
     track(AnalyticsEvents.PROJECT_CREATED, {
       preset: selectedPreset,
@@ -87,13 +92,10 @@ export const StartFromScratch: React.FC<StartFromScratchProps> = ({
       source: "start_from_scratch",
     });
 
-    setTimeout(() => {
-      setIsCreating(false);
-      onProjectCreated?.();
-    }, 100);
+    setIsCreating(false);
+    onProjectCreated?.();
   }, [
     createNewProject,
-    updateSettings,
     preset,
     projectName,
     info,

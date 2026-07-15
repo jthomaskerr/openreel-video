@@ -36,6 +36,20 @@ export function createEmptyProject(
   };
 }
 
+/** Non-editable startup value used until a backend project is confirmed. */
+export function createUnresolvedProject(): Project {
+  const now = Date.now();
+  return {
+    id: "unresolved",
+    name: "Unresolved project",
+    createdAt: now,
+    modifiedAt: now,
+    settings: { ...DEFAULT_PROJECT_SETTINGS },
+    mediaLibrary: { items: [] },
+    timeline: createDefaultTimeline(),
+  };
+}
+
 export function calculateTimelineDuration(project: Project): number {
   let maxEnd = 0;
   for (const track of project.timeline.tracks) {

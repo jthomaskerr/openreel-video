@@ -52,11 +52,12 @@ describe("AutoSaveManager synchronization", () => {
     const save = vi.fn()
       .mockImplementationOnce(() => firstSave)
       .mockResolvedValue(undefined);
-    const manager = new AutoSaveManager({ interval: 60_000, debounceTime: 60_000 });
+    const manager = new AutoSaveManager({ interval: 60_000, debounceTime: 0 });
     (manager as unknown as { save: (project: Project) => Promise<void> }).save = save;
 
     manager.start(() => project);
-    expect(save).toHaveBeenCalledTimes(1);
+    manager.markDirty();
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
 
     project = makeProject({ modifiedAt: 2 });
     manager.markDirty();
@@ -67,19 +68,17 @@ describe("AutoSaveManager synchronization", () => {
     manager.destroy();
   });
 
-  it("requests backend synchronization on every autosave interval", async () => {
+  it("does not save or request backend synchronization without an edit", async () => {
     vi.useFakeTimers();
     const project = makeProject({ id: "vintage-tokyo" });
     const manager = new AutoSaveManager({ interval: 1_000 });
     const save = vi.fn().mockResolvedValue(undefined);
-    const syncRequested = vi.fn();
     (manager as unknown as { save: (project: Project) => Promise<void> }).save = save;
-    manager.on("syncRequested", syncRequested);
 
     manager.start(() => project);
     await vi.advanceTimersByTimeAsync(1_000);
 
-    expect(syncRequested).toHaveBeenCalledWith({ project });
+    expect(save).not.toHaveBeenCalled();
     manager.destroy();
   });
 });

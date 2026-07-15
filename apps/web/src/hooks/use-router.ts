@@ -37,7 +37,7 @@ function parseHash(hash: string): RouterState {
   }
 
   const pathParts = path.split("/");
-  let route: AppRoute = (pathParts[0] || "welcome") as AppRoute;
+  const route: AppRoute = (pathParts[0] || "welcome") as AppRoute;
   const validRoutes: AppRoute[] = [
     "welcome",
     "editor",
@@ -54,6 +54,19 @@ function parseHash(hash: string): RouterState {
   return {
     route: validRoutes.includes(route) ? route : "welcome",
     params,
+  };
+}
+
+export function parseLocation(hash: string, search: string): RouterState {
+  const hashState = parseHash(hash);
+  const pageParams: RouteParams = {};
+  new URLSearchParams(search).forEach((value, key) => {
+    pageParams[key as keyof RouteParams] = value;
+  });
+
+  return {
+    route: hashState.route,
+    params: { ...pageParams, ...hashState.params },
   };
 }
 
@@ -79,14 +92,14 @@ function buildHash(route: AppRoute, params?: RouteParams): string {
 export function useRouter() {
   const [state, setState] = useState<RouterState>(() => {
     if (typeof window !== "undefined") {
-      return parseHash(window.location.hash);
+      return parseLocation(window.location.hash, window.location.search);
     }
     return { route: "welcome", params: {} };
   });
 
   useEffect(() => {
     const handleHashChange = () => {
-      setState(parseHash(window.location.hash));
+      setState(parseLocation(window.location.hash, window.location.search));
     };
 
     window.addEventListener("hashchange", handleHashChange);

@@ -108,7 +108,7 @@ export interface ProjectState {
   createNewProject: (
     name?: string,
     settings?: Partial<ProjectSettings>,
-  ) => void;
+  ) => Promise<boolean>;
   loadProject: (project: Project) => void;
   renameProject: (name: string) => Promise<ActionResult>;
   updateSettings: (settings: Partial<ProjectSettings>) => Promise<ActionResult>;

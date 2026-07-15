@@ -51,6 +51,7 @@ import type {
 } from "../bridges/effects-bridge";
 import { getEffectsBridge } from "../bridges/effects-bridge";
 import { getTransitionBridge } from "../bridges/transition-bridge";
+import { generateProjectName } from "../utils/project-names";
 import {
   autoSaveManager,
   initializeAutoSave,
@@ -60,7 +61,7 @@ import {
 import { useEngineStore } from "./engine-store";
 import { getMediaBridge, initializeMediaBridge } from "../bridges/media-bridge";
 import {
-  createEmptyProject,
+  createUnresolvedProject,
   calculateTimelineDuration,
   type AudioDuckingSettings,
   type EditingTemplateApplicationState,
@@ -123,59 +124,14 @@ function preserveUserMediaMetadata(
 }
 
 let autoSaveBindingsInitialized = false;
-const identityReconciliations = new Set<string>();
+let projectInstallationInProgress = false;
 
-async function reconcileBackendIdentity(
-  temporaryId: string,
-  getProjectState: () => ProjectState,
-): Promise<void> {
-  if (identityReconciliations.has(temporaryId)) return;
-  identityReconciliations.add(temporaryId);
+function installProjectWithoutPersistence(install: () => void): void {
+  projectInstallationInProgress = true;
   try {
-    const snapshot = getProjectState().project;
-    console.info("[Persistence] reconciling client project identity", {
-      temporaryId,
-      projectName: snapshot.name,
-    });
-    const projects = await backendSaveService.listProjects();
-    if (!projects) throw new Error("Backend project list is unavailable");
-    const normalizedName = snapshot.name.trim().toLocaleLowerCase();
-    const matches = projects.filter(
-      (project) => project.name.trim().toLocaleLowerCase() === normalizedName,
-    );
-    if (matches.length !== 1) {
-      throw new Error(
-        `Expected one backend project named "${snapshot.name}", found ${matches.length}; UUID ${temporaryId} was not persisted`,
-      );
-    }
-    const canonicalProject = await backendSaveService.load(matches[0]!.id);
-    if (!canonicalProject) {
-      throw new Error(`Backend project ${matches[0]!.id} could not provide a confirmed base revision`);
-    }
-    const current = getProjectState().project;
-    if (current.id !== temporaryId) return;
-    await autoSaveManager.migrateProjectId(temporaryId, matches[0]!.id);
-    useProjectStore.setState({
-      project: { ...current, id: matches[0]!.id, modifiedAt: Date.now() },
-    });
-    console.info("[Persistence] project identity reconciled", {
-      temporaryId,
-      projectId: matches[0]!.id,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    usePersistenceStatusStore.getState().markFailed(temporaryId, message);
-    console.error("[Persistence] project identity reconciliation failed", {
-      temporaryId,
-      error: message,
-    });
-    reportRuntimeError(
-      "Backend project identity reconciliation failed",
-      error,
-      "backend-save.identity-reconciliation",
-    );
+    install();
   } finally {
-    identityReconciliations.delete(temporaryId);
+    projectInstallationInProgress = false;
   }
 }
 
@@ -188,13 +144,13 @@ function ensureAutoSaveBindings(getProjectState: () => ProjectState): void {
   };
 
   autoSaveManager.on("saved", pushCurrentProjectToBackend);
-  autoSaveManager.on("syncRequested", pushCurrentProjectToBackend);
 
   // Backend persistence must not depend on IndexedDB initialization. Browsers
   // can block or fail IndexedDB while the orchestrator remains reachable.
   useProjectStore.subscribe(
     (state) => state.project,
     () => {
+      if (projectInstallationInProgress) return;
       const state = getProjectState();
       if (!state.explicitlyCreated) return;
       autoSaveManager.markDirty();
@@ -254,7 +210,7 @@ export interface ProjectState {
   createNewProject: (
     name?: string,
     settings?: Partial<ProjectSettings>,
-  ) => void;
+  ) => Promise<boolean>;
   loadProject: (project: Project) => void;
   renameProject: (name: string) => Promise<ActionResult>;
   updateSettings: (settings: Partial<ProjectSettings>) => Promise<ActionResult>;
@@ -1625,8 +1581,8 @@ export const useProjectStore = create<ProjectState>()(
     };
 
     return {
-      // Initial state - create empty project (Requirement 1.1)
-      project: createEmptyProject(),
+      // Startup is unresolved until a backend load or create confirms a receipt.
+      project: createUnresolvedProject(),
       photoProjects: new Map(),
       actionExecutor,
       actionHistory,
@@ -1641,98 +1597,58 @@ export const useProjectStore = create<ProjectState>()(
       clipboard: [] as Clip[],
       copiedEffects: [] as Effect[],
 
-      createNewProject: (
+      createNewProject: async (
         name?: string,
         settings?: Partial<ProjectSettings>,
       ) => {
-        const newHistory = new ActionHistory();
-        const newExecutor = new ActionExecutor(newHistory);
         const previousProject = get().project;
-        const nextProject = createEmptyProject(name, settings);
-
-        syncProjectEffectsBridge(nextProject, previousProject);
-        syncProjectTransitionsBridge(nextProject, previousProject);
-
-        set({
-          project: nextProject,
-          actionHistory: newHistory,
-          actionExecutor: newExecutor,
-          clipUndoStack: [],
-          clipRedoStack: [],
-          templateUndoStack: [],
-          templateRedoStack: [],
-          error: null,
-          explicitlyCreated: true,
-        });
-
+        const projectName = name?.trim() || generateProjectName();
+        set({ isLoading: true, error: null, explicitlyCreated: false });
         backendSaveService.resetForProject();
 
-        // Fire-and-forget: if the orchestrator is reachable, create the
-        // project on the backend and swap the client-generated UUID for
-        // the orchestrator-issued slug. Store a guard hash so we only
-        // apply the replacement if the user hasn't navigated away in the
-        // meantime (idempotent after-the-fact gating).
-        const snapshotId = nextProject.id;
-        const projectName = name ?? nextProject.name;
-        autoSaveManager.markPendingProjectCreation({
-          temporaryId: snapshotId,
-          name: projectName,
-          settings: nextProject.settings,
-          createdAt: Date.now(),
-        });
-        backendSaveService
-          .isReachable()
-          .then(async (reachable) => {
-            if (!reachable) {
-              autoSaveManager.clearPendingProjectCreation(snapshotId);
-              return;
-            }
-            const backendProject = await backendSaveService.create(projectName, settings);
-            const current = get();
-            if (current.project.id !== snapshotId) {
-              autoSaveManager.clearPendingProjectCreation(snapshotId);
-              return;
-            }
-            // Merge the backend slug id + timestamps into the live project
-            // state instead of replacing it outright. The store may already
-            // hold media items, clips, and settings added during create().
-            const merged = {
-              ...current.project,
-              id: backendProject.id,
-              createdAt: backendProject.createdAt,
-              modifiedAt: Date.now(),
-            };
-            syncProjectEffectsBridge(merged, previousProject);
-            syncProjectTransitionsBridge(merged, previousProject);
-            set({ project: merged });
-            backendSaveService.resetForProject(merged.id);
-            try {
-              await autoSaveManager.migrateProjectId(snapshotId, backendProject.id);
-            } catch (migrationError) {
-              console.error("[AutoSave] project identity migration failed:", migrationError);
-              reportRuntimeError(
-                "Local project recovery handoff failed",
-                migrationError,
-                "backend-save.identity-migration",
-              );
-            }
-            // Push the full current project state (tracks, clips, media
-            // items) to the backend now instead of waiting for the next
-            // autosave cycle. This prevents skeleton-only projects from being
-            // persisted when the user closes before autosave fires.
-            backendSaveService.save(merged).catch((saveErr) => {
-              console.error("[BackendSave] initial full save failed:", saveErr);
-              reportRuntimeError("Backend save failed", saveErr, "backend-save.initial-full-save");
+        try {
+          const backendProject = await backendSaveService.create(projectName, settings);
+          const persistence = usePersistenceStatusStore.getState();
+          if (persistence.projectId !== backendProject.id || !persistence.baseRevision) {
+            throw new Error(`Backend create returned no confirmed base revision for ${backendProject.id}`);
+          }
+
+          const newHistory = new ActionHistory();
+          const newExecutor = new ActionExecutor(newHistory);
+          syncProjectEffectsBridge(backendProject, previousProject);
+          syncProjectTransitionsBridge(backendProject, previousProject);
+          backendSaveService.resetForProject(backendProject.id);
+          installProjectWithoutPersistence(() => {
+            set({
+              project: backendProject,
+              actionHistory: newHistory,
+              actionExecutor: newExecutor,
+              clipUndoStack: [],
+              clipRedoStack: [],
+              templateUndoStack: [],
+              templateRedoStack: [],
+              isLoading: false,
+              error: null,
+              explicitlyCreated: true,
             });
-          })
-          .catch((err) => {
-            autoSaveManager.clearPendingProjectCreation(snapshotId);
-            console.error("[BackendSave] create new project failed, using local id:", err);
-            reportRuntimeError("Backend project creation failed", err, "backend-save.create-project");
           });
+          return true;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "Backend project creation failed";
+          set({ isLoading: false, error: message, explicitlyCreated: false });
+          reportRuntimeError("Backend project creation failed", err, "backend-save.create-project");
+          return false;
+        }
       },
 
       loadProject: (project: Project) => {
+        if (isClientOnlyProjectId(project.id)) {
+          set({
+            error: `Legacy UUID project ${project.id} is quarantined and cannot be activated.`,
+            explicitlyCreated: false,
+          });
+          return;
+        }
         backendSaveService.resetForProject(project.id);
         const previousProject = get().project;
         const titleEngine = useEngineStore.getState().getTitleEngine();
@@ -1766,21 +1682,19 @@ export const useProjectStore = create<ProjectState>()(
         syncProjectEffectsBridge(fixedProject, previousProject);
         syncProjectTransitionsBridge(fixedProject, previousProject);
 
-        set({
-          project: fixedProject,
-          actionHistory: newHistory,
-          actionExecutor: newExecutor,
-          clipUndoStack: [],
-          clipRedoStack: [],
-          templateUndoStack: [],
-          templateRedoStack: [],
-          error: null,
-          explicitlyCreated: true,
+        installProjectWithoutPersistence(() => {
+          set({
+            project: fixedProject,
+            actionHistory: newHistory,
+            actionExecutor: newExecutor,
+            clipUndoStack: [],
+            clipRedoStack: [],
+            templateUndoStack: [],
+            templateRedoStack: [],
+            error: null,
+            explicitlyCreated: true,
+          });
         });
-
-        if (isClientOnlyProjectId(fixedProject.id)) {
-          void reconcileBackendIdentity(fixedProject.id, get);
-        }
 
         // Auto-restore placeholder assets from saved FileSystemFileHandles (same machine)
         const placeholders = fixedProject.mediaLibrary.items.filter(
@@ -1880,8 +1794,7 @@ export const useProjectStore = create<ProjectState>()(
         await projectManager.deleteProject(project.id);
         await autoSaveManager.clearProjectSaves(project.id);
         stopAutoSave();
-        // Reset to empty project
-        const nextProject = createEmptyProject();
+        const nextProject = createUnresolvedProject();
         const newHistory = new ActionHistory();
         const newExecutor = new ActionExecutor(newHistory);
         set({
@@ -1893,6 +1806,7 @@ export const useProjectStore = create<ProjectState>()(
           templateUndoStack: [],
           templateRedoStack: [],
           error: null,
+          explicitlyCreated: false,
         });
       },
 
@@ -4985,135 +4899,56 @@ export const useProjectStore = create<ProjectState>()(
             set({ error: "No save record found for this ID." });
             return false;
           }
-
-          const temporaryProjectId = recoveredProject.id;
-          let projectToRecover = recoveredProject;
-          const pendingCreation = autoSaveManager.getPendingProjectCreation(temporaryProjectId);
-
-          // A refresh can interrupt the original POST after the local UUID
-          // autosave has completed. Retry creation from that complete local
-          // snapshot before attempting backend media migration, so the UUID
-          // never becomes a permanent backend lookup key.
-          if (pendingCreation && await backendSaveService.isReachable()) {
-            try {
-              const backendProject = await backendSaveService.create(
-                pendingCreation.name,
-                pendingCreation.settings,
-              );
-              projectToRecover = {
-                ...recoveredProject,
-                id: backendProject.id,
-                createdAt: backendProject.createdAt,
-                modifiedAt: Date.now(),
-              };
-              await autoSaveManager.migrateProjectId(temporaryProjectId, backendProject.id);
-            } catch (error) {
-              console.warn("[Recovery] Pending backend project creation failed; keeping local project:", error);
-            }
+          if (isClientOnlyProjectId(recoveredProject.id)) {
+            set({
+              error: "This legacy UUID autosave is quarantined and cannot create or replace a backend project.",
+            });
+            return false;
           }
 
-          // ── Migrate existing IndexedDB media to backend ──────────────
-          const storedMedia = await loadProjectMedia(temporaryProjectId);
-          const blobMap = new Map(storedMedia.map((m) => [m.id, m.blob]));
-
-          // Upload every locally stored blob to the backend.
-          const reachable = await backendSaveService.isReachable();
-          if (reachable) {
-            backendSaveService.resetForProject(projectToRecover.id);
-            for (const record of storedMedia) {
-              if (!record.blob) continue;
-              const item = projectToRecover.mediaLibrary.items.find((i) => i.id === record.id);
-              backendSaveService.uploadMediaAsync(
-                projectToRecover.id,
-                record.id,
-                record.blob,
-                item?.name ?? record.id,
-              );
-            }
-            // Wait for uploads to finish (fire-and-forget, but we need them
-            // before we can switch to backend-only storage).
-            await new Promise((r) => setTimeout(r, 1000));
-
-            // Push project JSON, then reload from backend for canonical remoteUrls.
-            await backendSaveService.save(projectToRecover);
-            const backendProject = await backendSaveService.load(projectToRecover.id);
-            if (backendProject) {
-              // Clean up IndexedDB — we've migrated.
-              await deleteProjectMedia(temporaryProjectId);
-              const titleEngine = useEngineStore.getState().getTitleEngine();
-              const graphicsEngine = useEngineStore.getState().getGraphicsEngine();
-              if (titleEngine && backendProject.textClips) {
-                titleEngine.loadTextClips(backendProject.textClips);
-              }
-              if (graphicsEngine) {
-                if (backendProject.shapeClips) graphicsEngine.loadShapeClips(backendProject.shapeClips);
-                if (backendProject.svgClips) graphicsEngine.loadSVGClips(backendProject.svgClips);
-                if (backendProject.stickerClips) graphicsEngine.loadStickerClips(backendProject.stickerClips);
-              }
-              const newHistory = new ActionHistory();
-              const newExecutor = new ActionExecutor(newHistory);
-              set({
-                project: backendProject,
-                actionHistory: newHistory,
-                actionExecutor: newExecutor,
-                clipUndoStack: [],
-                clipRedoStack: [],
-                templateUndoStack: [],
-                templateRedoStack: [],
-                error: null,
-                explicitlyCreated: true,
-              });
-              await projectManager.addToRecent(backendProject);
-              return true;
-            }
+          // Establish the authoritative project and receipt before any upload
+          // or persistence attempt.
+          const authoritativeProject = await backendSaveService.load(recoveredProject.id);
+          if (!authoritativeProject || authoritativeProject.id !== recoveredProject.id) {
+            set({ error: `Could not load authoritative project ${recoveredProject.id} for recovery.` });
+            return false;
+          }
+          const persistence = usePersistenceStatusStore.getState();
+          if (persistence.projectId !== recoveredProject.id || !persistence.baseRevision) {
+            set({ error: `No confirmed base revision is available for ${recoveredProject.id}.` });
+            return false;
           }
 
-          // ── Backend unreachable — hydrate from IndexedDB as before ───
-          const restoredItems = await Promise.all(
-            projectToRecover.mediaLibrary.items.map((item) =>
-              restoreMediaItem({ ...item, blob: null }, blobMap.get(item.id)),
-            ),
-          );
-
-          const projectWithMedia: Project = {
-            ...projectToRecover,
-            mediaLibrary: {
-              ...projectToRecover.mediaLibrary,
-              items: restoredItems,
-            },
-          };
-
-          const titleEngine = useEngineStore.getState().getTitleEngine();
-          const graphicsEngine = useEngineStore.getState().getGraphicsEngine();
-
-          if (titleEngine && projectToRecover.textClips) {
-            titleEngine.loadTextClips(projectToRecover.textClips);
-          }
-          if (graphicsEngine) {
-            if (projectToRecover.shapeClips) graphicsEngine.loadShapeClips(projectToRecover.shapeClips);
-            if (projectToRecover.svgClips) graphicsEngine.loadSVGClips(projectToRecover.svgClips);
-            if (projectToRecover.stickerClips) graphicsEngine.loadStickerClips(projectToRecover.stickerClips);
+          const storedMedia = await loadProjectMedia(recoveredProject.id);
+          backendSaveService.resetForProject(recoveredProject.id);
+          for (const record of storedMedia) {
+            if (!record.blob) continue;
+            const item = recoveredProject.mediaLibrary.items.find(candidate => candidate.id === record.id);
+            backendSaveService.uploadMediaAsync(
+              recoveredProject.id,
+              record.id,
+              record.blob,
+              item?.name ?? record.id,
+            );
           }
 
-          const newHistory = new ActionHistory();
-          const newExecutor = new ActionExecutor(newHistory);
-          set({
-            project: projectWithMedia,
-            actionHistory: newHistory,
-            actionExecutor: newExecutor,
-            clipUndoStack: [],
-            clipRedoStack: [],
-            templateUndoStack: [],
-            templateRedoStack: [],
-            error: null,
-            explicitlyCreated: true,
-          });
+          // Exactly one bounded persistence attempt. BackendSaveService.save
+          // waits for tracked uploads and requires the confirmed base revision.
+          await backendSaveService.save({
+            ...recoveredProject,
+            id: authoritativeProject.id,
+            createdAt: authoritativeProject.createdAt,
+          }, "recovery");
 
-          if (isClientOnlyProjectId(projectWithMedia.id)) {
-            void reconcileBackendIdentity(projectWithMedia.id, get);
+          const confirmedProject = await backendSaveService.load(recoveredProject.id);
+          if (!confirmedProject) {
+            set({ error: "Recovery saved but the confirmed project could not be reloaded." });
+            return false;
           }
 
-          await projectManager.addToRecent(projectWithMedia);
+          await deleteProjectMedia(recoveredProject.id);
+          get().loadProject(confirmedProject);
+          await projectManager.addToRecent(confirmedProject);
           return true;
         } catch (err) {
           const message = err instanceof Error ? err.message : "Recovery failed";

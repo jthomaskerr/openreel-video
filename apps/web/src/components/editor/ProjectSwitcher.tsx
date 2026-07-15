@@ -101,12 +101,14 @@ export const ProjectSwitcher: React.FC = () => {
     [handleSaveName, project.name]
   );
 
-  const handleNewProject = useCallback(() => {
+  const handleNewProject = useCallback(async () => {
     const name = window.prompt("Project name:", "");
     if (name !== null && name.trim().length > 0) {
-      createNewProject(name.trim());
+      setIsLoading(true);
+      const created = await createNewProject(name.trim());
+      setIsLoading(false);
+      if (created) setIsOpen(false);
     }
-    setIsOpen(false);
   }, [createNewProject]);
 
   const handleSwitchProject = useCallback(

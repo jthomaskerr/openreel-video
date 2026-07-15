@@ -15,7 +15,7 @@ import type { AutoSaveMetadata } from "../../services/auto-save";
 
 interface RecoveryDialogProps {
   saves: AutoSaveMetadata[];
-  onRecover: (saveId: string) => void;
+  onRecover: (saveId: string) => boolean | void | Promise<boolean | void>;
   onDismiss: () => void;
   onClearAll?: () => void;
   hasBackendConflict?: boolean;
@@ -67,9 +67,16 @@ export const RecoveryDialog: React.FC<RecoveryDialogProps> = ({
     onDismiss();
   };
 
-  const handleRecover = (saveId: string) => {
+  const handleRecover = async (saveId: string) => {
     setSelectedSave(saveId);
-    onRecover(saveId);
+    try {
+      await onRecover(saveId);
+    } catch {
+      // The recovery owner surfaces the actionable error. The dialog must
+      // still return to an interactive terminal state.
+    } finally {
+      setSelectedSave(null);
+    }
   };
 
   return (

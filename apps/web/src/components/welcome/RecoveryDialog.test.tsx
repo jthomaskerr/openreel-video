@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { RecoveryDialog } from "./RecoveryDialog";
 import type { AutoSaveMetadata } from "../../services/auto-save";
 
@@ -18,7 +18,8 @@ describe("RecoveryDialog", () => {
   });
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    mockOnRecover.mockReset().mockResolvedValue(false);
+    mockOnDismiss.mockReset();
   });
 
   it("renders dialog with most recent save", () => {
@@ -32,7 +33,7 @@ describe("RecoveryDialog", () => {
     expect(screen.getByText("My Video")).toBeInTheDocument();
   });
 
-  it("calls onRecover when recover button is clicked", () => {
+  it("calls onRecover when recover button is clicked", async () => {
     const saves = [createSave({ id: "save-abc" })];
     render(
       <RecoveryDialog saves={saves} onRecover={mockOnRecover} onDismiss={mockOnDismiss} />
@@ -40,6 +41,7 @@ describe("RecoveryDialog", () => {
 
     fireEvent.click(screen.getByText("Recover Project"));
     expect(mockOnRecover).toHaveBeenCalledWith("save-abc");
+    await waitFor(() => expect(screen.getByText("Recover Project")).toBeEnabled());
   });
 
   it("calls onDismiss when Start Fresh is clicked", () => {
@@ -98,7 +100,7 @@ describe("RecoveryDialog", () => {
     expect(screen.getByText("Older Save")).toBeInTheDocument();
   });
 
-  it("allows recovering older save", () => {
+  it("allows recovering older save", async () => {
     const saves = [
       createSave({ id: "save-1", projectName: "Most Recent" }),
       createSave({ id: "save-2", projectName: "Older Save", timestamp: Date.now() - 3600000 }),
@@ -111,6 +113,7 @@ describe("RecoveryDialog", () => {
     fireEvent.click(screen.getByText("Older Save"));
 
     expect(mockOnRecover).toHaveBeenCalledWith("save-2");
+    await waitFor(() => expect(screen.getByText("Recover Project")).toBeEnabled());
   });
 
   it("displays relative time for recent saves", () => {
@@ -133,12 +136,35 @@ describe("RecoveryDialog", () => {
 
   it("disables recover button while recovering", () => {
     const saves = [createSave()];
+    mockOnRecover.mockReturnValue(new Promise(() => undefined));
     render(
       <RecoveryDialog saves={saves} onRecover={mockOnRecover} onDismiss={mockOnDismiss} />
     );
 
     fireEvent.click(screen.getByText("Recover Project"));
     expect(screen.getByText("Recovering...")).toBeInTheDocument();
+  });
+
+  it("clears recovering state when recovery returns false", async () => {
+    mockOnRecover.mockResolvedValue(false);
+    render(
+      <RecoveryDialog saves={[createSave()]} onRecover={mockOnRecover} onDismiss={mockOnDismiss} />
+    );
+
+    fireEvent.click(screen.getByText("Recover Project"));
+
+    await waitFor(() => expect(screen.getByText("Recover Project")).toBeEnabled());
+  });
+
+  it("clears recovering state when recovery rejects", async () => {
+    mockOnRecover.mockRejectedValue(new Error("Recovery unavailable"));
+    render(
+      <RecoveryDialog saves={[createSave()]} onRecover={mockOnRecover} onDismiss={mockOnDismiss} />
+    );
+
+    fireEvent.click(screen.getByText("Recover Project"));
+
+    await waitFor(() => expect(screen.getByText("Recover Project")).toBeEnabled());
   });
 
   it("prompts to update the backend when local changes are newer", () => {

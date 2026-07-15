@@ -36,7 +36,7 @@ describe("createNewProject source guard", () => {
       // block that follows. We look for the flag between the function header
       // Use lastIndexOf to get the *implementation* occurrence (line ~1506),
       // not the type-declaration occurrence (line ~120) that has no body.
-      const fnStart = source.lastIndexOf("createNewProject: (");
+      const fnStart = source.lastIndexOf("createNewProject: async (");
       expect(fnStart).toBeGreaterThan(-1); // function must exist
 
       // The function closes before `loadProject:` which is the next peer.
@@ -52,20 +52,24 @@ describe("createNewProject source guard", () => {
   );
 
   it(
-    // [regression] Ensure the function is not also setting explicitlyCreated
-    // to false anywhere inside its own body (it must only set it to true).
-    "// [regression] createNewProject body must NOT set explicitlyCreated: false",
+    // [regression] A project is not editable until backend creation returns a
+    // confirmed persistence receipt.
+    "// [regression] createNewProject activates only after a confirmed backend receipt",
     () => {
       const source = fs.readFileSync(STORE_PATH, "utf-8");
 
-      const fnStart = source.lastIndexOf("createNewProject: (");
+      const fnStart = source.lastIndexOf("createNewProject: async (");
       const fnEnd = source.indexOf("loadProject:", fnStart);
       const fnBody = source.slice(fnStart, fnEnd);
 
-      // The body should never clear the flag it is setting.
-      // A false would mean the function creates a project that isn't
-      // considered explicitly created — the root cause of the regression.
-      expect(fnBody).not.toContain("explicitlyCreated: false");
+      const createIndex = fnBody.indexOf("await backendSaveService.create");
+      const receiptIndex = fnBody.indexOf("!persistence.baseRevision");
+      const activationIndex = fnBody.indexOf("explicitlyCreated: true");
+
+      expect(createIndex).toBeGreaterThan(-1);
+      expect(receiptIndex).toBeGreaterThan(createIndex);
+      expect(activationIndex).toBeGreaterThan(receiptIndex);
+      expect(fnBody).toContain("explicitlyCreated: false");
     },
   );
 });

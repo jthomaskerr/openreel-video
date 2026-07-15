@@ -117,10 +117,6 @@ vi.mock("../services/auto-save", () => ({
     on: vi.fn(),
     start: vi.fn(),
     markDirty: vi.fn(),
-    markPendingProjectCreation: vi.fn(),
-    clearPendingProjectCreation: vi.fn(),
-    migrateProjectId: vi.fn().mockResolvedValue(undefined),
-    getPendingProjectCreation: vi.fn().mockReturnValue(null),
     startAutoSave: vi.fn(),
     stopAutoSave: vi.fn(),
     triggerSave: vi.fn(),
@@ -178,12 +174,51 @@ vi.mock("../bridges/transition-bridge", () => ({
   getTransitionBridge: vi.fn(() => mockTransitionBridge)
         }));
 
+let createdProjectSequence = 0;
+
+function mockConfirmedBackendCreate() {
+  return vi.spyOn(backendSaveService, "create").mockImplementation(async (name, settings) => {
+    const now = Date.now();
+    const project: Project = {
+      id: `backend-project-${++createdProjectSequence}`,
+      name,
+      createdAt: now,
+      modifiedAt: now,
+      settings: {
+        width: 1920,
+        height: 1080,
+        frameRate: 30,
+        sampleRate: 48000,
+        channels: 2,
+        ...settings,
+      },
+      mediaLibrary: { items: [] },
+      timeline: { tracks: [], subtitles: [], duration: 0, markers: [] },
+    };
+    usePersistenceStatusStore.getState().confirmReceipt(project.id, {
+      saved: true,
+      committed: true,
+      projectId: project.id,
+      persistedAt: now,
+      sourceModifiedAt: project.modifiedAt,
+      commitSha: "a".repeat(40),
+      treeSha: "b".repeat(40),
+      projectBlobSha: "c".repeat(40),
+      mediaManifestDigest: "sha256:test",
+      lfsPayloads: [],
+    });
+    return project;
+  });
+}
+
 describe("ProjectStore", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.restoreAllMocks();
     mockEffectsBridgeState.clipEffects.clear();
     mockTransitionBridgeState.trackTransitions.clear();
     mockSaveMediaBlob.mockClear();
-    useProjectStore.getState().createNewProject();
+    mockConfirmedBackendCreate();
+    await useProjectStore.getState().createNewProject();
   });
 
   describe("project creation", () => {
@@ -198,15 +233,15 @@ describe("ProjectStore", () => {
       expect(project.settings.frameRate).toBe(30);
     });
 
-    it("should create project with custom name", () => {
-      useProjectStore.getState().createNewProject("My Custom Project");
+    it("should create project with custom name", async () => {
+      await useProjectStore.getState().createNewProject("My Custom Project");
       const { project } = useProjectStore.getState();
 
       expect(project.name).toBe("My Custom Project");
     });
 
-    it("should create project with custom settings", () => {
-      useProjectStore.getState().createNewProject("4K Project", {
+    it("should create project with custom settings", async () => {
+      await useProjectStore.getState().createNewProject("4K Project", {
         width: 3840,
         height: 2160,
         frameRate: 60
@@ -226,9 +261,9 @@ describe("ProjectStore", () => {
       expect(Array.isArray(project.timeline.tracks)).toBe(true);
     });
 
-    it("should have unique project id", () => {
+    it("should have unique project id", async () => {
       const firstProject = useProjectStore.getState().project;
-      useProjectStore.getState().createNewProject();
+      await useProjectStore.getState().createNewProject();
       const secondProject = useProjectStore.getState().project;
 
       expect(firstProject.id).not.toBe(secondProject.id);
@@ -241,30 +276,7 @@ describe("ProjectStore", () => {
     });
 
     describe("backend project creation", () => {
-      it("does not reconcile a freshly created UUID by project name", async () => {
-        const listSpy = vi.spyOn(backendSaveService, "listProjects");
-        vi.spyOn(backendSaveService, "isReachable").mockResolvedValue(false);
-
-        useProjectStore.getState().createNewProject("Fresh Local Project");
-        await Promise.resolve();
-
-        expect(listSpy).not.toHaveBeenCalled();
-      });
-
-      it("keeps local UUID id when backend is unreachable", async () => {
-        // Simulate unreachable backend — the createNewProject above already ran
-        // with backendSaveService in its default unreachable state before any
-        // mock stubbing, so the id should still be a UUID.
-        // (backendSaveService.isReachable() resolves false by default unless
-        // fetch is stubbed.)
-        const { project } = useProjectStore.getState();
-        // UUID pattern: 8-4-4-4-12 hex segments
-        expect(project.id).toMatch(
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-        );
-      });
-
-      it("regression: preserves media imported during pending backend create", async () => {
+      it("activates only the backend slug after its receipt is confirmed", async () => {
         const now = Date.now();
         const backendProject: Project = {
           id: "my-new-slug",
@@ -279,78 +291,32 @@ describe("ProjectStore", () => {
           timeline: { tracks: [], subtitles: [], duration: 0, markers: [] },
         };
 
-        // Deferred promise: keeps backendSaveService.create() pending until
-        // we explicitly resolve it below, so we can inject a media import
-        // "during" the race window deterministically instead of racing real
-        // timers.
-        let resolveCreate!: (project: Project) => void;
-        const createPromise = new Promise<Project>((resolve) => {
-          resolveCreate = resolve;
+        vi.spyOn(backendSaveService, "create").mockImplementation(async () => {
+          usePersistenceStatusStore.getState().confirmReceipt(backendProject.id, {
+            saved: true, committed: true, projectId: backendProject.id,
+            persistedAt: now, sourceModifiedAt: now,
+            commitSha: "a".repeat(40), treeSha: "b".repeat(40),
+            projectBlobSha: "c".repeat(40), mediaManifestDigest: "sha256:test",
+            lfsPayloads: [],
+          });
+          return backendProject;
         });
 
-        const isReachableSpy = vi
-          .spyOn(backendSaveService, "isReachable")
-          .mockResolvedValue(true);
-        const createSpy = vi
-          .spyOn(backendSaveService, "create")
-          .mockReturnValue(createPromise);
-        const saveSpy = vi
-          .spyOn(backendSaveService, "save")
-          .mockResolvedValue(undefined);
-
-        useProjectStore.getState().createNewProject("Pending Import Test");
-
-        // Let the isReachable().then(create(...)) chain start before we
-        // inject the media import, so the import genuinely lands during the
-        // pending window.
-        await vi.waitFor(() => expect(createSpy).toHaveBeenCalled());
-
-        // Import media during the pending backend-create window — this
-        // simulates the exact race condition where a user drags in a file
-        // while the orchestrator is still assigning the slug id.
-        const mediaItem: MediaItem = {
-          id: "imported-while-pending",
-          name: "race-import.mp4",
-          type: "video",
-          fileHandle: null,
-          blob: new Blob(["video-data"], { type: "video/mp4" }),
-          metadata: {
-            duration: 5, width: 1920, height: 1080, frameRate: 30,
-            codec: "h264", sampleRate: 48000, channels: 2, fileSize: 1000,
-          },
-          thumbnailUrl: null,
-        };
-        // Inject the item by mutating the project state directly via the
-        // zustand setState API (available on every zustand store).
-        useProjectStore.setState((s) => ({
-          project: {
-            ...s.project,
-            mediaLibrary: { items: [...s.project.mediaLibrary.items, mediaItem] },
-          },
-        }));
-
-        // Now let the pending backend create() resolve and the slug swap happen.
-        resolveCreate(backendProject);
-        await vi.waitFor(() => {
-          expect(useProjectStore.getState().project.id).toBe("my-new-slug");
-        });
-
-        // Without fix: media imported during the pending window is silently
-        // lost (replaced by the empty backend skeleton).
-        // With fix: the imported media survives the slug swap.
+        await expect(useProjectStore.getState().createNewProject("My New Project")).resolves.toBe(true);
         expect(useProjectStore.getState().project.id).toBe("my-new-slug");
-        expect(useProjectStore.getState().project.mediaLibrary.items).toHaveLength(1);
-        expect(useProjectStore.getState().project.mediaLibrary.items[0]?.name).toBe("race-import.mp4");
-        expect(saveSpy).toHaveBeenCalledWith(
-          expect.objectContaining({
-            id: "my-new-slug",
-            mediaLibrary: { items: [expect.objectContaining({ name: "race-import.mp4" })] },
-          }),
-        );
+        expect(useProjectStore.getState().explicitlyCreated).toBe(true);
+        expect(usePersistenceStatusStore.getState().baseRevision).not.toBeNull();
+      });
 
-        isReachableSpy.mockRestore();
-        createSpy.mockRestore();
-        saveSpy.mockRestore();
+      it("does not activate or autosave a project when backend creation fails", async () => {
+        const previousProject = useProjectStore.getState().project;
+        vi.spyOn(backendSaveService, "create").mockRejectedValue(new Error("Backend unavailable"));
+
+        await expect(useProjectStore.getState().createNewProject("Offline Project")).resolves.toBe(false);
+
+        expect(useProjectStore.getState().project).toBe(previousProject);
+        expect(useProjectStore.getState().explicitlyCreated).toBe(false);
+        expect(autoSaveManager.markDirty).not.toHaveBeenCalled();
       });
     });
   });
@@ -391,41 +357,28 @@ describe("ProjectStore", () => {
       );
     });
 
-    it("reconciles a recovered UUID project to its unique backend slug before saving", async () => {
+    it("quarantines a recovered UUID instead of reconciling or saving it", () => {
+      const initialProject = useProjectStore.getState().project;
       const recovered = {
-        ...useProjectStore.getState().project,
+        ...initialProject,
         id: "14aec9eb-469f-4db6-9652-00dee0d243fc",
         name: "Vintage Tokyo",
       };
       const listSpy = vi.spyOn(backendSaveService, "listProjects").mockResolvedValue([
         { id: "vintage-tokyo", name: "Vintage Tokyo", createdAt: 1, modifiedAt: 2 },
       ]);
-      const loadSpy = vi.spyOn(backendSaveService, "load").mockImplementation(async () => {
-        usePersistenceStatusStore.getState().confirmReceipt("vintage-tokyo", {
-          saved: true, projectId: "vintage-tokyo", persistedAt: 2,
-          sourceModifiedAt: recovered.modifiedAt, commitSha: "a".repeat(40),
-          treeSha: "b".repeat(40), projectBlobSha: "c".repeat(40),
-          mediaManifestDigest: "sha256:test", lfsPayloads: [], committed: true,
-        });
-        return { ...recovered, id: "vintage-tokyo" };
-      });
+      const loadSpy = vi.spyOn(backendSaveService, "load");
       const scheduleSaveSpy = vi
         .spyOn(backendSaveService, "scheduleSave")
         .mockImplementation(() => undefined);
 
       useProjectStore.getState().loadProject(recovered);
 
-      await vi.waitFor(() => {
-        expect(useProjectStore.getState().project.id).toBe("vintage-tokyo");
-      });
-      expect(autoSaveManager.migrateProjectId).toHaveBeenCalledWith(
-        recovered.id,
-        "vintage-tokyo",
-      );
-      expect(scheduleSaveSpy).toHaveBeenCalledWith(
-        expect.objectContaining({ id: "vintage-tokyo", name: "Vintage Tokyo" }),
-        0,
-      );
+      expect(useProjectStore.getState().project).toBe(initialProject);
+      expect(useProjectStore.getState().error).toMatch(/UUID project .* quarantined/i);
+      expect(listSpy).not.toHaveBeenCalled();
+      expect(loadSpy).not.toHaveBeenCalled();
+      expect(scheduleSaveSpy).not.toHaveBeenCalled();
       listSpy.mockRestore();
       loadSpy.mockRestore();
       scheduleSaveSpy.mockRestore();
@@ -433,6 +386,22 @@ describe("ProjectStore", () => {
   });
 
   describe("project loading", () => {
+    it("does not schedule persistence while installing an authoritative project", () => {
+      const scheduleSaveSpy = vi
+        .spyOn(backendSaveService, "scheduleSave")
+        .mockImplementation(() => undefined);
+      const existing = useProjectStore.getState().project;
+
+      useProjectStore.getState().loadProject({
+        ...existing,
+        id: "authoritative-project",
+      });
+
+      expect(scheduleSaveSpy).not.toHaveBeenCalled();
+      expect(autoSaveManager.markDirty).not.toHaveBeenCalled();
+      scheduleSaveSpy.mockRestore();
+    });
+
     it("retains the confirmed backend base revision for the loaded project", () => {
       const existing = useProjectStore.getState().project;
       usePersistenceStatusStore.getState().confirmReceipt("backend-project", {
@@ -2092,7 +2061,7 @@ describe("ProjectStore", () => {
     });
 
     it("should return an error when clip is not found", async () => {
-      useProjectStore.getState().createNewProject();
+      await useProjectStore.getState().createNewProject();
       const result = await useProjectStore.getState().separateAudio("non-existent-clip");
 
       expect(result.success).toBe(false);
@@ -2103,7 +2072,9 @@ describe("ProjectStore", () => {
 
 describe("ProjectStore - Text Clips", () => {
   beforeEach(async () => {
-    useProjectStore.getState().createNewProject();
+    vi.restoreAllMocks();
+    mockConfirmedBackendCreate();
+    await useProjectStore.getState().createNewProject();
     await useProjectStore.getState().addTrack("text");
   });
 
@@ -2140,8 +2111,10 @@ describe("ProjectStore - Text Clips", () => {
 });
 
 describe("ProjectStore - Subtitles (consolidated into text clips)", () => {
-  beforeEach(() => {
-    useProjectStore.getState().createNewProject();
+  beforeEach(async () => {
+    vi.restoreAllMocks();
+    mockConfirmedBackendCreate();
+    await useProjectStore.getState().createNewProject();
     const titleEngine = useEngineStore.getState().getTitleEngine();
     const graphicsEngine = useEngineStore.getState().getGraphicsEngine();
     titleEngine?.loadTextClips([]);

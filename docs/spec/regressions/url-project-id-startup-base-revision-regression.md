@@ -1,6 +1,6 @@
 # URL project identity startup and confirmed base revision regression
 
-**Status:** Reproduced on 2026-07-16 against the running web app and orchestrator. Specification only. No product code or user project data was changed.
+**Status:** Implemented on 2026-07-16. Deterministic tests and live browser evidence are recorded below.
 
 ## Extends
 
@@ -174,3 +174,25 @@ Use an isolated browser profile and a fixture copy, never the user project repos
 - An incomplete receipt or failed media audit does not install a base revision and does not create a replacement project.
 - A newer local recovery snapshot is presented as an explicit conflict choice, never silently substituted and never assigned a fabricated base revision.
 - A stale save is rejected as `PROJECT_CONFLICT`; URL normalization does not authorize overwrite.
+
+## Implementation evidence
+
+- `parseLocation()` merges the compatibility page query with the hash route query; the canonical hash value wins when both are present.
+- The project store starts with a non-editable `unresolved` sentinel and autosave remains disabled until a backend load or create confirms a persistence receipt.
+- URL startup performs only `backendSaveService.load(requestedSlug)`. A missing or mismatched project is terminal and never calls project creation or recovery.
+- Project creation is backend-first. The backend-returned slug becomes active only after `baseRevision` is confirmed.
+- Normal runtime UUID reconciliation and pending UUID creation metadata were removed. UUID project loads and autosaves are quarantined.
+- Recovery loads the matching backend slug and confirmed base before one persistence attempt, reloads the result, and returns `false` with a visible error on every failure path.
+- `RecoveryDialog` awaits recovery and clears `Recovering...` in `finally` for `false` and rejected promises.
+
+Deterministic coverage:
+
+- `src/hooks/use-router.test.ts`
+- `src/hooks/useProjectRecovery.test.ts`
+- `src/components/welcome/RecoveryDialog.test.tsx`
+- `src/stores/project-store.test.ts`
+- orchestrator project route and Git-store identity tests
+
+Live browser verification passed against `http://localhost:5173` and `http://localhost:4041` using system Chrome through Playwright. The test opened both supported URL forms in isolated pages, refreshed each, and confirmed `Vintage Tokyo` remained visible with no unresolved-project, load-error, onboarding-tour, or framework overlay. The network ledger contained zero project-collection POSTs and zero PUT/PATCH/DELETE requests; read-only media verification requests were allowed. The backend project ID list was identical before and after the run, and the browser console contained no errors.
+
+The permanent check is `apps/web/e2e/project-identity.spec.ts`, run with `pnpm --filter @openreel/web test:e2e -- e2e/project-identity.spec.ts`. Screenshot evidence was captured outside the repository at `/tmp/openreel-project-identity-hash.png` and `/tmp/openreel-project-identity-page-query.png`.

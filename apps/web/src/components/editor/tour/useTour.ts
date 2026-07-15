@@ -11,6 +11,13 @@ let tourState: TourState = {
   currentStep: 0,
 };
 
+export function hasRequestedProjectId(location: Pick<Location, "hash" | "search">): boolean {
+  const pageProjectId = new URLSearchParams(location.search).get("projectId");
+  const hashQuery = location.hash.includes("?") ? location.hash.split("?")[1] ?? "" : "";
+  const hashProjectId = new URLSearchParams(hashQuery).get("projectId");
+  return Boolean(pageProjectId?.trim() || hashProjectId?.trim());
+}
+
 const listeners = new Set<() => void>();
 
 function emitChange() {
@@ -109,7 +116,7 @@ export function useTour() {
 
   useEffect(() => {
     const completed = localStorage.getItem(ONBOARDING_KEY);
-    if (!completed) {
+    if (!completed && !hasRequestedProjectId(window.location)) {
       const timer = setTimeout(() => {
         start();
       }, 500);

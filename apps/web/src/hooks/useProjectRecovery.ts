@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { backendSaveService } from "../services/backend-save";
+import { backendSaveService, isClientOnlyProjectId } from "../services/backend-save";
 import { autoSaveManager, type AutoSaveMetadata } from "../services/auto-save";
 import { clearAllStorage } from "../services/media-storage";
 import { useProjectStore } from "../stores/project-store";
@@ -44,46 +44,21 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
         });
 
         if (autoRestoreProjectId) {
-          const pendingCreation = autoSaveManager.getPendingProjectCreation(autoRestoreProjectId);
-          if (pendingCreation) {
-            // A reload can happen after the UUID autosave but before POST
-            // returns its canonical slug. Do not turn that temporary UUID
-            // into a backend GET/404; recover the local save and let the
-            // store retry the identity handoff.
-            const matchingPendingSave = saves
-              .filter((save) => save.projectId === autoRestoreProjectId)
-              .sort((a, b) => b.timestamp - a.timestamp)[0];
-            if (matchingPendingSave) {
-              console.info("[ProjectRecovery] loading pending project from local autosave", {
-                projectId: autoRestoreProjectId,
-                saveId: matchingPendingSave.id,
-              });
-              const success = await recoverFromAutoSave(matchingPendingSave.id);
-              if (cancelled) return;
-              if (success) {
-                setState({ isChecking: false, availableSaves: [], showDialog: false, error: null });
-              } else {
-                const storeError = useProjectStore.getState().error;
-                setState({
-                  isChecking: false,
-                  availableSaves: [],
-                  showDialog: false,
-                  error: storeError ?? "Could not restore the pending local project.",
-                });
-              }
-              return;
-            }
+          if (isClientOnlyProjectId(autoRestoreProjectId)) {
+            setState({
+              isChecking: false,
+              availableSaves: [],
+              showDialog: false,
+              error: `Legacy UUID project ${autoRestoreProjectId} is quarantined and cannot be loaded.`,
+            });
+            return;
           }
-
-          // Prefer the backend copy when a URL project id is present, but do not
-          // strand fresh local work if the backend save has not completed yet
-          // (for example after HMR/page refresh shortly after an import).
           console.info("[ProjectRecovery] loading requested project from backend", {
             projectId: autoRestoreProjectId,
           });
           const backendProject = await backendSaveService.load(autoRestoreProjectId);
           if (cancelled) return;
-          if (backendProject) {
+          if (backendProject?.id === autoRestoreProjectId) {
             console.info("[ProjectRecovery] backend project hydrated", {
               projectId: autoRestoreProjectId,
               mediaCount: backendProject.mediaLibrary.items.length,
@@ -107,36 +82,11 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
             return;
           }
 
-          const matchingSave = saves
-            .filter((save) => save.projectId === autoRestoreProjectId)
-            .sort((a, b) => b.timestamp - a.timestamp)[0];
-
-          if (matchingSave) {
-            console.warn("[ProjectRecovery] backend load failed; loading local autosave", {
-              projectId: autoRestoreProjectId,
-              saveId: matchingSave.id,
-            });
-            const success = await recoverFromAutoSave(matchingSave.id);
-            if (cancelled) return;
-            if (success) {
-              setState({ isChecking: false, availableSaves: [], showDialog: false, error: null });
-            } else {
-              const storeError = useProjectStore.getState().error;
-              setState({
-                isChecking: false,
-                availableSaves: [],
-                showDialog: false,
-                error: storeError ?? "Could not restore the local autosave for this project.",
-              });
-            }
-            return;
-          }
-
           setState({
             isChecking: false,
             availableSaves: [],
             showDialog: false,
-            error: "Could not reach the project server and no local autosave was found for this project.",
+            error: `Could not load requested project ${autoRestoreProjectId}. No replacement project was created.`,
           });
           return;
         }
@@ -166,7 +116,7 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
             isChecking: false,
             availableSaves: [],
             showDialog: false,
-            error: null,
+            error: error instanceof Error ? error.message : "Project recovery check failed",
           });
         }
       }
@@ -177,7 +127,7 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
     return () => {
       cancelled = true;
     };
-  }, [autoRestoreProjectId]);
+  }, [autoRestoreProjectId, loadProject]);
 
   const recover = useCallback(
     async (saveId: string) => {

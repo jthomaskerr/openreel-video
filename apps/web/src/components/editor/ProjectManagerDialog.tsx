@@ -449,11 +449,11 @@ export const ProjectManagerDialog: React.FC = () => {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => {
+            onClick={async () => {
               const name = window.prompt("Project name:", "Untitled Project");
               if (name !== null && name.trim().length > 0) {
-                createNewProject(name.trim());
-                setProjectManagerOpen?.(false);
+                const created = await createNewProject(name.trim());
+                if (created) setProjectManagerOpen?.(false);
               }
             }}
             className="h-8 text-xs gap-1.5"

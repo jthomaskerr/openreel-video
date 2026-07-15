@@ -49,7 +49,7 @@ function App() {
     modalData?.tab === "import" ? "import" : "export";
 
   // Pass the projectId from the URL so the recovery hook auto-restores silently.
-  const { showDialog, availableSaves, recover, dismiss, clearAll, hasBackendConflict, isChecking: recoveryIsChecking } = useProjectRecovery(
+  const { showDialog, availableSaves, recover, dismiss, clearAll, hasBackendConflict, isChecking: recoveryIsChecking, error: recoveryError } = useProjectRecovery(
     route === "editor" ? params.projectId : undefined,
   );
 
@@ -155,6 +155,16 @@ function App() {
           <SharePage shareId={params.shareId!} />
         ) : showWelcome ? (
           <WelcomeScreen initialTab={initialTab} initialPreset={newProjectPreset} />
+        ) : route === "editor" && (recoveryIsChecking || !explicitlyCreated) ? (
+          recoveryIsChecking ? (
+            <LoadingSpinner message="Loading requested project..." />
+          ) : (
+            <div className="flex h-full items-center justify-center p-6" role="alert">
+              <div className="max-w-lg rounded-lg border border-destructive/40 bg-background-secondary p-5 text-sm text-text-primary">
+                {recoveryError ?? "No confirmed project is selected. Create or open a project to continue."}
+              </div>
+            </div>
+          )
         ) : (
           <Suspense fallback={<LoadingSpinner message="Loading editor..." />}>
             <EditorInterface />
@@ -173,6 +183,7 @@ function App() {
             onRecover={async (saveId) => {
               const success = await recover(saveId);
               if (success) navigate("editor");
+              return success;
             }}
             onDismiss={dismiss}
             onClearAll={clearAll}

@@ -1,13 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useProjectStore } from "../stores/project-store";
+import { createEmptyProject } from "../stores/project";
 import type { Project, Clip, Track } from "@openreel/core";
 
 vi.mock("../services/auto-save", () => ({
   autoSaveManager: {
-    markPendingProjectCreation: vi.fn(),
-    clearPendingProjectCreation: vi.fn(),
-    migrateProjectId: vi.fn().mockResolvedValue(undefined),
-    getPendingProjectCreation: vi.fn().mockReturnValue(null),
     startAutoSave: vi.fn(),
     stopAutoSave: vi.fn(),
     triggerSave: vi.fn(),
@@ -81,7 +78,10 @@ const createTestTrack = (overrides?: Partial<Track>): Track => ({
 
 describe("Export Readiness - Project Validation", () => {
   beforeEach(() => {
-    useProjectStore.getState().createNewProject();
+    useProjectStore.getState().loadProject({
+      ...createEmptyProject(),
+      id: "export-test-project",
+    });
   });
 
   it("should create exportable project with required fields", () => {
@@ -145,10 +145,13 @@ describe("Export Readiness - Project Validation", () => {
   });
 
   it("should apply custom project settings correctly", () => {
-    useProjectStore.getState().createNewProject("4K Project", {
-      width: 3840,
-      height: 2160,
-      frameRate: 60,
+    useProjectStore.getState().loadProject({
+      ...createEmptyProject("4K Project", {
+        width: 3840,
+        height: 2160,
+        frameRate: 60,
+      }),
+      id: "4k-project",
     });
 
     const { project } = useProjectStore.getState();
@@ -315,6 +318,13 @@ describe("Export Readiness - Subtitle Handling (consolidated into text clips)", 
 });
 
 describe("Export Readiness - Marker Preservation", () => {
+  beforeEach(() => {
+    useProjectStore.getState().loadProject({
+      ...createEmptyProject(),
+      id: "marker-export-test-project",
+    });
+  });
+
   beforeEach(() => {
     useProjectStore.getState().createNewProject();
   });
