@@ -45,7 +45,7 @@ describe("MetadataClipInspector routing", () => {
   it("renders scene inspector for kind scene", () => {
     render(<MetadataClipInspector clip={makeClip("scene")} kind="scene" />);
     expect(screen.getByTestId("scene-metadata-inspector")).toBeInTheDocument();
-    expect(screen.getByText("Prompt")).toBeInTheDocument();
+    expect(screen.getByText(/no usable scene ID/i)).toBeInTheDocument();
   });
 
   it("renders character inspector for kind character", () => {

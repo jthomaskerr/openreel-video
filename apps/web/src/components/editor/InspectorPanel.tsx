@@ -6,7 +6,7 @@ import { useUIStore } from "../../stores/ui-store";
 import { useEngineStore } from "../../stores/engine-store";
 import { useProblemCount } from "../../stores/problem-store";
 import type { Transform, EditingTemplatePrimitive } from "@openreel/core";
-import { isSceneProjection } from "@openreel/music-video-domain";
+import { getSceneIdFromClip, isSceneProjection } from "@openreel/music-video-domain";
 import {
   ChromaKeyEngine,
   initializeTranscriptionService,
@@ -62,6 +62,7 @@ import { AiTab } from "./inspector/tabs/AiTab";
 import { GenerateTab } from "./inspector/tabs/generation/GenerateTab";
 import { MetadataClipInspector } from "./inspector/MetadataClipInspector";
 import { SceneMetadataInspector } from "./inspector/SceneMetadataInspector";
+import { SceneEditor } from "./inspector/SceneEditor";
 import { ProblemsPanel } from "./inspector/ProblemsPanel";
 import { ImportErrorsPanel } from "./inspector/ImportErrorsPanel";
 import { LogPanel } from "./inspector/LogPanel";
@@ -109,6 +110,7 @@ export const InspectorPanel: React.FC = () => {
     (state) => state.finishEffectApplication,
   );
   const inspectedAsset = useUIStore((state) => state.inspectedAsset);
+  const inspectorSelection = useUIStore((state) => state.inspectorSelection);
   const selectedClipIds = getSelectedClipIds();
   // When a clip is selected and no explicit asset is pinned, show the clip's media item.
   const selectedClipMediaItem = useMemo(() => {
@@ -169,6 +171,22 @@ export const InspectorPanel: React.FC = () => {
     if (selectedClipIds.length !== 1) return null;
     return getClip(selectedClipIds[0]) || null;
   }, [getClip, project.modifiedAt, selectedClipIds]);
+
+  const sceneEditorSelection = useMemo(() => {
+    if (selectedTimelineClip) {
+      const sceneId = getSceneIdFromClip(selectedTimelineClip);
+      if (!sceneId) return null;
+      return {
+        sceneId,
+        projectionClipId: selectedTimelineClip.id,
+        focusTitleRequestId:
+          inspectorSelection?.type === "scene" && inspectorSelection.sceneId === sceneId
+            ? inspectorSelection.focusTitleRequestId
+            : undefined,
+      };
+    }
+    return inspectorSelection?.type === "scene" ? inspectorSelection : null;
+  }, [inspectorSelection, selectedTimelineClip]);
 
   const isSelectedMetadataClip = selectedTimelineClip?.type === "metadata";
 
@@ -917,7 +935,9 @@ export const InspectorPanel: React.FC = () => {
       {/* ── Inspector pane ─────────────────────────────────── */}
       {sidebarTab === "inspector" && (
         <>
-          {effectiveInspectedAsset ? (
+          {sceneEditorSelection ? (
+            <SceneEditor {...sceneEditorSelection} />
+          ) : effectiveInspectedAsset ? (
             <AssetInspectorWithTabs item={effectiveInspectedAsset} />
           ) : (
             <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
@@ -945,7 +965,7 @@ export const InspectorPanel: React.FC = () => {
             />
           )}
           <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
-            {selectedClip && <ClipTimingSection clip={selectedClip} />}
+            {selectedClip && metadataKind !== "scene" && <ClipTimingSection clip={selectedClip} />}
             <ImportErrorsPanel errors={importErrors} />
             {isSelectedMetadataClip ? (
               metadataKind === "note" ? (
@@ -958,9 +978,7 @@ export const InspectorPanel: React.FC = () => {
             ) : selectedClip ? (
               <>
                 {selectedTimelineClip?.type === "video" && metadataKind === "scene" && (
-                  <div className="border-b border-border/50 px-3 py-3">
-                    <SceneMetadataInspector clip={selectedTimelineClip} />
-                  </div>
+                  <SceneMetadataInspector clip={selectedTimelineClip} />
                 )}
                 <InspectorTabErrorBoundary key={activeTab}>
                 <InspectorTabPanel tab="effects" active={activeTab}>
