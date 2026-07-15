@@ -44,7 +44,12 @@
 
 - [ ] **#22** we are still creating new projects all the time on start. DO NOT do this. the url HAS a project id. We must only load that ➕ 2026-07-10 ^item-22
 
-- [ ] **#23** If there is a title available in any of the metadata for a media, use that title, not the filename. if you use the filename, convert snake/kebab case to sentence case and drop the extension ➕ 2026-07-10 ^item-23
+- [c] **#23** If there is a title available in any of the metadata for a media, use that title, not the filename. if you use the filename, convert snake/kebab case to sentence case and drop the extension ➕ 2026-07-10 🔗 6b3c96f ^item-23
+
+- [p] **#24** I want to confirm wavespeed generation is fully working (including reference images, auto extraction of audio clip (when the shot is placed on the timeline or has start/end values), inclusion of character images that are referenced in the prompt). there is an existing spec for this, update it to include anything missing ➕ 2026-07-10 🔄 16229-f5331ed0 ^item-24
+
+- [ ] **#25** Subtitle track clips should display each subtitle in a subtle box inside the clip at exact boundaries of that subtitle - relative to the start of the clip. The height of the box should be the minimum of half the height of the clip box (less padding) and a sensible fixed value that will fit padding + subtitle text which should be the same height as the clip title. Where subtitles overlap, the second subtitle box should appear on the opposite lane inside the clip box (ie have two lanes)  ➕ 2026-07-13 ^item-22
+
 
 ## Archived
 
