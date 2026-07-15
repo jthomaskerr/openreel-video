@@ -109,6 +109,20 @@ describe("buildImportPlan", () => {
     // Labels must be distinct
     expect(clip1!.mediaSpec.title).toBe("Scene 1");
     expect(clip2!.mediaSpec.title).toBe("Scene 2");
+    expect(clip1!.clipMetadata).toMatchObject({
+      kind: "storyboard-shot",
+      shotId: "shot-1",
+      source: "neuralframes",
+      importSource: "neuralframes",
+    });
+  });
+
+  it("does not invent projection timing for an unplaced manual scene", () => {
+    const shot = makeShot({ id: "manual-1", label: "Manual", prompt: "", source: "manual" });
+    delete shot.startSeconds;
+    delete shot.endSeconds;
+
+    expect(buildImportPlan(makeResult({ shots: [shot] }), makeRaw()).sceneClips).toEqual([]);
   });
 
   // [regression] Jun 30, Jul 3 — audio clip not produced even when audio is present.

@@ -9,6 +9,7 @@ import type {
   StoryboardShot,
 } from "./types.js";
 import { normalizeImageJob } from "./neuralframes.js";
+import { createSceneProjectionMetadata } from "./scene-projection.js";
 
 export interface NeuralFramesMediaSpec {
   id: string;
@@ -127,17 +128,20 @@ export function buildImportPlan(
 
   // ── Scene clips (shots are unrealized — no generatedAssetIds) ────────────
   // referenceImageUrl is a preview only, NOT a generated output.
-  const sceneClips: SceneClipSpec[] = result.shots.map((shot) => {
+  const sceneClips: SceneClipSpec[] = result.shots.flatMap((shot) => {
+    // Manual scenes are valid without storyboard planning timing and must not
+    // be projected merely because an import plan was requested.
+    if (shot.startSeconds === undefined || shot.endSeconds === undefined) return [];
     const duration = clampDuration(shot.startSeconds, shot.endSeconds);
     const thumbUrl = shot.referenceImageUrl ? resolveUrl(shot.referenceImageUrl) : null;
-    return {
+    return [{
       mediaSpec: buildUnrealizedSceneMediaSpec(shot, thumbUrl),
       trackName: "Neural Frames Scenes",
       startSeconds: shot.startSeconds,
       duration,
       clipMetadata: buildSceneClipMetadata(shot, thumbUrl),
       fetchUrl: null,
-    };
+    }];
   });
 
   // Orphaned generated assets (empty for normal NF imports; kept for compatibility)
@@ -454,18 +458,13 @@ function buildAudioMediaSpec(
 
 function buildSceneClipMetadata(shot: StoryboardShot, referenceImageUrl: string | null): Record<string, unknown> {
   return {
+    ...createSceneProjectionMetadata(shot, "neuralframes"),
     text: shot.prompt,
     importSource: "neuralframes",
     importId: shot.id,
-    source: "llm",
     linkedShotIds: [shot.id],
     linkedGeneratedAssetIds: [],
-    kind: "scene",
-    label: shot.label,
     color: "#4da8ff",
-    prompt: shot.prompt,
-    shotId: shot.id,
-    shotIndex: shot.index,
     generatedAssetIds: [],
     referenceImageUrl: referenceImageUrl ?? undefined,
   };
@@ -712,7 +711,7 @@ function storyboardDuration(result: NeuralFramesImportResult, raw: NeuralFramesS
     ...result.shots.map((shot) => shot.endSeconds),
     ...(raw.storyboard_props?.scenes ?? []).map((scene) => scene.end_time),
   ];
-  return candidates.reduce((max, value) => {
+  return candidates.reduce<number>((max, value) => {
     return typeof value === "number" && Number.isFinite(value) ? Math.max(max, value) : max;
   }, 0);
 }

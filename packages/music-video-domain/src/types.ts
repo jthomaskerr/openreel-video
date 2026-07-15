@@ -238,13 +238,23 @@ export interface GeneratedAsset {
 
 // ── Storyboard shots ──────────────────────────────────────────────────────────
 
+export type StoryboardShotSource = "manual" | "neuralframes" | "storyboard-generation";
+
 export interface StoryboardShot {
   id: string;
   index: number;
   label: string;
   sectionId?: string;
-  startSeconds: number;
-  endSeconds: number;
+  /**
+   * Legacy storyboard planning hint. A placed projection's Clip.startTime is the
+   * authoritative timeline position. Manual, unplaced scenes omit this field.
+   */
+  startSeconds?: number;
+  /**
+   * Legacy storyboard planning hint. A placed projection's Clip.duration and
+   * trim are authoritative. Manual, unplaced scenes omit this field.
+   */
+  endSeconds?: number;
   prompt: string;
   videoPrompt?: string;
   negativePrompt?: string;
@@ -256,6 +266,10 @@ export interface StoryboardShot {
   renderMode?: string;
   seed?: number;
   includeMainAudio: boolean;
+  /** Optional video media associated with the scene independently of placement. */
+  associatedMediaId?: string;
+  /** Origin of this scene. Older persisted scenes may omit it. */
+  source?: StoryboardShotSource;
   referenceAssetIds: string[];
   generatedAssetIds: string[];
   /** Preview image URL for an unrealized scene (the NeuralFrames scene_image_url). Not a generated output. */
