@@ -66,7 +66,7 @@ export const isSceneCompatibleTrack = (track: Track | undefined): boolean =>
   Boolean(track && track.type === "video" && !track.locked);
 
 export const getSceneCreationDisabledReason = (
-  tracks: readonly Track[],
+  tracks: readonly Pick<Track, "id" | "type" | "locked">[],
   activeTrackId: string | null,
 ): string | null => {
   if (tracks.length === 0) return "Add a video track before creating a scene.";

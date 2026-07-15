@@ -26,12 +26,19 @@ import {
   Rows3,
   Rows2,
   Eye,
+  Clapperboard,
 } from "lucide-react";
 import { useProjectStore } from "../../stores/project-store";
 import { useTimelineStore } from "../../stores/timeline-store";
 import { resolveActiveTrackId, useUIStore } from "../../stores/ui-store";
 import { toast } from "../../stores/notification-store";
 import { useEngineStore } from "../../stores/engine-store";
+import { useMusicVideoStore } from "../../stores/music-video-store";
+import {
+  executeTimelineCreateSceneCommand,
+  getCreateSceneMenuState,
+  type CreateSceneActivationGate,
+} from "./timeline/create-scene-command";
 import { getPlaybackBridge } from "../../bridges/playback-bridge";
 import {
   Popover,
@@ -115,6 +122,7 @@ export const Timeline: React.FC = () => {
     setSidebarTab,
     activeTrackId,
     setActiveTrack,
+    setInspectorSelection,
     selectedItems,
   } = useUIStore();
   const selectedClipIds = getSelectedClipIds();
@@ -126,6 +134,48 @@ export const Timeline: React.FC = () => {
     const resolvedTrackId = resolveActiveTrackId(tracks, activeTrackId, selectedClipTrackId);
     if (resolvedTrackId !== activeTrackId) setActiveTrack(resolvedTrackId);
   }, [tracks, activeTrackId, selectedClipTrackId, setActiveTrack]);
+
+  const createAndPlaceScene = useMusicVideoStore(
+    (state) => state.createAndPlaceScene,
+  );
+  const createSceneGateRef = useRef<CreateSceneActivationGate>({
+    inFlight: false,
+  });
+  const titleFocusRequestRef = useRef(0);
+  const createSceneMenuState = useMemo(
+    () => getCreateSceneMenuState(tracks, activeTrackId),
+    [tracks, activeTrackId],
+  );
+  const handleCreateScene = useCallback(async () => {
+    await executeTimelineCreateSceneCommand({
+      tracks,
+      activeTrackId,
+      playheadTime: playheadPosition,
+      gate: createSceneGateRef.current,
+      createAndPlaceScene,
+      onCreated: ({ sceneId, clipId, trackId }) => {
+        select({ type: "clip", id: clipId, trackId });
+        setActiveTrack(trackId);
+        setInspectorSelection({
+          type: "scene",
+          sceneId,
+          projectionClipId: clipId,
+          focusTitleRequestId: ++titleFocusRequestRef.current,
+        });
+      },
+      onFailed: ({ code, message }) => {
+        toast.error("Could not create scene", `[${code}] ${message}`);
+      },
+    });
+  }, [
+    tracks,
+    activeTrackId,
+    playheadPosition,
+    createAndPlaceScene,
+    select,
+    setActiveTrack,
+    setInspectorSelection,
+  ]);
 
   const { getTitleEngine, getGraphicsEngine } = useEngineStore();
   const titleEngine = getTitleEngine();
@@ -868,6 +918,24 @@ export const Timeline: React.FC = () => {
             <DropdownMenuItem onClick={() => addTrack("graphics")}>
               <Shapes size={16} className="text-clip-music" />
               <span>Graphics Track</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() => void handleCreateScene()}
+              disabled={!createSceneMenuState.enabled}
+              title={
+                createSceneMenuState.enabled
+                  ? "Create a scene at the playhead"
+                  : createSceneMenuState.reason
+              }
+              aria-label={
+                createSceneMenuState.enabled
+                  ? "Create Scene"
+                  : `Create Scene. ${createSceneMenuState.reason}`
+              }
+            >
+              <Clapperboard size={16} className="text-clip-video" />
+              <span>Create Scene</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
