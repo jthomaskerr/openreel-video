@@ -65,6 +65,8 @@ export interface ProjectMediaManifestSnapshot {
 export interface ProjectMediaManifestAuditOptions extends LfsVerificationOptions {
   /** Worktree containing the committed LFS pointers for the manifest. */
   readonly lfsRepoDir?: string;
+  /** Load-only compatibility: report dangling clips without rejecting the confirmed snapshot. */
+  readonly allowDanglingClips?: boolean;
 }
 
 export class ProjectMediaManifestAuditError extends Error {
@@ -270,7 +272,7 @@ export async function auditProjectMediaManifest(
     duplicateIssues.length > 0 ||
     filenameMismatches.length > 0 ||
     byteSizeMismatches.length > 0 ||
-    danglingClips.length > 0 ||
+    (!options.allowDanglingClips && danglingClips.length > 0) ||
     lfsPayloads.some(
       (payload) =>
         payload.local.state !== "verified" ||

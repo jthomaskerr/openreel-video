@@ -10,7 +10,7 @@ import type { MediaItem, Project, ProjectBaseRevision, ProjectSaveRequest } from
 import { serializeRequiredMediaManifest } from "../../../../packages/core/src/project-persistence";
 import { config } from "../env";
 import { GitStore } from "./git-store";
-import { buildRequiredMediaManifest } from "./media-manifest";
+import { buildRequiredMediaManifest, ProjectMediaManifestAuditError } from "./media-manifest";
 import { ProjectStore } from "./project-store";
 import { readPendingMedia, storePendingUpload } from "./pending-media";
 import {
@@ -177,6 +177,35 @@ test("an identical snapshot returns the confirmed receipt without creating a com
     assert.equal((await git(worktree, ["rev-parse", "HEAD"])).trim(), f.baseRevision.commitSha);
     await assertUnchanged(f, before);
   } finally {
+    await rm(f.fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("an identical incomplete snapshot returns recoverable MEDIA_INCOMPLETE", async () => {
+  const f = await fixture();
+  const auditSnapshot = f.store.auditSnapshot.bind(f.store);
+  try {
+    f.store.auditSnapshot = async () => {
+      throw new ProjectMediaManifestAuditError({
+        mediaManifestDigest: null,
+        requiredMediaManifest: [],
+        lfsPayloads: [],
+        missingEntries: [],
+        duplicateIssues: [],
+        filenameMismatches: [],
+        byteSizeMismatches: [],
+        danglingClips: [{ clipId: "clip-1", mediaId: "missing-media", trackId: "track-1", clipType: "video" }],
+      });
+    };
+
+    await assert.rejects(executeSaveTransaction(f.store, f.gitStore, request(f, f.project)), (error: unknown) => {
+      assert.ok(error instanceof SaveTransactionError);
+      assert.equal(error.status, 409);
+      assert.equal(error.body.code, "MEDIA_INCOMPLETE");
+      return true;
+    });
+  } finally {
+    f.store.auditSnapshot = auditSnapshot;
     await rm(f.fixtureRoot, { recursive: true, force: true });
   }
 });

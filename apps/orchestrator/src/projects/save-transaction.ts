@@ -295,7 +295,13 @@ export async function executeSaveTransaction(
     if (pendingMoves.length === 0
       && proposedBytes.equals(previousBytes)
       && currentReceipt.projectBlobSha === gitBlobSha(previousBytes)) {
-      const audit = await store.auditSnapshot(proposed);
+      let audit;
+      try {
+        audit = await store.auditSnapshot(proposed);
+      } catch (error) {
+        if (error instanceof ProjectMediaManifestAuditError) throw mediaIncomplete(request.projectId, error);
+        throw error;
+      }
       assertReceipt(currentReceipt);
       return {
         saved: true,

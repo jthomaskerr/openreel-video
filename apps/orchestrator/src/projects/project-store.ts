@@ -29,6 +29,7 @@ export interface ProjectMediaAuditOptions {
   readonly verifyLfs?: boolean;
   readonly checkRemoteObject?: LfsRemoteObjectCheck;
   readonly pointerSource?: "HEAD" | "index";
+  readonly allowDanglingClips?: boolean;
 }
 
 function defaultSettings(): ProjectSettings {
@@ -375,7 +376,9 @@ export class ProjectStore {
   ): Promise<ProjectMediaManifestSnapshot> {
     assertValidProjectId(project.id);
     if (options.verifyLfs === false) {
-      return auditProjectMediaManifest(project, this.mediaDir(project.id));
+      return auditProjectMediaManifest(project, this.mediaDir(project.id), {
+        allowDanglingClips: options.allowDanglingClips,
+      });
     }
     const { remote } = await this.gitStore.getConfig();
     return auditProjectMediaManifest(project, this.mediaDir(project.id), {
@@ -385,6 +388,7 @@ export class ProjectStore {
       remote: options.pointerSource === "index" ? null : remote ? "origin" : null,
       checkRemoteObject: options.checkRemoteObject,
       pointerSource: options.pointerSource,
+      allowDanglingClips: options.allowDanglingClips,
     });
   }
 }

@@ -115,7 +115,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
     }
     const persistedAt = await gitStore.readCommitTimestamp(project.id, receipt.commitSha);
     if (!persistedAt) throw new Error(`Project ${project.id} commit timestamp is unavailable`);
-    const audit = await store.auditSnapshot(project);
+    const audit = await store.auditSnapshot(project, { allowDanglingClips: true });
     if (audit.missingEntries.length > 0
       || audit.lfsPayloads.some((payload) => payload.local.state !== "verified")) {
       throw new Error(`Project ${project.id} committed media receipt failed verification`);

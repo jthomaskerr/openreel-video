@@ -311,6 +311,27 @@ test("auditSnapshot reports dangling clips separately from file scan misses", as
   });
 });
 
+test("load-only audit can report a dangling clip without rejecting the confirmed snapshot", async () => {
+  const { store } = await makeProjectStore();
+  const project = makeProject(
+    "audit-load-dangling-clip",
+    [makeMediaItem("media-1", "media-1.mp4", 4)],
+    [makeClip("clip-1", "missing-media", "track-1")],
+  );
+
+  await store.saveProject(project);
+  await writeMediaFile(store.mediaDir(project.id), "media-1.mp4", 4);
+
+  const snapshot = await store.auditSnapshot(project, {
+    verifyLfs: false,
+    allowDanglingClips: true,
+  });
+
+  assert.equal(snapshot.missingEntries.length, 0);
+  assert.equal(snapshot.danglingClips.length, 1);
+  assert.equal(snapshot.danglingClips[0]?.mediaId, "missing-media");
+});
+
 test("auditSnapshot digest is stable regardless of media-library input order", async () => {
   const { store } = await makeProjectStore();
   const clips = [makeClip("clip-1", "media-1", "track-1")];
