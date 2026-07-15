@@ -161,6 +161,35 @@ export class GitStore {
     return join(this.repoDir, projectId);
   }
 
+  /**
+   * Atomically reserve a collision-safe project slug across concurrent
+   * orchestrator processes. Reservation directories are intentionally kept as
+   * the durable identity registry, including after the worktree is created.
+   */
+  async reserveProjectSlug(baseSlug: string): Promise<string> {
+    assertValidProjectId(baseSlug);
+    await this.ensureSharedRepo();
+    const reservationsDir = join(this.repoDir, ".openreel", "project-slugs");
+    await mkdir(reservationsDir, { recursive: true });
+
+    for (let suffix = 1; ; suffix += 1) {
+      const candidate = suffix === 1 ? baseSlug : `${baseSlug}-${suffix}`;
+      assertValidProjectId(candidate);
+
+      // Existing repositories predate the reservation registry. Their
+      // worktrees remain authoritative and must never be claimed again.
+      if (existsSync(this.worktreePath(candidate))) continue;
+
+      try {
+        await mkdir(join(reservationsDir, candidate));
+        return candidate;
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "EEXIST") continue;
+        throw err;
+      }
+    }
+  }
+
   // ── Locking ──────────────────────────────────────────────────────────────
 
   #withLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {

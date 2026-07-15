@@ -204,3 +204,37 @@ test("existing project worktrees repair the Git LFS media rule before commits", 
     await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
+
+test("project creation reserves deterministic immutable slugs", async () => {
+  const { fixtureRoot, projectStore } = await makeStore();
+  try {
+    const first = await projectStore.createProject("Duplicate Name");
+    const second = await projectStore.createProject("Duplicate Name");
+
+    assert.equal(first.id, "duplicate-name");
+    assert.equal(second.id, "duplicate-name-2");
+
+    const renamed = await projectStore.renameProject(first.id, "Renamed Display Name");
+    assert.equal(renamed?.id, first.id);
+    assert.equal(renamed?.name, "Renamed Display Name");
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("concurrent same-name creation cannot reserve the same slug", async () => {
+  const { fixtureRoot, projectStore } = await makeStore();
+  try {
+    const projects = await Promise.all([
+      projectStore.createProject("Concurrent Name"),
+      projectStore.createProject("Concurrent Name"),
+    ]);
+
+    assert.deepEqual(
+      projects.map(project => project.id).sort(),
+      ["concurrent-name", "concurrent-name-2"],
+    );
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});

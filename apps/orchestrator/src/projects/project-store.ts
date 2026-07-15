@@ -187,8 +187,7 @@ export class ProjectStore {
   }
 
   async createProject(name: string, settings?: Partial<ProjectSettings>): Promise<Project> {
-    const slug = toSlug(name);
-    assertValidProjectId(slug);
+    const slug = await this.gitStore.reserveProjectSlug(toSlug(name));
     const project = defaultProject({ id: slug, name, settings });
     return this.saveProject(project);
   }
@@ -198,27 +197,7 @@ export class ProjectStore {
     const project = await this.loadProject(id);
     if (!project) return null;
 
-    const newSlug = toSlug(name);
-    assertValidProjectId(newSlug);
-    const renamed: Project = { ...project, name, id: newSlug, modifiedAt: Date.now() };
-
-    // Move worktree if slug changed
-    if (newSlug !== id) {
-      const oldDir = this.projectDir(id);
-      const oldExists = existsSync(oldDir);
-
-      // First save under new slug (creates the new worktree)
-      await this.saveProject(renamed);
-
-      if (oldExists) {
-        await this.gitStore.deleteWorktree(id);
-        try { await rm(oldDir, { recursive: true, force: true }); } catch { /* gone */ }
-      }
-
-      return renamed;
-    }
-
-    return this.saveProject(renamed);
+    return this.saveProject({ ...project, id, name, modifiedAt: Date.now() });
   }
 
   async deleteProject(id: string): Promise<boolean> {
