@@ -142,30 +142,32 @@ export const Timeline: React.FC = () => {
     inFlight: false,
   });
   const titleFocusRequestRef = useRef(0);
+  const preserveSceneTitleFocusRef = useRef(false);
   const createSceneMenuState = useMemo(
     () => getCreateSceneMenuState(tracks, activeTrackId),
     [tracks, activeTrackId],
   );
   const handleCreateScene = useCallback(async () => {
+    preserveSceneTitleFocusRef.current = true;
     await executeTimelineCreateSceneCommand({
-      tracks,
-      activeTrackId,
-      playheadTime: playheadPosition,
-      gate: createSceneGateRef.current,
-      createAndPlaceScene,
-      onCreated: ({ sceneId, clipId, trackId }) => {
-        select({ type: "clip", id: clipId, trackId });
-        setActiveTrack(trackId);
-        setInspectorSelection({
-          type: "scene",
-          sceneId,
-          projectionClipId: clipId,
-          focusTitleRequestId: ++titleFocusRequestRef.current,
-        });
-      },
-      onFailed: ({ code, message }) => {
-        toast.error("Could not create scene", `[${code}] ${message}`);
-      },
+        tracks,
+        activeTrackId,
+        playheadTime: playheadPosition,
+        gate: createSceneGateRef.current,
+        createAndPlaceScene,
+        onCreated: ({ sceneId, clipId, trackId }) => {
+          select({ type: "clip", id: clipId, trackId });
+          setActiveTrack(trackId);
+          setInspectorSelection({
+            type: "scene",
+            sceneId,
+            projectionClipId: clipId,
+            focusTitleRequestId: ++titleFocusRequestRef.current,
+          });
+        },
+        onFailed: ({ code, message }) => {
+          toast.error("Could not create scene", `[${code}] ${message}`);
+        },
     });
   }, [
     tracks,
@@ -897,7 +899,18 @@ export const Timeline: React.FC = () => {
               <ChevronDownIcon size={8} className="absolute bottom-0.5 right-0.5 text-fg-3" />
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-48">
+          <DropdownMenuContent
+            side="top"
+            align="start"
+            sideOffset={8}
+            className="w-48"
+            onCloseAutoFocus={(event) => {
+              if (preserveSceneTitleFocusRef.current) {
+                event.preventDefault();
+                preserveSceneTitleFocusRef.current = false;
+              }
+            }}
+          >
             <DropdownMenuItem onClick={() => addTrack("video")}>
               <Film size={16} className="text-clip-video" />
               <span>Video Track</span>

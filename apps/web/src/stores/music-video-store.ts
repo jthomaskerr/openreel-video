@@ -648,7 +648,14 @@ export const useMusicVideoStore = create<MusicVideoState>()(
       },
 
       createAndPlaceScene: async ({ trackId, startTime }) => {
-        const active = activeMusicProject(get());
+        const editor = useProjectStore.getState().project;
+        let active = get().projects[editor.id]
+          ? { id: editor.id, project: get().projects[editor.id] }
+          : undefined;
+        if (!active?.project) {
+          get().createProject(editor.id, editor.name);
+          active = activeMusicProject(get());
+        }
         if (!active?.project) return fail("MISSING_PROJECT", "No active music video project.");
         const editorState = useProjectStore.getState();
         const track = editorState.getTrack(trackId);

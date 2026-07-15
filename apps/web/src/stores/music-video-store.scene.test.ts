@@ -78,6 +78,21 @@ describe("music video scene operations", () => {
     expect(useProjectStore.getState().project.timeline.tracks[0].clips).toHaveLength(0);
   });
 
+  it("initializes only the current editor scene project on first timeline creation", async () => {
+    useMusicVideoStore.setState({ projects: {}, activeProjectId: "stale-other-project" });
+
+    const result = await useMusicVideoStore.getState().createAndPlaceScene({
+      trackId: "video-track",
+      startTime: 1.25,
+    });
+
+    expect(result.success).toBe(true);
+    expect(Object.keys(useMusicVideoStore.getState().projects)).toEqual(["editor-project"]);
+    expect(useMusicVideoStore.getState().activeProjectId).toBe("editor-project");
+    expect(useMusicVideoStore.getState().projects["editor-project"].shots).toHaveLength(1);
+    expect(useProjectStore.getState().project.id).toBe("editor-project");
+  });
+
   it("creates and places at the exact fractional playhead, then undoes and redoes atomically", async () => {
     const startTime = 10.123456789;
     const result = await useMusicVideoStore
