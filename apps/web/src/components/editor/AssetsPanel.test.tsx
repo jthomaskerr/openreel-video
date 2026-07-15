@@ -418,7 +418,10 @@ describe("AssetsPanel media toolbar and missing-only transitions", () => {
     expect(within(toolbar).getByRole("combobox", { name: "Group media by" })).toBeInTheDocument();
     expect(container.querySelectorAll('[role="toolbar"]').length).toBe(1);
     expect(screen.queryByRole("button", { name: "Import media" })).not.toBeNull();
-    expect(within(toolbar).getByRole("button", { name: "Create Scene" })).toBeInTheDocument();
+    const createSceneButton = within(toolbar).getByRole("button", { name: "Create Scene" });
+    expect(createSceneButton).toBeInTheDocument();
+    expect(createSceneButton.textContent).toBe("");
+    expect(createSceneButton.querySelector("svg")).not.toBeNull();
   });
 
   it("renders scenes as a searchable type bucket in the normal media content", () => {

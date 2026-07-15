@@ -1374,10 +1374,9 @@ export const AssetsPanel: React.FC = () => {
                   onClick={createSceneFromMedia}
                   title="Create scene"
                   aria-label="Create Scene"
-                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background-tertiary text-text-secondary transition-colors hover:bg-background-elevated hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
                 >
                   <Plus size={13} />
-                  <span>Create Scene</span>
                 </button>
                 {missingAssetsCount > 0 && (
                   <button
