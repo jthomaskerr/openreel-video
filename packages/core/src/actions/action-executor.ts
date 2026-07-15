@@ -85,6 +85,39 @@ export class ActionExecutor {
     }
   }
 
+  /**
+   * Validate and apply an action as part of a higher-level transaction without
+   * adding a standalone undo entry or changing special-marker bookkeeping.
+   */
+  async executeWithoutHistory(action: Action, project: Project): Promise<ActionResult> {
+    const validationResult = this.validator.validate(action, project);
+    if (!validationResult.valid) {
+      return {
+        success: false,
+        error: {
+          code: "INVALID_PARAMS",
+          message: validationResult.errors.map((error) => error.message).join("; "),
+          details: { errors: validationResult.errors },
+        },
+      };
+    }
+    const previousLastAddedIds = new Map(this.lastAddedIds);
+    try {
+      await this.applyAction(action as TimelineAction, project);
+      return { success: true, actionId: action.id };
+    } catch (error) {
+      return {
+        success: false,
+        error: {
+          code: "ACTION_FAILED",
+          message: error instanceof Error ? error.message : "Unknown error occurred",
+        },
+      };
+    } finally {
+      this.lastAddedIds = previousLastAddedIds;
+    }
+  }
+
   async executeMany(
     actions: Action[],
     project: Project,

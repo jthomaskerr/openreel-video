@@ -84,6 +84,10 @@ import { projectManager } from "../services/project-manager";
 import { reportRuntimeError, toast } from "./notification-store";
 import { usePersistenceStatusStore } from "./persistence-status-store";
 import { mediaAvailabilityRuntime } from "../services/media-verification";
+import {
+  applySceneHistoryEntry,
+  SCENE_HISTORY_ACTION,
+} from "./scene-history-bridge";
 
 function getImportedFileName(item: MediaItem): string {
   return item.sourceFile?.name ?? item.name;
@@ -4499,6 +4503,24 @@ export const useProjectStore = create<ProjectState>()(
             ? templateUndoStack[templateUndoStack.length - 1].timestamp
             : -1;
 
+        const latestAction = actionHistory.peekUndo();
+        if (
+          latestAction?.action.type === SCENE_HISTORY_ACTION &&
+          latestActionTimestamp >= latestClipTimestamp &&
+          latestActionTimestamp >= latestTemplateTimestamp
+        ) {
+          const sceneHistory = latestAction.action.params["sceneHistory"];
+          actionHistory.undo();
+          if (applySceneHistoryEntry(sceneHistory, "undo")) {
+            return { success: true };
+          }
+          actionHistory.redo();
+          return {
+            success: false,
+            error: { code: "INVALID_PARAMS", message: "Scene history entry is unavailable" },
+          };
+        }
+
         if (
           latestTemplateTimestamp >= 0 &&
           latestTemplateTimestamp >= latestClipTimestamp &&
@@ -4669,11 +4691,34 @@ export const useProjectStore = create<ProjectState>()(
         const {
           project,
           actionExecutor,
+          actionHistory,
           clipUndoStack,
           clipRedoStack,
           templateUndoStack,
           templateRedoStack,
         } = get();
+
+        const latestSceneRedo = actionHistory.peekRedo();
+        const latestSceneRedoTimestamp =
+          latestSceneRedo?.action.type === SCENE_HISTORY_ACTION ? latestSceneRedo.timestamp : -1;
+        const latestClipRedoTimestamp = clipRedoStack.at(-1)?.timestamp ?? -1;
+        const latestTemplateRedoTimestamp = templateRedoStack.at(-1)?.timestamp ?? -1;
+        if (
+          latestSceneRedoTimestamp >= 0 &&
+          latestSceneRedoTimestamp >= latestClipRedoTimestamp &&
+          latestSceneRedoTimestamp >= latestTemplateRedoTimestamp
+        ) {
+          const sceneHistory = latestSceneRedo?.action.params["sceneHistory"];
+          actionHistory.redo();
+          if (applySceneHistoryEntry(sceneHistory, "redo")) {
+            return { success: true };
+          }
+          actionHistory.undo();
+          return {
+            success: false,
+            error: { code: "INVALID_PARAMS", message: "Scene history entry is unavailable" },
+          };
+        }
 
         if (templateRedoStack.length > 0) {
           const entry = templateRedoStack[templateRedoStack.length - 1];
