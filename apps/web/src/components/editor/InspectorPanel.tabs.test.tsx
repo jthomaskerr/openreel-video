@@ -14,6 +14,7 @@ const trackId = "track-vid";
 function seedClip(opts: {
   mediaId: string;
   trackType: "video" | "audio" | "image";
+  metadata?: Record<string, unknown>;
 }): Project {
   const project = createEmptyProject("Inspector Tabs Test");
   const seeded: Project = {
@@ -52,6 +53,7 @@ function seedClip(opts: {
               },
               volume: 1,
               keyframes: [],
+              metadata: opts.metadata,
             },
           ],
           transitions: [],
@@ -98,6 +100,17 @@ describe("InspectorPanel real tabs", () => {
       screen.getByRole("tab", { name: /Transform/ }),
     ).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Audio/ })).toBeInTheDocument();
+  });
+
+  it.each([
+    ["canonical", { kind: "storyboard-shot", shotId: "scene-1", source: "neuralframes", importId: "nf-1" }],
+    ["legacy", { kind: "scene", sceneId: "scene-1", providerRequestId: "request-1" }],
+  ])("routes a %s scene projection through the scene inspector", (_name, metadata) => {
+    seedClip({ mediaId: "media-vid", trackType: "video", metadata });
+    render(<InspectorPanel />);
+    switchToEditPane();
+
+    expect(screen.getByTestId("scene-metadata-inspector")).toBeInTheDocument();
   });
 
   it("switching clip tabs swaps the visible panel (real isolation)", () => {

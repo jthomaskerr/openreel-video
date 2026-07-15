@@ -216,7 +216,24 @@ describe("NeuralFramesImportTab metadata import", () => {
         ok: true,
         json: async () => ({
           title: "Imported Storyboard",
-          shots: [{ id: "shot-1" }, { id: "shot-2" }],
+          shots: [
+            {
+              id: "shot-1",
+              index: 0,
+              label: "Scene 1",
+              startSeconds: 0,
+              endSeconds: 2,
+              prompt: "Opening performance",
+            },
+            {
+              id: "shot-2",
+              index: 1,
+              label: "Scene 2",
+              startSeconds: 2,
+              endSeconds: 4,
+              prompt: "Closing performance",
+            },
+          ],
           generatedAssets: [],
           metadataTracks: [
             {
@@ -321,10 +338,38 @@ describe("NeuralFramesImportTab metadata import", () => {
       expect(storeState.project!.mediaLibrary.items.some((item) => item.id === mediaId)).toBe(true);
     }
 
-    const metadataKinds = storeState.project!.timeline.tracks.flatMap((track) =>
-      track.clips.map((clip) => clip.metadata?.kind),
+    const timelineClips = storeState.project!.timeline.tracks.flatMap((track) => track.clips);
+    const sceneClips = timelineClips.filter((clip) => clip.metadata?.kind === "storyboard-shot");
+    expect(sceneClips).toHaveLength(2);
+    expect(sceneClips).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          startTime: 0,
+          duration: 2,
+          metadata: expect.objectContaining({
+            kind: "storyboard-shot",
+            shotId: "shot-1",
+            source: "neuralframes",
+            importSource: "neuralframes",
+            importId: "shot-1",
+          }),
+        }),
+        expect.objectContaining({
+          startTime: 2,
+          duration: 2,
+          metadata: expect.objectContaining({
+            kind: "storyboard-shot",
+            shotId: "shot-2",
+            source: "neuralframes",
+            importSource: "neuralframes",
+            importId: "shot-2",
+          }),
+        }),
+      ]),
     );
-    expect(metadataKinds).toEqual(expect.arrayContaining(["scene", "character", "style"]));
+    expect(timelineClips.map((clip) => clip.metadata?.kind)).toEqual(
+      expect.arrayContaining(["storyboard-shot", "character", "style"]),
+    );
   });
 
   it("keeps non-scene metadata blocks importable when storyboard duration is missing", async () => {

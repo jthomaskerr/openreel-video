@@ -6,6 +6,7 @@ import { useUIStore } from "../../stores/ui-store";
 import { useEngineStore } from "../../stores/engine-store";
 import { useProblemCount } from "../../stores/problem-store";
 import type { Transform, EditingTemplatePrimitive } from "@openreel/core";
+import { isSceneProjection } from "@openreel/music-video-domain";
 import {
   ChromaKeyEngine,
   initializeTranscriptionService,
@@ -172,10 +173,12 @@ export const InspectorPanel: React.FC = () => {
   const isSelectedMetadataClip = selectedTimelineClip?.type === "metadata";
 
   const metadataKind = useMemo(
-    () =>
-      typeof selectedTimelineClip?.metadata?.kind === "string"
-        ? (selectedTimelineClip.metadata!.kind as string)
-        : undefined,
+    () => {
+      if (isSceneProjection(selectedTimelineClip)) return "scene";
+      return typeof selectedTimelineClip?.metadata?.kind === "string"
+        ? (selectedTimelineClip.metadata.kind as string)
+        : undefined;
+    },
     [selectedTimelineClip],
   );
 

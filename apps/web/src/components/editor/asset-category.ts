@@ -1,4 +1,5 @@
 import type { MediaItem } from "@openreel/core";
+import { normalizeSceneProjectionMetadata } from "@openreel/music-video-domain";
 
 export type AssetCategory =
   | "video"
@@ -60,6 +61,7 @@ function readMetadataKind(item: MediaItem): string | undefined {
 
   try {
     const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (normalizeSceneProjectionMetadata(parsed)) return "scene";
     return typeof parsed["kind"] === "string" && parsed["kind"].trim()
       ? parsed["kind"]
       : undefined;
