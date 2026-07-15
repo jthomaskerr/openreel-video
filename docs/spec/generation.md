@@ -171,6 +171,16 @@ WaveSpeed model schemas control dynamic form fields and reference mapping. Image
 
 WaveSpeed supports shot-scoped image/video generation, timed audio for compatible models, automatic character references, cancellation when exposed by the provider, and server-side output download.
 
+Scene generation resolves creative data from the authoritative `StoryboardShot` and
+timing only from an explicitly selected, valid projection clip. Include Audio on an
+unplaced scene is disabled with an instruction to place and select a projection. If a
+scene has multiple projections, callers MUST supply the chosen `clipId`; the adapter
+never guesses by array order. There is no user-editable or persisted scene audio range.
+The request carries `shotId`, selected `clipId`, exact projection timing, model/schema,
+and ordered references. Reference precedence is source media, prompt-mentioned
+characters, scene/shot references, then user references. Generation completion MUST
+NOT mutate projection placement, duration, or trim.
+
 ### 9.3 Atlascloud
 
 Atlascloud uses the same normalized store, poller, UI, secret boundary, and finalizer. Provider endpoint paths, request schemas, output shape, rate limits, retry headers, cancellation, and webhook support remain unavailable until verified from authoritative provider documentation. Unknown facts MUST remain marked unsupported rather than implemented from assumptions.

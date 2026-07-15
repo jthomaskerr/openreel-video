@@ -16,7 +16,12 @@ The Storyboard system provides a unified interface for creating, viewing, editin
 
 ### Core Principle
 
-**Ownership model:** `StoryboardShot` records own all creative metadata (label, prompt, style, timing, references). Timeline `Clip` records own placement via specialized metadata (`metadata.kind = "storyboard-shot"`, `metadata.shotId`). This separation ensures:
+**Ownership model:** `StoryboardShot` records own creative metadata (label, prompt,
+style, references, associated media, Include Audio preference, model/settings, and
+generation state). Timeline `Clip` records own placement, duration, and trim via the
+canonical projection link (`metadata.kind = "storyboard-shot"`, `metadata.shotId`).
+Optional `startSeconds`/`endSeconds` values are legacy planning hints only and are
+never projection timing. This separation ensures:
 - Creative decisions remain independent of timeline layout.
 - Shots can be reordered, deleted, or edited without breaking timeline references.
 - Multiple clips can reference the same shot (shared creative intent, different placements).
@@ -37,8 +42,8 @@ export interface StoryboardShot {
   id: string;
   index: number;
   label: string;
-  startSeconds: number;
-  endSeconds: number;
+  startSeconds?: number;
+  endSeconds?: number;
   prompt: string;
   videoPrompt?: string;
   negativePrompt?: string;
@@ -47,6 +52,7 @@ export interface StoryboardShot {
   seed?: number;
   includeMainAudio: boolean;
   referenceAssetIds: string[];
+  associatedMediaId?: string;
   generatedAssetIds: string[];
   validation?: ValidationState;
   outputs: GenerationAttempt[];
@@ -58,7 +64,8 @@ export interface StoryboardShot {
 - `id`: Unique shot identifier (UUID).
 - `index`: Zero-based position in the shot sequence.
 - `label`: Human-readable name (e.g., "Verse 1 - Close-up").
-- `startSeconds`, `endSeconds`: Timing boundaries within the track.
+- `startSeconds`, `endSeconds`: Optional legacy planning hints. They do not place,
+  size, or trim a timeline projection.
 - `prompt`: Primary descriptive prompt for image generation.
 - `videoPrompt`: Optional video-generation-specific prompt.
 - `negativePrompt`: What NOT to include.
@@ -67,6 +74,8 @@ export interface StoryboardShot {
 - `seed`: Optional numeric seed for deterministic generation.
 - `includeMainAudio`: Whether the shot should include the audio track in final render.
 - `referenceAssetIds`: Array of reference image IDs.
+- `associatedMediaId`: Optional existing video asset association. Association alone
+  does not create a projection.
 - `generatedAssetIds`: Array of generated image/video IDs from past attempts.
 - `validation`: Optional validation state summary.
 - `outputs`: Array of `GenerationAttempt` records (one per generation/regeneration).
@@ -79,6 +88,12 @@ Timeline clips reference storyboard shots through the canonical
 This specification owns `StoryboardShot` creative state; [Timeline](./timeline.md)
 owns clip metadata, placement, grouping, and selection projection. No second
 `StoryboardClipMetadata` or clip-link contract is defined here.
+
+Manual scenes are valid before placement. Media creation produces an unplaced scene
+whose status is **Not on timeline**. Creative edits resolve by scene ID and are shared
+by every projection. Projection timing and trim controls appear only for an explicitly
+selected linked clip. Deleting a scene is blocked while projections exist with the
+instruction to remove timeline placements first.
 
 ---
 

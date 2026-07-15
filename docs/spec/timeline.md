@@ -50,7 +50,14 @@ interface StoryboardClipMetadata {
 - `shotId` SHOULD resolve to a `StoryboardShot`; an unresolved reference MUST NOT prevent the clip or other tracks from rendering.
 - Denormalized fields are display caches only. [Storyboard](./storyboard.md) owns creative truth.
 - New clips MUST write `kind: "storyboard-shot"`.
-- During migration, readers MAY accept a clip with a string `metadata.shotId` and `metadata.importSource === "neuralframes"` even when `kind` is absent.
+- During the compatibility period, readers MUST also accept legacy `kind: "scene"`
+  links with a usable scene/shot ID and NeuralFrames links with a string
+  `metadata.shotId` plus `metadata.importSource === "neuralframes"`, even when
+  `kind` is absent. Normalization preserves unknown/provider fields. Malformed
+  metadata remains an ordinary or recoverable orphan clip and MUST NOT invent an ID.
+- Legacy reads may be removed only after telemetry or explicit migration evidence
+  shows that no supported persisted project still contains those shapes, or as part
+  of an announced breaking migration.
 
 ## 2. Track Creation and Placement
 
@@ -75,6 +82,21 @@ Overlaps are allowed unless a specialized operation explicitly requests replacem
 ### 2.3 Time Conversion
 
 Pointer coordinates MUST be converted with the current zoom, horizontal scroll, and timeline origin. Times are clamped to zero and quantized only when snapping is enabled. Context-menu coordinates are captured at invocation and discarded when the menu closes.
+
+### 2.4 Scene Creation and Active Track
+
+`activeTrackId` is view state, not persisted project or clip metadata. When tracks
+change, keep the current visible track; otherwise prefer the selected clip's track,
+then the first unlocked video track, then the first visible track, and use `null`
+only when there are no tracks. Header, empty-lane, clip-selection, drag-source, and
+successful cross-track drop interactions activate their track.
+
+Scene placement is compatible only with an existing unlocked video track. Timeline
+**Create Scene** captures the active track and playhead at activation and creates one
+scene plus one projection at that exact time without snapping, rounding, gap finding,
+or ripple. Media **Create Scene** creates an unplaced scene and does not move the
+playhead. A scene may have multiple projections with independent placement, duration,
+trim, effects, and transforms.
 
 ## 3. View-Only Track Grouping
 
@@ -148,6 +170,10 @@ Empty-space, track, and clip context menus are distinct surfaces.
 - Opening one menu closes any other timeline menu.
 - Escape and outside click close the active menu.
 - Actions unavailable for the invoked target are hidden or disabled with an accessible explanation.
+- Ordinary video clips offer linking to an existing scene or in-place conversion.
+  Linking changes only canonical scene-link metadata. Conversion preserves the clip
+  ID, media, track, placement, duration, trim, effects, transforms, transitions, and
+  unrelated or future extension metadata.
 
 ## 6. Integration Boundaries
 
