@@ -60,6 +60,9 @@ CLAUDE.md
 *-PLAN-*.md
 .playwright-mcp/
 .wrangler/
+.claude/settings.local.json
+.serena/memories/
+apps/web/vite.config.ts.timestamp-*.mjs
 
 
 mobile-mockup/
