@@ -96,6 +96,15 @@ function journalPath(store: ProjectStore, projectId: string): string {
   return join(store.projectDir(projectId), ".openreel-save-transaction.json");
 }
 
+function moveSourceIsAbsent(error: NodeJS.ErrnoException): boolean {
+  return error.code === "ENOENT" || error.code === "ENAMETOOLONG";
+}
+
+async function filesMatch(leftPath: string, rightPath: string): Promise<boolean> {
+  const [left, right] = await Promise.all([readFile(leftPath), readFile(rightPath)]);
+  return left.equals(right);
+}
+
 async function replaceBytes(target: string, temp: string, bytes: Buffer): Promise<void> {
   await durableWrite(temp, bytes);
   await rename(temp, target);
@@ -130,7 +139,7 @@ async function recoverUnderLock(
     for (const move of journal.pendingMoves ?? []) {
       await mkdir(move.pendingEntryDirectory, { recursive: true });
       await rename(move.mediaPath, move.pendingContentPath).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== "ENOENT") throw error;
+        if (!moveSourceIsAbsent(error)) throw error;
       });
     }
   } else if (committedTarget) {
@@ -246,6 +255,7 @@ export async function executeSaveTransaction(
     const restorePath = `${projectPath}.${transactionId}.restore`;
     const pendingEntries = await listPendingMedia(store.projectDir(request.projectId));
     const pendingById = new Map(pendingEntries.map((entry) => [entry.mediaId, entry]));
+    const currentById = new Map(currentProject.mediaLibrary.items.map((item) => [item.id, item]));
     const referencedPending = (request.project as Project).mediaLibrary.items
       .filter((item) => pendingById.has(item.id));
     const occupied = new Set<string>();
@@ -254,6 +264,7 @@ export async function executeSaveTransaction(
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+    const existingMediaFilenames = new Set(occupied);
     for (const item of (request.project as Project).mediaLibrary.items) {
       if (!pendingById.has(item.id)) occupied.add(item.name);
     }
@@ -263,10 +274,15 @@ export async function executeSaveTransaction(
       if (item.metadata.fileSize !== pending.byteSize) {
         throw new Error(`Pending media byte size does not match snapshot metadata for ${item.id}`);
       }
-      const allocated = allocateMediaFilename(item.name || pending.originalFilename, occupied, {
-        caseSensitive: false,
-        unicodeNormalization: "NFC",
-      }).persistedBasename;
+      const currentItem = currentById.get(item.id);
+      const allocated = currentItem?.name ?? allocateMediaFilename(
+        item.name || pending.originalFilename,
+        occupied,
+        {
+          caseSensitive: false,
+          unicodeNormalization: "NFC",
+        },
+      ).persistedBasename;
       occupied.add(allocated);
       allocatedById.set(item.id, allocated);
     }
@@ -280,7 +296,19 @@ export async function executeSaveTransaction(
         }),
       },
     };
-    const pendingMoves: PendingMediaMove[] = referencedPending.map((item) => {
+    const redundantPending: typeof referencedPending = [];
+    for (const item of referencedPending) {
+      const currentItem = currentById.get(item.id);
+      if (!currentItem || !existingMediaFilenames.has(currentItem.name)) continue;
+      const pending = pendingById.get(item.id)!;
+      const currentPath = join(store.mediaDir(request.projectId), currentItem.name);
+      if (!await filesMatch(pending.contentPath, currentPath)) {
+        throw new Error(`Pending upload changed bytes for existing media identity ${item.id}`);
+      }
+      redundantPending.push(item);
+    }
+    const redundantPendingIds = new Set(redundantPending.map((item) => item.id));
+    const pendingMoves: PendingMediaMove[] = referencedPending.filter((item) => !redundantPendingIds.has(item.id)).map((item) => {
       const pending = pendingById.get(item.id) as PendingMediaEntry;
       const filename = allocatedById.get(item.id)!;
       return {
@@ -303,6 +331,9 @@ export async function executeSaveTransaction(
         throw error;
       }
       assertReceipt(currentReceipt);
+      for (const item of redundantPending) {
+        await rm(pendingById.get(item.id)!.entryDirectory, { recursive: true, force: true });
+      }
       return {
         saved: true,
         committed: true,
@@ -379,6 +410,9 @@ export async function executeSaveTransaction(
       }
       await rm(journalPath(store, request.projectId), { force: true });
       for (const move of pendingMoves) await rm(move.pendingEntryDirectory, { recursive: true, force: true });
+      for (const item of redundantPending) {
+        await rm(pendingById.get(item.id)!.entryDirectory, { recursive: true, force: true });
+      }
       return {
         saved: true,
         committed: true,
@@ -399,7 +433,7 @@ export async function executeSaveTransaction(
       for (const move of pendingMoves) {
         await mkdir(move.pendingEntryDirectory, { recursive: true });
         await rename(move.mediaPath, move.pendingContentPath).catch((moveError: NodeJS.ErrnoException) => {
-          if (moveError.code !== "ENOENT") throw moveError;
+          if (!moveSourceIsAbsent(moveError)) throw moveError;
         });
       }
       await rm(journalPath(store, request.projectId), { force: true });

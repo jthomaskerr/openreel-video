@@ -17,6 +17,29 @@ export type OccupiedMediaFilename =
   | Readonly<Pick<MediaFilenameResolution, "comparisonKey">>;
 
 const UNNAMED_STEM = "untitled";
+const MAX_BASENAME_BYTES = 255;
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  let result = "";
+  let byteLength = 0;
+  for (const character of value) {
+    const characterBytes = Buffer.byteLength(character, "utf8");
+    if (byteLength + characterBytes > maxBytes) break;
+    result += character;
+    byteLength += characterBytes;
+  }
+  return result;
+}
+
+function fitBasename(basename: string, suffix = ""): string {
+  const parsed = parse(basename);
+  const ext = parsed.ext === "." ? "" : parsed.ext;
+  const reservedBytes = Buffer.byteLength(`${suffix}${ext}`, "utf8");
+  if (reservedBytes >= MAX_BASENAME_BYTES) {
+    return truncateUtf8(`${parsed.name}${suffix}${ext}`, MAX_BASENAME_BYTES);
+  }
+  return `${truncateUtf8(parsed.name, MAX_BASENAME_BYTES - reservedBytes)}${suffix}${ext}`;
+}
 
 function toComparisonKey(value: string, policy: MediaFilenamePolicy): string {
   const normalized = value.normalize(policy.unicodeNormalization);
@@ -39,15 +62,19 @@ function sanitizeLeafFilename(value: string, policy: MediaFilenamePolicy): strin
   const stem = sanitizeStem(parsed.name);
   const ext = parsed.ext === "." ? "" : parsed.ext;
 
-  if (stem === "") return ext ? `${UNNAMED_STEM}${ext}` : UNNAMED_STEM;
-  return `${stem}${ext}`;
+  if (stem === "") return fitBasename(ext ? `${UNNAMED_STEM}${ext}` : UNNAMED_STEM);
+  return fitBasename(`${stem}${ext}`);
 }
 
 function appendCollisionSuffix(basename: string, attempt: number): string {
-  if (attempt === 0) return basename;
   const parsed = parse(basename);
   const ext = parsed.ext === "." ? "" : parsed.ext;
-  return `${parsed.name} ${attempt}${ext}`;
+  const numberedStem = /^(.*) ([1-9]\d*)$/.exec(parsed.name);
+  const existingSuffix = numberedStem ? Number(numberedStem[2]) : 0;
+  const canIncrement = Number.isSafeInteger(existingSuffix + attempt);
+  const stem = numberedStem && canIncrement ? numberedStem[1] : parsed.name;
+  const suffixNumber = canIncrement ? existingSuffix + attempt : attempt;
+  return fitBasename(`${stem}${ext}`, suffixNumber === 0 ? "" : ` ${suffixNumber}`);
 }
 
 export function sanitizeProjectFilename(

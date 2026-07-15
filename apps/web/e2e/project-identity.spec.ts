@@ -23,6 +23,8 @@ test("both supported project URLs load only the requested slug without creating 
   const projectPosts: string[] = [];
   const stateChangingWrites: string[] = [];
   const consoleErrors: string[] = [];
+  const pageErrors: string[] = [];
+  const failedProjectResponses: string[] = [];
 
   const entries = [
     {
@@ -48,6 +50,12 @@ test("both supported project URLs load only the requested slug without creating 
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(message.text());
     });
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    page.on("response", (response) => {
+      if (response.url().includes("/api/projects/") && response.status() >= 400) {
+        failedProjectResponses.push(`${response.status()} ${response.url()}`);
+      }
+    });
 
     await page.goto(`http://localhost:5173${entry.url}`, { waitUntil: "domcontentloaded" });
     await expect(page.getByText("Vintage Tokyo", { exact: true }).first()).toBeVisible();
@@ -69,4 +77,6 @@ test("both supported project URLs load only the requested slug without creating 
   expect(stateChangingWrites).toEqual([]);
   expect(await projectIds(request)).toEqual(beforeIds);
   expect(consoleErrors).toEqual([]);
+  expect(pageErrors).toEqual([]);
+  expect(failedProjectResponses).toEqual([]);
 });

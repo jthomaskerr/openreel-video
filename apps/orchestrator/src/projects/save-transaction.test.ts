@@ -155,6 +155,82 @@ test("pending media is LFS-audited from the index before one atomic snapshot com
   }
 });
 
+test("re-uploading the same media id reuses its canonical filename instead of growing collision suffixes", async () => {
+  const f = await fixture();
+  try {
+    const worktree = f.store.projectDir(f.project.id);
+    const bytes = Buffer.from("same-video");
+    const firstUpload = join(f.fixtureRoot, "first-upload.tmp");
+    await writeFile(firstUpload, bytes);
+    await storePendingUpload(worktree, "media-1", firstUpload, "clip 1.mp4", "video/mp4", bytes.length);
+
+    const firstProject: Project = {
+      ...f.project,
+      modifiedAt: f.project.modifiedAt + 1,
+      mediaLibrary: { items: [media("media-1", "clip 1.mp4", bytes.length)] },
+    };
+    const firstReceipt = await executeSaveTransaction(f.store, f.gitStore, request(f, firstProject));
+    assert.equal(firstReceipt.project.mediaLibrary.items[0]?.name, "clip 1.mp4");
+    if (!firstReceipt.commitSha || !firstReceipt.treeSha || !firstReceipt.projectBlobSha) {
+      throw new Error("First save did not return a complete revision");
+    }
+
+    const retryUpload = join(f.fixtureRoot, "retry-upload.tmp");
+    await writeFile(retryUpload, bytes);
+    await storePendingUpload(worktree, "media-1", retryUpload, "clip 1.mp4", "video/mp4", bytes.length);
+    const retryProject: Project = {
+      ...firstReceipt.project,
+      name: "Saved again",
+      modifiedAt: firstReceipt.project.modifiedAt + 1,
+    };
+    const retryRequest: ProjectSaveRequest = {
+      projectId: retryProject.id,
+      baseRevision: {
+        commitSha: firstReceipt.commitSha,
+        treeSha: firstReceipt.treeSha,
+        projectBlobSha: firstReceipt.projectBlobSha,
+        sourceModifiedAt: firstReceipt.sourceModifiedAt,
+      },
+      project: retryProject,
+      requiredMediaManifest: buildRequiredMediaManifest(retryProject),
+      saveIntent: "autosave",
+    };
+    const retryReceipt = await executeSaveTransaction(f.store, f.gitStore, retryRequest);
+
+    assert.equal(retryReceipt.project.mediaLibrary.items[0]?.name, "clip 1.mp4");
+    assert.equal(await readFile(join(worktree, "media", "clip 1.mp4"), "utf8"), "same-video");
+    assert.equal(await readPendingMedia(worktree, "media-1"), null);
+  } finally {
+    await rm(f.fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("a new media filename is capped before the filesystem rename", async () => {
+  const f = await fixture();
+  try {
+    const worktree = f.store.projectDir(f.project.id);
+    const bytes = Buffer.from("long-name-video");
+    const upload = join(f.fixtureRoot, "long-name-upload.tmp");
+    const longName = `${"solo 1 ".repeat(60)}.mp4`;
+    await writeFile(upload, bytes);
+    await storePendingUpload(worktree, "media-long", upload, longName, "video/mp4", bytes.length);
+
+    const proposed: Project = {
+      ...f.project,
+      modifiedAt: f.project.modifiedAt + 1,
+      mediaLibrary: { items: [media("media-long", longName, bytes.length)] },
+    };
+    const receipt = await executeSaveTransaction(f.store, f.gitStore, request(f, proposed));
+    const persistedName = receipt.project.mediaLibrary.items[0]?.name ?? "";
+
+    assert.ok(Buffer.byteLength(persistedName, "utf8") <= 255);
+    assert.match(persistedName, /\.mp4$/);
+    assert.equal(await readFile(join(worktree, "media", persistedName), "utf8"), "long-name-video");
+  } finally {
+    await rm(f.fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("an identical snapshot returns the confirmed receipt without creating a commit", async () => {
   const f = await fixture();
   try {
@@ -344,6 +420,48 @@ test("recovery after process loss before ref update restores the base bytes and 
     await recoverInterruptedSave(f.store, f.gitStore, f.project.id);
     await assertUnchanged(f, before);
   } finally { await rm(f.fixtureRoot, { recursive: true, force: true }); }
+});
+
+test("recovery clears a legacy journal whose planned media basename exceeds NAME_MAX", async () => {
+  const f = await fixture();
+  try {
+    const worktree = f.store.projectDir(f.project.id);
+    const bytes = Buffer.from("still-pending");
+    const upload = join(f.fixtureRoot, "legacy-pending.tmp");
+    await writeFile(upload, bytes);
+    await storePendingUpload(worktree, "media-legacy", upload, "clip.mp4", "video/mp4", bytes.length);
+    const pending = await readPendingMedia(worktree, "media-legacy");
+    assert.ok(pending);
+    const projectPath = join(worktree, "project.json");
+    const projectBytes = await readFile(projectPath);
+    const transactionId = "legacy-name-too-long";
+    const invalidFilename = `${"clip 1 ".repeat(60)}.mp4`;
+    await writeFile(join(worktree, ".openreel-save-transaction.json"), JSON.stringify({
+      version: 1,
+      projectId: f.project.id,
+      baseCommitSha: f.baseRevision.commitSha,
+      targetProjectBlobSha: f.baseRevision.projectBlobSha,
+      previousBytes: projectBytes.toString("base64"),
+      proposedBytes: projectBytes.toString("base64"),
+      stagedPath: `${projectPath}.${transactionId}.save`,
+      restorePath: `${projectPath}.${transactionId}.restore`,
+      pendingMoves: [{
+        mediaId: "media-legacy",
+        pendingContentPath: pending.contentPath,
+        pendingEntryDirectory: pending.entryDirectory,
+        mediaPath: join(f.store.mediaDir(f.project.id), invalidFilename),
+        relativeMediaPath: `media/${invalidFilename}`,
+      }],
+    }));
+
+    await recoverInterruptedSave(f.store, f.gitStore, f.project.id);
+
+    assert.deepEqual(await f.store.loadProject(f.project.id), f.project);
+    assert.ok(await readPendingMedia(worktree, "media-legacy"));
+    await assert.rejects(readFile(join(worktree, ".openreel-save-transaction.json")), /ENOENT/);
+  } finally {
+    await rm(f.fixtureRoot, { recursive: true, force: true });
+  }
 });
 
 test("recovery after process loss after ref update keeps the confirmed bytes and HEAD", async () => {

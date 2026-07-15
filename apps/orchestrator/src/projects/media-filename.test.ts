@@ -108,6 +108,16 @@ test("allocates the lowest free suffix without overwriting occupied entries", ()
       occupied: ["clip", "clip 1"],
       expectedPersistedBasename: "clip 2",
     },
+    {
+      desired: "clip 1.mp4",
+      occupied: ["clip 1.mp4", "clip 2.mp4"],
+      expectedPersistedBasename: "clip 3.mp4",
+    },
+    {
+      desired: "archive.tar 1.gz",
+      occupied: ["archive.tar 1.gz"],
+      expectedPersistedBasename: "archive.tar 2.gz",
+    },
   ];
 
   for (const testCase of cases) {
@@ -130,4 +140,18 @@ test("treats Unicode normalization equivalents as occupied on the chosen persist
 test("applies case sensitivity when comparing occupied names", () => {
   expectAllocation("Clip.mp4", ["clip.mp4"], NFC_CASE_INSENSITIVE, "Clip 1.mp4", "clip 1.mp4");
   expectAllocation("Clip.mp4", ["clip.mp4"], NFC_CASE_SENSITIVE, "Clip.mp4");
+});
+
+test("caps persisted basenames by UTF-8 bytes while preserving extensions and collision suffixes", () => {
+  const desired = `${"solo ".repeat(80)}.mp4`;
+  const first = allocateMediaFilename(desired, [], NFC_CASE_SENSITIVE);
+  const second = allocateMediaFilename(desired, [first.persistedBasename], NFC_CASE_SENSITIVE);
+  const unicode = sanitizeProjectFilename(`${"🎬".repeat(100)}.mp4`, NFC_CASE_SENSITIVE);
+
+  assert.ok(Buffer.byteLength(first.persistedBasename, "utf8") <= 255);
+  assert.ok(Buffer.byteLength(second.persistedBasename, "utf8") <= 255);
+  assert.ok(Buffer.byteLength(unicode.persistedBasename, "utf8") <= 255);
+  assert.match(first.persistedBasename, /\.mp4$/);
+  assert.match(second.persistedBasename, / 1\.mp4$/);
+  assert.match(unicode.persistedBasename, /\.mp4$/);
 });

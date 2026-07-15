@@ -40,7 +40,7 @@ test("validates served media filenames", () => {
 });
 
 test("rejects media filename traversal and path separators", () => {
-  for (const value of ["", "../media.mp4", "media/1.mp4", "media\\1.mp4", "media..1.mp4", "media%2f1.mp4"]) {
+  for (const value of ["", "../media.mp4", "media/1.mp4", "media\\1.mp4", "media..1.mp4", "media%2f1.mp4", `${"x".repeat(252)}.mp4`]) {
     assert.equal(isValidMediaFilename(value), false, value);
   }
 });

@@ -25,6 +25,7 @@ export function isValidMediaId(value: string): boolean {
 /** Return whether a generated stored media filename is safe to serve from media/. */
 export function isValidMediaFilename(value: string): boolean {
   return (
+    Buffer.byteLength(value, "utf8") <= 255 &&
     !hasTraversalOrSeparators(value) &&
     !value.includes("..") &&
     !/%(?:2f|5c)/i.test(value) &&
