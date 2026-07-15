@@ -189,17 +189,25 @@ export const useTimelineStore = create<TimelineState>()(
     },
 
     zoomIn: () => {
-      const { pixelsPerSecond } = get();
+      const { pixelsPerSecond, playheadPosition, scrollX } = get();
       // Scale zoom by 1.5x but never exceed max to prevent performance issues at extreme zoom
       const newZoom = Math.min(pixelsPerSecond * 1.5, ZOOM_PRESETS.MAX);
-      set({ pixelsPerSecond: newZoom });
+      const playheadViewportOffset = playheadPosition * pixelsPerSecond - scrollX;
+      set({
+        pixelsPerSecond: newZoom,
+        scrollX: Math.max(0, playheadPosition * newZoom - playheadViewportOffset),
+      });
     },
 
     zoomOut: () => {
-      const { pixelsPerSecond } = get();
+      const { pixelsPerSecond, playheadPosition, scrollX } = get();
       // Scale zoom down by 1.5x but never go below min to prevent blur at extreme zoom out
       const newZoom = Math.max(pixelsPerSecond / 1.5, ZOOM_PRESETS.MIN);
-      set({ pixelsPerSecond: newZoom });
+      const playheadViewportOffset = playheadPosition * pixelsPerSecond - scrollX;
+      set({
+        pixelsPerSecond: newZoom,
+        scrollX: Math.max(0, playheadPosition * newZoom - playheadViewportOffset),
+      });
     },
 
     setZoom: (pixelsPerSecond: number) => {

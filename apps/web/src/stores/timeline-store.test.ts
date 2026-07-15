@@ -55,8 +55,38 @@ describe("TimelineStore zoom limits", () => {
   beforeEach(() => {
     useTimelineStore.setState({
       pixelsPerSecond: ZOOM_PRESETS.DEFAULT,
+      playheadPosition: 0,
+      scrollX: 0,
       viewportWidth: 800,
     });
+  });
+
+  it("keeps the playhead at the same viewport position when zooming in", () => {
+    useTimelineStore.setState({
+      pixelsPerSecond: 100,
+      playheadPosition: 10,
+      scrollX: 700,
+    });
+
+    useTimelineStore.getState().zoomIn();
+
+    const state = useTimelineStore.getState();
+    expect(state.pixelsPerSecond).toBe(150);
+    expect(state.playheadPosition * state.pixelsPerSecond - state.scrollX).toBe(300);
+  });
+
+  it("keeps the playhead at the same viewport position when zooming out", () => {
+    useTimelineStore.setState({
+      pixelsPerSecond: 150,
+      playheadPosition: 10,
+      scrollX: 1_200,
+    });
+
+    useTimelineStore.getState().zoomOut();
+
+    const state = useTimelineStore.getState();
+    expect(state.pixelsPerSecond).toBe(100);
+    expect(state.playheadPosition * state.pixelsPerSecond - state.scrollX).toBe(300);
   });
 
   it("clamps direct zoom changes to 1 pixel per second", () => {
