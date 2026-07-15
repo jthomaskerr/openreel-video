@@ -177,6 +177,39 @@ describe("music video scene operations", () => {
     expect(useProjectStore.getState().project.mediaLibrary.items).toHaveLength(1);
   });
 
+  it("deletes only unplaced scenes and restores them through editor undo and redo", async () => {
+    const unplaced = useMusicVideoStore.getState().createScene({ label: "Delete me" });
+    expect(unplaced.success).toBe(true);
+    if (!unplaced.success) return;
+
+    expect(useMusicVideoStore.getState().deleteScene(unplaced.value)).toEqual({
+      success: true,
+      value: undefined,
+    });
+    expect(useMusicVideoStore.getState().getScene(unplaced.value)).toBeUndefined();
+    expect((await useProjectStore.getState().undo()).success).toBe(true);
+    expect(useMusicVideoStore.getState().getScene(unplaced.value)?.label).toBe("Delete me");
+    expect((await useProjectStore.getState().redo()).success).toBe(true);
+    expect(useMusicVideoStore.getState().getScene(unplaced.value)).toBeUndefined();
+
+    expect((await useProjectStore.getState().undo()).success).toBe(true);
+    const placed = await useMusicVideoStore.getState().placeScene({
+      sceneId: unplaced.value,
+      trackId: "video-track",
+      startTime: 2.5,
+    });
+    expect(placed.success).toBe(true);
+    const before = structuredClone(useMusicVideoStore.getState().projects);
+    expect(useMusicVideoStore.getState().deleteScene(unplaced.value)).toEqual({
+      success: false,
+      error: {
+        code: "SCENE_HAS_PROJECTIONS",
+        message: "Remove this scene's timeline placements before deleting it.",
+      },
+    });
+    expect(useMusicVideoStore.getState().projects).toEqual(before);
+  });
+
   it("links by changing only canonical scene metadata keys", async () => {
     useProjectStore.setState({ project: editorProject([track("video-track")], [videoMedia()]) });
     await useProjectStore.getState().addClip("video-track", "video-1", 2, {

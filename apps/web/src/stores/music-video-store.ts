@@ -13,6 +13,7 @@ import { v4 as uuidv4 } from "uuid";
 import type { Clip, MediaItem, Project } from "@openreel/core";
 import {
   createSceneProjectionMetadata,
+  getSceneIdFromClip,
   DEFAULT_ASPECT_RATIO,
   DEFAULT_IMAGE_MODEL,
   DEFAULT_RESOLUTION,
@@ -42,6 +43,7 @@ export type SceneOperationErrorCode =
   | "MISSING_MEDIA"
   | "NON_VIDEO_MEDIA"
   | "NON_VIDEO_CLIP"
+  | "SCENE_HAS_PROJECTIONS"
   | "PLACEMENT_FAILED";
 
 export interface SceneOperationError {
@@ -109,6 +111,7 @@ interface MusicVideoState {
   // ── Atomic scene operations ─────────────────────────────────────────────────
   createScene: (input?: Partial<StoryboardShot>) => SceneOperationResult<string>;
   updateScene: (sceneId: string, patch: Partial<StoryboardShot>) => SceneOperationResult;
+  deleteScene: (sceneId: string) => SceneOperationResult;
   placeScene: (input: {
     sceneId: string;
     trackId: string;
@@ -272,10 +275,7 @@ function createInternalPlaceholder(scene: StoryboardShot, id: string): MediaItem
 
 function projectionsForScene(editor: Project, sceneId: string): Clip[] {
   return editor.timeline.tracks.flatMap((track) =>
-    track.clips.filter(
-      (clip) =>
-        clip.metadata?.["kind"] === "storyboard-shot" && clip.metadata?.["shotId"] === sceneId,
-    ),
+    track.clips.filter((clip) => getSceneIdFromClip(clip) === sceneId),
   );
 }
 
@@ -527,6 +527,43 @@ export const useMusicVideoStore = create<MusicVideoState>()(
           sceneIndex,
         );
         const afterMusic = normalizeMusicProject({ ...active.project, shots, updatedAt: now() });
+        set((state) => ({
+          projects: { ...state.projects, [active.id]: afterMusic },
+          sceneUndoStack: [
+            ...state.sceneUndoStack,
+            {
+              beforeMusicProject: beforeMusic,
+              afterMusicProject: structuredClone(afterMusic),
+              beforeEditorProject: beforeEditor,
+              afterEditorProject: structuredClone(beforeEditor),
+            },
+          ],
+          sceneRedoStack: [],
+        }));
+        publishSceneHistory(active.id, get().sceneUndoStack.at(-1)!);
+        return ok(undefined);
+      },
+
+      deleteScene: (sceneId) => {
+        const active = activeMusicProject(get());
+        if (!active?.project) return fail("MISSING_PROJECT", "No active music video project.");
+        const sceneIndex = active.project.shots.findIndex((scene) => scene.id === sceneId);
+        if (sceneIndex < 0) return fail("MISSING_SCENE", `Scene ${sceneId} was not found.`);
+        const beforeEditor = structuredClone(useProjectStore.getState().project);
+        if (projectionsForScene(beforeEditor, sceneId).length > 0) {
+          return fail(
+            "SCENE_HAS_PROJECTIONS",
+            "Remove this scene's timeline placements before deleting it.",
+          );
+        }
+        const beforeMusic = structuredClone(active.project);
+        const afterMusic = normalizeMusicProject({
+          ...active.project,
+          shots: active.project.shots
+            .filter((scene) => scene.id !== sceneId)
+            .map((scene, index) => normalizeScene({ ...scene, index }, index)),
+          updatedAt: now(),
+        });
         set((state) => ({
           projects: { ...state.projects, [active.id]: afterMusic },
           sceneUndoStack: [
