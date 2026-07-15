@@ -28,6 +28,7 @@ interface AssetBucketsProps {
   onRetryKieAIRef?: React.MutableRefObject<(item: MediaItem) => void>;
   onManageRef?: React.MutableRefObject<(item: MediaItem) => void>;
   onRenameRef?: React.MutableRefObject<(item: MediaItem) => void>;
+  onAssociateSceneRef?: React.MutableRefObject<(item: MediaItem) => void>;
   /** Component that renders a single media item row */
   MediaRow: React.ComponentType<{
     item: MediaItem;
@@ -37,6 +38,7 @@ interface AssetBucketsProps {
     onRetryKieAIRef?: React.MutableRefObject<(item: MediaItem) => void>;
     onManageRef?: React.MutableRefObject<(item: MediaItem) => void>;
     onRenameRef?: React.MutableRefObject<(item: MediaItem) => void>;
+    onAssociateSceneRef?: React.MutableRefObject<(item: MediaItem) => void>;
   }>;
 }
 
@@ -192,6 +194,7 @@ export const AssetBuckets = forwardRef<AssetBucketsHandle, AssetBucketsProps>(fu
   onRetryKieAIRef,
   onManageRef,
   onRenameRef,
+  onAssociateSceneRef,
   MediaRow,
 }, ref) {
   const buckets = useMemo(
@@ -242,6 +245,7 @@ export const AssetBuckets = forwardRef<AssetBucketsHandle, AssetBucketsProps>(fu
             onRetryKieAIRef={onRetryKieAIRef}
             onManageRef={onManageRef}
             onRenameRef={onRenameRef}
+            onAssociateSceneRef={onAssociateSceneRef}
           />
         ))}
       </div>
@@ -285,6 +289,7 @@ export const AssetBuckets = forwardRef<AssetBucketsHandle, AssetBucketsProps>(fu
                       onRetryKieAIRef={onRetryKieAIRef}
                       onManageRef={onManageRef}
                       onRenameRef={onRenameRef}
+                      onAssociateSceneRef={onAssociateSceneRef}
                     />
                   ))}
                 </div>

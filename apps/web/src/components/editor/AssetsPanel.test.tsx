@@ -470,4 +470,23 @@ describe("AssetsPanel media toolbar and missing-only transitions", () => {
     expect(verify).toHaveBeenCalledWith(projectId, ["transient-1"], expect.any(Object));
     expect(JSON.stringify(useProjectStore.getState().project)).toBe(before);
   });
+
+  it("offers Associate with Scene only from video asset actions", async () => {
+    seedProject([
+      media({ id: "video-1", name: "clip.mp4", type: "video" }),
+      media({ id: "image-1", name: "still.png", type: "image" }),
+    ]);
+    renderPanel();
+
+    fireEvent.contextMenu(screen.getByText("clip.mp4"));
+    const action = await screen.findByRole("menuitem", { name: "Associate with Scene…" });
+    fireEvent.click(action);
+    expect(screen.getByRole("dialog", { name: /Associate clip.mp4 with Scene/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    fireEvent.contextMenu(screen.getByText("still.png"));
+    await waitFor(() => {
+      expect(screen.queryByRole("menuitem", { name: "Associate with Scene…" })).not.toBeInTheDocument();
+    });
+  });
 });

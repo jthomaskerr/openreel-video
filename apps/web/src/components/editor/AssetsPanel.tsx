@@ -4,7 +4,7 @@ import {
   Square, Circle, Triangle, Star, ArrowRight, Hexagon, FileCode, AlertTriangle,
   RefreshCw, Palette, LayoutGrid, Grid2x2, List, Sparkles, Video,
   Type, Shapes, Wand2, LayoutTemplate, Zap, Shuffle, Pencil, Settings,
-  SlidersHorizontal, ChevronsDownUp, ChevronsUpDown,
+  SlidersHorizontal, ChevronsDownUp, ChevronsUpDown, Link2,
 } from "lucide-react";
 import {
   BACKGROUND_PRESETS,
@@ -45,6 +45,7 @@ import type { GenerateAssetDialogProps } from "./generate/GenerateAssetDialog";
 import { loadMediaBlob, saveFileHandle, saveDirectoryHandle, scanDirectoryRecursive } from "../../services/media-storage";
 import { useKieAIStore } from "../../stores/kieai-store";
 import { useMusicVideoStore } from "../../stores/music-video-store";
+import { SceneLibrary } from "./SceneLibrary";
 import { AssetBuckets, type AssetBucketsHandle, type GroupBy } from "./AssetBuckets";
 import { mediaAvailabilityRuntime } from "../../services/media-verification";
 import {
@@ -154,6 +155,7 @@ const MediaThumbnail: React.FC<{
   onRetryKieAI?: () => void;
   onManage?: () => void;
   onRename?: () => void;
+  onAssociateScene?: () => void;
 }> = function MediaThumbnail({
   item,
   availability,
@@ -169,6 +171,7 @@ const MediaThumbnail: React.FC<{
   onRetryKieAI,
   onManage,
   onRename,
+  onAssociateScene,
 }) {
   const [isHovered, setIsHovered] = useState(false);
   const isReplacing = useProjectStore((s) => s.replacingMediaIds.has(item.id));
@@ -459,6 +462,12 @@ const MediaThumbnail: React.FC<{
             <Settings size={13} className="mr-2" />
             Manage
           </ContextMenuItem>
+          {item.type === "video" && onAssociateScene && (
+            <ContextMenuItem onClick={(e) => { (e as React.MouseEvent).stopPropagation?.(); onAssociateScene(); }}>
+              <Link2 size={13} className="mr-2" />
+              Associate with Scene…
+            </ContextMenuItem>
+          )}
           <ContextMenuItem onClick={(e) => { (e as React.MouseEvent).stopPropagation?.(); onDelete(); }} className="text-red-400 focus:text-red-400">
             <Trash2 size={13} className="mr-2" />
             Delete
@@ -641,6 +650,12 @@ const MediaThumbnail: React.FC<{
           <Settings size={13} className="mr-2" />
           Manage
         </ContextMenuItem>
+        {item.type === "video" && onAssociateScene && (
+          <ContextMenuItem onClick={() => onAssociateScene()}>
+            <Link2 size={13} className="mr-2" />
+            Associate with Scene…
+          </ContextMenuItem>
+        )}
         <ContextMenuItem onClick={() => onDelete()} className="text-red-400 focus:text-red-400">
           <Trash2 size={13} className="mr-2" />
           Delete
@@ -701,7 +716,7 @@ function useStableMediaItems(items: MediaItem[]): MediaItem[] {
   return prev; // no changes — return stable reference
 }
 const MediaThumbnailRow = React.memo(
-  ({ item, viewMode, isSelected, onGenerateRef, onRetryKieAIRef, onManageRef, onRenameRef }: {
+  ({ item, viewMode, isSelected, onGenerateRef, onRetryKieAIRef, onManageRef, onRenameRef, onAssociateSceneRef }: {
     item: MediaItem;
     viewMode: MediaViewMode;
     isSelected: boolean;
@@ -709,12 +724,14 @@ const MediaThumbnailRow = React.memo(
     onRetryKieAIRef?: React.MutableRefObject<(item: MediaItem) => void>;
     onManageRef?: React.MutableRefObject<(item: MediaItem) => void>;
     onRenameRef?: React.MutableRefObject<(item: MediaItem) => void>;
+    onAssociateSceneRef?: React.MutableRefObject<(item: MediaItem) => void>;
   }) => {
     const projectId = useProjectStore((s) => s.project.id);
     const availability = useMediaAvailabilityView(projectId, item);
     const handleSelect = useCallback(() => {
       const ui = useUIStore.getState();
       ui.select({ type: "clip", id: item.id });
+      ui.setInspectorSelection(null);
       ui.setInspectedAsset(item);
     }, [item]);
 
@@ -781,6 +798,10 @@ const MediaThumbnailRow = React.memo(
       onRenameRef?.current?.(item);
     }, [onRenameRef, item]);
 
+    const handleAssociateScene = useCallback(() => {
+      onAssociateSceneRef?.current?.(item);
+    }, [onAssociateSceneRef, item]);
+
     return (
       <MediaThumbnail
         item={item}
@@ -797,6 +818,7 @@ const MediaThumbnailRow = React.memo(
         onRetryKieAI={getMediaStatus(item) === MediaStatus.ERROR && item.kieaiTaskId ? handleRetryKieAICb : undefined}
         onManage={handleManage}
         onRename={handleRename}
+        onAssociateScene={item.type === "video" ? handleAssociateScene : undefined}
       />
     );
   },
@@ -821,7 +843,8 @@ const MediaThumbnailRow = React.memo(
     prev.onGenerateRef === next.onGenerateRef &&
     prev.onRetryKieAIRef === next.onRetryKieAIRef &&
     prev.onManageRef === next.onManageRef &&
-    prev.onRenameRef === next.onRenameRef,
+    prev.onRenameRef === next.onRenameRef &&
+    prev.onAssociateSceneRef === next.onAssociateSceneRef,
 );
 
 MediaThumbnailRow.displayName = "MediaThumbnailRow";
@@ -877,6 +900,7 @@ export const AssetsPanel: React.FC = () => {
   } | null>(null);
   const [mediaViewMode, setMediaViewMode] = useState<MediaViewMode>("large");
   const [groupBy, setGroupBy] = useState<GroupBy>("type");
+  const [associationMedia, setAssociationMedia] = useState<MediaItem | null>(null);
   const assetBucketsRef = useRef<AssetBucketsHandle>(null);
   const [generatingBackground, setGeneratingBackground] = useState<
     string | null
@@ -1258,6 +1282,9 @@ export const AssetsPanel: React.FC = () => {
       useProjectStore.getState().updateMediaMetadata(item.id, { title: newTitle.trim() });
     }
   });
+  const onAssociateSceneRef = useRef((item: MediaItem) => {
+    if (item.type === "video") setAssociationMedia(item);
+  });
 
   const handleVerifyAll = useCallback(() => {
     const mediaIds = mediaItems
@@ -1429,6 +1456,11 @@ export const AssetsPanel: React.FC = () => {
               </div>
             </div>
 
+            <SceneLibrary
+              associationMedia={associationMedia}
+              onDismissAssociation={() => setAssociationMedia(null)}
+            />
+
             <ScrollArea
               className={`min-h-0 flex-1 ${isDragOver ? "bg-primary/5" : ""}`}
               onDrop={handleDrop}
@@ -1450,6 +1482,7 @@ export const AssetsPanel: React.FC = () => {
                     onRetryKieAIRef={onRetryKieAIRef}
                     onManageRef={onManageRef}
                     onRenameRef={onRenameRef}
+                    onAssociateSceneRef={onAssociateSceneRef}
                     MediaRow={MediaThumbnailRow}
                   />
                 )}
