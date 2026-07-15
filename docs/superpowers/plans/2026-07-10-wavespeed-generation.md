@@ -20,7 +20,7 @@
 **Next action:** implement timed audio, checkpointed finalization/recovery, and failure-injection suites before browser and paid-provider gates.
 
 **Date:** 2026-07-10  
-**Spec:** `docs/spec/wavespeed-generation.md`  
+**Spec:** `docs/spec/generation.md` (canonical), with `docs/spec/wavespeed-generation.md` retained as the Inbox #24 compatibility entry point.  
 **Status:** Partial deterministic implementation; browser/provider/recovery gates pending.
 **Outcome:** A shot-aware WaveSpeed image/video generation flow resolves stable references and exact shot audio, survives reload/retry, finalizes one versioned asset, and applies an explicit idempotent timeline placement policy.
 
@@ -47,7 +47,11 @@ Do not add a new database framework solely for this feature. Implement a small f
 
 ## Delivery sequence
 
-## Execution protocol for GPT-5.6-Luna subagents
+## Execution protocol for Codex subagents
+
+Implementation packages are assigned to `gpt-5.4-mini` Codex subagents. The final integrated diff is reviewed by a separate `gpt-5.6-sol` Codex subagent that did not implement a work package. If the requested model cannot be selected by the Codex execution surface, dispatch stops rather than silently substituting another model.
+
+The `gpt-5.6-sol` verifier owns no implementation package. It reviews the canonical spec, this plan, all implementation diffs, focused and full gate evidence, browser evidence, and provider-eval evidence. It must return one of `PASS`, `FAIL`, or `BLOCKED`, with requirement-level findings and exact file/symbol evidence. A `PASS` requires every Definition of Done item to be evidenced; tests passing without browser and provider gates is not sufficient.
 
 This section is normative for parallel execution. A subagent owns only the files in its work package unless the package explicitly lists a shared file. When a shared file must change, the subagent records the required edit in its handoff and the integration owner applies it. Subagents must not reformat unrelated code, delete user changes, or infer contracts that are owned by an earlier package.
 
@@ -500,22 +504,17 @@ Tests enumerate every allowed transition and reject all others; assert provider 
 
 | Spec requirement | Implementation owner | Primary deterministic evidence | Live evidence |
 |---|---|---|---|
-| §2 ownership boundaries | WP-01, WP-07B | contract and store mutation tests | asset/shot/clip inspection |
-| §4 image/video/new asset/variation workflows | WP-06, WP-08, WP-09 | coordinator and component tests | browser cases 4–6 |
-| §5 inspector information architecture/accessibility | WP-08 | component keyboard/ARIA/draft tests | browser case 9 |
-| §6 typed context/timing/duration | WP-01, WP-02, WP-03 | schema, resolver, duration-adapter tests | timing labels and submitted manifest |
-| §7 audio source/extraction/cache | WP-02, WP-05 | range conversion, PCM, hash, cache tests | waveform plus recorded hash/range |
-| §8 reference and character resolution | WP-02, WP-04, WP-06 | order/dedupe/token/upload tests | character/reference thumbnails and manifest |
-| §9 model discovery/forms/schema drift | WP-03, WP-08 | recorded adapter and component reset tests | model refresh/switch scenarios |
-| §10 secret and submission boundary | WP-04, WP-06 | route, redaction, failure-injection tests | browser network/log inspection |
-| §11 persistent jobs | WP-01, WP-04, WP-09 | migration/restart/retry/cancel tests | reload-during-job scenario |
-| §12 completion/versioning/placement | WP-07A, WP-07B | checkpoint/concurrency/undo tests | exact media/shot/clip IDs |
-| §13 status/errors/recovery | WP-08, WP-09 | state transition and recovery-action tests | four injected failure scenarios |
-| §14.1–14.3 deterministic suites | WP-10 | focused and fake-provider command logs | not applicable |
-| §14.4 paid provider eval | WP-10 | sanitized eval manifest validator | paid outputs after authorization |
-| §15 browser verification | WP-10 | fixture/setup scripts | screenshots/recordings for all nine cases |
-| §16 observability | WP-04, WP-07A, WP-10 | redacted event/logger tests | sanitized event capture |
-| §17 rollout/compatibility | WP-01, WP-04, WP-10 | migration and feature-flag tests | rollback/poll-existing-job check |
+| Canonical §1 architecture/security | WP-04, WP-06 | route, ownership, schema, and redaction tests | browser network/log inspection |
+| Canonical §2 provider/model contracts | WP-01, WP-03 | shared-schema and recorded-adapter tests | normalized model and submitted manifest inspection |
+| Canonical §3 unified generation UI | WP-06, WP-08, WP-09 | coordinator, component, keyboard, ARIA, and draft tests | shot and new-asset browser workflows |
+| Canonical §4 effective context | WP-01, WP-02, WP-06 | contract, timing, target, and duration tests | timing labels and submitted manifest |
+| Canonical §5 reference resolution | WP-02, WP-04, WP-06 | order, deduplication, character-token, and upload tests | character/reference thumbnails and manifest |
+| Canonical §6 timed audio | WP-02, WP-05, WP-06 | range conversion, PCM, hash, cache, and failure-injection tests | waveform plus recorded hash/range |
+| Canonical §7 persistent jobs | WP-01, WP-04, WP-09 | migration, restart, ownership, retry, and cancel tests | reload-during-job scenario |
+| Canonical §8 idempotent finalization | WP-07A, WP-07B | checkpoint, concurrency, media/version, placement, and undo tests | exact media, shot, and clip IDs |
+| Canonical §9.2 WaveSpeed adapter | WP-03, WP-04, WP-06 | schema mapping, server stripping, provider-state, and output tests | image/video/reference/audio provider matrix |
+| Canonical §10 observability/problems | WP-04, WP-07A, WP-08, WP-09, WP-10 | stable-error, recovery-action, and redacted-event tests | injected failure scenarios and sanitized event capture |
+| Canonical §11 tests/eval | WP-10 and independent `gpt-5.6-sol` verifier | focused/full/fake-provider command logs and eval-manifest validation | browser evidence and paid provider outputs after authorization |
 
 ## Canonical verification commands
 
