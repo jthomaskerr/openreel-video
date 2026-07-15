@@ -1,5 +1,5 @@
 import "../../test/install-local-storage-mock";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Clip, MediaItem, Track } from "@openreel/core";
 import { Timeline } from "./Timeline";
@@ -7,6 +7,7 @@ import { createEmptyProject } from "../../stores/project/project-helpers";
 import { useProjectStore } from "../../stores/project-store";
 import { useTimelineStore } from "../../stores/timeline-store";
 import { useUIStore } from "../../stores/ui-store";
+import { saveTimelineViewState } from "./timeline/timeline-view-persistence";
 
 vi.mock("../../bridges/playback-bridge", () => ({
   getPlaybackBridge: () => ({
@@ -86,6 +87,7 @@ function makeTrack(clip: Clip): Track {
 
 describe("Timeline clip selection", () => {
   beforeEach(() => {
+    localStorage.clear();
     const media = makeMedia();
     const clip = makeClip();
     const track = makeTrack(clip);
@@ -132,5 +134,62 @@ describe("Timeline clip selection", () => {
     expect(uiState.sidebarTab).toBe("edit");
     expect(uiState.inspectedAsset).toBeNull();
     expect(uiState.activeTrackId).toBe("track-1");
+  });
+
+  it("keeps the timeline scroller synchronized with persisted store offsets", async () => {
+    const projectId = useProjectStore.getState().project.id;
+    saveTimelineViewState(projectId, {
+      playheadPosition: 12.5,
+      scrollX: 321,
+      scrollY: 87,
+    });
+
+    render(<Timeline />);
+
+    const scroller = screen.getByTestId("timeline-scroll-container");
+    await waitFor(() => {
+      expect(scroller.scrollLeft).toBe(321);
+      expect(scroller.scrollTop).toBe(87);
+    });
+    expect(useTimelineStore.getState()).toMatchObject({
+      playheadPosition: 12.5,
+      scrollX: 321,
+      scrollY: 87,
+    });
+
+    act(() => useTimelineStore.setState({ scrollX: 222, scrollY: 44 }));
+    expect(scroller.scrollLeft).toBe(222);
+    expect(scroller.scrollTop).toBe(44);
+
+    scroller.scrollLeft = 456;
+    scroller.scrollTop = 123;
+    fireEvent.scroll(scroller);
+    expect(useTimelineStore.getState()).toMatchObject({ scrollX: 456, scrollY: 123 });
+  });
+
+  it("restores the final playhead and scroll positions after a reload-like remount", async () => {
+    const { unmount } = render(<Timeline />);
+
+    act(() => {
+      useTimelineStore.setState({
+        playheadPosition: 42.25,
+        scrollX: 640,
+        scrollY: 96,
+      });
+    });
+    unmount();
+
+    act(() => {
+      useTimelineStore.setState({ playheadPosition: 0, scrollX: 0, scrollY: 0 });
+    });
+    render(<Timeline />);
+
+    await waitFor(() => {
+      expect(useTimelineStore.getState()).toMatchObject({
+        playheadPosition: 42.25,
+        scrollX: 640,
+        scrollY: 96,
+      });
+    });
   });
 });

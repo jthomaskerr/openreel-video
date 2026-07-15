@@ -2,9 +2,11 @@ import React, {
   useRef,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useState,
 } from "react";
+import { shallow } from "zustand/shallow";
 import {
   Undo2,
   Redo2,
@@ -39,6 +41,10 @@ import {
   getCreateSceneMenuState,
   type CreateSceneActivationGate,
 } from "./timeline/create-scene-command";
+import {
+  loadTimelineViewState,
+  saveTimelineViewState,
+} from "./timeline/timeline-view-persistence";
 import { getPlaybackBridge } from "../../bridges/playback-bridge";
 import {
   Popover,
@@ -106,6 +112,47 @@ export const Timeline: React.FC = () => {
     getTrackHeight,
     setViewportDimensions,
   } = useTimelineStore();
+
+  useEffect(() => {
+    const projectId = project.id;
+    const restoredState = loadTimelineViewState(projectId);
+    if (restoredState) useTimelineStore.setState(restoredState);
+
+    let saveTimer: ReturnType<typeof setTimeout> | null = null;
+    const flush = () => {
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = null;
+      const { playheadPosition: position, scrollX: x, scrollY: y } =
+        useTimelineStore.getState();
+      saveTimelineViewState(projectId, {
+        playheadPosition: position,
+        scrollX: x,
+        scrollY: y,
+      });
+    };
+    const unsubscribe = useTimelineStore.subscribe(
+      (state) => [state.playheadPosition, state.scrollX, state.scrollY] as const,
+      () => {
+        if (saveTimer) clearTimeout(saveTimer);
+        saveTimer = setTimeout(flush, 250);
+      },
+      { equalityFn: shallow },
+    );
+
+    window.addEventListener("pagehide", flush);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, [project.id]);
+
+  useLayoutEffect(() => {
+    const scroller = tracksRef.current;
+    if (!scroller) return;
+    if (scroller.scrollLeft !== scrollX) scroller.scrollLeft = scrollX;
+    if (scroller.scrollTop !== scrollY) scroller.scrollTop = scrollY;
+  }, [scrollX, scrollY]);
 
   const [showLayersPanel, setShowLayersPanel] = useState(false);
 
@@ -1177,6 +1224,7 @@ export const Timeline: React.FC = () => {
 
           <div
             ref={tracksRef}
+            data-testid="timeline-scroll-container"
             className="flex-1 bg-background relative overflow-auto custom-scrollbar"
             onScroll={(e) => {
               setScrollX(e.currentTarget.scrollLeft);
