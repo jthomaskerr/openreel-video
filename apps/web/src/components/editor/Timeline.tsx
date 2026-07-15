@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import { useProjectStore } from "../../stores/project-store";
 import { useTimelineStore } from "../../stores/timeline-store";
-import { useUIStore } from "../../stores/ui-store";
+import { resolveActiveTrackId, useUIStore } from "../../stores/ui-store";
 import { toast } from "../../stores/notification-store";
 import { useEngineStore } from "../../stores/engine-store";
 import { getPlaybackBridge } from "../../bridges/playback-bridge";
@@ -113,8 +113,19 @@ export const Timeline: React.FC = () => {
     toggleTimelineMaximized,
     setInspectedAsset,
     setSidebarTab,
+    activeTrackId,
+    setActiveTrack,
+    selectedItems,
   } = useUIStore();
   const selectedClipIds = getSelectedClipIds();
+  const selectedClipTrackId =
+    selectedItems.find((item) => item.type === "clip" || item.type === "text-clip" || item.type === "shape-clip")
+      ?.trackId ?? null;
+
+  useEffect(() => {
+    const resolvedTrackId = resolveActiveTrackId(tracks, activeTrackId, selectedClipTrackId);
+    if (resolvedTrackId !== activeTrackId) setActiveTrack(resolvedTrackId);
+  }, [tracks, activeTrackId, selectedClipTrackId, setActiveTrack]);
 
   const { getTitleEngine, getGraphicsEngine } = useEngineStore();
   const titleEngine = getTitleEngine();
@@ -286,6 +297,7 @@ export const Timeline: React.FC = () => {
       const isTextClip = allTextClips.some((tc) => tc.id === clipId);
       if (isTextClip) {
         const textClip = allTextClips.find((tc) => tc.id === clipId);
+        if (textClip?.trackId) setActiveTrack(textClip.trackId);
         select(
           { type: "text-clip", id: clipId, trackId: textClip?.trackId },
           addToSelection,
@@ -295,6 +307,7 @@ export const Timeline: React.FC = () => {
       const isShapeClip = allShapeClips.some((sc) => sc.id === clipId);
       if (isShapeClip) {
         const shapeClip = allShapeClips.find((sc) => sc.id === clipId);
+        if (shapeClip?.trackId) setActiveTrack(shapeClip.trackId);
         select(
           { type: "shape-clip", id: clipId, trackId: shapeClip?.trackId },
           addToSelection,
@@ -309,9 +322,10 @@ export const Timeline: React.FC = () => {
           break;
         }
       }
+      if (trackId) setActiveTrack(trackId);
       select({ type: "clip", id: clipId, trackId }, addToSelection);
     },
-    [tracks, select, allTextClips, allShapeClips, revealClipInspector],
+    [tracks, select, allTextClips, allShapeClips, revealClipInspector, setActiveTrack],
   );
 
   const [selectedKeyframeIds, setSelectedKeyframeIds] = useState<string[]>([]);
@@ -574,9 +588,10 @@ export const Timeline: React.FC = () => {
         }));
       } else {
         await moveClip(clipId, newStartTime, targetTrackId);
+        if (targetTrackId) setActiveTrack(targetTrackId);
       }
     },
-    [moveClip, allShapeClips, graphicsEngine],
+    [moveClip, allShapeClips, graphicsEngine, setActiveTrack],
   );
 
   const [snapIndicatorTime, setSnapIndicatorTime] = React.useState<
@@ -1066,6 +1081,7 @@ export const Timeline: React.FC = () => {
                   >
                     <TrackHeader
                       track={track}
+                      isActive={activeTrackId === track.id}
                       index={i}
                       onDragStart={handleTrackDragStart}
                       onDragOver={handleTrackDragOver}
@@ -1177,6 +1193,7 @@ export const Timeline: React.FC = () => {
                 <TrackLane
                   key={track.id}
                   track={track}
+                  isActive={activeTrackId === track.id}
                   allTracks={visualOrderTracks}
                   pixelsPerSecond={pixelsPerSecond}
                   selectedClipIds={selectedClipIds}

@@ -112,6 +112,7 @@ describe("Timeline clip selection", () => {
     useUIStore.setState({
       sidebarTab: "problems",
       inspectedAsset: media,
+      activeTrackId: null,
     });
   });
 
@@ -130,5 +131,6 @@ describe("Timeline clip selection", () => {
     ]);
     expect(uiState.sidebarTab).toBe("edit");
     expect(uiState.inspectedAsset).toBeNull();
+    expect(uiState.activeTrackId).toBe("track-1");
   });
 });

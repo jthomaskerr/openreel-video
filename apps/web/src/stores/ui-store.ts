@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { Track } from "@openreel/core";
 import { subscribeWithSelector, persist } from "zustand/middleware";
 import { problemBus } from "./problem-store";
 import { logBus } from "./log-store";
@@ -27,6 +28,55 @@ export interface SelectionItem {
   id: string;
   trackId?: string;
 }
+
+export interface SceneInspectorSelection {
+  type: "scene";
+  sceneId: string;
+  projectionClipId?: string;
+  focusTitleRequestId?: number;
+}
+
+/**
+ * Resolves the active track without mutating project state. Track order is the
+ * visual timeline order, so each fallback is deterministic across rerenders.
+ */
+export const resolveActiveTrackId = (
+  tracks: readonly Track[],
+  activeTrackId: string | null,
+  selectedClipTrackId: string | null = null,
+): string | null => {
+  if (tracks.length === 0) return null;
+
+  const current = tracks.find((track) => track.id === activeTrackId);
+  if (current && !current.hidden) return current.id;
+
+  const selectedClipTrack = tracks.find((track) => track.id === selectedClipTrackId);
+  if (selectedClipTrack) return selectedClipTrack.id;
+
+  const unlockedVideoTrack = tracks.find(
+    (track) => track.type === "video" && !track.locked && !track.hidden,
+  );
+  if (unlockedVideoTrack) return unlockedVideoTrack.id;
+
+  const firstVisibleTrack = tracks.find((track) => !track.hidden);
+  return firstVisibleTrack?.id ?? tracks[0].id;
+};
+
+export const isSceneCompatibleTrack = (track: Track | undefined): boolean =>
+  Boolean(track && track.type === "video" && !track.locked);
+
+export const getSceneCreationDisabledReason = (
+  tracks: readonly Track[],
+  activeTrackId: string | null,
+): string | null => {
+  if (tracks.length === 0) return "Add a video track before creating a scene.";
+  if (!activeTrackId) return "Select a video track to create a scene.";
+  const activeTrack = tracks.find((track) => track.id === activeTrackId);
+  if (!activeTrack) return "Select a video track to create a scene.";
+  if (activeTrack.locked) return "Unlock the active track to create a scene.";
+  if (activeTrack.type !== "video") return "Select a video track to create a scene.";
+  return null;
+};
 
 export interface SnapSettings {
   enabled: boolean;
@@ -74,6 +124,8 @@ export interface UIState {
   effectApplicationClipId: string | null;
   effectApplicationLabel: string | null;
   inspectedAsset: import("@openreel/core").MediaItem | null;
+  inspectorSelection: SceneInspectorSelection | null;
+  activeTrackId: string | null;
   snapSettings: SnapSettings;
   panels: Record<PanelId, PanelState>;
   shortcuts: KeyboardShortcuts;
@@ -166,6 +218,8 @@ export interface UIState {
   startEffectApplication: (clipId: string, label?: string) => void;
   finishEffectApplication: () => void;
   setInspectedAsset: (asset: import("@openreel/core").MediaItem | null) => void;
+  setInspectorSelection: (selection: SceneInspectorSelection | null) => void;
+  setActiveTrack: (trackId: string | null) => void;
 }
 
 export interface ContextMenuItem {
@@ -223,6 +277,8 @@ export const useUIStore = create<UIState>()(
         effectApplicationClipId: null,
         effectApplicationLabel: null,
         inspectedAsset: null,
+        inspectorSelection: null,
+        activeTrackId: null,
 
         snapSettings: DEFAULT_SNAP_SETTINGS,
 
@@ -287,6 +343,17 @@ export const useUIStore = create<UIState>()(
 
         setInspectedAsset: (asset) => {
           set({ inspectedAsset: asset, ...(asset ? { sidebarTab: "inspector" as const } : {}) });
+        },
+
+        setInspectorSelection: (selection) => {
+          set({
+            inspectorSelection: selection,
+            ...(selection ? { sidebarTab: "inspector" as const } : {}),
+          });
+        },
+
+        setActiveTrack: (trackId) => {
+          set({ activeTrackId: trackId });
         },
 
         select: (item: SelectionItem, addToSelection = false) => {

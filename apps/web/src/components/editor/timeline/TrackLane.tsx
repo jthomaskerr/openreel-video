@@ -21,6 +21,7 @@ type GraphicClipUnion = ShapeClip | SVGClip | StickerClip;
 
 interface TrackLaneProps {
   track: Track;
+  isActive: boolean;
   allTracks: Track[];
   pixelsPerSecond: number;
   selectedClipIds: string[];
@@ -63,6 +64,7 @@ interface TrackLaneProps {
 
 export const TrackLane: React.FC<TrackLaneProps> = ({
   track,
+  isActive,
   allTracks,
   pixelsPerSecond,
   selectedClipIds,
@@ -88,7 +90,7 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
 }) => {
   const { isTrackExpanded, playheadPosition } = useTimelineStore();
   const isExpanded = isTrackExpanded(track.id);
-  const { snapSettings } = useUIStore();
+  const { snapSettings, setActiveTrack } = useUIStore();
   const [isDragOver, setIsDragOver] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const laneRef = useRef<HTMLDivElement>(null);
@@ -150,6 +152,7 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
                 await addClip(track.id, newItem.id, snapResult.time, {
                   type: TRACK_TO_CLIP_TYPE[track.type] ?? MEDIA_TO_CLIP_TYPE[newItem.type] ?? "video",
                 });
+                setActiveTrack(track.id);
                 toast.success(`Added to ${track.name}`, file.name);
               }
             }
@@ -193,7 +196,7 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
         // Silently ignore parse errors
       }
     },
-    [track.id, track.name, pixelsPerSecond, scrollX, onDropMedia, allTracks, playheadPosition, snapSettings],
+    [track.id, track.name, pixelsPerSecond, scrollX, onDropMedia, allTracks, playheadPosition, snapSettings, setActiveTrack],
   );
 
   const handleResizeStart = useCallback(
@@ -237,12 +240,20 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
     <div className="relative">
       <div
         ref={laneRef}
+        data-testid={`track-lane-${track.id}`}
+        data-active-track={isActive ? "true" : "false"}
+        aria-current={isActive ? "true" : undefined}
+        aria-label={`${track.name} timeline lane${isActive ? ", active track" : ""}`}
+        role="region"
         style={{ height: trackHeight }}
         className={`border-b border-border/50 relative transition-colors ${
+          isActive ? "ring-2 ring-inset ring-primary bg-primary/10" : ""
+        } ${
           isDragOver
             ? "bg-primary/10 border-primary/30"
             : "bg-background-secondary/20"
         }`}
+        onPointerDown={() => setActiveTrack(track.id)}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}

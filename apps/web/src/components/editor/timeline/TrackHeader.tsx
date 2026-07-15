@@ -3,6 +3,7 @@ import { Eye, EyeOff, Volume2, Lock, Trash2, ChevronDown, ChevronRight, Pencil, 
 import type { Track } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
+import { useUIStore } from "../../../stores/ui-store";
 import { getTrackInfo } from "./utils";
 import {
   ContextMenu,
@@ -15,6 +16,7 @@ import {
 interface TrackHeaderProps {
   track: Track;
   index: number;
+  isActive: boolean;
   onDragStart: (e: React.DragEvent, trackId: string) => void;
   onDragOver: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent, targetTrackId: string) => void;
@@ -24,6 +26,7 @@ interface TrackHeaderProps {
 export const TrackHeader: React.FC<TrackHeaderProps> = ({
   track,
   index,
+  isActive,
   onDragStart,
   onDragOver,
   onDrop,
@@ -32,6 +35,7 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
   const { lockTrack, hideTrack, muteTrack, removeTrack, renameTrack, consolidateTrack } = useProjectStore();
   const { isTrackExpanded, toggleTrackExpanded, getTrackHeight } = useTimelineStore();
   const isExpanded = isTrackExpanded(track.id);
+  const setActiveTrack = useUIStore((state) => state.setActiveTrack);
 
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState(track.name);
@@ -92,12 +96,30 @@ export const TrackHeader: React.FC<TrackHeaderProps> = ({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
+          data-testid={`track-header-${track.id}`}
+          data-active-track={isActive ? "true" : "false"}
+          aria-current={isActive ? "true" : undefined}
+          aria-label={`${track.name || trackInfo.label}${isActive ? ", active track" : ""}`}
+          tabIndex={0}
           draggable={!isRenaming}
-          onDragStart={(e) => onDragStart(e, track.id)}
+          onClick={() => setActiveTrack(track.id)}
+          onKeyDown={(e) => {
+            if (e.target !== e.currentTarget) return;
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setActiveTrack(track.id);
+            }
+          }}
+          onDragStart={(e) => {
+            setActiveTrack(track.id);
+            onDragStart(e, track.id);
+          }}
           onDragOver={onDragOver}
           onDrop={(e) => onDrop(e, track.id)}
           style={{ height: getTrackHeight(track.id) }}
-          className={`border-b border-border flex flex-col justify-between py-1.5 px-2.5 relative group transition-colors cursor-grab active:cursor-grabbing ${
+          className={`border-b border-border flex flex-col justify-between py-1.5 px-2.5 relative group transition-colors cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary ${
+            isActive ? "ring-2 ring-inset ring-primary bg-primary/10" : ""
+          } ${
             track.hidden ? "opacity-60" : ""
           } ${
             track.locked ? "bg-bg-2/50" : "bg-bg-1"
