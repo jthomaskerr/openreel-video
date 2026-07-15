@@ -8,6 +8,7 @@ export class UploadRepository {
   private meta(id: string) { return join(this.directory, `${id}.json`); }
   private blob(id: string) { return join(this.directory, `${id}.bin`); }
   async create(input: { ownerId: string; projectId: string; mimeType: string; bytes: Uint8Array; ttlMs?: number }) {
+    if (input.bytes.byteLength === 0) throw new Error("upload-empty");
     if (!/^image\/(png|jpeg|webp)|^video\/(mp4|webm)|^audio\/(wav|mpeg|mp4|webm)$/.test(input.mimeType)) throw new Error("upload-invalid-mime");
     if (input.bytes.byteLength > this.maxBytes) throw new Error("upload-too-large");
     await mkdir(this.directory, { recursive: true }); const id = `upl_${randomUUID()}`; const now = this.now();

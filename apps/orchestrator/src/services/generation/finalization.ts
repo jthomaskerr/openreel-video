@@ -52,8 +52,13 @@ export interface FinalizationPorts {
 export type CompletionSignal = { provider: string; providerJobId: string };
 
 const CHECKPOINTS: GenerationCheckpointName[] = [
-  "output-claimed", "output-downloaded", "output-verified", "output-inspected",
-  "placeholder-finalized", "shot-linked", "placement-applied",
+  "output-claimed",
+  "output-downloaded",
+  "output-verified",
+  "output-inspected",
+  "placeholder-finalized",
+  "shot-linked",
+  "placement-applied",
 ];
 
 function errorFrom(error: unknown, fallback = "generation-finalization-failed"): GenerationError {
@@ -65,7 +70,9 @@ function completed(job: GenerationJob, checkpoint: GenerationCheckpointName) {
   return job.checkpoints[checkpoint]?.status === "completed";
 }
 
-function key(jobId: string, checkpoint: string) { return `generation:${jobId}:${checkpoint}`; }
+function idempotencyKey(jobId: string, stage: string) {
+  return `generation:${jobId}:${stage}`;
+}
 
 /** Resumable, idempotent finalization. Provider submission is deliberately not a port here. */
 export class GenerationFinalizer {
@@ -109,18 +116,18 @@ export class GenerationFinalizer {
         job = await this.requireJob(job.id);
         if (!completed(job, "placeholder-finalized")) {
           const output = job.output!;
-          const ids = await this.ports.placeholder.finalize({ job, output, idempotencyKey: key(job.id, "placeholder-finalized") });
+          const ids = await this.ports.placeholder.finalize({ job, output, idempotencyKey: idempotencyKey(job.id, "placeholder-finalized") });
           await this.repository.update(job.id, (current) => ({ ...current, output: { ...current.output!, ...ids } }));
           await this.mark(job.id, "placeholder-finalized", { status: "completed", timestamp: this.now() });
         }
         job = await this.requireJob(job.id);
         if (job.context.shotId && this.ports.shot && !completed(job, "shot-linked")) {
-          await this.ports.shot.link({ job, output: job.output!, idempotencyKey: key(job.id, "shot-linked") });
+          await this.ports.shot.link({ job, output: job.output!, idempotencyKey: idempotencyKey(job.id, "shot-linked") });
           await this.mark(job.id, "shot-linked", { status: "completed", timestamp: this.now() });
         }
         if (job.context.placementPolicy !== "none" && this.ports.placement && !completed(job, "placement-applied")) {
           try {
-            await this.ports.placement.place({ job, output: job.output!, idempotencyKey: key(job.id, "placement-applied") });
+            await this.ports.placement.place({ job, output: job.output!, idempotencyKey: idempotencyKey(job.id, "placement-applied") });
             await this.mark(job.id, "placement-applied", { status: "completed", timestamp: this.now() });
             await this.repository.update(job.id, (current) => ({ ...current, placement: { policy: current.context.placementPolicy, status: "applied", appliedAt: this.now() } }));
           } catch (error) {
