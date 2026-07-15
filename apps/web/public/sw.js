@@ -250,7 +250,7 @@ self.addEventListener("fetch", (event) => {
  * Message event - handle messages from the main thread
  */
 self.addEventListener("message", (event) => {
-  const { type, payload } = event.data || {};
+  const { type } = event.data || {};
 
   switch (type) {
     case "SKIP_WAITING":
@@ -283,7 +283,6 @@ self.addEventListener("message", (event) => {
  */
 async function getCacheStatus() {
   const cacheNames = await caches.keys();
-  let totalSize = 0;
   let totalEntries = 0;
 
   for (const name of cacheNames) {
@@ -314,3 +313,4 @@ async function clearAllCaches() {
 }
 
 console.log("[ServiceWorker] Script loaded");
+/* global self, caches, fetch, URL, Response, navigator, console */

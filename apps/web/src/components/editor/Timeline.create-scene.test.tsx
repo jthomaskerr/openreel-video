@@ -100,7 +100,7 @@ describe("Timeline Create Scene menu integration", () => {
       viewportWidth: 800,
       trackHeight: 60,
       trackHeights: {},
-      playheadPosition: 19.123456789012345,
+      playheadPosition: 19.1234567890625,
       playbackState: "paused",
       scrollX: 0,
       scrollY: 0,
