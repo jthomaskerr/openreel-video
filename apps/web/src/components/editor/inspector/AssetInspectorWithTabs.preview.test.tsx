@@ -1,7 +1,8 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import type { MediaItem } from "@openreel/core";
 import { AssetInspectorWithTabs } from "./AssetInspectorWithTabs";
+import { mediaAvailabilityRuntime } from "../../../services/media-verification";
 
 function makeVideoItem(overrides: Partial<MediaItem> = {}): MediaItem {
   return {
@@ -28,6 +29,7 @@ function makeVideoItem(overrides: Partial<MediaItem> = {}): MediaItem {
 describe("AssetInspectorWithTabs preview", () => {
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
   });
 
   it("renders the persisted thumbnailUrl in the preview area", () => {
@@ -38,8 +40,13 @@ describe("AssetInspectorWithTabs preview", () => {
   });
 
   it("shows the missing-file placeholder when thumbnailUrl is absent", () => {
+    vi.spyOn(mediaAvailabilityRuntime, "get").mockReturnValue({
+      mediaId: "video-1",
+      status: "confirmed_missing",
+      evidence: { authoritative: true, mapping: "absent", object: "absent" },
+    });
     render(<AssetInspectorWithTabs item={makeVideoItem({ blob: null, sourceFile: { name: "missing.mp4", size: 0, lastModified: 0 } })} />);
 
-    expect(screen.getByText(/Missing file/)).toBeInTheDocument();
+    expect(screen.getByText("Missing")).toBeInTheDocument();
   });
 });

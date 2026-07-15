@@ -1,10 +1,12 @@
 import "../../../test/install-local-storage-mock";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { Clip, Track, MediaItem } from "@openreel/core";
+import type { Clip, Track, MediaItem, ProjectSaveReceipt } from "@openreel/core";
 import { ClipComponent } from "./ClipComponent";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
+import { usePersistenceStatusStore } from "../../../stores/persistence-status-store";
+import { mediaAvailabilityRuntime } from "../../../services/media-verification";
 
 vi.mock("../../../bridges/transition-bridge", () => ({
   getTransitionBridge: () => ({
@@ -74,14 +76,41 @@ function makeTrack(clip: Clip): Track {
   };
 }
 
+function receipt(commitSha: string, semanticFilename = "clip-source.mp4"): ProjectSaveReceipt {
+  return {
+    saved: true,
+    projectId: "project-1",
+    persistedAt: 100,
+    sourceModifiedAt: 90,
+    commitSha,
+    treeSha: "b".repeat(40),
+    projectBlobSha: "c".repeat(40),
+    mediaManifestDigest: "sha256:manifest",
+    committed: true,
+    lfsPayloads: [{
+      mediaId: "media-1",
+      semanticFilename,
+      relativePhysicalPath: `media/${semanticFilename}`,
+      oid: "sha256:payload",
+      pointerSize: 128,
+      local: { state: "verified", actualSize: 100 },
+      remote: { state: "local-only", remote: null },
+    }],
+  };
+}
+
 describe("ClipComponent", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
+    mediaAvailabilityRuntime.reset();
+    usePersistenceStatusStore.getState().reset();
     useUIStore.getState().clearSelection();
     const clip = makeClip();
     const track = makeTrack(clip);
     useProjectStore.setState((state) => ({
       project: {
         ...state.project,
+        id: "project-1",
         mediaLibrary: { items: [mediaItem("media-1")] },
         timeline: { ...state.project.timeline, tracks: [track] },
       },
@@ -379,5 +408,196 @@ describe("ClipComponent", () => {
     );
 
     expect(screen.getByText("Generated · failed")).toBeInTheDocument();
+  });
+
+  it("marks every dangling clip with a semantic name, explanation, and relink action", () => {
+    const first = makeClip();
+    const second = { ...makeClip(), id: "clip-2", startTime: 6 };
+    const track = { ...makeTrack(first), clips: [first, second] };
+    useProjectStore.setState((state) => ({
+      project: {
+        ...state.project,
+        mediaLibrary: { items: [] },
+        timeline: { ...state.project.timeline, tracks: [track] },
+      },
+    }));
+    usePersistenceStatusStore.setState({
+      projectId: "project-1",
+      confirmedReceipt: {
+        saved: true,
+        projectId: "project-1",
+        persistedAt: 100,
+        sourceModifiedAt: 90,
+        commitSha: "a".repeat(40),
+        treeSha: "b".repeat(40),
+        projectBlobSha: "c".repeat(40),
+        mediaManifestDigest: "sha256:manifest",
+        committed: true,
+        lfsPayloads: [{
+          mediaId: "media-1",
+          semanticFilename: "Interview Wide.mp4",
+          relativePhysicalPath: "media/Interview Wide.mp4",
+          oid: "sha256:payload",
+          pointerSize: 128,
+          local: { state: "verified", actualSize: 100 },
+          remote: { state: "local-only", remote: null },
+        }],
+      },
+    });
+
+    render(
+      <div style={{ position: "relative", width: 500, height: 80 }}>
+        {[first, second].map((clip) => (
+          <ClipComponent
+            key={clip.id}
+            clip={clip}
+            track={track}
+            allTracks={[track]}
+            pixelsPerSecond={20}
+            isSelected={false}
+            trackHeights={new Map([[track.id, 60]])}
+            timelineRef={{ current: document.createElement("div") }}
+            onSelect={vi.fn()}
+            onMoveClip={vi.fn()}
+            onSnapIndicator={vi.fn()}
+          />
+        ))}
+      </div>,
+    );
+
+    expect(screen.getAllByRole("status")).toHaveLength(2);
+    expect(screen.getAllByText("Missing")).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Relink file" })).toHaveLength(2);
+    expect(screen.getAllByText("Interview Wide.mp4")).toHaveLength(2);
+    expect(screen.getAllByText(/warning remains until backend persistence is confirmed/)).toHaveLength(2);
+    expect(screen.queryByText("media-1")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["verifying", "Verifying", "Verify now"],
+    ["temporarily_unavailable", "Unavailable", "Retry connection"],
+    ["unauthorized", "Access required", "Retry access"],
+    ["decode_error", "Decode error", "Verify again"],
+  ] as const)("renders %s as a distinct non-destructive state", (status, label, actionLabel) => {
+    vi.spyOn(mediaAvailabilityRuntime, "get").mockReturnValue({
+      mediaId: "media-1",
+      status,
+      evidence: { authoritative: false, mapping: "unknown", object: "unknown" },
+    });
+    const clip = makeClip();
+    const track = makeTrack(clip);
+
+    render(
+      <div style={{ position: "relative", width: 120, height: 40 }}>
+        <ClipComponent
+          clip={clip}
+          track={track}
+          allTracks={[track]}
+          pixelsPerSecond={8}
+          isSelected={false}
+          trackHeights={new Map([[track.id, 32]])}
+          timelineRef={{ current: document.createElement("div") }}
+          onSelect={vi.fn()}
+          onMoveClip={vi.fn()}
+          onSnapIndicator={vi.fn()}
+        />
+      </div>,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent(label);
+    expect(screen.getByRole("button", { name: actionLabel })).toHaveAttribute(
+      "aria-describedby",
+      "clip-availability-clip-1",
+    );
+    expect(screen.queryByText("Missing")).not.toBeInTheDocument();
+    expect(screen.getByLabelText(`clip-source.mp4, ${label}`)).toBeInTheDocument();
+  });
+
+  it("keeps a confirmed-missing marker through local relink until a newer verified receipt arrives", () => {
+    let runtimeStatus: "confirmed_missing" | "available" = "confirmed_missing";
+    vi.spyOn(mediaAvailabilityRuntime, "get").mockImplementation(() => ({
+      mediaId: "media-1",
+      status: runtimeStatus,
+      evidence: { authoritative: true, mapping: "present", object: runtimeStatus === "available" ? "present" : "absent" },
+    }));
+    usePersistenceStatusStore.setState({ projectId: "project-1", confirmedReceipt: receipt("a".repeat(40)) });
+    const clip = makeClip();
+    const track = makeTrack(clip);
+    const props = {
+      clip,
+      track,
+      allTracks: [track],
+      pixelsPerSecond: 20,
+      isSelected: false,
+      trackHeights: new Map([[track.id, 60]]),
+      timelineRef: { current: document.createElement("div") },
+      onSelect: vi.fn(),
+      onMoveClip: vi.fn(),
+      onSnapIndicator: vi.fn(),
+    };
+    const { rerender } = render(<ClipComponent {...props} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Missing");
+
+    act(() => {
+      runtimeStatus = "available";
+      useProjectStore.setState((state) => ({
+        project: {
+          ...state.project,
+          mediaLibrary: {
+            items: state.project.mediaLibrary.items.map((item) =>
+              item.id === "media-1" ? { ...item, blob: new Blob(["linked"], { type: "video/mp4" }) } : item,
+            ),
+          },
+        },
+      }));
+    });
+    rerender(<ClipComponent {...props} />);
+    expect(screen.getByRole("status")).toHaveTextContent("Missing");
+
+    act(() => {
+      usePersistenceStatusStore.setState({ confirmedReceipt: receipt("d".repeat(40)) });
+    });
+    rerender(<ClipComponent {...props} />);
+    expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["unrealized", "Unrealized"],
+    ["processing", "Pending"],
+    ["failed", "Error"],
+  ] as const)("preserves the generated %s badge", (generationStatus, expectedLabel) => {
+    useProjectStore.setState((state) => ({
+      project: {
+        ...state.project,
+        mediaLibrary: {
+          items: [{
+            ...mediaItem("media-1"),
+            generationMeta: {
+              provider: "neuralframes",
+              model: "nf",
+              prompt: "Generated shot",
+              status: generationStatus,
+            },
+          }],
+        },
+      },
+    }));
+    const clip = makeClip();
+    const track = makeTrack(clip);
+    render(
+      <ClipComponent
+        clip={clip}
+        track={track}
+        allTracks={[track]}
+        pixelsPerSecond={20}
+        isSelected={false}
+        trackHeights={new Map([[track.id, 60]])}
+        timelineRef={{ current: document.createElement("div") }}
+        onSelect={vi.fn()}
+        onMoveClip={vi.fn()}
+        onSnapIndicator={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent(expectedLabel);
   });
 });

@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import {
   AlertTriangle,
   FileQuestion,
@@ -16,6 +16,11 @@ import {
   executeResolveAction,
 } from "../../../stores/problem-store";
 import { useProjectStore } from "../../../stores/project-store";
+import {
+  selectMediaAvailabilityView,
+  useMediaAvailabilityVersion,
+} from "../../../services/media-availability-view";
+import { mediaAvailabilityRuntime } from "../../../services/media-verification";
 import { cn } from "@openreel/ui/lib/utils";
 
 // ── Kind metadata ──────────────────────────────────────────────────
@@ -123,11 +128,37 @@ export function ProblemsPanel() {
   const resolveProblem = useProblemStore((s) => s.resolveProblem);
   const clearAll = useProblemStore((s) => s.clearAll);
   const projectId = useProjectStore((s) => s.project?.id);
+  const mediaItems = useProjectStore((s) => s.project.mediaLibrary.items);
+  const availabilityVersion = useMediaAvailabilityVersion(projectId);
 
-  // Scope to current project; fall through to project-less problems
-  const problems = allProblems.filter(
-    (p) => !p.projectId || !projectId || p.projectId === projectId,
-  );
+  const problems = useMemo(() => {
+    const mediaById = new Map(mediaItems.map((item) => [item.id, item]));
+    const isConfirmedMissing = (mediaId: string) => selectMediaAvailabilityView(
+      mediaById.get(mediaId),
+      mediaAvailabilityRuntime.get(projectId, mediaId)?.status,
+    ).isMissing;
+    const scoped = allProblems.filter((problem) => {
+      if (problem.projectId && problem.projectId !== projectId) return false;
+      if (problem.kind !== "missing_media") return true;
+      return problem.mediaId ? isConfirmedMissing(problem.mediaId) : false;
+    });
+    const knownMissingIds = new Set(
+      scoped.filter((problem) => problem.kind === "missing_media").map((problem) => problem.mediaId),
+    );
+    const derived = mediaItems
+      .filter((item) => !knownMissingIds.has(item.id) && isConfirmedMissing(item.id))
+      .map((item): Problem => ({
+        id: `availability:${projectId}:${item.id}`,
+        kind: "missing_media",
+        message: `${item.sourceFile?.name ?? item.name} is confirmed missing.`,
+        label: item.title ?? item.name,
+        timestamp: 0,
+        resolved: false,
+        projectId,
+        mediaId: item.id,
+      }));
+    return [...scoped, ...derived];
+  }, [allProblems, availabilityVersion, mediaItems, projectId]);
 
   const handleDismiss = useCallback(
     (id: string) => resolveProblem(id),

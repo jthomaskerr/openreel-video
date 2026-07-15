@@ -48,7 +48,6 @@ import {
   type Subtitle,
   type Track
 } from "@openreel/core";
-import { getMediaStatus, MediaStatus } from "@openreel/core";
 import { useEngineStore } from "../../stores/engine-store";
 import {
   type HandlePosition,
@@ -93,6 +92,20 @@ import {
   getVidstabEngine
 } from "@openreel/core";
 import type { MotionPathConfig, GSAPMotionPathPoint, MediaItem } from "@openreel/core";
+import { selectMediaAvailabilityView } from "../../services/media-availability-view";
+import { mediaAvailabilityRuntime } from "../../services/media-verification";
+
+function getPreviewMediaAvailability(mediaItem: MediaItem | undefined, mediaId: string) {
+  const projectId = useProjectStore.getState().project.id;
+  return selectMediaAvailabilityView(
+    mediaItem,
+    mediaAvailabilityRuntime.get(projectId, mediaId)?.status,
+  );
+}
+
+function isConfirmedMissingPreviewMedia(mediaItem: MediaItem | undefined, mediaId: string): boolean {
+  return getPreviewMediaAvailability(mediaItem, mediaId).isMissing;
+}
 
 interface GPULayer {
   bitmap: ImageBitmap;
@@ -834,7 +847,7 @@ export const Preview: React.FC = () => {
           // Draw the warning overlay on top of the thumbnail
           const colors = resolvePlaceholderColors(isDark);
           const mediaName = mediaItem?.name ?? "Missing media";
-          const isMissing = mediaItem ? getMediaStatus(mediaItem) === MediaStatus.MISSING : true;
+          const isMissing = isConfirmedMissingPreviewMedia(mediaItem, clip.mediaId ?? "");
           drawWarningOverlay(ctx, canvasWidth, canvasHeight, mediaName, isMissing, colors);
         }
 
@@ -1647,7 +1660,7 @@ export const Preview: React.FC = () => {
         if (
           mediaItem &&
           mediaItem.type === "video" &&
-          getMediaStatus(mediaItem) !== MediaStatus.OK
+          isConfirmedMissingPreviewMedia(mediaItem, clip.mediaId)
         ) {
           try {
             return await renderMissingVideoBitmap(
@@ -2450,7 +2463,7 @@ export const Preview: React.FC = () => {
 
             if (time >= clipStart && time < clipEnd) {
               const mediaItem = getMediaItem(clip.mediaId);
-              if (mediaItem && getMediaStatus(mediaItem) !== MediaStatus.OK) {
+              if (mediaItem && isConfirmedMissingPreviewMedia(mediaItem, clip.mediaId)) {
                 // Missing video placeholder — draw thumbnail + warning
                 hasRenderedContent = true;
                 try {
@@ -2470,7 +2483,7 @@ export const Preview: React.FC = () => {
                     // Draw warning overlay on top of thumbnail
                     const colors = resolvePlaceholderColors(isDark);
                     const mediaName = mediaItem?.name ?? "Missing media";
-                    const isMediaMissing = mediaItem ? getMediaStatus(mediaItem) === MediaStatus.MISSING : true;
+                    const isMediaMissing = isConfirmedMissingPreviewMedia(mediaItem, clip.mediaId);
                     drawWarningOverlay(ctx, canvas.width, canvas.height, mediaName, isMediaMissing, colors);
                   }
                 } catch {
@@ -2639,7 +2652,7 @@ export const Preview: React.FC = () => {
               mediaItem &&
               mediaItem.type === "video" &&
               !mediaItem.blob &&
-              getMediaStatus(mediaItem) !== MediaStatus.OK
+              !getPreviewMediaAvailability(mediaItem, clip.mediaId).canRender
             ) {
               // A visible future video clip has missing source — fall back to
               // the multi-track renderer so the placeholder can be drawn.
@@ -2688,7 +2701,10 @@ export const Preview: React.FC = () => {
       // They are rendered using CPU canvas2D after the video frame
 
       // Collect image clips for background compositing (don't disable native playback)
-      const imageClips = collectImagePlaybackClips(
+      const imageClips = collectImagePlaybackClips<
+        (typeof timelineTracks)[0]["clips"][0],
+        (typeof timelineTracks)[0]
+      >(
         tracks,
         (mediaId) => getMediaItem(mediaId)?.type,
       );
@@ -4458,7 +4474,7 @@ export const Preview: React.FC = () => {
                 if (!resources) {
                   // Missing video — render placeholder for this clip
                   const mediaItem = getMediaItem(clip.mediaId);
-                  if (mediaItem && getMediaStatus(mediaItem) !== MediaStatus.OK) {
+                  if (mediaItem && isConfirmedMissingPreviewMedia(mediaItem, clip.mediaId)) {
                     try {
                       const placeholderCanvas = new OffscreenCanvas(canvas.width, canvas.height);
                       const pctx = placeholderCanvas.getContext("2d");
@@ -4476,7 +4492,7 @@ export const Preview: React.FC = () => {
                           await loadAndDrawThumbnail(thumbnailUrl, pctx, canvas.width, canvas.height);
                           const colors = resolvePlaceholderColors(isDark);
                           const mediaName = mediaItem?.name ?? "Missing media";
-                          const isMediaMissing = getMediaStatus(mediaItem) === MediaStatus.MISSING;
+                          const isMediaMissing = isConfirmedMissingPreviewMedia(mediaItem, clip.mediaId);
                           drawWarningOverlay(pctx, canvas.width, canvas.height, mediaName, isMediaMissing, colors);
                         }
                         const bitmap = await createImageBitmap(placeholderCanvas);

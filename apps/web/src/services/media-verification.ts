@@ -244,6 +244,10 @@ export class MediaAvailabilityRuntime {
     return this.outcomes.get(`${projectId}\0${mediaId}`);
   }
 
+  getGeneration(projectId: string): number {
+    return this.generations.get(projectId) ?? 0;
+  }
+
   subscribe(listener: MediaAvailabilityListener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -336,6 +340,9 @@ export class MediaAvailabilityRuntime {
     for (const projectId of this.recoveryTimers.keys()) projectIds.add(projectId);
     for (const projectId of projectIds) this.cancel(projectId);
     this.outcomes.clear();
+    for (const projectId of projectIds) {
+      this.notify(projectId, this.generations.get(projectId) ?? 0);
+    }
   }
 
   private notify(projectId: string, generation: number): void {

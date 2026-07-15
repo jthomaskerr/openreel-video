@@ -1,6 +1,5 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import type { Clip, Track, TransitionType } from "@openreel/core";
-import { getMediaStatus, MediaStatus } from "@openreel/core";
 import { getEffectiveThumbnailUrl } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
@@ -9,13 +8,19 @@ import { calculateSnap, getClipStyle, getMetadataBadge } from "./utils";
 import { ClipContextMenu } from "./ClipContextMenu";
 import { ContextMenu, ContextMenuTrigger } from "@openreel/ui";
 import { toast } from "../../../stores/notification-store";
+import { usePersistenceStatusStore } from "../../../stores/persistence-status-store";
+import { mediaAvailabilityRuntime } from "../../../services/media-verification";
+import {
+  selectMediaAvailabilityView,
+  useMediaAvailabilityView,
+} from "../../../services/media-availability-view";
 import { getTransitionBridge } from "../../../bridges/transition-bridge";
 import type { VideoEffectType } from "../../../bridges/effects-bridge";
 import {
   EFFECT_DRAG_MIME,
   TRANSITION_DRAG_MIME
 } from "../panels/EffectsTransitionsPanel";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, LoaderCircle, RefreshCw, ShieldAlert } from "lucide-react";
 
 interface ClipComponentProps {
   clip: Clip;
@@ -56,7 +61,8 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   onSnapIndicator,
   onTrimClip,
 }) => {
-  const { getMediaItem } = useProjectStore();
+  const { getMediaItem, replaceMediaAsset } = useProjectStore();
+  const projectId = useProjectStore((state) => state.project.id);
   const allMediaItems = useProjectStore((state) => state.project.mediaLibrary.items);
   const { snapSettings } = useUIStore();
   const effectApplicationClipId = useUIStore(
@@ -67,6 +73,12 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   );
   const { playheadPosition } = useTimelineStore();
   const mediaItem = getMediaItem(clip.mediaId);
+  const runtimeAvailabilityView = useMediaAvailabilityView(projectId, mediaItem, clip.mediaId);
+  const confirmedReceipt = usePersistenceStatusStore((state) =>
+    state.projectId === projectId ? state.confirmedReceipt : null,
+  );
+  const confirmedPayload = confirmedReceipt?.lfsPayloads.find((payload) => payload.mediaId === clip.mediaId);
+  const manifestName = confirmedPayload?.semanticFilename;
   const effectiveThumbnailUrl = getEffectiveThumbnailUrl(mediaItem, allMediaItems, clip.metadata);
   const [isDragging, setIsDragging] = useState(false);
   const [isPendingDrag, setIsPendingDrag] = useState(false);
@@ -144,16 +156,11 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   // metadata/subtitle tracks without real media don't render any media UI
   const mediaType = mediaItem?.type ?? (isAudio ? "audio" : isImage ? "image" : (isMetadata || isSubtitle) ? "none" : "video");
   const clipStyle = getClipStyle(track.type);
-  const mediaStatus = mediaItem ? getMediaStatus(mediaItem) : null;
-  const isMissingMedia = mediaStatus === MediaStatus.MISSING;
-  const unavailableBadge =
-    mediaStatus === MediaStatus.UNREALIZED
-      ? { label: "Unrealized", className: "bg-zinc-700 text-zinc-100" }
-      : mediaStatus === MediaStatus.PENDING
-        ? { label: "Pending", className: "bg-blue-500 text-white" }
-        : mediaStatus === MediaStatus.ERROR
-          ? { label: "Error", className: "bg-red-600 text-white" }
-          : null;
+  const isDirectlyMissingMedia = runtimeAvailabilityView.isMissing;
+  const missingBaseCommitRef = useRef<string | null | undefined>(undefined);
+  if (isDirectlyMissingMedia && missingBaseCommitRef.current === undefined) {
+    missingBaseCommitRef.current = confirmedReceipt?.commitSha ?? null;
+  }
 
   const handleClick = (e: React.MouseEvent) => {
     if (e.button !== 0) return;
@@ -667,10 +674,62 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   // Clip name: prefer media name, then metadata label/kind fallback
   const metadataKind = isMetadata ? (clip.metadata?.["kind"] as string | undefined) : undefined;
   const clipName =
+    mediaItem?.title ??
     mediaItem?.name ??
+    manifestName ??
     (isMetadata
       ? ((clip.metadata?.["label"] as string | undefined) ?? metadataKind ?? "Metadata")
-      : clip.mediaId.slice(0, 8));
+      : "Missing media");
+  const hasConfirmedRelink = missingBaseCommitRef.current !== undefined
+    && confirmedReceipt?.commitSha != null
+    && confirmedReceipt.commitSha !== missingBaseCommitRef.current
+    && confirmedPayload?.local.state === "verified"
+    && confirmedPayload.semanticFilename.trim().length > 0;
+  const isMissingMedia = isDirectlyMissingMedia
+    || (missingBaseCommitRef.current !== undefined && !hasConfirmedRelink);
+  const availabilityView = isMissingMedia
+    ? selectMediaAvailabilityView(mediaItem, "confirmed_missing", clipName)
+    : runtimeAvailabilityView.status === "available"
+      ? null
+      : runtimeAvailabilityView;
+  const availabilityDescriptionId = `clip-availability-${clip.id}`;
+
+  const verifyMedia = useCallback(() => {
+    void mediaAvailabilityRuntime.verify(projectId, [clip.mediaId], {
+      currentUrl: (mediaId) => useProjectStore.getState().getMediaItem(mediaId)?.remoteUrl,
+      getActiveProjectId: () => useProjectStore.getState().project.id,
+    });
+  }, [clip.mediaId, projectId]);
+
+  const relinkMedia = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "video/*,audio/*,image/*";
+    input.hidden = true;
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      try {
+        if (!file) return;
+        const result = await replaceMediaAsset(clip.mediaId, file);
+        if (result.success) {
+          toast.success("File selected", "The missing warning will clear after backend persistence is confirmed.");
+        } else {
+          toast.error("Relink failed", result.error?.message ?? "Could not relink the original file");
+        }
+      } finally {
+        input.remove();
+      }
+    };
+    document.body.appendChild(input);
+    input.click();
+  }, [clip.mediaId, replaceMediaAsset]);
+
+  const handleAvailabilityAction = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (availabilityView?.action === "relink") relinkMedia();
+    else verifyMedia();
+  }, [availabilityView?.action, relinkMedia, verifyMedia]);
 
   const generatedStatus = mediaItem?.generationMeta?.status ?? (clip.metadata?.["generatedStatus"] as string | undefined);
   const isGenerated = !!mediaItem?.generationMeta || !!clip.metadata?.["isGenerated"] || !!generatedStatus;
@@ -692,6 +751,8 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
+          aria-label={`${clipName}${availabilityView ? `, ${availabilityView.label}` : ""}`}
+          aria-describedby={availabilityView ? availabilityDescriptionId : undefined}
           className={`clip-component group absolute top-1 bottom-1 rounded-lg shadow-sm ${
             isDragging
               ? `cursor-grabbing z-50 ${isInvalidDrop ? "opacity-50 ring-2 ring-red-500 border-red-500" : "opacity-90 shadow-xl"}`
@@ -851,27 +912,42 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
             </div>
           )}
 
-          {/* Left: link-file warning */}
-          {isMissingMedia && (
-            <div className="absolute inset-x-0 top-1 z-20 pointer-events-none" style={{ overflow: "clip" }}>
+          {/* Left: authoritative runtime availability and recovery action */}
+          {availabilityView && (
+            <div className="absolute inset-x-0 top-1 z-30 pointer-events-none" style={{ overflow: "clip" }}>
               <div className="sticky left-1 w-fit">
-                <div className="rounded bg-yellow-500 px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none text-black">
-                  Link file
+                <div
+                  role="status"
+                  className={`inline-flex h-6 items-center overflow-hidden rounded border text-[8px] font-bold uppercase leading-none shadow-sm ${availabilityView.className}`}
+                >
+                  <span className="inline-flex items-center gap-1 px-1.5">
+                    {availabilityView.status === "verifying" ? (
+                      <LoaderCircle aria-hidden="true" size={10} className="animate-spin motion-reduce:animate-none" />
+                    ) : availabilityView.status === "unauthorized" ? (
+                      <ShieldAlert aria-hidden="true" size={10} />
+                    ) : (
+                      <AlertTriangle aria-hidden="true" size={10} />
+                    )}
+                    {availabilityView.label}
+                  </span>
+                  <button
+                    type="button"
+                    className="pointer-events-auto inline-flex h-6 items-center gap-1 border-l border-current/30 px-1.5 normal-case underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+                    aria-describedby={availabilityDescriptionId}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onClick={handleAvailabilityAction}
+                  >
+                    <RefreshCw aria-hidden="true" size={9} />
+                    {availabilityView.actionLabel}
+                  </button>
                 </div>
               </div>
             </div>
           )}
-
-          {/* Left: non-link unavailable status badge */}
-          {unavailableBadge && (
-            <div className="absolute inset-x-0 top-1 z-20 pointer-events-none" style={{ overflow: "clip" }}>
-              <div className="sticky left-1 w-fit">
-                <div className={`inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[8px] font-bold uppercase leading-none ${unavailableBadge.className}`}>
-                  {mediaStatus === MediaStatus.ERROR && <AlertTriangle size={9} />}
-                  {unavailableBadge.label}
-                </div>
-              </div>
-            </div>
+          {availabilityView && (
+            <span id={availabilityDescriptionId} className="sr-only">
+              {availabilityView.description}
+            </span>
           )}
 
           {/* Left: metadata kind badge */}

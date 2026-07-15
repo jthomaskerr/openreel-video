@@ -46,6 +46,13 @@ import { loadMediaBlob, saveFileHandle, saveDirectoryHandle, scanDirectoryRecurs
 import { useKieAIStore } from "../../stores/kieai-store";
 import { useMusicVideoStore } from "../../stores/music-video-store";
 import { AssetBuckets, type AssetBucketsHandle, type GroupBy } from "./AssetBuckets";
+import { mediaAvailabilityRuntime } from "../../services/media-verification";
+import {
+  selectMediaAvailabilityView,
+  useMediaAvailabilityVersion,
+  useMediaAvailabilityView,
+  type MediaAvailabilityView,
+} from "../../services/media-availability-view";
 const formatDuration = (seconds: number): string => {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
@@ -134,11 +141,13 @@ const TAB_ICONS: Record<AssetsTab, React.ElementType> = {
 
 const MediaThumbnail: React.FC<{
   item: MediaItem;
+  availability: MediaAvailabilityView;
   isSelected: boolean;
   viewMode: MediaViewMode;
   onSelect: () => void;
   onDelete: () => void;
   onReplace: () => void;
+  onVerify: () => void;
   onDragStart: (e: React.DragEvent) => void;
   onAddToTimeline: () => void;
   onGenerate?: () => void;
@@ -147,11 +156,13 @@ const MediaThumbnail: React.FC<{
   onRename?: () => void;
 }> = function MediaThumbnail({
   item,
+  availability,
   isSelected,
   viewMode,
   onSelect,
   onDelete,
   onReplace,
+  onVerify,
   onDragStart,
   onAddToTimeline,
   onGenerate,
@@ -202,8 +213,10 @@ const MediaThumbnail: React.FC<{
     ? "border-red-500 ring-1 ring-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.3)]"
     : getMediaStatus(item) === MediaStatus.PENDING
     ? "border-purple-500 ring-1 ring-purple-500/50 shadow-[0_0_10px_rgba(168,85,247,0.3)]"
-    : getMediaStatus(item) === MediaStatus.MISSING
+    : availability.isMissing
       ? "border-yellow-500 ring-1 ring-yellow-500/50 shadow-[0_0_10px_rgba(234,179,8,0.3)]"
+      : availability.status !== "available"
+        ? "border-amber-400/70 ring-1 ring-amber-400/30"
       : isSelected
         ? "border-primary ring-1 ring-primary/50 shadow-[0_0_10px_rgba(34,197,94,0.2)]"
         : "border-border hover:border-text-secondary";
@@ -228,7 +241,7 @@ const MediaThumbnail: React.FC<{
         <div title="KieAI generation in progress…" className="p-2">
           <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-400 border-t-transparent" />
         </div>
-      ) : getMediaStatus(item) === MediaStatus.MISSING ? (
+      ) : availability.isMissing ? (
         <>
           <button
             onClick={(e) => { e.stopPropagation(); onReplace(); }}
@@ -245,6 +258,15 @@ const MediaThumbnail: React.FC<{
             <Trash2 size={14} className="text-red-400" />
           </button>
         </>
+      ) : availability.status !== "available" ? (
+        <button
+          onClick={(e) => { e.stopPropagation(); onVerify(); }}
+          title={availability.actionLabel ?? "Verify media"}
+          aria-label={`${availability.actionLabel ?? "Verify media"}: ${item.title || item.name}`}
+          className="p-2 bg-amber-500/20 rounded-full hover:bg-amber-500/40 backdrop-blur-sm transition-colors"
+        >
+          <RefreshCw size={14} className="text-amber-300" />
+        </button>
       ) : (
         <>
           {item.type === "image" && onGenerate && (
@@ -313,9 +335,14 @@ const MediaThumbnail: React.FC<{
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
             </div>
           )}
-          {getMediaStatus(item) === MediaStatus.MISSING && (
+          {availability.isMissing && (
             <div className="absolute inset-0 flex items-center justify-center bg-yellow-500/10">
               <AlertTriangle size={12} className="text-yellow-500/70" />
+            </div>
+          )}
+          {!availability.isMissing && availability.status !== "available" && getMediaStatus(item) !== MediaStatus.PENDING && getMediaStatus(item) !== MediaStatus.ERROR && (
+            <div className="absolute inset-0 flex items-center justify-center bg-amber-500/10" title={availability.description}>
+              <AlertTriangle size={12} className="text-amber-300" />
             </div>
           )}
         </div>
@@ -352,7 +379,7 @@ const MediaThumbnail: React.FC<{
               <div className="p-1" title="Generating…">
                 <div className="h-3 w-3 animate-spin rounded-full border-2 border-purple-400 border-t-transparent" />
               </div>
-            ) : getMediaStatus(item) === MediaStatus.MISSING ? (
+            ) : availability.isMissing ? (
               <>
                 <button
                   onClick={(e) => { e.stopPropagation(); onReplace(); }}
@@ -369,6 +396,15 @@ const MediaThumbnail: React.FC<{
                   <Trash2 size={12} className="text-red-400" />
                 </button>
               </>
+            ) : availability.status !== "available" ? (
+              <button
+                onClick={(e) => { e.stopPropagation(); onVerify(); }}
+                title={availability.actionLabel ?? "Verify media"}
+                aria-label={`${availability.actionLabel ?? "Verify media"}: ${item.title || item.name}`}
+                className="p-1 bg-amber-500/20 rounded hover:bg-amber-500/40 transition-colors"
+              >
+                <RefreshCw size={12} className="text-amber-300" />
+              </button>
             ) : (
               <>
                 {item.type === "image" && onGenerate && (
@@ -499,10 +535,19 @@ const MediaThumbnail: React.FC<{
 
 
         {/* Missing Asset Badge */}
-        {getMediaStatus(item) !== MediaStatus.ERROR && getMediaStatus(item) !== MediaStatus.PENDING && getMediaStatus(item) === MediaStatus.MISSING && (
+        {availability.isMissing && (
           <div className="absolute top-1 left-1 px-1.5 py-0.5 bg-yellow-500 rounded text-[8px] text-black font-bold flex items-center gap-1">
             <AlertTriangle size={10} />
             Missing
+          </div>
+        )}
+        {!availability.isMissing && availability.status !== "available" && getMediaStatus(item) !== MediaStatus.PENDING && getMediaStatus(item) !== MediaStatus.ERROR && (
+          <div
+            className="absolute top-1 left-1 px-1.5 py-0.5 bg-amber-950/90 border border-amber-300/60 rounded text-[8px] text-amber-100 font-bold flex items-center gap-1"
+            title={availability.description}
+          >
+            <AlertTriangle size={9} />
+            {availability.label}
           </div>
         )}
 
@@ -528,7 +573,7 @@ const MediaThumbnail: React.FC<{
         )}
 
         {/* Warning icon overlay for placeholders */}
-        {getMediaStatus(item) === MediaStatus.MISSING && !isHovered && (
+        {availability.isMissing && !isHovered && (
           <div className="absolute inset-0 flex items-center justify-center bg-yellow-500/10">
             <AlertTriangle size={viewMode === "small" ? 20 : 32} className="text-yellow-500/50" />
           </div>
@@ -665,6 +710,8 @@ const MediaThumbnailRow = React.memo(
     onManageRef?: React.MutableRefObject<(item: MediaItem) => void>;
     onRenameRef?: React.MutableRefObject<(item: MediaItem) => void>;
   }) => {
+    const projectId = useProjectStore((s) => s.project.id);
+    const availability = useMediaAvailabilityView(projectId, item);
     const handleSelect = useCallback(() => {
       const ui = useUIStore.getState();
       ui.select({ type: "clip", id: item.id });
@@ -698,6 +745,13 @@ const MediaThumbnailRow = React.memo(
       input.click();
     }, [item.id]);
 
+    const handleVerify = useCallback(() => {
+      void mediaAvailabilityRuntime.verify(projectId, [item.id], {
+        currentUrl: (mediaId) => useProjectStore.getState().getMediaItem(mediaId)?.remoteUrl,
+        getActiveProjectId: () => useProjectStore.getState().project.id,
+      });
+    }, [item.id, projectId]);
+
     const handleDragStart = useCallback(
       (e: React.DragEvent) => {
         e.dataTransfer.setData("application/json", JSON.stringify({ mediaId: item.id }));
@@ -730,11 +784,13 @@ const MediaThumbnailRow = React.memo(
     return (
       <MediaThumbnail
         item={item}
+        availability={availability}
         isSelected={isSelected}
         viewMode={viewMode}
         onSelect={handleSelect}
         onDelete={handleDelete}
         onReplace={handleReplace}
+        onVerify={handleVerify}
         onDragStart={handleDragStart}
         onAddToTimeline={handleAddToTimeline}
         onGenerate={item.type === "image" && getMediaStatus(item) !== MediaStatus.PENDING && getMediaStatus(item) !== MediaStatus.ERROR ? handleOpenGenerate : undefined}
@@ -837,6 +893,8 @@ export const AssetsPanel: React.FC = () => {
   // creates new refs for unchanged items on every timeline edit.
   const rawMediaItems = useProjectStore((s) => s.project.mediaLibrary.items);
   const mediaItems = useStableMediaItems(rawMediaItems);
+  const projectId = useProjectStore((s) => s.project.id);
+  const availabilityVersion = useMediaAvailabilityVersion(projectId);
   const projectSettings = useProjectStore((s) => s.project.settings);
   const importMedia = useProjectStore((s) => s.importMedia);
   const updateSettings = useProjectStore((s) => s.updateSettings);
@@ -855,10 +913,26 @@ export const AssetsPanel: React.FC = () => {
   // KieAI store
   const { retryTask } = useKieAIStore();
 
-  // Count missing assets (memoized)
+  const availabilityById = useMemo(() => {
+    const views = new Map<string, MediaAvailabilityView>();
+    for (const item of mediaItems) {
+      views.set(item.id, selectMediaAvailabilityView(
+        item,
+        mediaAvailabilityRuntime.get(projectId, item.id)?.status,
+      ));
+    }
+    return views;
+  }, [availabilityVersion, mediaItems, projectId]);
   const missingAssetsCount = useMemo(
-    () => mediaItems.filter((item) => getMediaStatus(item) === MediaStatus.MISSING).length,
-    [mediaItems],
+    () => mediaItems.filter((item) => availabilityById.get(item.id)?.isMissing).length,
+    [availabilityById, mediaItems],
+  );
+  const retryableAssetsCount = useMemo(
+    () => mediaItems.filter((item) => {
+      const view = availabilityById.get(item.id);
+      return view && view.status !== "available" && !view.isMissing;
+    }).length,
+    [availabilityById, mediaItems],
   );
   useEffect(() => {
     if (missingAssetsCount === 0 && showOnlyMissing) {
@@ -869,7 +943,7 @@ export const AssetsPanel: React.FC = () => {
   const filteredItems = useMemo(() => {
     const query = searchQuery.toLowerCase();
     return mediaItems.filter((item) => {
-      if (showOnlyMissing && getMediaStatus(item) !== MediaStatus.MISSING) return false;
+      if (showOnlyMissing && !availabilityById.get(item.id)?.isMissing) return false;
       if (!query) return true;
       return (
         item.name.toLowerCase().includes(query) ||
@@ -879,7 +953,7 @@ export const AssetsPanel: React.FC = () => {
         (item.group?.toLowerCase().includes(query) ?? false)
       );
     });
-  }, [mediaItems, searchQuery, showOnlyMissing]);
+  }, [availabilityById, mediaItems, searchQuery, showOnlyMissing]);
 
   // Handle file import with loading state
   const handleFileImport = useCallback(
@@ -1185,6 +1259,20 @@ export const AssetsPanel: React.FC = () => {
     }
   });
 
+  const handleVerifyAll = useCallback(() => {
+    const mediaIds = mediaItems
+      .filter((item) => {
+        const view = availabilityById.get(item.id);
+        return view && view.status !== "available" && !view.isMissing;
+      })
+      .map((item) => item.id);
+    if (mediaIds.length === 0) return;
+    void mediaAvailabilityRuntime.verify(projectId, mediaIds, {
+      currentUrl: (mediaId) => useProjectStore.getState().getMediaItem(mediaId)?.remoteUrl,
+      getActiveProjectId: () => useProjectStore.getState().project.id,
+    });
+  }, [availabilityById, mediaItems, projectId]);
+
   const renderSectionContent = (tab: AssetsTab): React.ReactNode => {
     switch (tab) {
       case "media":
@@ -1240,6 +1328,18 @@ export const AssetsPanel: React.FC = () => {
                     >
                       {missingAssetsCount}
                     </span>
+                  </button>
+                )}
+                {retryableAssetsCount > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleVerifyAll}
+                    title="Retry verification for unavailable media"
+                    aria-label="Retry verification for unavailable media"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/5 px-2 text-xs font-medium text-amber-300 transition-colors hover:bg-amber-500/15 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+                  >
+                    <RefreshCw size={13} />
+                    <span>Retry {retryableAssetsCount}</span>
                   </button>
                 )}
                 {missingAssetsCount > 0 && (

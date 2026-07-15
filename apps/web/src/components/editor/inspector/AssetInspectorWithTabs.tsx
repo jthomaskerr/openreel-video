@@ -1,11 +1,11 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { WaveformPreview } from "./WaveformPreview";
-import { Film, Music, ImageIcon, FileText, Layers, Sparkles, GitBranch, Link2, RefreshCw, Trash2, Download, X as XIcon } from "lucide-react";
+import { AlertTriangle, Film, Music, ImageIcon, FileText, Layers, Sparkles, GitBranch, Link2, RefreshCw, Trash2, Download, X as XIcon } from "lucide-react";
 import type { MediaItem } from "@openreel/core";
-import { getMediaStatus, MediaStatus } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
+import { useMediaAvailabilityView } from "../../../services/media-availability-view";
 import { toast } from "../../../stores/notification-store";
 import { resolveAssetCategory } from "../asset-category";
 import {
@@ -124,6 +124,8 @@ function statusColor(status: string | undefined): string {
 // ── Preview ────────────────────────────────────────────────────────
 
 function AssetPreview({ item }: { item: MediaItem }) {
+  const projectId = useProjectStore((state) => state.project.id);
+  const availability = useMediaAvailabilityView(projectId, item);
   const effectiveThumbnailUrl = item.thumbnailUrl;
   const category = resolveAssetCategory(item);
   if (category.isMetadata) {
@@ -146,9 +148,10 @@ function AssetPreview({ item }: { item: MediaItem }) {
         <div className="p-3">
           <WaveformPreview item={item} />
         </div>
-        {getMediaStatus(item) === MediaStatus.MISSING && (
-          <div className="px-3 py-1 bg-yellow-500/10 border-t border-yellow-500/20">
-            <span className="text-[10px] text-yellow-400 font-medium">⚠ Missing file</span>
+        {availability.status !== "available" && (
+          <div className="flex items-center gap-1 px-3 py-1 bg-amber-500/10 border-t border-amber-500/20" title={availability.description}>
+            <AlertTriangle size={10} className="text-amber-300" />
+            <span className="text-[10px] text-amber-300 font-medium">{availability.label}</span>
           </div>
         )}
       </div>
@@ -170,14 +173,10 @@ function AssetPreview({ item }: { item: MediaItem }) {
           }
         </div>
       )}
-      {getMediaStatus(item) === MediaStatus.MISSING && (
-        <div className="px-3 py-1 bg-yellow-500/10 border-t border-yellow-500/20">
-          <span className="text-[10px] text-yellow-400 font-medium">⚠ Missing file — placeholder</span>
-        </div>
-      )}
-      {getMediaStatus(item) === MediaStatus.PENDING && getMediaStatus(item) !== MediaStatus.MISSING && (
-        <div className="px-3 py-1 bg-blue-500/10 border-t border-blue-500/20">
-          <span className="text-[10px] text-blue-400 font-medium">⏳ Generating…</span>
+      {availability.status !== "available" && (
+        <div className="flex items-center gap-1 px-3 py-1 bg-amber-500/10 border-t border-amber-500/20" title={availability.description}>
+          <AlertTriangle size={10} className="text-amber-300" />
+          <span className="text-[10px] text-amber-300 font-medium">{availability.label}</span>
         </div>
       )}
     </div>

@@ -5,6 +5,7 @@ import {
   describe,
   expect,
   it,
+  vi,
 } from "vitest";
 import {
   act,
@@ -20,6 +21,7 @@ import { createEmptyProject } from "../../stores/project/project-helpers";
 import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
 import { AssetsPanel } from "./AssetsPanel";
+import { mediaAvailabilityRuntime } from "../../services/media-verification";
 
 if (!Element.prototype.hasPointerCapture) {
   Element.prototype.hasPointerCapture = () => false;
@@ -90,6 +92,19 @@ function openSelectAndChoose(
 describe("AssetsPanel media toolbar and missing-only transitions", () => {
   beforeEach(() => {
     seedProject([]);
+    vi.spyOn(mediaAvailabilityRuntime, "get").mockImplementation((_projectId, mediaId) => {
+      const item = useProjectStore.getState().project.mediaLibrary.items.find((candidate) => candidate.id === mediaId);
+      if (!item?.sourceFile || item.blob) return item ? {
+        mediaId,
+        status: "available",
+        evidence: { authoritative: true, mapping: "present", object: "present" },
+      } : undefined;
+      return {
+        mediaId,
+        status: "confirmed_missing",
+        evidence: { authoritative: true, mapping: "absent", object: "absent" },
+      };
+    });
   });
 
   afterEach(() => {
@@ -97,6 +112,7 @@ describe("AssetsPanel media toolbar and missing-only transitions", () => {
     useUIStore.getState().clearSelection();
     useUIStore.setState({ inspectedAsset: null });
     useProjectStore.setState({ project: createEmptyProject("Reset") });
+    vi.restoreAllMocks();
   });
 
   it("cancels missing-only when the final missing asset is resolved", async () => {
@@ -431,5 +447,27 @@ describe("AssetsPanel media toolbar and missing-only transitions", () => {
     openSelectAndChoose("Group media by", "Type");
     expect(screen.getByRole("button", { name: "Collapse all buckets" })).not.toBeDisabled();
     expect(screen.getByRole("button", { name: "Expand all buckets" })).not.toBeDisabled();
+  });
+
+  it("does not count transient failures as missing and retries without semantic mutation", async () => {
+    seedProject([
+      media({ id: "transient-1", name: "transient.mp4", type: "video", sourceFile: { name: "transient.mp4", size: 10, lastModified: 0 } }),
+    ]);
+    vi.mocked(mediaAvailabilityRuntime.get).mockReturnValue({
+      mediaId: "transient-1",
+      status: "temporarily_unavailable",
+      evidence: { authoritative: false, mapping: "unknown", object: "unknown" },
+    });
+    const verify = vi.spyOn(mediaAvailabilityRuntime, "verify").mockResolvedValue([]);
+    const before = JSON.stringify(useProjectStore.getState().project);
+    const projectId = useProjectStore.getState().project.id;
+
+    renderPanel();
+
+    expect(screen.queryByRole("button", { name: "Show only missing assets" })).toBeNull();
+    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry verification for unavailable media" }));
+    expect(verify).toHaveBeenCalledWith(projectId, ["transient-1"], expect.any(Object));
+    expect(JSON.stringify(useProjectStore.getState().project)).toBe(before);
   });
 });
