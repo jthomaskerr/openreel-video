@@ -12,12 +12,19 @@ import {
   Image,
   ArrowLeftToLine,
   RefreshCw,
-  AlertTriangle
+  AlertTriangle,
+  Link2,
+  Clapperboard,
+  ExternalLink,
 } from "lucide-react";
 import type { Clip, Track } from "@openreel/core";
 import { getMediaStatus, MediaStatus } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
+import { useMusicVideoStore } from "../../../stores/music-video-store";
+import { useUIStore } from "../../../stores/ui-store";
+import { normalizeSceneProjectionMetadata } from "@openreel/music-video-domain";
+import { ScenePickerDialog } from "./ScenePickerDialog";
 import {
   ContextMenuContent,
   ContextMenuItem,
@@ -55,6 +62,13 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
     replaceMediaAsset
   } = useProjectStore();
   const { playheadPosition } = useTimelineStore();
+  const activeMusicProject = useMusicVideoStore((state) =>
+    state.activeProjectId ? state.projects[state.activeProjectId] : undefined,
+  );
+  const linkClipToScene = useMusicVideoStore((state) => state.linkClipToScene);
+  const convertClipToScene = useMusicVideoStore((state) => state.convertClipToScene);
+  const { select, setActiveTrack, setInspectorSelection } = useUIStore();
+  const [scenePickerMode, setScenePickerMode] = React.useState<"link" | "change" | null>(null);
 
   const isPlayheadOnClip =
     playheadPosition >= clip.startTime &&
@@ -70,7 +84,7 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
   }, [track.clips, clip.id, clip.startTime]);
 
   const mediaItem = getMediaItem(clip.mediaId);
-  const isVideo = track.type === "video";
+  const isVideo = track.type === "video" && clip.type === "video";
   const isAudio = track.type === "audio";
   const isImage = track.type === "image";
   const isVideoWithAudio =
@@ -81,6 +95,45 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
 
   const hasEffects = clip.effects && clip.effects.length > 0;
   const hasCopiedEffects = copiedEffects && copiedEffects.length > 0;
+  const linkedSceneId = React.useMemo(() => {
+    const direct = normalizeSceneProjectionMetadata(clip.metadata);
+    if (direct) return direct.shotId;
+    const payload = clip.metadata && typeof clip.metadata.payload === "object"
+      ? clip.metadata.payload
+      : undefined;
+    return normalizeSceneProjectionMetadata(payload)?.shotId;
+  }, [clip.metadata]);
+  const scenes = activeMusicProject?.shots ?? [];
+
+  const openSceneInspector = (sceneId: string) => {
+    select({ type: "clip", id: clip.id, trackId: track.id });
+    setActiveTrack(track.id);
+    setInspectorSelection({
+      type: "scene",
+      sceneId,
+      projectionClipId: clip.id,
+    });
+    onClose?.();
+  };
+
+  const handleSelectScene = (sceneId: string) => {
+    const result = linkClipToScene({ clipId: clip.id, sceneId });
+    if (!result.success) {
+      toast.error("Could not link scene", `[${result.error.code}] ${result.error.message}`);
+      return;
+    }
+    setScenePickerMode(null);
+    openSceneInspector(sceneId);
+  };
+
+  const handleConvertToScene = () => {
+    const result = convertClipToScene({ clipId: clip.id });
+    if (!result.success) {
+      toast.error("Could not convert clip", `[${result.error.code}] ${result.error.message}`);
+      return;
+    }
+    openSceneInspector(result.value);
+  };
 
   const handleCopy = () => {
     copyClips([clip.id]);
@@ -169,7 +222,8 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
   };
 
   return (
-    <ContextMenuContent className="min-w-[220px]">
+    <>
+      <ContextMenuContent className="min-w-[220px]">
       <ContextMenuLabel className="flex items-center text-[10px] text-text-muted">
         {getClipTypeIcon()}
         {getClipTypeLabel()}
@@ -263,6 +317,39 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
         </>
       )}
 
+      {isVideo && (
+        <>
+          <ContextMenuSeparator />
+          {linkedSceneId ? (
+            <>
+              <ContextMenuItem onClick={() => openSceneInspector(linkedSceneId)}>
+                <ExternalLink className="mr-2 h-4 w-4" />
+                Open Scene
+              </ContextMenuItem>
+              <ContextMenuItem onClick={() => setScenePickerMode("change")}>
+                <Link2 className="mr-2 h-4 w-4" />
+                Change Linked Scene…
+              </ContextMenuItem>
+            </>
+          ) : (
+            <>
+              <ContextMenuItem
+                onClick={() => setScenePickerMode("link")}
+                disabled={scenes.length === 0}
+                title={scenes.length === 0 ? "Create a scene before linking this clip." : undefined}
+              >
+                <Link2 className="mr-2 h-4 w-4" />
+                Link to Existing Scene…
+              </ContextMenuItem>
+              <ContextMenuItem onClick={handleConvertToScene}>
+                <Clapperboard className="mr-2 h-4 w-4" />
+                Convert to Scene Clip
+              </ContextMenuItem>
+            </>
+          )}
+        </>
+      )}
+
       <ContextMenuSeparator />
       <ContextMenuItem onClick={handleRippleDelete} className="text-red-400">
         <Trash2 className="mr-2 h-4 w-4" />
@@ -273,6 +360,15 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
         <Trash2 className="mr-2 h-4 w-4" />
         Delete
       </ContextMenuItem>
-    </ContextMenuContent>
+      </ContextMenuContent>
+      <ScenePickerDialog
+        open={scenePickerMode !== null}
+        title={scenePickerMode === "change" ? "Change Linked Scene" : "Link to Existing Scene"}
+        scenes={scenes}
+        currentSceneId={linkedSceneId}
+        onSelect={handleSelectScene}
+        onCancel={() => setScenePickerMode(null)}
+      />
+    </>
   );
 };
