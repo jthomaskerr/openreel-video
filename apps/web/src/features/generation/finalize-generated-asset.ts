@@ -2,7 +2,7 @@ import type { ActionResult, MediaItem, Project } from "@openreel/core";
 
 export interface GeneratedAssetFinalizationStore {
   readonly project: Project;
-  /** Replace a placeholder in-place, retaining its media ID. */
+  /** Replace a placeholder in place, retaining its media ID. */
   finalizePlaceholder?: (input: {
     placeholderMediaId: string;
     item: MediaItem;
@@ -46,10 +46,14 @@ export interface FinalizeGeneratedAssetResult {
   error?: ActionResult["error"];
 }
 
+type ReplayableActionResult = ActionResult & { replayed?: boolean };
+
 /**
- * Applies the media-side finalization checkpoint exactly once. The mutation
- * port owns persistence and should atomically recognize the supplied key.
- * This function deliberately does not infer a source asset from references.
+ * Applies the media-side finalization checkpoint exactly once.
+ *
+ * The supplied mutation ports own persistence and idempotency. This helper
+ * only validates the placeholder target, forwards the correct mutation input,
+ * and appends a single shot attempt when shot linkage is requested.
  */
 export async function finalizeGeneratedAsset(
   store: GeneratedAssetFinalizationStore,
@@ -58,40 +62,115 @@ export async function finalizeGeneratedAsset(
   const mediaId = input.target.placeholderMediaId;
   const existing = store.project.mediaLibrary.items.find((item) => item.id === mediaId);
   if (!existing) {
-    return fail(mediaId, { code: "MEDIA_NOT_FOUND", message: `Placeholder ${mediaId} not found` });
+    return fail(mediaId, {
+      code: "MEDIA_NOT_FOUND",
+      message: `Placeholder ${mediaId} not found`,
+    });
   }
 
-  const key = `generation-finalize:${input.jobId}:${input.target.kind}`;
-  const result = input.target.kind === "new-asset"
-    ? await store.finalizePlaceholder?.({ placeholderMediaId: mediaId, item: input.item, blob: input.blob, idempotencyKey: key })
-    : await store.finalizeVersion?.({ sourceMediaId: input.target.sourceMediaId, placeholderMediaId: mediaId, item: input.item, blob: input.blob, idempotencyKey: key });
+  const finalizeKey = `generation-finalize:${input.jobId}:${input.target.kind}`;
+  const finalizeResult =
+    input.target.kind === "new-asset"
+      ? await store.finalizePlaceholder?.({
+          placeholderMediaId: mediaId,
+          item: input.item,
+          blob: input.blob,
+          idempotencyKey: finalizeKey,
+        })
+      : await store.finalizeVersion?.({
+          sourceMediaId: input.target.sourceMediaId,
+          placeholderMediaId: mediaId,
+          item: input.item,
+          blob: input.blob,
+          idempotencyKey: finalizeKey,
+        });
 
-  if (!result) return fail(mediaId, { code: "ACTION_FAILED", message: "Store does not expose generation finalization" });
-  if (!result.success) return fail(mediaId, result.error);
-
-  let shotLinked = false;
-  if (input.shotId && input.attempt && store.appendShotAttempt) {
-    const shotKey = `generation-shot:${input.jobId}:${input.shotId}`;
-    const shotResult = await store.appendShotAttempt({ shotId: input.shotId, generatedMediaId: mediaId, attempt: input.attempt, idempotencyKey: shotKey });
-    if (!shotResult.success) return { success: false, mediaId, shotLinked: false, replayed: isReplay(shotResult), error: shotResult.error };
-    shotLinked = true;
+  if (!finalizeResult) {
+    return fail(mediaId, {
+      code: "ACTION_FAILED",
+      message: "Store does not expose generation finalization",
+    });
   }
-  return { success: true, mediaId, shotLinked, replayed: isReplay(result) };
+  if (!finalizeResult.success) {
+    return fail(mediaId, finalizeResult.error);
+  }
+
+  const replayed = isReplay(finalizeResult);
+  if (!hasShotAttempt(input)) {
+    return { success: true, mediaId, shotLinked: false, replayed };
+  }
+
+  if (!store.appendShotAttempt) {
+    return fail(mediaId, {
+      code: "ACTION_FAILED",
+      message: "Store does not expose shot mutation",
+    });
+  }
+
+  const shotKey = `generation-shot:${input.jobId}:${input.shotId}`;
+  const shotResult = await store.appendShotAttempt({
+    shotId: input.shotId,
+    generatedMediaId: mediaId,
+    attempt: input.attempt,
+    idempotencyKey: shotKey,
+  });
+  if (!shotResult.success) {
+    return {
+      success: false,
+      mediaId,
+      shotLinked: false,
+      replayed: replayed || isReplay(shotResult),
+      error: shotResult.error,
+    };
+  }
+
+  return {
+    success: true,
+    mediaId,
+    shotLinked: true,
+    replayed: replayed || isReplay(shotResult),
+  };
 }
 
 export async function appendGeneratedShotAttempt(
   store: GeneratedAssetFinalizationStore,
   input: { shotId: string; generatedMediaId: string; attempt: unknown; jobId: string },
 ): Promise<{ success: boolean; replayed: boolean; error?: ActionResult["error"] }> {
-  if (!store.appendShotAttempt) return { success: false, replayed: false, error: { code: "ACTION_FAILED", message: "Store does not expose shot mutation" } };
-  const result = await store.appendShotAttempt({ ...input, idempotencyKey: `generation-shot:${input.jobId}:${input.shotId}` });
-  return { success: result.success, replayed: isReplay(result), ...(result.success ? {} : { error: result.error }) };
+  if (!store.appendShotAttempt) {
+    return {
+      success: false,
+      replayed: false,
+      error: {
+        code: "ACTION_FAILED",
+        message: "Store does not expose shot mutation",
+      },
+    };
+  }
+
+  const result = await store.appendShotAttempt({
+    ...input,
+    idempotencyKey: `generation-shot:${input.jobId}:${input.shotId}`,
+  });
+  return {
+    success: result.success,
+    replayed: isReplay(result),
+    ...(result.success ? {} : { error: result.error }),
+  };
+}
+
+function hasShotAttempt(
+  input: FinalizeGeneratedAssetInput,
+): input is FinalizeGeneratedAssetInput & { shotId: string; attempt: unknown } {
+  return input.shotId !== undefined && input.attempt !== undefined;
 }
 
 function isReplay(result: ActionResult): boolean {
-  return (result as ActionResult & { replayed?: boolean }).replayed === true;
+  return (result as ReplayableActionResult).replayed === true;
 }
 
-function fail(mediaId: string, error: ActionResult["error"]): FinalizeGeneratedAssetResult {
+function fail(
+  mediaId: string,
+  error: ActionResult["error"],
+): FinalizeGeneratedAssetResult {
   return { success: false, mediaId, shotLinked: false, replayed: false, error };
 }

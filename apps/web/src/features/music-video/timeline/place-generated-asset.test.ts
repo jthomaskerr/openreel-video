@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ActionResult, MediaItem, Project, Track } from "@openreel/core";
-import { placeGeneratedAssetOnTimeline, type GeneratedAssetPlacementStore } from "./place-generated-asset";
+import {
+  placeGeneratedAssetOnTimeline,
+  type GeneratedAssetPlacementStore,
+} from "./place-generated-asset";
 
 function makeProject(items: MediaItem[] = []): Project {
   return {
@@ -8,7 +11,13 @@ function makeProject(items: MediaItem[] = []): Project {
     name: "Placement Test",
     createdAt: 1,
     modifiedAt: 1,
-    settings: { width: 1920, height: 1080, frameRate: 30, sampleRate: 48000, channels: 2 },
+    settings: {
+      width: 1920,
+      height: 1080,
+      frameRate: 30,
+      sampleRate: 48_000,
+      channels: 2,
+    },
     mediaLibrary: { items },
     timeline: { tracks: [], duration: 0, markers: [], subtitles: [] },
   };
@@ -21,17 +30,57 @@ function makeMedia(id: string, type: "image" | "video", assetGroupId = "group-1"
     type,
     fileHandle: null,
     blob: new Blob([id]),
-    metadata: { duration: 0, width: 16, height: 16, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 1 },
+    metadata: {
+      duration: 0,
+      width: 16,
+      height: 16,
+      frameRate: 0,
+      codec: "",
+      sampleRate: 0,
+      channels: 0,
+      fileSize: 1,
+    },
     thumbnailUrl: null,
     assetGroupId,
     isCurrent: true,
   };
 }
 
+function makeClip(overrides: Partial<Track["clips"][number]> = {}): Track["clips"][number] {
+  return {
+    id: "clip-1",
+    type: "image",
+    mediaId: "old-media",
+    trackId: "image-track",
+    startTime: 8,
+    duration: 3,
+    inPoint: 0.25,
+    outPoint: 2.5,
+    effects: [{ id: "fx-1", type: "blur", params: {}, enabled: true }],
+    audioEffects: [{ id: "audio-fx-1", type: "gain", params: {}, enabled: true }],
+    transform: {
+      position: { x: 4, y: 5 },
+      scale: { x: 1.2, y: 0.8 },
+      rotation: 12,
+      anchor: { x: 0, y: 0 },
+      opacity: 0.7,
+    },
+    volume: 0.6,
+    keyframes: [],
+    metadata: {
+      shotId: "shot-1",
+      custom: "keep",
+    },
+    ...overrides,
+  } as Track["clips"][number];
+}
+
 function makeStore(project = makeProject()) {
   let current = project;
   const store: GeneratedAssetPlacementStore = {
-    get project() { return current; },
+    get project() {
+      return current;
+    },
     addTrack: vi.fn(async (trackType: Track["type"]): Promise<ActionResult> => {
       const track: Track = {
         id: `${trackType}-track-${current.timeline.tracks.length + 1}`,
@@ -44,7 +93,13 @@ function makeStore(project = makeProject()) {
         muted: false,
         solo: false,
       };
-      current = { ...current, timeline: { ...current.timeline, tracks: [...current.timeline.tracks, track] } };
+      current = {
+        ...current,
+        timeline: {
+          ...current.timeline,
+          tracks: [...current.timeline.tracks, track],
+        },
+      };
       return { success: true, actionId: "track-action" };
     }),
     addClip: vi.fn(async (trackId, mediaId, startTime, options) => {
@@ -60,20 +115,26 @@ function makeStore(project = makeProject()) {
                     ...track.clips,
                     {
                       id: `clip-${track.clips.length + 1}`,
+                      type: options?.type ?? "image",
                       mediaId,
+                      trackId,
                       startTime,
                       duration: options?.duration ?? 0,
                       inPoint: 0,
                       outPoint: options?.duration ?? 0,
-                      speed: 1,
-                      volume: 1,
-                      opacity: 1,
-                      transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 },
                       effects: [],
-                      transitions: [],
+                      audioEffects: [],
+                      transform: {
+                        position: { x: 0, y: 0 },
+                        scale: { x: 1, y: 1 },
+                        rotation: 0,
+                        anchor: { x: 0, y: 0 },
+                        opacity: 1,
+                      },
+                      volume: 1,
                       keyframes: [],
                       metadata: options?.metadata ?? {},
-                    } as any,
+                    },
                   ],
                 }
               : track,
@@ -82,110 +143,292 @@ function makeStore(project = makeProject()) {
       };
       return { success: true, actionId: "clip-action" };
     }),
+    beginHistoryGroup: vi.fn(),
+    endHistoryGroup: vi.fn(),
   };
   return store;
 }
 
 describe("placeGeneratedAssetOnTimeline", () => {
-  it("places an image result on an image track at the shot timing", async () => {
-    const media = makeMedia("image-v1", "image", "group-image");
+  it("skips timeline mutation for the none policy", async () => {
+    const media = makeMedia("image-v1", "image");
     const store = makeStore(makeProject([media]));
 
     const result = await placeGeneratedAssetOnTimeline(store, {
       mediaId: media.id,
       shotId: "shot-1",
-      startTime: 12,
-      duration: 5,
-      providerJobId: "job-1",
+      startTime: 0,
+      duration: 4,
+      policy: "none",
     });
 
-    expect(result.success).toBe(true);
-    expect(store.addTrack).toHaveBeenCalledWith("image");
-    const track = store.project.timeline.tracks[0];
-    expect(track.type).toBe("image");
-    expect(track.clips[0]).toMatchObject({
-      mediaId: "image-v1",
-      startTime: 12,
-      duration: 5,
-      metadata: { shotId: "shot-1", assetGroupId: "group-image", providerJobId: "job-1" },
+    expect(result).toMatchObject({
+      success: true,
+      placed: false,
+      status: "skipped",
     });
+    expect(store.addTrack).not.toHaveBeenCalled();
   });
 
-  it("places a video result on a video track", async () => {
-    const media = makeMedia("video-v1", "video", "group-video");
+  it.each([
+    { startTime: 0, label: "zero" },
+    { startTime: 12, label: "non-zero" },
+  ])("creates a linked clip at %s timing", async ({ startTime, label }) => {
+    const media = makeMedia(`image-${label}`, "image", `group-${label}`);
     const store = makeStore(makeProject([media]));
 
     const result = await placeGeneratedAssetOnTimeline(store, {
       mediaId: media.id,
-      shotId: "shot-2",
-      startTime: 3,
-      duration: 7,
+      shotId: "shot-1",
+      startTime,
+      duration: 5,
+      providerJobId: "job-1",
+      idempotencyKey: `placement-${label}`,
     });
 
-    expect(result.success).toBe(true);
-    expect(store.project.timeline.tracks[0].type).toBe("video");
-    expect(store.project.timeline.tracks[0].clips[0]).toMatchObject({ mediaId: "video-v1", startTime: 3, duration: 7 });
+    expect(result).toMatchObject({
+      success: true,
+      placed: true,
+      status: "applied",
+    });
+    expect(store.addTrack).toHaveBeenCalledWith("image");
+    const track = store.project.timeline.tracks[0];
+    expect(track.type).toBe("image");
+    expect(track.clips[0]).toMatchObject({
+      mediaId: media.id,
+      startTime,
+      duration: 5,
+      metadata: {
+        shotId: "shot-1",
+        assetGroupId: `group-${label}`,
+        providerJobId: "job-1",
+        idempotencyKey: `placement-${label}`,
+      },
+    });
   });
 
-  it("does not duplicate a clip for the same shot and asset group", async () => {
+  it("replays duplicate linked-clip keys without creating a second clip", async () => {
     const media = makeMedia("image-v1", "image", "group-image");
     const store = makeStore(makeProject([media]));
 
-    await placeGeneratedAssetOnTimeline(store, { mediaId: media.id, shotId: "shot-1", startTime: 0, duration: 4 });
-    const second = await placeGeneratedAssetOnTimeline(store, { mediaId: media.id, shotId: "shot-1", startTime: 0, duration: 4 });
+    const input = {
+      mediaId: media.id,
+      shotId: "shot-1",
+      startTime: 0,
+      duration: 4,
+      idempotencyKey: "placement-replay",
+    } as const;
 
-    expect(second.success).toBe(true);
-    expect(second.placed).toBe(false);
+    const first = await placeGeneratedAssetOnTimeline(store, input);
+    const second = await placeGeneratedAssetOnTimeline(store, input);
+
+    expect(first).toMatchObject({
+      success: true,
+      placed: true,
+      status: "applied",
+    });
+    expect(second).toMatchObject({
+      success: true,
+      placed: false,
+      status: "skipped",
+    });
+    expect(store.project.timeline.tracks).toHaveLength(1);
     expect(store.project.timeline.tracks[0].clips).toHaveLength(1);
   });
 
-  it("skips timeline mutation for the none policy", async () => {
-    const media = makeMedia("image-v1", "image");
-    const store = makeStore(makeProject([media]));
-    const result = await placeGeneratedAssetOnTimeline(store, {
-      mediaId: media.id, shotId: "shot-1", startTime: 0, duration: 4, policy: "none",
-    });
-    expect(result).toMatchObject({ success: true, placed: false, status: "skipped" });
-    expect(store.addTrack).not.toHaveBeenCalled();
-  });
-
-  it("replaces only mediaId and retains clip edit state", async () => {
+  it("replaces only mediaId and retains clip identity, state, and undo grouping", async () => {
     const oldMedia = makeMedia("image-old", "image");
     const newMedia = makeMedia("image-new", "image");
     const store = makeStore(makeProject([oldMedia, newMedia]));
-    const track: Track = {
-      id: "image-track", type: "image", name: "Images", clips: [{
-        id: "selected", type: "image", mediaId: oldMedia.id, trackId: "image-track", startTime: 8,
-        duration: 3, inPoint: 0.25, outPoint: 2.5, effects: [{ id: "fx", type: "blur", params: {} }],
-        audioEffects: [], transform: { x: 4, y: 5, scaleX: 1.2, scaleY: 0.8, rotation: 12 }, volume: 0.7,
-        keyframes: [], metadata: { shotId: "shot-1", custom: "keep" },
-      } as any], transitions: [], locked: false, hidden: false, muted: false, solo: false,
+    const selectedClip = makeClip({ mediaId: oldMedia.id });
+    let track: Track = {
+      id: "image-track",
+      type: "image",
+      name: "Images",
+      clips: [selectedClip],
+      transitions: [],
+      locked: false,
+      hidden: false,
+      muted: false,
+      solo: false,
     };
-    let current = { ...store.project, timeline: { ...store.project.timeline, tracks: [track] } };
-    Object.defineProperty(store, "project", { get: () => current });
+    const baseProject = store.project;
+    Object.defineProperty(store, "project", {
+      get: () => ({
+        ...baseProject,
+        timeline: { ...baseProject.timeline, tracks: [track] },
+      }),
+    });
+
     store.replaceClipMedia = vi.fn(async (clipId, mediaId) => {
-      current = { ...current, timeline: { ...current.timeline, tracks: current.timeline.tracks.map((t) => ({ ...t, clips: t.clips.map((c) => c.id === clipId ? { ...c, mediaId } : c) })) } };
+      track = {
+        ...track,
+        clips: track.clips.map((clip) =>
+          clip.id === clipId ? { ...clip, mediaId } : clip,
+        ) as Track["clips"],
+      };
       return { success: true, actionId: "replace-action" };
     });
-    const before = current.timeline.tracks[0].clips[0];
+
     const result = await placeGeneratedAssetOnTimeline(store, {
-      mediaId: newMedia.id, shotId: "shot-1", startTime: 8, duration: 3,
-      policy: "replace-selected-clip-media", clipId: "selected", idempotencyKey: "key-1",
+      mediaId: newMedia.id,
+      shotId: "shot-1",
+      startTime: 8,
+      duration: 3,
+      policy: "replace-selected-clip-media",
+      clipId: "clip-1",
+      idempotencyKey: "replace-key",
     });
-    const after = current.timeline.tracks[0].clips[0];
-    expect(result).toMatchObject({ success: true, placed: true, clipId: "selected" });
-    expect(after).toMatchObject({ ...before, mediaId: newMedia.id });
-    expect(store.replaceClipMedia).toHaveBeenCalledWith("selected", newMedia.id, "key-1");
+
+    expect(result).toMatchObject({
+      success: true,
+      placed: true,
+      clipId: "clip-1",
+      status: "applied",
+    });
+    expect(store.beginHistoryGroup).toHaveBeenCalledTimes(1);
+    expect(store.endHistoryGroup).toHaveBeenCalledTimes(1);
+    expect(store.replaceClipMedia).toHaveBeenCalledWith(
+      "clip-1",
+      newMedia.id,
+      "replace-key",
+    );
+
+    expect(track.clips[0]).toMatchObject({
+      id: "clip-1",
+      mediaId: newMedia.id,
+      trackId: "image-track",
+      startTime: 8,
+      duration: 3,
+      inPoint: 0.25,
+      outPoint: 2.5,
+      effects: [{ id: "fx-1", type: "blur", params: {}, enabled: true }],
+      audioEffects: [{ id: "audio-fx-1", type: "gain", params: {}, enabled: true }],
+      transform: {
+        position: { x: 4, y: 5 },
+        scale: { x: 1.2, y: 0.8 },
+        rotation: 12,
+        anchor: { x: 0, y: 0 },
+        opacity: 0.7,
+      },
+      metadata: {
+        shotId: "shot-1",
+        custom: "keep",
+      },
+    });
   });
 
-  it("rejects replacement when selected clip belongs to another shot", async () => {
+  it("skips a repeated replacement when the selected clip already has the generated media", async () => {
+    const oldMedia = makeMedia("image-old", "image");
+    const newMedia = makeMedia("image-new", "image");
+    const store = makeStore(makeProject([oldMedia, newMedia]));
+    const selectedClip = makeClip({ mediaId: oldMedia.id });
+    let track: Track = {
+      id: "image-track",
+      type: "image",
+      name: "Images",
+      clips: [selectedClip],
+      transitions: [],
+      locked: false,
+      hidden: false,
+      muted: false,
+      solo: false,
+    };
+    const baseProject = store.project;
+    Object.defineProperty(store, "project", {
+      get: () => ({
+        ...baseProject,
+        timeline: { ...baseProject.timeline, tracks: [track] },
+      }),
+    });
+
+    store.replaceClipMedia = vi.fn(async (clipId, mediaId) => {
+      track = {
+        ...track,
+        clips: track.clips.map((clip) =>
+          clip.id === clipId ? { ...clip, mediaId } : clip,
+        ) as Track["clips"],
+      };
+      return { success: true, actionId: "replace-action" };
+    });
+
+    const input = {
+      mediaId: newMedia.id,
+      shotId: "shot-1",
+      startTime: 8,
+      duration: 3,
+      policy: "replace-selected-clip-media" as const,
+      clipId: "clip-1",
+      idempotencyKey: "replace-key",
+    };
+
+    const first = await placeGeneratedAssetOnTimeline(store, input);
+    const second = await placeGeneratedAssetOnTimeline(store, input);
+
+    expect(first).toMatchObject({
+      success: true,
+      placed: true,
+      status: "applied",
+    });
+    expect(second).toMatchObject({
+      success: true,
+      placed: false,
+      status: "skipped",
+    });
+    expect(store.replaceClipMedia).toHaveBeenCalledTimes(1);
+    expect(store.beginHistoryGroup).toHaveBeenCalledTimes(1);
+    expect(store.endHistoryGroup).toHaveBeenCalledTimes(1);
+    expect(track.clips[0]).toMatchObject({
+      id: "clip-1",
+      mediaId: newMedia.id,
+    });
+  });
+
+  it("rejects replacement when the selected clip belongs to another shot", async () => {
     const media = makeMedia("image-v1", "image");
     const store = makeStore(makeProject([media]));
-    const track: Track = { id: "image-track", type: "image", name: "Images", clips: [{ id: "c", type: "image", mediaId: media.id, trackId: "image-track", startTime: 0, duration: 1, inPoint: 0, outPoint: 1, effects: [], audioEffects: [], transform: { x: 0, y: 0, scaleX: 1, scaleY: 1, rotation: 0 }, volume: 1, keyframes: [], metadata: { shotId: "other" } } as any], transitions: [], locked: false, hidden: false, muted: false, solo: false };
+    const track: Track = {
+      id: "image-track",
+      type: "image",
+      name: "Images",
+      clips: [
+        makeClip({
+          id: "c",
+          mediaId: media.id,
+          metadata: { shotId: "other" },
+        }),
+      ],
+      transitions: [],
+      locked: false,
+      hidden: false,
+      muted: false,
+      solo: false,
+    };
     const baseProject = store.project;
-    Object.defineProperty(store, "project", { get: () => ({ ...baseProject, timeline: { ...baseProject.timeline, tracks: [track] } }) });
+    Object.defineProperty(store, "project", {
+      get: () => ({
+        ...baseProject,
+        timeline: { ...baseProject.timeline, tracks: [track] },
+      }),
+    });
+
     store.replaceClipMedia = vi.fn();
-    const result = await placeGeneratedAssetOnTimeline(store, { mediaId: media.id, shotId: "requested", startTime: 0, duration: 1, policy: "replace-selected-clip-media", clipId: "c" });
+
+    const result = await placeGeneratedAssetOnTimeline(store, {
+      mediaId: media.id,
+      shotId: "requested",
+      startTime: 0,
+      duration: 1,
+      policy: "replace-selected-clip-media",
+      clipId: "c",
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      placed: false,
+      trackId: "image-track",
+      clipId: "c",
+    });
     expect(result.error?.code).toBe("INVALID_PARAMS");
     expect(store.replaceClipMedia).not.toHaveBeenCalled();
   });
