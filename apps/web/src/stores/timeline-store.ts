@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 
 export const ZOOM_PRESETS = {
-  MIN: 10,
+  MIN: 1,
   DEFAULT: 50,
   MAX: 500,
 } as const;

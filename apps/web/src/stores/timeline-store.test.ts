@@ -50,3 +50,31 @@ describe("TimelineStore playback locking", () => {
     expect(state.playbackState).toBe("playing");
   });
 });
+
+describe("TimelineStore zoom limits", () => {
+  beforeEach(() => {
+    useTimelineStore.setState({
+      pixelsPerSecond: ZOOM_PRESETS.DEFAULT,
+      viewportWidth: 800,
+    });
+  });
+
+  it("clamps direct zoom changes to 1 pixel per second", () => {
+    useTimelineStore.getState().setZoom(0);
+
+    expect(useTimelineStore.getState().pixelsPerSecond).toBe(1);
+  });
+
+  it("stops zooming out at 1 pixel per second", () => {
+    useTimelineStore.setState({ pixelsPerSecond: 1 });
+    useTimelineStore.getState().zoomOut();
+
+    expect(useTimelineStore.getState().pixelsPerSecond).toBe(1);
+  });
+
+  it("allows zoom-to-fit to reach 1 pixel per second", () => {
+    useTimelineStore.getState().zoomToFit(1_000);
+
+    expect(useTimelineStore.getState().pixelsPerSecond).toBe(1);
+  });
+});
