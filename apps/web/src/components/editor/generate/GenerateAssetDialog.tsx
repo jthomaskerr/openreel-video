@@ -11,7 +11,11 @@ import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, Button } from "@openreel/ui";
 import { ChevronLeft, Search } from "lucide-react";
-import type { GeneratedAsset, StoryboardShot, ValidationState } from "@openreel/music-video-domain";
+import {
+  normalizeSceneProjectionMetadata,
+  type GeneratedAsset,
+  type StoryboardShot,
+} from "@openreel/music-video-domain";
 
 // ── KieAI models ────────────────────────────────────────────────────────────
 import type { ImageModelInput } from "../../../services/kieai/image-generation";
@@ -27,6 +31,10 @@ import { QwenForm } from "../kieai/forms/QwenForm";
 import type { WavespeedModel } from "../../../services/wavespeed/index";
 import { fetchModelsCached, submitGenerationJob } from "../../../services/wavespeed/index";
 import type { GenerationContext } from "@openreel/music-video-domain/generation";
+import {
+  buildSceneGenerationRequest,
+  selectSceneGenerationContext,
+} from "../../../features/generation/context/scene-generation";
 import { SchemaForm } from "./SchemaForm";
 
 import { uploadFileStream } from "../../../services/kieai/file-upload";
@@ -159,14 +167,66 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
       : shot?.prompt ?? "";
     if (!prompt && !shot) return undefined;
     if (shot) return { ...shot, prompt };
-    const validation: ValidationState = { valid: true, warnings: [], errors: [] };
+    const metadata = normalizeSceneProjectionMetadata(clip.metadata)
+      ?? normalizeSceneProjectionMetadata(
+        clip.metadata && typeof clip.metadata.payload === "object"
+          ? clip.metadata.payload
+          : undefined,
+      );
     return {
-      id: clipId, index: 0, label: "", startSeconds: 0, endSeconds: 0,
+      id: metadata?.shotId ?? clipId, index: 0, label: "",
       prompt, model: "", resolution: "", aspectRatio: "16:9",
       includeMainAudio: false, referenceAssetIds: [], generatedAssetIds: [],
-      validation, outputs: [], selected: false,
+      validation: { valid: true, warnings: [], errors: [] }, outputs: [], selected: false,
     };
   }, [clipId, project.timeline.tracks, shot]);
+
+  const effectiveSceneId = useMemo(() => {
+    if (shot?.id) return shot.id;
+    if (!clipId) return undefined;
+    const clip = project.timeline.tracks
+      .flatMap((track) => track.clips)
+      .find((candidate) => candidate.id === clipId);
+    if (!clip) return undefined;
+    return (
+      normalizeSceneProjectionMetadata(clip.metadata)
+      ?? normalizeSceneProjectionMetadata(
+        clip.metadata && typeof clip.metadata.payload === "object"
+          ? clip.metadata.payload
+          : undefined,
+      )
+    )?.shotId;
+  }, [clipId, project.timeline.tracks, shot?.id]);
+
+  const sceneGenerationSelection = useMemo(() => {
+    if (!effectiveSceneId || !effectiveShot) return undefined;
+    const projections = project.timeline.tracks.flatMap((track) =>
+      track.clips.flatMap((clip) => {
+        const metadata = normalizeSceneProjectionMetadata(clip.metadata)
+          ?? normalizeSceneProjectionMetadata(
+            clip.metadata && typeof clip.metadata.payload === "object"
+              ? clip.metadata.payload
+              : undefined,
+          );
+        return metadata
+          ? [{
+              clipId: clip.id,
+              linkedShotId: metadata.shotId,
+              startTime: clip.startTime,
+              duration: clip.duration,
+              inPoint: clip.inPoint,
+              outPoint: clip.outPoint,
+            }]
+          : [];
+      }),
+    );
+    return selectSceneGenerationContext({
+      shotId: effectiveSceneId,
+      includeAudio: effectiveShot.includeMainAudio,
+      projectionClipId: clipId,
+      projections,
+    });
+  }, [clipId, effectiveSceneId, effectiveShot, project.timeline.tracks]);
 
   // ── KieAI input state ────────────────────────────────────────────────────
   const defaults = makeKieAIDefaults(asset, effectiveShot);
@@ -314,6 +374,11 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
   // ── Generate ──────────────────────────────────────────────────────────────
   const handleGenerate = useCallback(async () => {
     if (!model || !project) return;
+    if (sceneGenerationSelection?.status === "disabled") {
+      setError(sceneGenerationSelection.reason);
+      setStep("error");
+      return;
+    }
     setStep("submitting");
     setError("");
     const ac = new AbortController();
@@ -373,7 +438,8 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
         });
       } else if (model.provider === "wavespeed" && model.wsModel) {
         const schema = model.wsModel.api_schema?.api_schemas?.[0]?.request_schema;
-        const injected = schema ? injectImageInputs(schema, wsInputs, getRefImageUrls(project.mediaLibrary.items, refIds)) : wsInputs;
+        const resolvedReferenceItems = getRefImageUrls(project.mediaLibrary.items, refIds);
+        const injected = schema ? injectImageInputs(schema, wsInputs, resolvedReferenceItems) : wsInputs;
         const mediaId = uuidv4();
         const isVideo = model.genType.includes("video");
         const name = `wavespeed_${model.wsModel.model_id.split("/").pop()}.${isVideo ? "mp4" : "jpg"}`;
@@ -383,21 +449,55 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
           thumbnailUrl: previewUrl ?? null,
           generationMeta: { provider: "wavespeed", model: model.wsModel.model_id, prompt: String(wsInputs.prompt ?? ""), inputs: injected, status: "pending" },
         });
-        const timing = effectiveShot && Number.isFinite(effectiveShot.startSeconds) && Number.isFinite(effectiveShot.endSeconds) && effectiveShot.endSeconds > effectiveShot.startSeconds
-          ? { source: "shot" as const, startSeconds: effectiveShot.startSeconds, endSeconds: effectiveShot.endSeconds, durationSeconds: effectiveShot.endSeconds - effectiveShot.startSeconds }
-          : undefined;
-        const context: GenerationContext = {
-          projectId: project.id,
-          ...(effectiveShot?.id ? { shotId: effectiveShot.id } : {}),
-          target: { kind: "new-asset", placeholderMediaId: mediaId },
-          ...(timing ? { timing } : {}),
-          references: [],
-          placementPolicy: "none",
-        };
-        const submitted = await submitGenerationJob({
-          id: uuidv4(), projectId: project.id, provider: "wavespeed", modelId: model.wsModel.model_id,
-          modelSchemaVersion: "wavespeed-schema-v1", context, providerInputs: injected,
-        });
+        const requestId = uuidv4();
+        const target = { kind: "new-asset" as const, placeholderMediaId: mediaId };
+        const request = effectiveSceneId && effectiveShot && sceneGenerationSelection?.status === "ready"
+          ? buildSceneGenerationRequest({
+              id: requestId,
+              projectId: project.id,
+              shotId: effectiveSceneId,
+              selection: sceneGenerationSelection,
+              target,
+              placementPolicy: "none",
+              modelId: model.wsModel.model_id,
+              modelSchemaVersion: "wavespeed-schema-v1",
+              providerInputs: injected,
+              references: {
+                shotReferences: resolvedReferenceItems
+                  .filter((item) => effectiveShot.referenceAssetIds.includes(item.id))
+                  .map((item) => ({
+                    mediaId: item.id,
+                    remoteInput: {
+                      kind: "upload-token" as const,
+                      value: item.originalUrl ?? item.thumbnailUrl!,
+                    },
+                  })),
+                userReferences: resolvedReferenceItems
+                  .filter((item) => !effectiveShot.referenceAssetIds.includes(item.id))
+                  .map((item) => ({
+                    mediaId: item.id,
+                    remoteInput: {
+                      kind: "upload-token" as const,
+                      value: item.originalUrl ?? item.thumbnailUrl!,
+                    },
+                  })),
+              },
+            })
+          : {
+              id: requestId,
+              projectId: project.id,
+              provider: "wavespeed" as const,
+              modelId: model.wsModel.model_id,
+              modelSchemaVersion: "wavespeed-schema-v1",
+              context: {
+                projectId: project.id,
+                target,
+                references: [],
+                placementPolicy: "none" as const,
+              } satisfies GenerationContext,
+              providerInputs: injected,
+            };
+        const submitted = await submitGenerationJob(request);
         if (ac.signal.aborted) return;
         const jobId = submitted.jobId;
         useProjectStore.getState().setGenerationStatus(mediaId, "pending");
@@ -412,7 +512,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
       setError((err as Error).message);
       setStep("error");
     }
-  }, [model, project, sourceFile, previewUrl, seedream, zimage, nanoBanana2, flux2, grok, qwen, wsInputs, refIds, addPlaceholderMedia, enqueueJob, handleClose]);
+  }, [model, project, sceneGenerationSelection, effectiveSceneId, effectiveShot, sourceFile, previewUrl, seedream, zimage, nanoBanana2, flux2, grok, qwen, wsInputs, refIds, addPlaceholderMedia, enqueueJob, handleClose]);
 
   // ── Gen type label ────────────────────────────────────────────────────────
   const genTypeLabel: Record<GenType, string> = {
@@ -571,7 +671,19 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
                     values={wsInputs}
                     onChange={setWsInputs}
                   />
-                  <Button onClick={handleGenerate} className="w-full" size="sm">Generate</Button>
+                  {sceneGenerationSelection?.status === "disabled" && (
+                    <p className="text-xs text-amber-400" role="status">
+                      {sceneGenerationSelection.reason}
+                    </p>
+                  )}
+                  <Button
+                    onClick={handleGenerate}
+                    className="w-full"
+                    size="sm"
+                    disabled={sceneGenerationSelection?.status === "disabled"}
+                  >
+                    Generate
+                  </Button>
                 </>
               )}
             </div>
