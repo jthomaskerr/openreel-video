@@ -32,6 +32,23 @@ function selectScene(selection: SceneInspectorSelection): void {
   ui.setInspectorSelection(selection);
 }
 
+export function createSceneFromMedia(): string | null {
+  const editor = useProjectStore.getState().project;
+  const musicVideo = useMusicVideoStore.getState();
+  if (!musicVideo.projects[editor.id]) {
+    musicVideo.createProject(editor.id, editor.name);
+  } else if (musicVideo.activeProjectId !== editor.id) {
+    useMusicVideoStore.setState({ activeProjectId: editor.id });
+  }
+  const result = useMusicVideoStore.getState().createScene();
+  if (!result.success) {
+    toast.error("Could not create scene", result.error.message);
+    return null;
+  }
+  selectScene(sceneSelection(result.value, { requestTitleFocus: true }));
+  return result.value;
+}
+
 function placementDisabledReason(): string | null {
   const { activeTrackId } = useUIStore.getState();
   if (!activeTrackId) return "Select a video track to place this scene.";
@@ -106,9 +123,10 @@ interface SceneCardProps {
   scene: StoryboardShot;
   videos: readonly MediaItem[];
   projectionCount: number;
+  isSelected?: boolean;
 }
 
-function SceneCard({ scene, videos, projectionCount }: SceneCardProps) {
+export function SceneCard({ scene, videos, projectionCount, isSelected = false }: SceneCardProps) {
   const [showAssociation, setShowAssociation] = useState(false);
   const disabledReason = placementDisabledReason();
   const status = projectionCount === 0
@@ -156,7 +174,9 @@ function SceneCard({ scene, videos, projectionCount }: SceneCardProps) {
   return (
     <article
       aria-label={`Scene: ${scene.label}`}
-      className="rounded-lg border border-border bg-background-tertiary p-3"
+      className={`rounded-lg border bg-background-tertiary p-3 ${
+        isSelected ? "border-primary ring-1 ring-primary/40" : "border-border"
+      }`}
       data-scene-id={scene.id}
     >
       <div className="flex items-start gap-3">
@@ -235,11 +255,13 @@ function SceneCard({ scene, videos, projectionCount }: SceneCardProps) {
 interface SceneLibraryProps {
   associationMedia?: MediaItem | null;
   onDismissAssociation?: () => void;
+  associationOnly?: boolean;
 }
 
 export function SceneLibrary({
   associationMedia = null,
   onDismissAssociation,
+  associationOnly = false,
 }: SceneLibraryProps) {
   const projectId = useProjectStore((state) => state.project.id);
   const mediaItems = useProjectStore((state) => state.project.mediaLibrary.items);
@@ -258,18 +280,15 @@ export function SceneLibrary({
   void activeTrackId;
 
   const create = () => {
-    const result = useMusicVideoStore.getState().createScene();
-    if (!result.success) {
-      toast.error("Could not create scene", result.error.message);
-      return;
-    }
-    selectScene(
-      sceneSelection(result.value, { requestTitleFocus: true }),
-    );
+    createSceneFromMedia();
   };
 
   return (
-    <section aria-labelledby="media-scenes-heading" className="border-b border-border/70 px-4 pb-4">
+    <section
+      {...(associationOnly ? { "aria-label": "Scene association" } : { "aria-labelledby": "media-scenes-heading" })}
+      className={associationOnly ? "px-4 pb-3" : "border-b border-border/70 px-4 pb-4"}
+    >
+      {!associationOnly && <>
       <div className="mb-2 flex items-center justify-between gap-3">
         <div>
           <h3 id="media-scenes-heading" className="text-xs font-semibold text-text-primary">
@@ -302,6 +321,7 @@ export function SceneLibrary({
           ))}
         </div>
       )}
+      </>}
 
       {associationMedia?.type === "video" && (
         <div

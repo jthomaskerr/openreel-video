@@ -17,6 +17,7 @@ import { useProjectStore } from "../../stores/project-store";
 import { shallow } from "zustand/shallow";
 import { useUIStore } from "../../stores/ui-store";
 import type { MediaItem } from "@openreel/core";
+import type { StoryboardShot } from "@openreel/music-video-domain";
 import { AspectRatioMatchDialog } from "./dialogs/AspectRatioMatchDialog";
 import { AIGenTab } from "./AIGenTab";
 import { RecipesTab } from "./panels/RecipesTab";
@@ -45,7 +46,7 @@ import type { GenerateAssetDialogProps } from "./generate/GenerateAssetDialog";
 import { loadMediaBlob, saveFileHandle, saveDirectoryHandle, scanDirectoryRecursive } from "../../services/media-storage";
 import { useKieAIStore } from "../../stores/kieai-store";
 import { useMusicVideoStore } from "../../stores/music-video-store";
-import { SceneLibrary } from "./SceneLibrary";
+import { createSceneFromMedia, SceneCard, SceneLibrary } from "./SceneLibrary";
 import { AssetBuckets, type AssetBucketsHandle, type GroupBy } from "./AssetBuckets";
 import { mediaAvailabilityRuntime } from "../../services/media-verification";
 import {
@@ -848,6 +849,34 @@ const MediaThumbnailRow = React.memo(
 );
 
 MediaThumbnailRow.displayName = "MediaThumbnailRow";
+
+const EMPTY_SCENES: readonly StoryboardShot[] = [];
+
+const SceneThumbnailRow = React.memo(function SceneThumbnailRow({
+  scene,
+  isSelected,
+}: {
+  scene: StoryboardShot;
+  viewMode: MediaViewMode;
+  isSelected: boolean;
+}) {
+  const mediaItems = useProjectStore((state) => state.project.mediaLibrary.items);
+  const tracks = useProjectStore((state) => state.project.timeline.tracks);
+  const videos = useMemo(
+    () => mediaItems.filter((item) => item.type === "video"),
+    [mediaItems],
+  );
+  void tracks;
+  return (
+    <SceneCard
+      scene={scene}
+      videos={videos}
+      projectionCount={useMusicVideoStore.getState().getSceneProjectionCount(scene.id)}
+      isSelected={isSelected}
+    />
+  );
+});
+
 const EmptyState: React.FC<{ onImport: () => void }> = ({ onImport }) => (
   <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
     <div className="w-16 h-16 rounded-2xl bg-background-tertiary border border-border flex items-center justify-center mb-4 shadow-inner">
@@ -918,6 +947,9 @@ export const AssetsPanel: React.FC = () => {
   const rawMediaItems = useProjectStore((s) => s.project.mediaLibrary.items);
   const mediaItems = useStableMediaItems(rawMediaItems);
   const projectId = useProjectStore((s) => s.project.id);
+  const scenes = useMusicVideoStore(
+    (state) => state.projects[projectId]?.shots ?? EMPTY_SCENES,
+  );
   const availabilityVersion = useMediaAvailabilityVersion(projectId);
   const projectSettings = useProjectStore((s) => s.project.settings);
   const importMedia = useProjectStore((s) => s.importMedia);
@@ -926,6 +958,9 @@ export const AssetsPanel: React.FC = () => {
 
   // Selection tracking — stable Set derived from selectedItems array
   const selectedItems = useUIStore((s) => s.selectedItems, shallow);
+  const selectedSceneId = useUIStore((s) =>
+    s.inspectorSelection?.type === "scene" ? s.inspectorSelection.sceneId : undefined,
+  );
   const selectedItemIds = useMemo(() => {
     const ids = new Set<string>();
     for (const si of selectedItems) {
@@ -1334,6 +1369,16 @@ export const AssetsPanel: React.FC = () => {
                 >
                   <Upload size={13} />
                 </button>
+                <button
+                  type="button"
+                  onClick={createSceneFromMedia}
+                  title="Create scene"
+                  aria-label="Create Scene"
+                  className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md bg-primary px-2.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+                >
+                  <Plus size={13} />
+                  <span>Create Scene</span>
+                </button>
                 {missingAssetsCount > 0 && (
                   <button
                     type="button"
@@ -1456,10 +1501,13 @@ export const AssetsPanel: React.FC = () => {
               </div>
             </div>
 
-            <SceneLibrary
-              associationMedia={associationMedia}
-              onDismissAssociation={() => setAssociationMedia(null)}
-            />
+            {associationMedia && (
+              <SceneLibrary
+                associationOnly
+                associationMedia={associationMedia}
+                onDismissAssociation={() => setAssociationMedia(null)}
+              />
+            )}
 
             <ScrollArea
               className={`min-h-0 flex-1 ${isDragOver ? "bg-primary/5" : ""}`}
@@ -1468,22 +1516,25 @@ export const AssetsPanel: React.FC = () => {
               onDragLeave={handleDragLeave}
             >
               <div className="px-4 pb-4 relative">
-                {filteredItems.length === 0 ? (
+                {filteredItems.length === 0 && (showOnlyMissing || scenes.length === 0) ? (
                   <EmptyState onImport={triggerFileInput} />
                 ) : (
                   <AssetBuckets
                     ref={assetBucketsRef}
                     items={filteredItems}
+                    scenes={showOnlyMissing ? EMPTY_SCENES : scenes}
                     viewMode={mediaViewMode}
                     searchQuery={searchQuery}
                     groupBy={groupBy}
                     selectedItemIds={selectedItemIds}
+                    selectedSceneId={selectedSceneId}
                     onGenerateRef={onGenerateRef}
                     onRetryKieAIRef={onRetryKieAIRef}
                     onManageRef={onManageRef}
                     onRenameRef={onRenameRef}
                     onAssociateSceneRef={onAssociateSceneRef}
                     MediaRow={MediaThumbnailRow}
+                    SceneRow={SceneThumbnailRow}
                   />
                 )}
 

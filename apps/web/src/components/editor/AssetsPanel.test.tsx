@@ -20,6 +20,7 @@ import type { MediaItem, Project } from "@openreel/core";
 import { createEmptyProject } from "../../stores/project/project-helpers";
 import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
+import { useMusicVideoStore } from "../../stores/music-video-store";
 import { AssetsPanel } from "./AssetsPanel";
 import { mediaAvailabilityRuntime } from "../../services/media-verification";
 
@@ -92,6 +93,7 @@ function openSelectAndChoose(
 describe("AssetsPanel media toolbar and missing-only transitions", () => {
   beforeEach(() => {
     seedProject([]);
+    useMusicVideoStore.setState({ projects: {}, activeProjectId: null });
     vi.spyOn(mediaAvailabilityRuntime, "get").mockImplementation((_projectId, mediaId) => {
       const item = useProjectStore.getState().project.mediaLibrary.items.find((candidate) => candidate.id === mediaId);
       if (!item?.sourceFile || item.blob) return item ? {
@@ -416,6 +418,30 @@ describe("AssetsPanel media toolbar and missing-only transitions", () => {
     expect(within(toolbar).getByRole("combobox", { name: "Group media by" })).toBeInTheDocument();
     expect(container.querySelectorAll('[role="toolbar"]').length).toBe(1);
     expect(screen.queryByRole("button", { name: "Import media" })).not.toBeNull();
+    expect(within(toolbar).getByRole("button", { name: "Create Scene" })).toBeInTheDocument();
+  });
+
+  it("renders scenes as a searchable type bucket in the normal media content", () => {
+    seedProject([
+      media({ id: "video-1", name: "clip.mp4", type: "video" }),
+    ]);
+    renderPanel();
+
+    fireEvent.click(within(getToolbar()).getByRole("button", { name: "Create Scene" }));
+
+    const scenesBucket = screen.getByRole("button", { name: /Scenes 1/ });
+    expect(scenesBucket).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("article", { name: "Scene: Untitled Scene" })).toBeInTheDocument();
+    expect(screen.getAllByText("Scenes")).toHaveLength(1);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Search media" }), {
+      target: { value: "does not match" },
+    });
+    expect(screen.queryByRole("article", { name: "Scene: Untitled Scene" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByRole("textbox", { name: "Search media" }), {
+      target: { value: "Untitled" },
+    });
+    expect(screen.getByRole("article", { name: "Scene: Untitled Scene" })).toBeInTheDocument();
   });
 
   it("keeps collapse and expand disabled when group by is none", () => {
