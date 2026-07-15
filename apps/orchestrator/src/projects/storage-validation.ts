@@ -24,7 +24,12 @@ export function isValidMediaId(value: string): boolean {
 
 /** Return whether a generated stored media filename is safe to serve from media/. */
 export function isValidMediaFilename(value: string): boolean {
-  return !hasTraversalOrSeparators(value) && !value.includes("\0");
+  return (
+    !hasTraversalOrSeparators(value) &&
+    !value.includes("..") &&
+    !/%(?:2f|5c)/i.test(value) &&
+    !value.includes("\0")
+  );
 }
 
 export function assertValidProjectId(value: string): void {
