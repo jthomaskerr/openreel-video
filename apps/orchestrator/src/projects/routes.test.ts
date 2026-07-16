@@ -558,7 +558,7 @@ test("PUT confirms persistence only after the Git commit succeeds", async () => 
 });
 
 
-test("PUT commits modifiedAt-only changes so authoritative JSON never remains ahead of HEAD", async () => {
+test("PUT writes modifiedAt-only changes without advancing the confirmed Git revision", async () => {
   const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");
   const incoming = { ...previous, modifiedAt: previous.modifiedAt + 1 };
   let commits = 0;
@@ -591,7 +591,7 @@ test("PUT commits modifiedAt-only changes so authoritative JSON never remains ah
     const receipt = await response.json();
 
     assert.equal(response.status, 200);
-    assert.equal(commits, 1);
+    assert.equal(commits, 0);
     assert.equal(receipt.saved, true);
     assert.equal(receipt.committed, true);
     assert.equal(receipt.commitSha, "dddddddddddddddddddddddddddddddddddddddd");
