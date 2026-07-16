@@ -198,6 +198,7 @@ function mockConfirmedBackendCreate() {
     usePersistenceStatusStore.getState().confirmReceipt(project.id, {
       saved: true,
       committed: true,
+      commitDueAt: null,
       projectId: project.id,
       persistedAt: now,
       sourceModifiedAt: project.modifiedAt,
@@ -293,7 +294,7 @@ describe("ProjectStore", () => {
 
         vi.spyOn(backendSaveService, "create").mockImplementation(async () => {
           usePersistenceStatusStore.getState().confirmReceipt(backendProject.id, {
-            saved: true, committed: true, projectId: backendProject.id,
+        saved: true, committed: true, commitDueAt: null, projectId: backendProject.id,
             persistedAt: now, sourceModifiedAt: now,
             commitSha: "a".repeat(40), treeSha: "b".repeat(40),
             projectBlobSha: "c".repeat(40), mediaManifestDigest: "sha256:test",
@@ -414,7 +415,8 @@ describe("ProjectStore", () => {
         projectBlobSha: "c".repeat(40),
         mediaManifestDigest: "sha256:test",
         lfsPayloads: [],
-        committed: true,
+      committed: true,
+      commitDueAt: null,
       });
 
       useProjectStore.getState().loadProject({ ...existing, id: "backend-project" });

@@ -180,6 +180,7 @@ function confirmBaseRevision(projectId: string, sourceModifiedAt = 2000): void {
   usePersistenceStatusStore.getState().confirmReceipt(projectId, {
     saved: true,
     committed: true,
+    commitDueAt: null,
     projectId,
     persistedAt: sourceModifiedAt,
     sourceModifiedAt,

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Project, ProjectBaseRevision, ProjectSaveReceipt } from "@openreel/core";
 
-export type PersistencePhase = "idle" | "pending" | "saving" | "deferred" | "persisted" | "incomplete" | "conflict" | "failed";
+export type PersistencePhase = "idle" | "pending" | "saving" | "deferred" | "committing" | "retry-wait" | "persisted" | "incomplete" | "conflict" | "failed";
 
 interface PersistenceStatusState {
   phase: PersistencePhase;
@@ -15,7 +15,8 @@ interface PersistenceStatusState {
   conflictingProject: Project | null;
   markPending: (projectId: string) => void;
   markSaving: (projectId: string) => void;
-  markDeferred: (projectId: string) => void;
+  markDeferred: (projectId: string, receipt: ProjectSaveReceipt) => void;
+  markCommitState: (projectId: string, phase: "deferred" | "committing" | "retry-wait", error?: string | null) => void;
   markPersisted: (projectId: string, receipt: ProjectSaveReceipt) => void;
   markIncomplete: (projectId: string, error: string) => void;
   markConflict: (projectId: string, error: string, project: Project | null) => void;
@@ -36,7 +37,29 @@ export const usePersistenceStatusStore = create<PersistenceStatusState>((set) =>
   conflictingProject: null,
   markPending: (projectId) => set({ phase: "pending", projectId, error: null, phaseStartedAt: Date.now() }),
   markSaving: (projectId) => set({ phase: "saving", projectId, error: null, phaseStartedAt: Date.now() }),
-  markDeferred: (projectId) => set({ phase: "deferred", projectId, error: null, phaseStartedAt: null }),
+  markDeferred: (projectId, receipt) => set((state) => ({
+    phase: "deferred",
+    projectId,
+    persistedAt: receipt.persistedAt,
+    persistedModifiedAt: receipt.sourceModifiedAt,
+    confirmedReceipt: state.confirmedReceipt,
+    baseRevision: receipt.commitSha && receipt.treeSha && receipt.projectBlobSha
+      ? {
+        commitSha: receipt.commitSha,
+        treeSha: receipt.treeSha,
+        projectBlobSha: receipt.projectBlobSha,
+        sourceModifiedAt: receipt.sourceModifiedAt,
+      }
+      : state.baseRevision,
+    error: null,
+    phaseStartedAt: null,
+  })),
+  markCommitState: (projectId, phase, error = null) => set({
+    phase,
+    projectId,
+    error,
+    phaseStartedAt: null,
+  }),
   markPersisted: (projectId, receipt) => set({
     phase: "persisted",
     projectId,

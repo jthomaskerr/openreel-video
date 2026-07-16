@@ -85,6 +85,7 @@ const makeReceipt = (
   mediaManifestDigest: "sha256:manifest-digest",
   lfsPayloads: [],
   committed: true,
+  commitDueAt: null,
   ...overrides,
 });
 
@@ -544,13 +545,12 @@ describe("backendSaveService.save", () => {
   it("treats a modifiedAt-only backend write as deferred rather than Git-persisted", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => makeReceipt({
-        committed: false,
-        persistedAt: null,
-        commitSha: null,
-        treeSha: null,
-        projectBlobSha: null,
-        mediaManifestDigest: null,
+      json: async () => ({
+        ...makeReceipt({
+          committed: false,
+          commitDueAt: null,
+        }),
+        project: makeSaveProject(),
       }),
     }));
 
@@ -559,7 +559,10 @@ describe("backendSaveService.save", () => {
     expect(usePersistenceStatusStore.getState()).toMatchObject({
       phase: "deferred",
       projectId: "vintage-tokyo",
-      persistedAt: null,
+      persistedAt: 1_234,
+      baseRevision: {
+        sourceModifiedAt: 2,
+      },
     });
   });
 
