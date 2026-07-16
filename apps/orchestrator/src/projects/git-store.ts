@@ -3,7 +3,7 @@ import type { ExecException } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promisify } from "node:util";
 import { existsSync } from "node:fs";
-import { readFile, writeFile, mkdir, mkdtemp, rename, rm, cp } from "node:fs/promises";
+import { readFile, writeFile, mkdir, mkdtemp, rename, rm, cp, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, normalize } from "node:path";
 import type { Project } from "@openreel/core";
@@ -39,6 +39,12 @@ export interface GitCommitReceipt {
 export type GitCumulativeCommitResult =
   | { readonly kind: "metadata-only" }
   | { readonly kind: "committed"; readonly receipt: GitCommitReceipt };
+
+export interface GitDirtyProjectState {
+  readonly sourceModifiedAt: number;
+  readonly newestChangedPathAt: number;
+  readonly semanticChanged: boolean;
+}
 
 export interface GitCommitTransaction {
   allowlist: readonly string[];
@@ -627,6 +633,39 @@ export class GitStore {
         await this.git(["reset", "--", ...allowlist], wtPath).catch(() => undefined);
         throw error;
       }
+    });
+  }
+
+  async inspectDirtyProject(projectId: string): Promise<GitDirtyProjectState | null> {
+    assertValidProjectId(projectId);
+    return this.#withLock(projectId, async () => {
+      const wtPath = this.worktreePath(projectId);
+      const { stdout } = await this.git(
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        wtPath,
+      );
+      const changedPaths = stdout.split("\0").filter(Boolean).map((entry) => entry.slice(3));
+      if (changedPaths.length === 0) return null;
+      const [headBytes, worktreeBytes] = await Promise.all([
+        this.git(["show", "HEAD:project.json"], wtPath).then((result) => result.stdout),
+        readFile(join(wtPath, "project.json"), "utf8"),
+      ]);
+      const headProject = JSON.parse(headBytes) as Project;
+      const worktreeProject = JSON.parse(worktreeBytes) as Project;
+      const mtimes = await Promise.all(changedPaths.map(async (path) => {
+        try {
+          return (await stat(join(wtPath, path))).mtimeMs;
+        } catch {
+          return Date.now();
+        }
+      }));
+      return {
+        sourceModifiedAt: worktreeProject.modifiedAt,
+        newestChangedPathAt: Math.max(...mtimes),
+        semanticChanged: semanticProjectChanges(headProject, worktreeProject).length > 0
+          || changedPaths.some((path) => path.startsWith("media/"))
+          || changedPaths.some((path) => path !== "project.json"),
+      };
     });
   }
 

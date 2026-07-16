@@ -73,6 +73,7 @@ test("cumulative commit ignores metadata-only drift and rejects unrelated paths"
     saved.name = "Cumulative Commit Updated";
     saved.modifiedAt += 1;
     await writeFile(projectPath, JSON.stringify(saved, null, 2));
+    assert.equal((await gitStore.inspectDirtyProject(project.id))?.semanticChanged, true);
 
     const committed = await gitStore.commitCumulativeProjectDiff(
       project.id,
@@ -83,6 +84,7 @@ test("cumulative commit ignores metadata-only drift and rejects unrelated paths"
 
     saved.modifiedAt += 1;
     await writeFile(projectPath, JSON.stringify(saved, null, 2));
+    assert.equal((await gitStore.inspectDirtyProject(project.id))?.semanticChanged, false);
     const metadataOnly = await gitStore.commitCumulativeProjectDiff(
       project.id,
       async () => undefined,

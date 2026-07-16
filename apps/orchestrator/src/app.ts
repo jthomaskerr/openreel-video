@@ -65,9 +65,23 @@ export function createApp(): OrchestratorApp {
       }
     },
   });
-  void projectStore.migrateUuidDirs().catch((err) => {
-    console.error("[ProjectStore] failed to migrate legacy project directories:", err);
-  });
+  void projectStore.migrateUuidDirs()
+    .then(async () => {
+      const projects = await projectStore.listProjects();
+      await Promise.all(projects.map(async ({ id }) => {
+        const dirty = await gitStore.inspectDirtyProject(id);
+        if (!dirty) return;
+        commitScheduler.noteAcceptedSave(
+          id,
+          dirty.sourceModifiedAt,
+          dirty.newestChangedPathAt,
+          dirty.semanticChanged,
+        );
+      }));
+    })
+    .catch((err) => {
+      console.error("[ProjectStore] failed to recover dirty project commit timers:", err);
+    });
   const app = express() as OrchestratorApp;
   Object.defineProperty(app, "dispose", {
     value: () => commitScheduler.dispose(),
