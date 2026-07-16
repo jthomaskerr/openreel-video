@@ -345,6 +345,7 @@ export async function executeSaveTransaction(
       return {
         saved: true,
         committed: true,
+        commitDueAt: null,
         projectId: request.projectId,
         persistedAt: proposedBytes.equals(previousBytes)
           ? await gitStore.readCommitTimestamp(request.projectId, currentReceipt.commitSha)
@@ -424,9 +425,10 @@ export async function executeSaveTransaction(
         await rm(pendingById.get(item.id)!.entryDirectory, { recursive: true, force: true });
       }
       return {
-        saved: true,
-        committed: true,
-        projectId: request.projectId,
+      saved: true,
+      committed: true,
+      commitDueAt: null,
+      projectId: request.projectId,
         persistedAt: Date.now(),
         sourceModifiedAt: proposed.modifiedAt,
         commitSha: receipt.commitSha,

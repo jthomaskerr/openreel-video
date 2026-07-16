@@ -42,8 +42,22 @@ function env(key: string, fallback = ""): string {
   return process.env[key] ?? dotenv[key] ?? fallback;
 }
 
+export function parseProjectCommitDebounceMs(value: string | undefined): number {
+  const raw = value ?? "120000";
+  const parsed = Number(raw);
+  if (raw.trim() === "" || !Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed < 0) {
+    throw new Error(
+      "MV_PROJECT_COMMIT_DEBOUNCE_MS must be a finite non-negative integer",
+    );
+  }
+  return parsed;
+}
+
 export const config = {
   port: parseInt(env("ORCHESTRATOR_PORT", "4041"), 10),
+  projectCommitDebounceMs: parseProjectCommitDebounceMs(
+    env("MV_PROJECT_COMMIT_DEBOUNCE_MS", "120000"),
+  ),
   wavespeedApiKey: env("WAVESPEED_API_KEY"),
   kieAiApiKey: env("KIE_AI_API_KEY"),
   kieAiVideoModel: env("KIE_AI_VIDEO_MODEL", "veo3_fast"),
