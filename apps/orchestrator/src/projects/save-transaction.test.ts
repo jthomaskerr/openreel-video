@@ -257,6 +257,76 @@ test("an identical snapshot returns the confirmed receipt without creating a com
   }
 });
 
+test("modifiedAt-only saves persist immediately without commits and a later semantic save commits once", async () => {
+  const f = await fixture();
+  try {
+    const worktree = f.store.projectDir(f.project.id);
+    const initialHead = (await git(worktree, ["rev-parse", "HEAD"])).trim();
+    const initialCommitCount = Number((await git(worktree, ["rev-list", "--count", "HEAD"])).trim());
+    let noOpCommitCalls = 0;
+    const rejectNoOpCommit = async () => {
+      noOpCommitCalls += 1;
+      throw new Error("modifiedAt-only save must not commit");
+    };
+
+    const firstProject = { ...f.project, modifiedAt: f.project.modifiedAt + 1 };
+    const firstReceipt = await executeSaveTransaction(f.store, f.gitStore, request(f, firstProject), {
+      commit: rejectNoOpCommit,
+    });
+    assert.deepEqual(JSON.parse(await readFile(join(worktree, "project.json"), "utf8")), firstProject);
+    assert.equal((await git(worktree, ["rev-parse", "HEAD"])).trim(), initialHead);
+    assert.equal(Number((await git(worktree, ["rev-list", "--count", "HEAD"])).trim()), initialCommitCount);
+    assert.match(await git(worktree, ["status", "--short"]), /^ M project\.json\s*$/);
+    assert.equal(firstReceipt.commitSha, f.baseRevision.commitSha);
+    assert.equal(firstReceipt.projectBlobSha, f.baseRevision.projectBlobSha);
+    assert.equal(firstReceipt.sourceModifiedAt, firstProject.modifiedAt);
+
+    assert.ok(firstReceipt.commitSha && firstReceipt.treeSha && firstReceipt.projectBlobSha);
+    const firstRevision: ProjectBaseRevision = {
+      commitSha: firstReceipt.commitSha,
+      treeSha: firstReceipt.treeSha,
+      projectBlobSha: firstReceipt.projectBlobSha,
+      sourceModifiedAt: firstReceipt.sourceModifiedAt,
+    };
+    const secondProject = { ...firstProject, modifiedAt: firstProject.modifiedAt + 1 };
+    const secondReceipt = await executeSaveTransaction(
+      f.store,
+      f.gitStore,
+      request(f, secondProject, firstRevision),
+      { commit: rejectNoOpCommit },
+    );
+    assert.deepEqual(JSON.parse(await readFile(join(worktree, "project.json"), "utf8")), secondProject);
+    assert.equal((await git(worktree, ["rev-parse", "HEAD"])).trim(), initialHead);
+    assert.equal(Number((await git(worktree, ["rev-list", "--count", "HEAD"])).trim()), initialCommitCount);
+    assert.equal(noOpCommitCalls, 0);
+
+    assert.ok(secondReceipt.commitSha && secondReceipt.treeSha && secondReceipt.projectBlobSha);
+    const secondRevision: ProjectBaseRevision = {
+      commitSha: secondReceipt.commitSha,
+      treeSha: secondReceipt.treeSha,
+      projectBlobSha: secondReceipt.projectBlobSha,
+      sourceModifiedAt: secondReceipt.sourceModifiedAt,
+    };
+    const semanticProject = {
+      ...secondProject,
+      name: "Atomic Save Renamed",
+      modifiedAt: secondProject.modifiedAt + 1,
+    };
+    const semanticReceipt = await executeSaveTransaction(
+      f.store,
+      f.gitStore,
+      request(f, semanticProject, secondRevision),
+    );
+    assert.notEqual(semanticReceipt.commitSha, initialHead);
+    assert.equal(Number((await git(worktree, ["rev-list", "--count", "HEAD"])).trim()), initialCommitCount + 1);
+    assert.deepEqual(JSON.parse(await readFile(join(worktree, "project.json"), "utf8")), semanticProject);
+    assert.equal((await git(worktree, ["status", "--short"])).trim(), "");
+    assert.match(await git(worktree, ["show", "--format=", "--unified=0", "HEAD", "--", "project.json"]), /Atomic Save Renamed/);
+  } finally {
+    await rm(f.fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("an identical incomplete snapshot returns recoverable MEDIA_INCOMPLETE", async () => {
   const f = await fixture();
   const auditSnapshot = f.store.auditSnapshot.bind(f.store);

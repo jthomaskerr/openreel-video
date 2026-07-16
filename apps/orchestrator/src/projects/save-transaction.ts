@@ -320,9 +320,8 @@ export async function executeSaveTransaction(
       };
     });
     const proposedBytes = Buffer.from(JSON.stringify(proposed, null, 2), "utf8");
-    if (pendingMoves.length === 0
-      && proposedBytes.equals(previousBytes)
-      && currentReceipt.projectBlobSha === gitBlobSha(previousBytes)) {
+    const semanticChanges = semanticProjectChanges(currentProject, proposed);
+    if (pendingMoves.length === 0 && semanticChanges.length === 0) {
       let audit;
       try {
         audit = await store.auditSnapshot(proposed);
@@ -331,6 +330,15 @@ export async function executeSaveTransaction(
         throw error;
       }
       assertReceipt(currentReceipt);
+      if (!proposedBytes.equals(previousBytes)) {
+        try {
+          await durableWrite(stagedPath, proposedBytes);
+          await rename(stagedPath, projectPath);
+          await syncDirectory(dirname(projectPath));
+        } finally {
+          await rm(stagedPath, { force: true }).catch(() => undefined);
+        }
+      }
       for (const item of redundantPending) {
         await rm(pendingById.get(item.id)!.entryDirectory, { recursive: true, force: true });
       }
@@ -338,7 +346,9 @@ export async function executeSaveTransaction(
         saved: true,
         committed: true,
         projectId: request.projectId,
-        persistedAt: await gitStore.readCommitTimestamp(request.projectId, currentReceipt.commitSha),
+        persistedAt: proposedBytes.equals(previousBytes)
+          ? await gitStore.readCommitTimestamp(request.projectId, currentReceipt.commitSha)
+          : Date.now(),
         sourceModifiedAt: proposed.modifiedAt,
         commitSha: currentReceipt.commitSha,
         treeSha: currentReceipt.treeSha,
@@ -400,7 +410,7 @@ export async function executeSaveTransaction(
       await options.beforeCommit?.();
       const receipt = await commit(
         request.projectId,
-        deterministicCommitMessage(semanticProjectChanges(currentProject, proposed), expectedEntries),
+        deterministicCommitMessage(semanticChanges, expectedEntries),
         { allowlist: ["project.json", ...pendingMoves.map((move) => move.relativeMediaPath)], expectedEntries },
       );
       assertReceipt(receipt);
