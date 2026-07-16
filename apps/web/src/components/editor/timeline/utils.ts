@@ -8,20 +8,32 @@ import type {
   TrackInfo,
 } from "./types";
 
-export const calculateSnap = (
-  rawTime: number,
+const SNAP_PRIORITY: Record<SnapPoint["type"], number> = {
+  "clip-start": 0,
+  "clip-end": 0,
+  playhead: 1,
+  marker: 2,
+  grid: 2,
+};
+
+interface SnapTarget {
+  time: number;
+  offset: number;
+}
+
+interface SelectedSnap {
+  point: SnapPoint;
+  targetOffset: number;
+}
+
+function buildSnapPoints(
+  referenceTime: number,
   clipId: string,
   tracks: Track[],
   playheadPosition: number,
   snapSettings: SnapSettings,
-  pixelsPerSecond: number,
-  clipDuration?: number,
-): SnapResult => {
-  if (!snapSettings.enabled) {
-    return { time: rawTime, snapped: false };
-  }
-
-  const thresholdSeconds = snapSettings.snapThreshold / pixelsPerSecond;
+  secondaryGridOffset?: number,
+): SnapPoint[] {
   const snapPoints: SnapPoint[] = [];
 
   if (snapSettings.snapToClips) {
@@ -43,74 +55,126 @@ export const calculateSnap = (
 
   if (snapSettings.snapToGrid) {
     const nearestGrid =
-      Math.round(rawTime / snapSettings.gridSize) * snapSettings.gridSize;
+      Math.round(referenceTime / snapSettings.gridSize) * snapSettings.gridSize;
     snapPoints.push({ time: nearestGrid, type: "grid" });
-    if (clipDuration) {
-      const endTime = rawTime + clipDuration;
-      const nearestEndGrid =
-        Math.round(endTime / snapSettings.gridSize) * snapSettings.gridSize;
-      snapPoints.push({ time: nearestEndGrid, type: "grid" });
+    if (secondaryGridOffset) {
+      const secondaryTime = referenceTime + secondaryGridOffset;
+      const nearestSecondaryGrid =
+        Math.round(secondaryTime / snapSettings.gridSize) * snapSettings.gridSize;
+      snapPoints.push({ time: nearestSecondaryGrid, type: "grid" });
     }
   }
 
-  const priorityOrder: Record<string, number> = {
-    "clip-start": 0,
-    "clip-end": 0,
-    "playhead": 1,
-    "grid": 2,
-  };
+  return snapPoints;
+}
 
-  let closestPoint: SnapPoint | undefined;
+function selectSnapTarget(
+  snapPoints: SnapPoint[],
+  targets: SnapTarget[],
+  thresholdSeconds: number,
+): SelectedSnap | undefined {
+  let selected: SelectedSnap | undefined;
   let closestDistance = Infinity;
   let closestPriority = Infinity;
-  let snapFromEnd = false;
 
   for (const point of snapPoints) {
-    const pointPriority = priorityOrder[point.type] ?? 2;
+    const pointPriority = SNAP_PRIORITY[point.type];
 
-    const startDistance = Math.abs(point.time - rawTime);
-    if (startDistance < thresholdSeconds) {
+    for (const target of targets) {
+      const distance = Math.abs(point.time - target.time);
+      if (distance >= thresholdSeconds) continue;
+
       const isBetter =
         pointPriority < closestPriority ||
-        (pointPriority === closestPriority && startDistance < closestDistance);
+        (pointPriority === closestPriority && distance < closestDistance);
       if (isBetter) {
-        closestDistance = startDistance;
+        closestDistance = distance;
         closestPriority = pointPriority;
-        closestPoint = point;
-        snapFromEnd = false;
-      }
-    }
-
-    if (clipDuration) {
-      const clipEndTime = rawTime + clipDuration;
-      const endDistance = Math.abs(point.time - clipEndTime);
-      if (endDistance < thresholdSeconds) {
-        const isBetter =
-          pointPriority < closestPriority ||
-          (pointPriority === closestPriority && endDistance < closestDistance);
-        if (isBetter) {
-          closestDistance = endDistance;
-          closestPriority = pointPriority;
-          closestPoint = point;
-          snapFromEnd = true;
-        }
+        selected = { point, targetOffset: target.offset };
       }
     }
   }
 
-  if (closestPoint) {
-    const snappedTime = snapFromEnd
-      ? closestPoint.time - (clipDuration ?? 0)
-      : closestPoint.time;
+  return selected;
+}
+
+export const calculateSnap = (
+  rawTime: number,
+  clipId: string,
+  tracks: Track[],
+  playheadPosition: number,
+  snapSettings: SnapSettings,
+  pixelsPerSecond: number,
+  clipDuration?: number,
+): SnapResult => {
+  if (!snapSettings.enabled) {
+    return { time: rawTime, snapped: false };
+  }
+
+  const snapPoints = buildSnapPoints(
+    rawTime,
+    clipId,
+    tracks,
+    playheadPosition,
+    snapSettings,
+    clipDuration,
+  );
+  const targets: SnapTarget[] = [{ time: rawTime, offset: 0 }];
+  if (clipDuration) {
+    targets.push({ time: rawTime + clipDuration, offset: clipDuration });
+  }
+  const selected = selectSnapTarget(
+    snapPoints,
+    targets,
+    snapSettings.snapThreshold / pixelsPerSecond,
+  );
+
+  if (selected) {
+    const snappedTime = selected.point.time - selected.targetOffset;
     return {
       time: Math.max(0, snappedTime),
       snapped: true,
-      snapPoint: { ...closestPoint, time: closestPoint.time },
+      snapPoint: { ...selected.point, time: selected.point.time },
     };
   }
 
   return { time: rawTime, snapped: false };
 };
+
+export function calculateEdgeSnap(
+  rawEdgeTime: number,
+  clipId: string,
+  tracks: Track[],
+  playheadPosition: number,
+  snapSettings: SnapSettings,
+  pixelsPerSecond: number,
+): SnapResult {
+  if (!snapSettings.enabled) {
+    return { time: rawEdgeTime, snapped: false };
+  }
+
+  const selected = selectSnapTarget(
+    buildSnapPoints(
+      rawEdgeTime,
+      clipId,
+      tracks,
+      playheadPosition,
+      snapSettings,
+    ),
+    [{ time: rawEdgeTime, offset: 0 }],
+    snapSettings.snapThreshold / pixelsPerSecond,
+  );
+
+  if (!selected) {
+    return { time: rawEdgeTime, snapped: false };
+  }
+
+  return {
+    time: selected.point.time,
+    snapped: true,
+    snapPoint: { ...selected.point, time: selected.point.time },
+  };
+}
 
 export const METADATA_KIND_BADGE: Record<string, { label: string; Icon: typeof FileText; className: string }> = {
   character: { label: "CH", Icon: User, className: "bg-purple-500/25 text-purple-100 border-purple-300/40" },
