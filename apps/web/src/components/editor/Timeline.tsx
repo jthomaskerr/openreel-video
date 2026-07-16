@@ -45,6 +45,7 @@ import {
   loadTimelineViewState,
   saveTimelineViewState,
 } from "./timeline/timeline-view-persistence";
+import type { ClipTrimUpdate } from "./timeline/trim-calculation";
 import { getPlaybackBridge } from "../../bridges/playback-bridge";
 import {
   Popover,
@@ -66,6 +67,54 @@ import {
   formatTimecode,
   getTrackInfo,
 } from "./timeline/index";
+
+const isValidClipTrimUpdate = (update: ClipTrimUpdate): boolean =>
+  [
+    update.edgeTime,
+    update.startTime,
+    update.duration,
+    update.inPoint,
+    update.outPoint,
+    ...update.keyframes.map((keyframe) => keyframe.time),
+  ].every((value) => Number.isFinite(value) && value >= 0);
+
+export const commitClipTrimUpdate = (
+  clipId: string,
+  update: ClipTrimUpdate,
+): void => {
+  if (!isValidClipTrimUpdate(update)) return;
+
+  useProjectStore.setState((state) => {
+    let clipFound = false;
+    const tracks = state.project.timeline.tracks.map((track) => {
+      const clipIndex = track.clips.findIndex((clip) => clip.id === clipId);
+      if (clipIndex === -1) return track;
+
+      clipFound = true;
+      const clips = [...track.clips];
+      clips[clipIndex] = {
+        ...clips[clipIndex],
+        startTime: update.startTime,
+        duration: update.duration,
+        inPoint: update.inPoint,
+        outPoint: update.outPoint,
+        keyframes: update.keyframes,
+      };
+      return { ...track, clips };
+    });
+
+    if (!clipFound) return state;
+
+    return {
+      ...state,
+      project: {
+        ...state.project,
+        timeline: { ...state.project.timeline, tracks },
+        modifiedAt: Date.now(),
+      },
+    };
+  });
+};
 
 export const Timeline: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -814,56 +863,10 @@ export const Timeline: React.FC = () => {
   );
 
   const handleTrimClip = useCallback(
-    (clipId: string, edge: "left" | "right", newTime: number) => {
-      const clip = tracks.flatMap((t) => t.clips).find((c) => c.id === clipId);
-      if (!clip) return;
-
-      const oldDuration = clip.duration;
-      const newDuration =
-        edge === "left"
-          // Left-edge: newTime is the new inPoint, so duration = outPoint - newInPoint
-          ? Math.max(0.1, clip.outPoint - newTime)
-          : Math.max(0.1, newTime - clip.startTime);
-
-      const updates =
-        edge === "left"
-          ? {
-              // Trim from left: advance inPoint (clip beginning of source),
-              // keep startTime (clip stays in place on timeline)
-              inPoint: newTime,
-              duration: newDuration,
-            }
-          : {
-              duration: newDuration,
-            };
-
-      const adjustedKeyframes = clip.keyframes.map((kf) => {
-        if (kf.id.startsWith("kf-exit-")) {
-          const relativeTime = kf.time - oldDuration;
-          return { ...kf, time: newDuration + relativeTime };
-        }
-        return kf;
-      });
-
-      useProjectStore.setState((state) => ({
-        project: {
-          ...state.project,
-          timeline: {
-            ...state.project.timeline,
-            tracks: state.project.timeline.tracks.map((track) => ({
-              ...track,
-              clips: track.clips.map((c) =>
-                c.id === clipId
-                  ? { ...c, ...updates, keyframes: adjustedKeyframes }
-                  : c,
-              ),
-            })),
-          },
-          modifiedAt: Date.now(),
-        },
-      }));
+    (clipId: string, update: ClipTrimUpdate) => {
+      commitClipTrimUpdate(clipId, update);
     },
-    [tracks],
+    [],
   );
 
   const visualOrderTracks = useMemo(() => tracks, [tracks]);
@@ -1378,6 +1381,7 @@ export const Timeline: React.FC = () => {
 
               {snapIndicatorTime !== null && (
                 <div
+                  data-testid="timeline-snap-indicator"
                   className="absolute top-0 bottom-0 w-px bg-yellow-400 z-30 pointer-events-none"
                   style={{ left: `${snapIndicatorTime * pixelsPerSecond}px` }}
                 >
