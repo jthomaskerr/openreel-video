@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -55,6 +55,50 @@ test("commit returns verified identities from the created commit", async () => {
     assert.equal(receipt.treeSha, head.treeSha);
     assert.equal(receipt.projectBlobSha, head.projectBlobSha);
     assert.match(receipt.mediaManifestDigest ?? "", /^sha256:/);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
+test("cumulative commit ignores metadata-only drift and rejects unrelated paths", async () => {
+  const { fixtureRoot, gitStore, projectStore } = await makeStore();
+  try {
+    const project = await projectStore.createProject("Cumulative Commit");
+    await gitStore.commit(project.id, "test: create project", {
+      allowlist: ["project.json"],
+      expectedEntries: [{ status: "A", path: "project.json" }],
+    });
+    const projectPath = join(projectStore.projectDir(project.id), "project.json");
+    const saved = JSON.parse(await readFile(projectPath, "utf8"));
+    saved.name = "Cumulative Commit Updated";
+    saved.modifiedAt += 1;
+    await writeFile(projectPath, JSON.stringify(saved, null, 2));
+
+    const committed = await gitStore.commitCumulativeProjectDiff(
+      project.id,
+      async () => undefined,
+      () => true,
+    );
+    assert.equal(committed.kind, "committed");
+
+    saved.modifiedAt += 1;
+    await writeFile(projectPath, JSON.stringify(saved, null, 2));
+    const metadataOnly = await gitStore.commitCumulativeProjectDiff(
+      project.id,
+      async () => undefined,
+      () => true,
+    );
+    assert.equal(metadataOnly.kind, "metadata-only");
+
+    await writeFile(join(projectStore.projectDir(project.id), ".DS_Store"), "unexpected");
+    await assert.rejects(
+      gitStore.commitCumulativeProjectDiff(
+        project.id,
+        async () => undefined,
+        () => true,
+      ),
+      /Unexpected project worktree path/,
+    );
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }

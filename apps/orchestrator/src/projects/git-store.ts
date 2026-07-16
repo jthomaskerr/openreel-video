@@ -8,6 +8,10 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, normalize } from "node:path";
 import type { Project } from "@openreel/core";
 import { assertValidProjectId } from "./storage-validation";
+import {
+  deterministicCommitMessage,
+  semanticProjectChanges,
+} from "./semantic-commit";
 
 const execFileAsync = promisify(execFile);
 
@@ -31,6 +35,10 @@ export interface GitCommitReceipt {
   projectBlobSha: string | null;
   mediaManifestDigest: string | null;
 }
+
+export type GitCumulativeCommitResult =
+  | { readonly kind: "metadata-only" }
+  | { readonly kind: "committed"; readonly receipt: GitCommitReceipt };
 
 export interface GitCommitTransaction {
   allowlist: readonly string[];
@@ -547,10 +555,79 @@ export class GitStore {
   /**
    * Stage the explicit allowlist and commit the worktree. Fire-and-forget — never throws to caller.
    */
-  commitAsync(projectId: string, message: string, transaction: GitCommitTransaction): void {
-    this.commit(projectId, message, transaction).catch((err) =>
-      console.error(`[GitStore] commit failed for ${projectId}:`, err),
-    );
+  async commitCumulativeProjectDiff(
+    projectId: string,
+    audit: (project: Project) => Promise<void>,
+    shouldCommit: () => boolean,
+  ): Promise<GitCumulativeCommitResult> {
+    assertValidProjectId(projectId);
+    return this.#withLock(projectId, async () => {
+      const wtPath = this.worktreePath(projectId);
+      if (!existsSync(join(wtPath, ".git"))) await this.#ensureWorktreeInner(projectId);
+      if (!shouldCommit()) throw new Error("Project commit generation was superseded");
+
+      const ownedPaths = ["project.json", "media"];
+      await this.git(["reset", "--", ...ownedPaths], wtPath);
+      const { stdout: staged } = await this.git(
+        ["diff", "--cached", "--name-only", "-z"],
+        wtPath,
+      );
+      const unexpectedStaged = staged
+        .split("\0")
+        .filter(Boolean)
+        .filter((path) => path !== "project.json" && !path.startsWith("media/"));
+      if (unexpectedStaged.length > 0) {
+        throw new Error(`Unexpected staged project path: ${unexpectedStaged.join(", ")}`);
+      }
+
+      const { stdout: porcelain } = await this.git(
+        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
+        wtPath,
+      );
+      const changedPaths = porcelain
+        .split("\0")
+        .filter(Boolean)
+        .map((entry) => entry.slice(3));
+      const unexpected = changedPaths.filter(
+        (path) => path !== "project.json" && !path.startsWith("media/"),
+      );
+      if (unexpected.length > 0) {
+        throw new Error(`Unexpected project worktree path: ${unexpected.join(", ")}`);
+      }
+
+      const [headBytes, worktreeBytes] = await Promise.all([
+        this.git(["show", "HEAD:project.json"], wtPath).then(({ stdout }) => stdout),
+        readFile(join(wtPath, "project.json"), "utf8"),
+      ]);
+      const headProject = JSON.parse(headBytes) as Project;
+      const worktreeProject = JSON.parse(worktreeBytes) as Project;
+      const semanticChanges = semanticProjectChanges(headProject, worktreeProject);
+      const mediaPaths = changedPaths.filter((path) => path.startsWith("media/"));
+      if (semanticChanges.length === 0 && mediaPaths.length === 0) {
+        return { kind: "metadata-only" };
+      }
+
+      const allowlist = [...new Set(changedPaths)].sort();
+      try {
+        await this.git(["add", "-A", "--", ...allowlist], wtPath);
+        const { stdout: cachedDiff } = await this.git(
+          ["diff", "--cached", "--name-status", "-z"],
+          wtPath,
+        );
+        const expectedEntries = parseCachedNameStatus(cachedDiff);
+        await audit(worktreeProject);
+        if (!shouldCommit()) throw new Error("Project commit generation was superseded");
+        const receipt = await this.#commitInner(
+          projectId,
+          deterministicCommitMessage(semanticChanges, expectedEntries),
+          { allowlist, expectedEntries },
+        );
+        return { kind: "committed", receipt };
+      } catch (error) {
+        await this.git(["reset", "--", ...allowlist], wtPath).catch(() => undefined);
+        throw error;
+      }
+    });
   }
 
   async #commitInner(projectId: string, message: string, transaction: GitCommitTransaction): Promise<GitCommitReceipt> {
