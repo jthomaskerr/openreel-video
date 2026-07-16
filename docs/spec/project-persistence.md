@@ -28,6 +28,74 @@ The editor remains gated while identity and receipt resolution are pending. The 
 
 Every writable project has a confirmed base revision containing matching `projectId`, `commitSha`, `treeSha`, and `projectBlobSha`. A save sends that base and advances it only after validating a complete committed response. Missing, incomplete, or mismatched receipts keep persistence disabled.
 
+### Deferred save receipts
+
+An accepted ordinary project PUT writes the submitted snapshot to the worktree
+immediately and returns before Git commit. Its receipt has:
+
+- `saved: true`;
+- `committed: false`;
+- the current project ID and newly written `sourceModifiedAt`;
+- a finite positive `persistedAt` recording completion of the durable worktree write;
+- the existing confirmed `commitSha`, `treeSha`, and `projectBlobSha`;
+- `commitDueAt`, calculated from the backend's 120-second quiet-period deadline;
+- the canonical project snapshot, including backend-allocated media filenames.
+
+The existing Git hashes identify the confirmed base; they do not claim that the new
+worktree bytes are committed. The frontend validates all three hashes and advances its
+next submitted base revision to those hashes plus the new `sourceModifiedAt`. It keeps
+the last confirmed receipt separately and displays the save as awaiting commit.
+
+A deferred response with missing confirmed hashes, a mismatched project,
+non-monotonic `sourceModifiedAt`, invalid `persistedAt`, or invalid `commitDueAt` is not
+a successful save.
+
+### Background commit confirmation
+
+After the quiet period, a successful background commit produces a normal receipt with
+`committed: true` and hashes for the cumulative committed snapshot.
+
+The backend exposes lightweight per-project persistence status so the frontend can
+confirm the eventual commit without repeatedly downloading the complete project. The
+status distinguishes at least:
+
+- `clean`;
+- `waiting`, with `commitDueAt`;
+- `committing`;
+- `retry-wait`, with a safe error summary;
+- `settled-metadata-only`.
+
+The frontend polls only while a project is deferred, beginning at `commitDueAt`, and
+stops after a matching committed receipt, project change, project switch, terminal
+error, or disposal. A confirmed receipt is accepted only when its
+`sourceModifiedAt` matches the latest saved snapshot.
+
+`persistedAt` means durable worktree persistence for a deferred receipt and confirmed
+commit persistence for a committed receipt. Callers must inspect `committed` rather
+than infer commit state from `persistedAt`.
+
+### Conflict base while deferred
+
+Conflict checks combine:
+
+- the confirmed commit, tree, and project blob hashes; and
+- the `sourceModifiedAt` of the latest authoritative worktree snapshot.
+
+This permits successive saves during the debounce window while rejecting clients based
+on an older worktree snapshot. A background commit changes the confirmed hashes but not
+the logical project contents. A save racing that commit must receive or resolve against
+the new confirmed base under the same project lock.
+
+### Commit eligibility
+
+Only semantic differences relative to HEAD are committed. `modifiedAt` is ignored when
+determining eligibility, preventing timestamp-only commits. All accepted changes remain
+immediately present in the worktree even when no commit is eligible.
+
+One background commit contains the cumulative semantic project and media changes
+accepted during the quiet period. Its staged path set is derived and checked against the
+project allowlist, and staged LFS pointers are verified before the ref advances.
+
 ## Recovery
 
 Recovery is slug-only and bounded:
