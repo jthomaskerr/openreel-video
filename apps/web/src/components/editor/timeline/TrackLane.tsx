@@ -7,10 +7,16 @@ import type {
   StickerClip,
 } from "@openreel/core";
 import { calculateSnap } from "./utils";
+import {
+  getMediaDropRejection,
+  pointerToTimelineTime,
+  type TimelineMediaType,
+} from "./media-drop";
 import { ClipComponent } from "./ClipComponent";
 import { TextClipComponent } from "./TextClipComponent";
 import { ShapeClipComponent } from "./ShapeClipComponent";
 import { KeyframeTrack } from "./KeyframeTrack";
+import { TimelineEmptySpaceMenu } from "./TimelineEmptySpaceMenu";
 import { useTimelineStore } from "../../../stores/timeline-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { useProjectStore } from "../../../stores/project-store";
@@ -80,7 +86,6 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
   onTrimClip,
   onTrimTextClip,
   onTrimShapeClip,
-  scrollX,
   trackHeight,
   onResizeTrack,
   onKeyframeSelect,
@@ -91,7 +96,11 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
   const { isTrackExpanded, playheadPosition } = useTimelineStore();
   const isExpanded = isTrackExpanded(track.id);
   const { snapSettings, setActiveTrack } = useUIStore();
-  const [isDragOver, setIsDragOver] = useState(false);
+  const [dropPreview, setDropPreview] = useState<{
+    time: number;
+    rejection: string | null;
+  } | null>(null);
+  const isDragOver = dropPreview !== null;
   const [isResizing, setIsResizing] = useState(false);
   const laneRef = useRef<HTMLDivElement>(null);
   const resizeStartY = useRef<number>(0);
@@ -101,36 +110,81 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
     return track.clips.filter((clip) => clip.keyframes && clip.keyframes.length > 0);
   }, [track.clips]);
 
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "copy";
-    setIsDragOver(true);
+  const resolveDropTime = useCallback((clientX: number) => {
+    const viewport = timelineRef.current;
+    const lane = laneRef.current;
+    const viewportLeft = viewport?.getBoundingClientRect().left
+      ?? lane?.getBoundingClientRect().left;
+    if (viewportLeft === undefined) return null;
+
+    const rawTime = pointerToTimelineTime({
+      clientX,
+      viewportLeft,
+      scrollLeft: viewport?.scrollLeft ?? 0,
+      pixelsPerSecond,
+    });
+    return calculateSnap(
+      rawTime,
+      "",
+      allTracks,
+      playheadPosition,
+      snapSettings,
+      pixelsPerSecond,
+    ).time;
+  }, [timelineRef, pixelsPerSecond, allTracks, playheadPosition, snapSettings]);
+
+  const getDraggedMediaType = useCallback((mediaId?: string): TimelineMediaType | null => {
+    const { dragType, dragData } = useUIStore.getState();
+    const draggedType = dragType === "media" ? dragData?.mediaType : undefined;
+    if (
+      draggedType === "video"
+      || draggedType === "audio"
+      || draggedType === "image"
+      || draggedType === "srt"
+    ) {
+      return draggedType;
+    }
+    const item = mediaId
+      ? useProjectStore.getState().project.mediaLibrary.items.find(candidate => candidate.id === mediaId)
+      : undefined;
+    return item?.type ?? null;
   }, []);
 
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const time = resolveDropTime(e.clientX);
+    if (time === null) return;
+    const mediaType = getDraggedMediaType();
+    const rejection = track.locked
+      ? "Track is locked"
+      : mediaType
+        ? getMediaDropRejection(track, mediaType)
+        : null;
+    e.dataTransfer.dropEffect = rejection ? "none" : "copy";
+    setDropPreview({ time, rejection });
+  }, [getDraggedMediaType, resolveDropTime, track]);
+
   const handleDragLeave = useCallback(() => {
-    setIsDragOver(false);
+    setDropPreview(null);
   }, []);
 
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      setIsDragOver(false);
+      setDropPreview(null);
+
+      // Always consume a lane drop. Rejected drops must not bubble to the
+      // timeline container and create a clip on a fallback track.
+      if (track.locked) {
+        toast.error("Cannot add media", "Track is locked");
+        return;
+      }
 
       // External OS file drop (e.g. from Windows Explorer)
       if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-        const rect = laneRef.current?.getBoundingClientRect();
-        if (!rect) return;
-        const x = e.clientX - rect.left + scrollX;
-        const rawTime = Math.max(0, x / pixelsPerSecond);
-        const snapResult = calculateSnap(
-          rawTime,
-          "",
-          allTracks,
-          playheadPosition,
-          snapSettings,
-          pixelsPerSecond,
-        );
+        const resolvedTime = resolveDropTime(e.clientX);
+        if (resolvedTime === null) return;
         const { importMedia, addClip } = useProjectStore.getState();
         for (const file of Array.from(e.dataTransfer.files)) {
           try {
@@ -143,13 +197,18 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
                 .getState()
                 .project.mediaLibrary.items.find(i => !beforeIds.has(i.id));
               if (newItem) {
+                const rejection = getMediaDropRejection(track, newItem.type);
+                if (rejection) {
+                  toast.error("Cannot add media", rejection);
+                  continue;
+                }
                 const TRACK_TO_CLIP_TYPE: Partial<Record<string, "metadata" | "audio" | "image">> = {
                   metadata: "metadata", audio: "audio", image: "image",
                 };
                 const MEDIA_TO_CLIP_TYPE: Partial<Record<string, "audio" | "image">> = {
                   audio: "audio", image: "image",
                 };
-                await addClip(track.id, newItem.id, snapResult.time, {
+                await addClip(track.id, newItem.id, resolvedTime, {
                   type: TRACK_TO_CLIP_TYPE[track.type] ?? MEDIA_TO_CLIP_TYPE[newItem.type] ?? "video",
                 });
                 setActiveTrack(track.id);
@@ -178,25 +237,20 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
           return;
         }
 
-        const rect = laneRef.current?.getBoundingClientRect();
-        if (rect) {
-          const x = e.clientX - rect.left + scrollX;
-          const rawTime = Math.max(0, x / pixelsPerSecond);
-          const snapResult = calculateSnap(
-            rawTime,
-            "",
-            allTracks,
-            playheadPosition,
-            snapSettings,
-            pixelsPerSecond,
-          );
-          onDropMedia(track.id, data.mediaId, snapResult.time);
+        const mediaType = getDraggedMediaType(data.mediaId);
+        if (!mediaType) return;
+        const rejection = getMediaDropRejection(track, mediaType);
+        if (rejection) {
+          toast.error("Cannot add media", rejection);
+          return;
         }
+        const resolvedTime = resolveDropTime(e.clientX);
+        if (resolvedTime !== null) onDropMedia(track.id, data.mediaId, resolvedTime);
       } catch {
         // Silently ignore parse errors
       }
     },
-    [track.id, track.name, pixelsPerSecond, scrollX, onDropMedia, allTracks, playheadPosition, snapSettings, setActiveTrack],
+    [track, onDropMedia, setActiveTrack, resolveDropTime, getDraggedMediaType],
   );
 
   const handleResizeStart = useCallback(
@@ -242,6 +296,8 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
         ref={laneRef}
         data-testid={`track-lane-${track.id}`}
         data-active-track={isActive ? "true" : "false"}
+        data-drop-time={dropPreview?.time}
+        aria-invalid={dropPreview?.rejection ? "true" : undefined}
         aria-current={isActive ? "true" : undefined}
         aria-label={`${track.name} timeline lane${isActive ? ", active track" : ""}`}
         role="region"
@@ -249,8 +305,10 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
         className={`border-b border-border/50 relative transition-colors ${
           isActive ? "ring-2 ring-inset ring-primary bg-primary/10" : ""
         } ${
-          isDragOver
-            ? "bg-primary/10 border-primary/30"
+          dropPreview?.rejection
+            ? "bg-destructive/10 border-destructive/50"
+            : isDragOver
+              ? "bg-primary/10 border-primary/30"
             : "bg-background-secondary/20"
         }`}
         onPointerDown={() => setActiveTrack(track.id)}
@@ -258,6 +316,7 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
       >
+        <TimelineEmptySpaceMenu trackId={track.id} />
         {/* All standard clips — video, audio, image, metadata — route through ClipComponent */}
         {track.type !== "text" && track.type !== "graphics" &&
           track.clips
@@ -301,10 +360,21 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
             onMoveClip={onMoveClip}
           />
         ))}
-        {isDragOver && (
-          <div className="absolute inset-0 border-2 border-dashed border-primary/50 rounded pointer-events-none flex items-center justify-center">
-            <span className="text-xs text-primary bg-background/80 px-2 py-1 rounded">
-              Drop to add clip
+        {dropPreview && (
+          <div className={`absolute inset-0 border-2 border-dashed rounded pointer-events-none flex items-center justify-center ${
+            dropPreview.rejection ? "border-destructive/60" : "border-primary/50"
+          }`}>
+            <div
+              data-testid="media-drop-position"
+              className={`absolute top-0 bottom-0 w-px ${
+                dropPreview.rejection ? "bg-destructive" : "bg-primary"
+              }`}
+              style={{ left: `${dropPreview.time * pixelsPerSecond}px` }}
+            />
+            <span className={`text-xs bg-background/80 px-2 py-1 rounded ${
+              dropPreview.rejection ? "text-destructive" : "text-primary"
+            }`}>
+              {dropPreview.rejection ?? `Drop at ${dropPreview.time.toFixed(2)}s`}
             </span>
           </div>
         )}

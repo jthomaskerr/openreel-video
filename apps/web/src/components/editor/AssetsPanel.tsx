@@ -16,6 +16,7 @@ import { getMediaStatus, MediaStatus } from "@openreel/core";
 import { useProjectStore } from "../../stores/project-store";
 import { shallow } from "zustand/shallow";
 import { useUIStore } from "../../stores/ui-store";
+import { insertMediaAtCurrentTime } from "./media-timeline-insertion";
 import type { MediaItem } from "@openreel/core";
 import type { StoryboardShot } from "@openreel/music-video-domain";
 import { AspectRatioMatchDialog } from "./dialogs/AspectRatioMatchDialog";
@@ -780,7 +781,7 @@ const MediaThumbnailRow = React.memo(
     );
 
     const handleAddToTimeline = useCallback(async () => {
-      await useProjectStore.getState().addClipToNewTrack(item.id);
+      await insertMediaAtCurrentTime(item.id);
     }, [item.id]);
 
     const handleOpenGenerate = useCallback(() => {

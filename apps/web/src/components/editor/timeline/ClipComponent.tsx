@@ -6,7 +6,7 @@ import { useUIStore } from "../../../stores/ui-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
 import { calculateSnap, getClipStyle, getMetadataBadge } from "./utils";
 import { ClipContextMenu } from "./ClipContextMenu";
-import { ContextMenu, ContextMenuTrigger } from "@openreel/ui";
+import { TimelineContextMenu } from "./TimelineContextMenu";
 import { toast } from "../../../stores/notification-store";
 import { usePersistenceStatusStore } from "../../../stores/persistence-status-store";
 import { mediaAvailabilityRuntime } from "../../../services/media-verification";
@@ -742,8 +742,8 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const MetadataBadgeIcon = metadataBadge?.Icon;
 
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
+    <TimelineContextMenu
+      trigger={
         <div
           ref={clipRef}
           onClick={handleClick}
@@ -999,9 +999,10 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
             </>
           )}
         </div>
-      </ContextMenuTrigger>
+      }
+    >
       <ClipContextMenu clip={clip} track={track} />
-    </ContextMenu>
+    </TimelineContextMenu>
   );
 };
 

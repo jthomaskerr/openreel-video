@@ -26,7 +26,6 @@ import { useUIStore } from "../../../stores/ui-store";
 import { normalizeSceneProjectionMetadata } from "@openreel/music-video-domain";
 import { ScenePickerDialog } from "./ScenePickerDialog";
 import {
-  ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuShortcut,
@@ -35,6 +34,7 @@ import {
   ContextMenuSubContent,
   ContextMenuLabel
 } from "@openreel/ui";
+import { TimelineContextMenuContent } from "./TimelineContextMenu";
 
 interface ClipContextMenuProps {
   clip: Clip;
@@ -223,7 +223,7 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
 
   return (
     <>
-      <ContextMenuContent className="min-w-[220px]">
+      <TimelineContextMenuContent className="min-w-[220px]">
       <ContextMenuLabel className="flex items-center text-[10px] text-text-muted">
         {getClipTypeIcon()}
         {getClipTypeLabel()}
@@ -360,7 +360,7 @@ export const ClipContextMenu: React.FC<ClipContextMenuProps> = ({
         <Trash2 className="mr-2 h-4 w-4" />
         Delete
       </ContextMenuItem>
-      </ContextMenuContent>
+      </TimelineContextMenuContent>
       <ScenePickerDialog
         open={scenePickerMode !== null}
         title={scenePickerMode === "change" ? "Change Linked Scene" : "Link to Existing Scene"}
