@@ -196,7 +196,7 @@ class BackendSaveService {
     const poll = async (): Promise<void> => {
       if (generation !== this.persistencePollGeneration) return;
       try {
-        const response = await fetch(`${BASE_URL}/projects/${projectId}/persistence-status`);
+        const response = await fetch(`${BASE_URL}/api/projects/${projectId}/persistence-status`);
         if (!response.ok) throw new Error(`Persistence status request failed (${response.status})`);
         const status = await response.json() as ProjectPersistenceStatusResponse;
         if (generation !== this.persistencePollGeneration

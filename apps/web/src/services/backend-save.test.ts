@@ -543,18 +543,35 @@ describe("backendSaveService.save", () => {
   });
 
   it("treats a modifiedAt-only backend write as deferred rather than Git-persisted", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        ...makeReceipt({
-          committed: false,
-          commitDueAt: null,
+    vi.useFakeTimers();
+    const project = makeSaveProject();
+    const commitDueAt = Date.now() + 1_000;
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          ...makeReceipt({
+            committed: false,
+            commitDueAt,
+          }),
+          project,
         }),
-        project: makeSaveProject(),
-      }),
-    }));
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          projectId: project.id,
+          state: "waiting",
+          sourceModifiedAt: project.modifiedAt,
+          commitDueAt,
+          error: null,
+          receipt: null,
+        }),
+      });
+    vi.stubGlobal("fetch", fetchMock);
 
-    await backendSaveService.save(makeSaveProject());
+    await backendSaveService.save(project);
+    await vi.advanceTimersByTimeAsync(1_000);
 
     expect(usePersistenceStatusStore.getState()).toMatchObject({
       phase: "deferred",
@@ -564,6 +581,9 @@ describe("backendSaveService.save", () => {
         sourceModifiedAt: 2,
       },
     });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      "http://localhost:4041/api/projects/vintage-tokyo/persistence-status",
+    );
   });
 
   it("schedules a backend PUT without waiting for an IndexedDB save event", async () => {
