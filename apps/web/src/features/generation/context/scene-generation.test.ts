@@ -4,6 +4,7 @@ import {
   buildSceneGenerationRequest,
   SCENE_AUDIO_REQUIRES_PLACEMENT,
   SCENE_AUDIO_REQUIRES_SELECTION,
+  resolveGenerationEntryContext,
   selectSceneGenerationContext,
   type SceneGenerationProjection,
 } from "./scene-generation";
@@ -120,6 +121,145 @@ describe("scene generation context truth table", () => {
   });
 });
 
+describe("generation entry context resolver", () => {
+  it.each([
+    [
+      "new asset",
+      { kind: "new-asset" as const },
+      {
+        timingAbsent: true,
+        audioEligible: false,
+        defaultPlacementPolicy: "none",
+        placementPolicy: "none",
+      },
+    ],
+    [
+      "unplaced shot",
+      { kind: "unplaced-shot" as const },
+      {
+        timingAbsent: true,
+        audioEligible: false,
+        defaultPlacementPolicy: "none",
+        placementPolicy: "none",
+      },
+    ],
+    [
+      "explicit unlinked range",
+      {
+        kind: "explicit-unlinked-range" as const,
+        startSeconds: 0.5,
+        endSeconds: 2.5,
+      },
+      {
+        timingAbsent: false,
+        audioEligible: false,
+        defaultPlacementPolicy: "create-linked-clip",
+        placementPolicy: "create-linked-clip",
+        timing: {
+          source: "manual",
+          startSeconds: 0.5,
+          endSeconds: 2.5,
+          durationSeconds: 2,
+        },
+      },
+    ],
+    [
+      "selected linked projection",
+      {
+        kind: "selected-linked-projection" as const,
+        projection: projection("clip-b", "shot-1", {
+          startTime: 20,
+          duration: 5,
+          inPoint: 3,
+          outPoint: 8,
+        }),
+        supportsAudio: true,
+      },
+      {
+        timingAbsent: false,
+        audioEligible: true,
+        defaultPlacementPolicy: "replace-selected-clip-media",
+        placementPolicy: "replace-selected-clip-media",
+        projection: { clipId: "clip-b" },
+        timing: {
+          source: "timeline",
+          startSeconds: 20,
+          endSeconds: 25,
+          durationSeconds: 5,
+        },
+      },
+    ],
+  ] as const)(
+    "%s",
+    (_label, input, expected) =>
+      expect(resolveGenerationEntryContext(input)).toMatchObject(expected),
+  );
+
+  it("honors an override on a selected projection", () => {
+    const result = resolveGenerationEntryContext({
+      kind: "selected-linked-projection",
+      projection: projection("clip-b"),
+      supportsAudio: false,
+      placementPolicy: "none",
+    });
+
+    expect(result).toMatchObject({
+      defaultPlacementPolicy: "replace-selected-clip-media",
+      placementPolicy: "none",
+      audioEligible: false,
+    });
+  });
+
+  it.each([
+    ["zero span", { kind: "explicit-unlinked-range" as const, startSeconds: 0, endSeconds: 0 }],
+    [
+      "half span with non-finite end",
+      {
+        kind: "explicit-unlinked-range" as const,
+        startSeconds: 0.5,
+        endSeconds: Number.NaN,
+      },
+    ],
+    [
+      "negative start",
+      {
+        kind: "explicit-unlinked-range" as const,
+        startSeconds: -1,
+        endSeconds: 2,
+      },
+    ],
+    [
+      "equal bounds",
+      {
+        kind: "explicit-unlinked-range" as const,
+        startSeconds: 2,
+        endSeconds: 2,
+      },
+    ],
+    [
+      "reversed bounds",
+      {
+        kind: "explicit-unlinked-range" as const,
+        startSeconds: 4,
+        endSeconds: 3,
+      },
+    ],
+    [
+      "invalid selected projection",
+      {
+        kind: "selected-linked-projection" as const,
+        projection: projection("clip-b", "shot-1", { duration: 0 }),
+        supportsAudio: true,
+      },
+    ],
+  ] as const)("rejects %s", (_label, input) => {
+    const result = resolveGenerationEntryContext(input);
+
+    expect(result.errors).toEqual([{ code: "timing-invalid" }]);
+    expect(result.audioEligible).toBe(false);
+  });
+});
+
 describe("scene generation request fixture", () => {
   it("serializes model, selected clip timing, audio, and ordered references", () => {
     const selection = selectSceneGenerationContext({
@@ -229,5 +369,33 @@ describe("scene generation request fixture", () => {
       references: [],
       placementPolicy: "none",
     });
+  });
+
+  it("preserves a user-selected placement override on a selected projection", () => {
+    const selection = selectSceneGenerationContext({
+      shotId: "shot-1",
+      includeAudio: true,
+      projectionClipId: "clip-b",
+      projections: [projection("clip-b")],
+    });
+    if (selection.status !== "ready") throw new Error(selection.reason);
+
+    expect(
+      buildSceneGenerationRequest({
+        id: "request-2",
+        projectId: "project-1",
+        shotId: "shot-1",
+        selection,
+        target: {
+          kind: "new-version",
+          sourceMediaId: "source-1",
+          placeholderMediaId: "placeholder-1",
+        },
+        placementPolicy: "replace-selected-clip-media",
+        modelId: "provider/model",
+        modelSchemaVersion: "schema-v1",
+        providerInputs: {},
+      }).context.placementPolicy,
+    ).toBe("replace-selected-clip-media");
   });
 });

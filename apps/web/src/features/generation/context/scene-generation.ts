@@ -6,12 +6,16 @@ import type {
   ResolvedGenerationReference,
 } from "@openreel/music-video-domain/generation";
 
-import { resolveGenerationReferences } from "./index";
+import {
+  resolveGenerationReferences,
+  type ContextDiagnostic,
+  type GenerationTiming,
+} from "./index";
 
 export const SCENE_AUDIO_REQUIRES_PLACEMENT =
-  "Place this scene on the timeline to generate audio from its timing.";
+  "Place scene on timeline generate audio from timing.";
 export const SCENE_AUDIO_REQUIRES_SELECTION =
-  "Select a timeline projection to generate audio from its timing.";
+  "Select timeline projection generate audio timing.";
 
 export type SceneGenerationDisabledCode =
   | "audio-requires-placement"
@@ -20,7 +24,6 @@ export type SceneGenerationDisabledCode =
   | "projection-scene-mismatch"
   | "projection-timing-invalid";
 
-/** Temporary structural seam for the WP2 projection selector. */
 export interface SceneGenerationProjection {
   clipId: string;
   linkedShotId: string;
@@ -50,11 +53,139 @@ export type SceneGenerationContextResult =
       };
       audioInterval?: SceneGenerationAudioInterval;
     }
+  | { status: "disabled"; code: SceneGenerationDisabledCode; reason: string };
+
+export type GenerationEntryContextInput =
+  | { kind: "new-asset"; placementPolicy?: GenerationPlacementPolicy }
+  | { kind: "unplaced-shot"; placementPolicy?: GenerationPlacementPolicy }
   | {
-      status: "disabled";
-      code: SceneGenerationDisabledCode;
-      reason: string;
+      kind: "explicit-unlinked-range";
+      startSeconds: number;
+      endSeconds: number;
+      placementPolicy?: GenerationPlacementPolicy;
+    }
+  | {
+      kind: "selected-linked-projection";
+      projection: SceneGenerationProjection;
+      supportsAudio: boolean;
+      placementPolicy?: GenerationPlacementPolicy;
     };
+
+export interface GenerationEntryContextResult {
+  kind: GenerationEntryContextInput["kind"];
+  timingAbsent: boolean;
+  timing?: GenerationTiming;
+  projection?: SceneGenerationProjection;
+  audioEligible: boolean;
+  defaultPlacementPolicy: GenerationPlacementPolicy;
+  placementPolicy: GenerationPlacementPolicy;
+  errors: ContextDiagnostic[];
+  warnings: ContextDiagnostic[];
+}
+
+const invalidTiming = (): { errors: ContextDiagnostic[]; warnings: [] } => ({
+  errors: [{ code: "timing-invalid" }],
+  warnings: [],
+});
+
+const isFiniteRange = (startSeconds: number, endSeconds: number) =>
+  Number.isFinite(startSeconds) &&
+  Number.isFinite(endSeconds) &&
+  startSeconds >= 0 &&
+  endSeconds > startSeconds;
+
+const isValidProjectionTiming = (projection: SceneGenerationProjection) =>
+  Number.isFinite(projection.startTime) &&
+  projection.startTime >= 0 &&
+  Number.isFinite(projection.duration) &&
+  projection.duration > 0 &&
+  Number.isFinite(projection.inPoint) &&
+  projection.inPoint >= 0 &&
+  Number.isFinite(projection.outPoint) &&
+  projection.outPoint > projection.inPoint;
+
+export function resolveGenerationEntryContext(
+  input: GenerationEntryContextInput,
+): GenerationEntryContextResult {
+  if (input.kind === "new-asset" || input.kind === "unplaced-shot") {
+    const defaultPlacementPolicy = "none" as const;
+    return {
+      kind: input.kind,
+      timingAbsent: true,
+      audioEligible: false,
+      defaultPlacementPolicy,
+      placementPolicy: input.placementPolicy ?? defaultPlacementPolicy,
+      errors: [],
+      warnings: [],
+    };
+  }
+
+  if (input.kind === "explicit-unlinked-range") {
+    const defaultPlacementPolicy = "create-linked-clip" as const;
+    if (!isFiniteRange(input.startSeconds, input.endSeconds)) {
+      const invalid = invalidTiming();
+      return {
+        kind: input.kind,
+        timingAbsent: true,
+        audioEligible: false,
+        defaultPlacementPolicy,
+        placementPolicy: input.placementPolicy ?? defaultPlacementPolicy,
+        ...invalid,
+      };
+    }
+
+    const timing: GenerationTiming = {
+      source: "manual",
+      startSeconds: input.startSeconds,
+      endSeconds: input.endSeconds,
+      durationSeconds: input.endSeconds - input.startSeconds,
+    };
+
+    return {
+      kind: input.kind,
+      timingAbsent: false,
+      timing,
+      audioEligible: false,
+      defaultPlacementPolicy,
+      placementPolicy: input.placementPolicy ?? defaultPlacementPolicy,
+      errors: [],
+      warnings: [],
+    };
+  }
+
+  const defaultPlacementPolicy = "replace-selected-clip-media" as const;
+  if (!isValidProjectionTiming(input.projection)) {
+    const invalid = invalidTiming();
+    return {
+      kind: input.kind,
+      timingAbsent: true,
+      projection: input.projection,
+      audioEligible: false,
+      defaultPlacementPolicy,
+      placementPolicy: input.placementPolicy ?? defaultPlacementPolicy,
+      ...invalid,
+    };
+  }
+
+  const timing: GenerationTiming = {
+    source: "timeline",
+    startSeconds: input.projection.startTime,
+    endSeconds: input.projection.startTime + input.projection.duration,
+    durationSeconds: input.projection.duration,
+  };
+
+  return {
+    kind: input.kind,
+    timingAbsent: false,
+    projection: input.projection,
+    timing,
+    audioEligible: input.supportsAudio,
+    defaultPlacementPolicy,
+    placementPolicy: input.placementPolicy ?? defaultPlacementPolicy,
+    errors: [],
+    warnings: [],
+  };
+}
 
 export function selectSceneGenerationContext(input: {
   shotId: string;
