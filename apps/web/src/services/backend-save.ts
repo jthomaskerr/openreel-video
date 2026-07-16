@@ -683,8 +683,13 @@ class BackendSaveService {
       }
       const response = await res.json() as BackendProjectResponse;
       const { project, mediaFiles } = response;
-    const receipt = validateSaveResponse(response, projectId, project.modifiedAt);
-      usePersistenceStatusStore.getState().confirmReceipt(projectId, receipt);
+      const receipt = validateSaveResponse(response, projectId, project.modifiedAt);
+      if (receipt.committed === false) {
+        usePersistenceStatusStore.getState().markDeferred(projectId, receipt);
+        this.schedulePersistenceConfirmation(projectId, receipt);
+      } else {
+        usePersistenceStatusStore.getState().confirmReceipt(projectId, receipt);
+      }
 
       const mediaIds = new Set(project.mediaLibrary.items.map(item => item.id));
       for (const track of project.timeline.tracks) {
