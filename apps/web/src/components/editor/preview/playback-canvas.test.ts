@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   EMPTY_PLAYBACK_BACKGROUND,
   paintPlaybackBackground,
+  shouldDrawLastGoodFrame,
 } from "./playback-canvas";
 
 describe("paintPlaybackBackground", () => {
@@ -29,5 +30,16 @@ describe("paintPlaybackBackground", () => {
 
     expect(context.fillStyle).toBe("#f4f4f5");
     expect(context.fillRect).toHaveBeenCalledWith(0, 0, 1280, 720);
+  });
+});
+
+describe("shouldDrawLastGoodFrame", () => {
+  it("does not freeze the previous video frame while audio continues without visual media", () => {
+    expect(shouldDrawLastGoodFrame(false, true)).toBe(false);
+  });
+
+  it("retains the decode fallback while a visual media clip is still active", () => {
+    expect(shouldDrawLastGoodFrame(true, true)).toBe(true);
+    expect(shouldDrawLastGoodFrame(true, false)).toBe(false);
   });
 });

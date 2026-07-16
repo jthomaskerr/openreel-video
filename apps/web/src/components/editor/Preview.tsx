@@ -90,7 +90,6 @@ import {
   getCachedImagePlaybackFrame,
   isImagePlaybackClip,
 } from "./preview/media-image-source";
-import { paintPlaybackBackground } from "./preview/playback-canvas";
 import {
   isValidLoopRange,
   resolvePlaybackCleanupPosition,
@@ -102,6 +101,10 @@ import {
   getLoopMarkerPercentages,
   PreviewTransportControls,
 } from "./preview/PreviewTransportControls";
+import {
+  paintPlaybackBackground,
+  shouldDrawLastGoodFrame,
+} from "./preview/playback-canvas";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 import {
   getPersonSegmentationEngine,
@@ -1280,7 +1283,6 @@ export const Preview: React.FC = () => {
 
   useEffect(() => {
     getMasterClock().setLoop(
-      loopEnabled && isValidLoopRange(loopStart, loopEnd),
       loopStart,
       loopEnd,
     );
@@ -4951,15 +4953,34 @@ export const Preview: React.FC = () => {
               lastGoodFrameRef.current?.close();
               lastGoodFrameRef.current = await createImageBitmap(offscreenCanvasRef.current!);
             } catch {}
-          } else if (lastGoodFrameRef.current) {
+          } else if (shouldDrawLastGoodFrame(
+            activeClips.length > 0,
+            lastGoodFrameRef.current !== null,
+          )) {
             ctx.drawImage(
-              lastGoodFrameRef.current,
+              lastGoodFrameRef.current!,
               0,
               0,
               canvas.width,
               canvas.height,
             );
 
+            const activeSubtitles = getActiveSubtitles(
+              allSubtitlesRef.current,
+              currentPlayhead,
+            );
+            for (const subtitle of activeSubtitles) {
+              renderSubtitleToCanvas(
+                ctx,
+                subtitle,
+                canvas.width,
+                canvas.height,
+                currentPlayhead,
+              );
+            }
+
+            mainCtx.drawImage(offscreenCanvasRef.current!, 0, 0);
+          } else if (activeClips.length === 0) {
             const activeSubtitles = getActiveSubtitles(
               allSubtitlesRef.current,
               currentPlayhead,
