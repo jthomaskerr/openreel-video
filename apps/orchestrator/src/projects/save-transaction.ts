@@ -14,7 +14,7 @@ import { serializeRequiredMediaManifest } from "../../../../packages/core/src/pr
 import type { GitCommitReceipt, GitProjectTransaction, GitStore } from "./git-store";
 import { ProjectMediaManifestAuditError } from "./media-manifest";
 import type { ProjectStore } from "./project-store";
-import { deterministicCommitMessage, semanticProjectChanges } from "./semantic-commit";
+import { semanticProjectChanges } from "./semantic-commit";
 import { allocateMediaFilename } from "./media-filename";
 import { listPendingMedia, type PendingMediaEntry } from "./pending-media";
 import {
@@ -35,6 +35,12 @@ export class SaveTransactionError extends Error {
 }
 
 export interface SaveTransactionOptions {
+  readonly noteAcceptedSave?: (
+    projectId: string,
+    sourceModifiedAt: number,
+    persistedAt: number,
+    semanticChanged: boolean,
+  ) => { readonly commitDueAt: number | null };
   readonly commit?: (
     projectId: string,
     message: string,
@@ -324,7 +330,7 @@ export async function executeSaveTransaction(
     if (pendingMoves.length === 0 && semanticChanges.length === 0) {
       let audit;
       try {
-        audit = await store.auditSnapshot(proposed);
+        audit = await store.auditSnapshot(proposed, { pointerSource: "worktree" });
       } catch (error) {
         if (error instanceof ProjectMediaManifestAuditError) throw mediaIncomplete(request.projectId, error);
         throw error;
@@ -344,8 +350,13 @@ export async function executeSaveTransaction(
       }
       return {
         saved: true,
-        committed: true,
-        commitDueAt: null,
+        committed: false,
+        commitDueAt: options.noteAcceptedSave?.(
+          request.projectId,
+          proposed.modifiedAt,
+          Date.now(),
+          false,
+        ).commitDueAt ?? null,
         projectId: request.projectId,
         persistedAt: proposedBytes.equals(previousBytes)
           ? await gitStore.readCommitTimestamp(request.projectId, currentReceipt.commitSha)
@@ -359,13 +370,6 @@ export async function executeSaveTransaction(
         project: proposed,
       };
     }
-    const expectedEntries = options.expectedEntries ?? [
-      ...pendingMoves.map((move) => ({ status: "A", path: move.relativeMediaPath })),
-      { status: "M", path: "project.json" },
-    ] as const;
-    const commit = options.commit
-      ?? ((_projectId: string, message: string, transaction: Parameters<GitProjectTransaction["commit"]>[1]) =>
-        gitTransaction.commit(message, transaction));
     const journal: SaveJournal = {
       version: 1,
       projectId: request.projectId,
@@ -386,9 +390,7 @@ export async function executeSaveTransaction(
       for (const move of pendingMoves) await rename(move.pendingContentPath, move.mediaPath);
       try {
         // Pending bytes become auditable only inside this locked transaction.
-        await store.auditSnapshot(proposed, { verifyLfs: false });
-        await gitTransaction.stage(pendingMoves.map((move) => move.relativeMediaPath));
-        audit = await store.auditSnapshot(proposed, { pointerSource: "index" });
+        audit = await store.auditSnapshot(proposed, { pointerSource: "worktree" });
       } catch (error) {
         if (error instanceof ProjectMediaManifestAuditError) throw mediaIncomplete(request.projectId, error);
         throw error;
@@ -409,11 +411,7 @@ export async function executeSaveTransaction(
         throw new SimulatedSaveProcessCrash("simulated crash before ref update");
       }
       await options.beforeCommit?.();
-      const receipt = await commit(
-        request.projectId,
-        deterministicCommitMessage(semanticChanges, expectedEntries),
-        { allowlist: ["project.json", ...pendingMoves.map((move) => move.relativeMediaPath)], expectedEntries },
-      );
+      const receipt = currentReceipt;
       assertReceipt(receipt);
       if (options.simulateCrashAt === "after-ref-update") {
         simulatedCrash = true;
@@ -425,9 +423,14 @@ export async function executeSaveTransaction(
         await rm(pendingById.get(item.id)!.entryDirectory, { recursive: true, force: true });
       }
       return {
-      saved: true,
-      committed: true,
-      commitDueAt: null,
+        saved: true,
+        committed: false,
+        commitDueAt: options.noteAcceptedSave?.(
+          request.projectId,
+          proposed.modifiedAt,
+          Date.now(),
+          true,
+        ).commitDueAt ?? null,
       projectId: request.projectId,
         persistedAt: Date.now(),
         sourceModifiedAt: proposed.modifiedAt,

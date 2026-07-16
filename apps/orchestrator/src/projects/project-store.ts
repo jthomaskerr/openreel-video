@@ -28,7 +28,7 @@ export interface ProjectMediaAuditOptions {
   /** Defaults to true; false is reserved for lower-level manifest-only checks. */
   readonly verifyLfs?: boolean;
   readonly checkRemoteObject?: LfsRemoteObjectCheck;
-  readonly pointerSource?: "HEAD" | "index";
+  readonly pointerSource?: "HEAD" | "index" | "worktree";
   readonly allowDanglingClips?: boolean;
 }
 
@@ -364,7 +364,9 @@ export class ProjectStore {
       lfsRepoDir: this.projectDir(project.id),
       // A newly staged object cannot be required to exist remotely before the
       // commit that makes it reachable. Push durability is verified later.
-      remote: options.pointerSource === "index" ? null : remote ? "origin" : null,
+      remote: options.pointerSource === "index" || options.pointerSource === "worktree"
+        ? null
+        : remote ? "origin" : null,
       checkRemoteObject: options.checkRemoteObject,
       pointerSource: options.pointerSource,
       allowDanglingClips: options.allowDanglingClips,

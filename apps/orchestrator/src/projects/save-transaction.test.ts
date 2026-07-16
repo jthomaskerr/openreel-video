@@ -132,24 +132,23 @@ test("pending media is LFS-audited from the index before one atomic snapshot com
     };
     const receipt = await executeSaveTransaction(f.store, f.gitStore, request(f, proposed));
 
-    assert.notEqual(receipt.commitSha, headBeforeUpload);
+    assert.equal(receipt.commitSha, headBeforeUpload);
+    assert.equal(receipt.committed, false);
     assert.equal(receipt.project.mediaLibrary.items[0]?.id, "media-1");
     assert.equal(receipt.project.mediaLibrary.items[0]?.name, "Interview 1.mp4");
-    const committedProject = JSON.parse(await git(worktree, ["show", "HEAD:project.json"])) as Project;
-    assert.equal(committedProject.mediaLibrary.items[0]?.id, "media-1");
-    assert.equal(committedProject.mediaLibrary.items[0]?.name, "Interview 1.mp4");
-
-    const pointer = await git(worktree, ["show", "HEAD:media/Interview 1.mp4"]);
     const expectedOid = createHash("sha256").update(bytes).digest("hex");
-    assert.match(pointer, new RegExp(`oid sha256:${expectedOid}`));
-    assert.match(pointer, new RegExp(`size ${bytes.length}`));
     assert.equal(receipt.lfsPayloads[0]?.oid, `sha256:${expectedOid}`);
     assert.deepEqual(receipt.lfsPayloads[0]?.local, { state: "verified", actualSize: bytes.length });
     assert.deepEqual(receipt.lfsPayloads[0]?.remote, { state: "local-only", remote: null });
     assert.equal(receipt.lfsPayloads[0]?.semanticFilename, "Interview 1.mp4");
+    assert.equal((await git(worktree, ["diff", "--cached", "--name-only"])).trim(), "");
+    assert.deepEqual(
+      await readFile(join(worktree, "media", "Interview 1.mp4")),
+      bytes,
+    );
     await assert.rejects(execFileAsync("git", ["show", "HEAD:media/Interview.mp4"], { cwd: worktree }));
     await execFileAsync("git", ["lfs", "fsck", "--objects"], { cwd: worktree });
-    assert.equal((await git(worktree, ["rev-list", "--count", `${headBeforeUpload}..HEAD`])).trim(), "1");
+    assert.equal((await git(worktree, ["rev-list", "--count", `${headBeforeUpload}..HEAD`])).trim(), "0");
   } finally {
     await rm(f.fixtureRoot, { recursive: true, force: true });
   }
@@ -312,16 +311,26 @@ test("modifiedAt-only saves persist immediately without commits and a later sema
       name: "Atomic Save Renamed",
       modifiedAt: secondProject.modifiedAt + 1,
     };
+    let schedulerNotes = 0;
     const semanticReceipt = await executeSaveTransaction(
       f.store,
       f.gitStore,
       request(f, semanticProject, secondRevision),
+      {
+        noteAcceptedSave: (_projectId, _sourceModifiedAt, _persistedAt, semanticChanged) => {
+          schedulerNotes += 1;
+          assert.equal(semanticChanged, true);
+          return { commitDueAt: 123_456 };
+        },
+      },
     );
-    assert.notEqual(semanticReceipt.commitSha, initialHead);
-    assert.equal(Number((await git(worktree, ["rev-list", "--count", "HEAD"])).trim()), initialCommitCount + 1);
+    assert.equal(semanticReceipt.commitSha, initialHead);
+    assert.equal(semanticReceipt.committed, false);
+    assert.equal(semanticReceipt.commitDueAt, 123_456);
+    assert.equal(schedulerNotes, 1);
+    assert.equal(Number((await git(worktree, ["rev-list", "--count", "HEAD"])).trim()), initialCommitCount);
     assert.deepEqual(JSON.parse(await readFile(join(worktree, "project.json"), "utf8")), semanticProject);
-    assert.equal((await git(worktree, ["status", "--short"])).trim(), "");
-    assert.match(await git(worktree, ["show", "--format=", "--unified=0", "HEAD", "--", "project.json"]), /Atomic Save Renamed/);
+    assert.match((await git(worktree, ["status", "--short"])).trim(), /project\.json/);
   } finally {
     await rm(f.fixtureRoot, { recursive: true, force: true });
   }
@@ -375,7 +384,7 @@ test("recovery unstages and returns promoted media to pending before ref update"
       executeSaveTransaction(f.store, f.gitStore, request(f, proposed), { simulateCrashAt: "before-ref-update" }),
       SimulatedSaveProcessCrash,
     );
-    assert.match(await git(worktree, ["diff", "--cached", "--name-only"]), /media\/Clip\.mp4/);
+    assert.equal(await git(worktree, ["diff", "--cached", "--name-only"]), "");
 
     await recoverInterruptedSave(f.store, f.gitStore, f.project.id);
 
@@ -442,13 +451,16 @@ test("post-stage mismatch restores authoritative state after Git rejects the cac
   try {
     const before = await state(f);
     const proposed = { ...f.project, name: "Staged mismatch", modifiedAt: f.project.modifiedAt + 1 };
-    await assert.rejects(
-      executeSaveTransaction(f.store, f.gitStore, request(f, proposed), {
-        expectedEntries: [{ status: "A", path: "project.json" }],
-      }),
-      /Cached diff did not match/,
+    const receipt = await executeSaveTransaction(f.store, f.gitStore, request(f, proposed), {
+      expectedEntries: [{ status: "A", path: "project.json" }],
+    });
+    assert.equal(receipt.committed, false);
+    assert.equal(receipt.commitSha, before.head);
+    assert.deepEqual(
+      JSON.parse(await readFile(join(f.store.projectDir(f.project.id), "project.json"), "utf8")),
+      proposed,
     );
-    await assertUnchanged(f, before);
+    assert.equal(await git(f.store.projectDir(f.project.id), ["diff", "--cached", "--name-only"]), "");
   } finally { await rm(f.fixtureRoot, { recursive: true, force: true }); }
 });
 
@@ -543,29 +555,31 @@ test("recovery after process loss after ref update keeps the confirmed bytes and
       SimulatedSaveProcessCrash,
     );
     const headAfterCommit = (await git(f.store.projectDir(f.project.id), ["rev-parse", "HEAD"])).trim();
-    assert.notEqual(headAfterCommit, f.baseRevision.commitSha);
+    assert.equal(headAfterCommit, f.baseRevision.commitSha);
     await recoverInterruptedSave(f.store, f.gitStore, f.project.id);
     const recovered = await f.store.loadProject(f.project.id);
-    assert.equal(recovered?.name, proposed.name);
+    assert.equal(recovered?.name, f.project.name);
     assert.equal((await git(f.store.projectDir(f.project.id), ["rev-parse", "HEAD"])).trim(), headAfterCommit);
     assert.equal(await git(f.store.projectDir(f.project.id), ["status", "--porcelain=v1", "-z"]), "");
   } finally { await rm(f.fixtureRoot, { recursive: true, force: true }); }
 });
 
-test("commit failure restores only transaction-owned project JSON and index state", async () => {
+test("foreground durability is independent of the legacy commit callback", async () => {
   const f = await fixture();
   try {
     const worktree = f.store.projectDir(f.project.id);
     await writeFile(join(worktree, "unrelated.txt"), "keep me");
-    const before = await state(f);
     const proposed = { ...f.project, name: "Commit failure", modifiedAt: f.project.modifiedAt + 1 };
-    await assert.rejects(
-      executeSaveTransaction(f.store, f.gitStore, request(f, proposed), {
-        commit: async () => { throw new Error("injected commit failure"); },
-      }),
-      /injected commit failure/,
-    );
-    await assertUnchanged(f, before);
+    let commitCalls = 0;
+    const receipt = await executeSaveTransaction(f.store, f.gitStore, request(f, proposed), {
+      commit: async () => {
+        commitCalls += 1;
+        throw new Error("injected commit failure");
+      },
+    });
+    assert.equal(commitCalls, 0);
+    assert.equal(receipt.committed, false);
+    assert.deepEqual(JSON.parse(await readFile(join(worktree, "project.json"), "utf8")), proposed);
     assert.equal(await readFile(join(worktree, "unrelated.txt"), "utf8"), "keep me");
   } finally { await rm(f.fixtureRoot, { recursive: true, force: true }); }
 });

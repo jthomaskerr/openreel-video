@@ -241,7 +241,7 @@ export async function auditProjectMediaManifest(
   }
 
   const danglingClips = detectDanglingClips(project);
-  const lfsPayloads = options.lfsRepoDir
+  const lfsPayloads = options.lfsRepoDir && missingEntries.length === 0
       ? await verifyGitLfsPayloads(options.lfsRepoDir, requiredMediaManifest, {
         remote: options.remote,
         checkRemoteObject: options.checkRemoteObject,

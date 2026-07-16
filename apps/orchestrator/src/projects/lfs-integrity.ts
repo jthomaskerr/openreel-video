@@ -39,7 +39,7 @@ export interface LfsVerificationOptions {
   /** Injectable remote probe for deterministic tests and deployment-specific LFS APIs. */
   readonly checkRemoteObject?: LfsRemoteObjectCheck;
   /** Resolve pointers from the current index before ref update, or from HEAD. */
-  readonly pointerSource?: "HEAD" | "index";
+  readonly pointerSource?: "HEAD" | "index" | "worktree";
 }
 
 export type LfsRemoteObjectCheck = (
@@ -204,6 +204,18 @@ export async function verifyGitLfsPayloads(
 ): Promise<LfsPayloadVerification[]> {
   return Promise.all(
     entries.map(async (entry) => {
+      if (options.pointerSource === "worktree") {
+        const payloadPath = join(repoDir, entry.relativePhysicalPath);
+        const payloadStat = await stat(payloadPath);
+        const digest = await hashFile(payloadPath);
+        return {
+          ...entry,
+          oid: `sha256:${digest}` as const,
+          pointerSize: payloadStat.size,
+          local: { state: "verified", actualSize: payloadStat.size } as const,
+          remote: { state: "local-only", remote: null } as const,
+        };
+      }
       const pointer = await committedPointer(repoDir, entry, options.pointerSource ?? "HEAD");
       const [local, remote] = await Promise.all([
         verifyLocalObject(repoDir, pointer),
