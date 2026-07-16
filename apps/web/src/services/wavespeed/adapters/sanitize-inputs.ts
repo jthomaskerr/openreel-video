@@ -19,6 +19,13 @@ export interface SanitizeWaveSpeedInputsResult {
   errors: InputFieldError[];
 }
 
+const FORBIDDEN_VALUE_PATTERNS = [
+  { code: "forbidden-url", pattern: /\b(?:blob:|file:|https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0))/i },
+  { code: "forbidden-canonical-token", pattern: /@\{[^}]+\}/ },
+];
+
+const FORBIDDEN_KEY_PATTERN = /^(?:projectId|mediaId|mediaVersionId|apiKey|secret|password|authorization|credential)$/i;
+
 function validateValue(field: string, value: unknown, property: SchemaProperty, errors: InputFieldError[]): void {
   const typeOk = property.type === "array" ? Array.isArray(value)
     : property.type === "integer" ? typeof value === "number" && Number.isInteger(value)
@@ -42,6 +49,24 @@ function validateValue(field: string, value: unknown, property: SchemaProperty, 
     if (limits.minItems != null && value.length < limits.minItems) errors.push({ field, code: "below-min-items" });
     if (limits.maxItems != null && value.length > limits.maxItems) errors.push({ field, code: "above-max-items" });
     if (property.items) value.forEach((item) => validateValue(field, item, property.items!, errors));
+  }
+}
+
+function scanForLeaks(value: unknown, path: string, errors: InputFieldError[]): void {
+  if (typeof value === "string") {
+    for (const { code, pattern } of FORBIDDEN_VALUE_PATTERNS) {
+      if (pattern.test(value)) errors.push({ field: path, code });
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => scanForLeaks(item, `${path}[${index}]`, errors));
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (FORBIDDEN_KEY_PATTERN.test(key)) errors.push({ field: path ? `${path}.${key}` : key, code: "forbidden-key" });
+    scanForLeaks(item, path ? `${path}.${key}` : key, errors);
   }
 }
 
@@ -88,5 +113,6 @@ export function sanitizeWaveSpeedInputs(args: SanitizeWaveSpeedInputsArgs): Sani
     if (!(required in inputs)) errors.push({ field: required, code: "required" });
   }
   for (const [field, value] of Object.entries(inputs)) validateValue(field, value, schema.properties[field], errors);
+  for (const [field, value] of Object.entries(inputs)) scanForLeaks(value, field, errors);
   return { inputs, errors };
 }

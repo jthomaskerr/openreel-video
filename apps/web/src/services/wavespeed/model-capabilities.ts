@@ -45,6 +45,8 @@ export interface CapabilityEvidence {
   classification: "request-schema-type" | "override";
   value: string;
   overrideVersion?: string;
+  acceptedFields: readonly string[];
+  referenceLimits: { min: number; max: number } | false;
   mediaFields: Readonly<Record<string, string>>;
 }
 
@@ -146,29 +148,41 @@ export function normalizeWaveSpeedModel(
   const override = overrideRegistry[rawModel.model_id];
   const exact = entry ? SCHEMA_TYPES[entry.type.toLowerCase()] : undefined;
   const classification = override ? "override" : "request-schema-type";
-  const evidence: CapabilityEvidence = {
-    classification,
-    value: override ? rawModel.model_id : (entry?.type ?? "missing"),
-    ...(override ? { overrideVersion: override.version } : {}),
-    mediaFields: {},
-  };
   if (!entry?.request_schema?.properties || (!override && !exact)) {
-    return { ok: false, code: "unsupported-schema", evidence };
+    return {
+      ok: false,
+      code: "unsupported-schema",
+      evidence: {
+        classification,
+        value: override ? rawModel.model_id : (entry?.type ?? "missing"),
+        ...(override ? { overrideVersion: override.version } : {}),
+        acceptedFields: [],
+        referenceLimits: false,
+        mediaFields: {},
+      },
+    };
   }
   const schema = entry.request_schema;
   const fields = fieldMap(schema, override);
-  evidence.mediaFields = Object.fromEntries(
-    Object.entries(fields).filter(([key]) => ["sourceImage", "referenceImages", "audio"].includes(key)),
-  ) as Record<string, string>;
-  for (const field of Object.values(override?.fields ?? {})) {
-    if (field && !(field in schema.properties)) return { ok: false, code: "unsupported-schema", evidence };
-  }
-  const classified = override ?? exact!;
   const referenceProperty = fields.referenceImages ? schema.properties[fields.referenceImages] : undefined;
   const arrayLimits = referenceProperty as (SchemaProperty & { minItems?: number; maxItems?: number }) | undefined;
   const referenceLimits = referenceProperty?.type === "array"
     ? { min: arrayLimits?.minItems ?? 0, max: arrayLimits?.maxItems ?? Number.MAX_SAFE_INTEGER }
     : false;
+  const evidence: CapabilityEvidence = {
+    classification,
+    value: override ? rawModel.model_id : (entry?.type ?? "missing"),
+    ...(override ? { overrideVersion: override.version } : {}),
+    acceptedFields: [...(schema["x-order-properties"] ?? Object.keys(schema.properties))],
+    referenceLimits,
+    mediaFields: Object.fromEntries(
+      Object.entries(fields).filter(([key]) => ["sourceImage", "referenceImages", "audio"].includes(key)),
+    ) as Record<string, string>,
+  };
+  for (const field of Object.values(override?.fields ?? {})) {
+    if (field && !(field in schema.properties)) return { ok: false, code: "unsupported-schema", evidence };
+  }
+  const classified = override ?? exact!;
   const aspectProperty = fields.aspectRatio ? schema.properties[fields.aspectRatio] : undefined;
   const capability: GenerationModelCapability = {
     provider: "wavespeed",

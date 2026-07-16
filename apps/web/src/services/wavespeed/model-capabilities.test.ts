@@ -53,8 +53,14 @@ describe("normalizeWaveSpeedModel", () => {
   });
 
   it("extracts explicit reference, audio, duration and aspect capabilities", () => {
-    expect(normalized(referenceAndAudio)).toMatchObject({
+    const referenceCapability = normalized(referenceAndAudio);
+    const referenceResult = normalizeWaveSpeedModel(referenceAndAudio);
+    expect(referenceCapability).toMatchObject({
       accepts: { referenceImages: { min: 1, max: 3 }, audio: true },
+    });
+    expect(referenceResult.evidence).toMatchObject({
+      acceptedFields: ["prompt", "references", "soundtrack"],
+      referenceLimits: { min: 1, max: 3 },
     });
     expect(normalized(imageToVideo).duration).toEqual({ min: 2, max: 8, step: 0.5 });
     expect(normalized(textToImage).aspectRatios).toEqual(["16:9", "1:1"]);
@@ -82,6 +88,47 @@ describe("normalizeWaveSpeedModel", () => {
       flag: { type: "boolean", default: false }, count: { type: "integer", default: 0 }, refs: { type: "array", default: [] },
     }));
     expect(getModelDefaults(defaultsSchema)).toEqual({ flag: false, count: 0, refs: [] });
+  });
+
+  it("rejects recursive leakage in nested object and array fields", () => {
+    const model = recordedModel("leak-check", "text-to-image", {
+      prompt: { type: "string" },
+      metadata: {
+        type: "object",
+        properties: {
+          url: { type: "string" },
+          nested: { type: "array", items: { type: "string" } },
+          auth: {
+            type: "object",
+            properties: {
+              apiKey: { type: "string" },
+            },
+          },
+        },
+      },
+    });
+
+    const result = sanitizeWaveSpeedInputs({
+      schema: schema(model),
+      capability: normalized(model),
+      draftValues: {
+        prompt: "frame",
+        metadata: {
+          url: "http://localhost/internal",
+          nested: ["blob:asset", "file:/tmp/render.mov"],
+          auth: { apiKey: "secret-value" },
+        },
+      },
+    });
+
+    expect(result.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ field: "metadata.url" }),
+        expect.objectContaining({ field: "metadata.nested[0]" }),
+        expect.objectContaining({ field: "metadata.nested[1]" }),
+        expect.objectContaining({ field: "metadata.auth.apiKey" }),
+      ]),
+    );
   });
 });
 
