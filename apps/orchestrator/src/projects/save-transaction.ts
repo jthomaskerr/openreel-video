@@ -170,11 +170,19 @@ export async function recoverInterruptedSave(
     recoverUnderLock(store, gitStore, projectId, transaction));
 }
 
-function revisionMatches(submitted: ProjectBaseRevision, current: ProjectBaseRevision): boolean {
-  return submitted.commitSha === current.commitSha
+async function revisionMatches(
+  gitStore: GitStore,
+  projectId: string,
+  submitted: ProjectBaseRevision,
+  current: ProjectBaseRevision,
+): Promise<boolean> {
+  const exactMatch = submitted.commitSha === current.commitSha
     && submitted.treeSha === current.treeSha
     && submitted.projectBlobSha === current.projectBlobSha
     && submitted.sourceModifiedAt === current.sourceModifiedAt;
+  if (exactMatch) return true;
+  if (submitted.sourceModifiedAt !== current.sourceModifiedAt) return false;
+  return gitStore.isConfirmedRevisionAncestor(projectId, submitted, current.commitSha);
 }
 
 function asRevision(receipt: GitCommitReceipt, project: Project): ProjectBaseRevision | null {
@@ -230,7 +238,7 @@ export async function executeSaveTransaction(
     if (!currentProject || !currentReceipt) throw new Error(`Project ${request.projectId} has no confirmed base revision`);
     const currentBaseRevision = asRevision(currentReceipt, currentProject);
     if (!currentBaseRevision) throw new Error(`Project ${request.projectId} has an incomplete confirmed base revision`);
-    if (!revisionMatches(request.baseRevision, currentBaseRevision)) {
+    if (!await revisionMatches(gitStore, request.projectId, request.baseRevision, currentBaseRevision)) {
       throw new SaveTransactionError(409, {
         saved: false,
         code: "PROJECT_CONFLICT",

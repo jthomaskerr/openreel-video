@@ -336,6 +336,64 @@ test("modifiedAt-only saves persist immediately without commits and a later sema
   }
 });
 
+test("a deferred receipt remains valid after its background commit advances the confirmed hashes", async () => {
+  const f = await fixture();
+  try {
+    const firstProject = {
+      ...f.project,
+      name: "First deferred save",
+      modifiedAt: f.project.modifiedAt + 1,
+    };
+    const deferredReceipt = await executeSaveTransaction(
+      f.store,
+      f.gitStore,
+      request(f, firstProject),
+    );
+    assert.equal(deferredReceipt.committed, false);
+    assert.equal(deferredReceipt.commitSha, f.baseRevision.commitSha);
+    assert.equal(deferredReceipt.sourceModifiedAt, firstProject.modifiedAt);
+    assert.ok(
+      deferredReceipt.commitSha
+      && deferredReceipt.treeSha
+      && deferredReceipt.projectBlobSha,
+    );
+
+    const backgroundCommit = await f.gitStore.commitCumulativeProjectDiff(
+      f.project.id,
+      async () => undefined,
+      () => true,
+    );
+    assert.equal(backgroundCommit.kind, "committed");
+    if (backgroundCommit.kind !== "committed") throw new Error("Expected background commit");
+    assert.notEqual(backgroundCommit.receipt.commitSha, deferredReceipt.commitSha);
+
+    const deferredRevision: ProjectBaseRevision = {
+      commitSha: deferredReceipt.commitSha,
+      treeSha: deferredReceipt.treeSha,
+      projectBlobSha: deferredReceipt.projectBlobSha,
+      sourceModifiedAt: deferredReceipt.sourceModifiedAt,
+    };
+    const replacementProject = {
+      ...firstProject,
+      name: "Replacement accepted",
+      modifiedAt: firstProject.modifiedAt + 1,
+    };
+    const replacementReceipt = await executeSaveTransaction(
+      f.store,
+      f.gitStore,
+      request(f, replacementProject, deferredRevision),
+    );
+
+    assert.equal(replacementReceipt.saved, true);
+    assert.deepEqual(
+      JSON.parse(await readFile(join(f.store.projectDir(f.project.id), "project.json"), "utf8")),
+      replacementProject,
+    );
+  } finally {
+    await rm(f.fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("an identical incomplete snapshot returns recoverable MEDIA_INCOMPLETE", async () => {
   const f = await fixture();
   const auditSnapshot = f.store.auditSnapshot.bind(f.store);

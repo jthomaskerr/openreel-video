@@ -38,6 +38,12 @@ export interface GitCommitReceipt {
   mediaManifestDigest: string | null;
 }
 
+export interface GitRevisionIdentity {
+  commitSha: string;
+  treeSha: string;
+  projectBlobSha: string;
+}
+
 export type GitCumulativeCommitResult =
   | { readonly kind: "metadata-only" }
   | { readonly kind: "committed"; readonly receipt: GitCommitReceipt };
@@ -268,6 +274,32 @@ export class GitStore {
       return Number.isFinite(timestamp) ? timestamp : null;
     } catch {
       return null;
+    }
+  }
+
+  async isConfirmedRevisionAncestor(
+    projectId: string,
+    submitted: GitRevisionIdentity,
+    currentCommitSha: string,
+  ): Promise<boolean> {
+    assertValidProjectId(projectId);
+    const wtPath = this.worktreePath(projectId);
+    if (!existsSync(join(wtPath, ".git"))) return false;
+    try {
+      const resolved = await this.#resolveReceiptFromCommit(projectId, submitted.commitSha, null);
+      if (
+        resolved.treeSha !== submitted.treeSha
+        || resolved.projectBlobSha !== submitted.projectBlobSha
+      ) {
+        return false;
+      }
+      await this.git(
+        ["merge-base", "--is-ancestor", submitted.commitSha, currentCommitSha],
+        wtPath,
+      );
+      return true;
+    } catch {
+      return false;
     }
   }
 
