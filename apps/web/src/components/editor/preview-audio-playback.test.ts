@@ -19,7 +19,7 @@ function clip(
   mediaId: string,
   trackId: string,
   type: "video" | "audio",
-  overrides: Partial<{ startTime: number; duration: number }> = {},
+  overrides: Partial<{ startTime: number; duration: number; muted: boolean }> = {},
 ): Track["clips"][number] {
   return {
     id,
@@ -34,6 +34,7 @@ function clip(
     audioEffects: [],
     transform,
     volume: 1,
+    muted: overrides.muted ?? false,
     keyframes: [],
   };
 }
@@ -220,6 +221,32 @@ describe("getAudioPlaybackClips", () => {
     const tracks = [track("vt", "video", [v], { muted: true })];
 
     const result = getAudioPlaybackClips(tracks, lookup([media("media-1", "video", 2)]), 0);
+
+    expect(result).toHaveLength(0);
+  });
+
+  it("excludes a muted video clip with embedded audio", () => {
+    const v = clip("v1", "media-1", "vt", "video", { muted: true });
+    const tracks = [track("vt", "video", [v])];
+
+    const result = getAudioPlaybackClips(
+      tracks,
+      lookup([media("media-1", "video", 2)]),
+      0,
+    );
+
+    expect(result).toHaveLength(0);
+  });
+
+  it("excludes a muted audio-only clip", () => {
+    const a = clip("a1", "media-1", "at", "audio", { muted: true });
+    const tracks = [track("at", "audio", [a])];
+
+    const result = getAudioPlaybackClips(
+      tracks,
+      lookup([media("media-1", "audio", 2)]),
+      0,
+    );
 
     expect(result).toHaveLength(0);
   });

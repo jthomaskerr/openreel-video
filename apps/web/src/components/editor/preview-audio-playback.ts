@@ -61,6 +61,7 @@ export function getAudioPlaybackClips(
     }
 
     for (const clip of track.clips) {
+      if (clip.muted) continue;
       if (!isClipInPlaybackWindow(clip, time, lookAheadSeconds)) continue;
       if (!mediaItemHasAudio(getMediaItem(clip.mediaId))) continue;
       if (track.type === "video" && hasLinkedAudioClip(tracks, clip, time, lookAheadSeconds)) {
