@@ -66,20 +66,29 @@ export interface StoryboardShot {
 - `label`: Human-readable name (e.g., "Verse 1 - Close-up").
 - `startSeconds`, `endSeconds`: Optional legacy planning hints. They do not place,
   size, or trim a timeline projection.
-- `prompt`: Primary descriptive prompt for image generation.
+- `prompt`: Primary descriptive prompt for image generation. Character and
+  image references use the canonical typed prompt tokens from
+  [References and Generated Images](./references.md).
 - `videoPrompt`: Optional video-generation-specific prompt.
 - `negativePrompt`: What NOT to include.
 - `style`: Visual style descriptor (e.g., "cinematic", "watercolor").
 - `renderMode`: Generation technique (e.g., "single-frame", "video-clip").
 - `seed`: Optional numeric seed for deterministic generation.
 - `includeMainAudio`: Whether the shot should include the audio track in final render.
-- `referenceAssetIds`: Array of reference image IDs.
+- `referenceAssetIds`: Explicit automatic/shot reference image IDs. Images and
+  characters selected through the prompt are derived from typed prompt tokens
+  and are not duplicated into this array.
 - `associatedMediaId`: Optional existing video asset association. Association alone
   does not create a projection.
 - `generatedAssetIds`: Array of generated image/video IDs from past attempts.
 - `validation`: Optional validation state summary.
 - `outputs`: Array of `GenerationAttempt` records (one per generation/regeneration).
 - `selected`: Optional boolean for UI multi-select state (client-side only).
+
+Model-specific reference-role selections live in the persistent shot-scoped
+generation draft keyed by stable reference identity. They do not alter
+`referenceAssetIds` and do not embed provider field names or prompt syntax in
+the storyboard record.
 
 ### Timeline Projection
 

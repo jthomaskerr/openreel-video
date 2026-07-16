@@ -54,16 +54,23 @@ The detailed source investigation remains in [Media Title from Metadata Design](
 
 ## 4. Media Pane
 
+The pane-level create action is a dropdown with exactly `Add Scene` and
+`Add Generated Image`. `Add Generated Image` atomically creates an asset group,
+a generated-image definition, and an unrealized image placeholder, then opens
+the shared generated-image editor. The detailed lifecycle is defined by
+[References and Generated Images](./references.md).
+
 The Media pane supports grid/list presentation, stable selection, search, sort, grouping, import, drag placement, add-at-playhead, missing-only filtering, and bulk relink.
 
 It has exactly one pane-level toolbar row in this order:
 
 1. flexible search field;
 2. import button;
-3. missing-only toggle with confirmed-missing count when non-zero;
-4. relink-from-folder when confirmed-missing items exist;
-5. group-by control;
-6. collapse-all and expand-all controls when grouping is active.
+3. create dropdown;
+4. missing-only toggle with confirmed-missing count when non-zero;
+5. relink-from-folder when confirmed-missing items exist;
+6. group-by control;
+7. collapse-all and expand-all controls when grouping is active.
 
 Missing controls are never rendered as a competing second toolbar. Search, group, sort, and missing filter compose deterministically. Selection remains stable by media ID as filters change, but hidden selection is not acted on without explicit indication.
 
@@ -83,7 +90,29 @@ Version history displays all items sharing `assetGroupId`, including the current
 
 Generated variations create new media IDs in the intended asset group and store generation provenance defined by [Generation](./generation.md).
 
-## 6. Runtime Availability
+## 6. Generated Image Definitions
+
+Generated-image editability belongs to a logical asset group and is distinct
+from binary provenance. A generated-image definition owns its draft, model,
+prompt, role assignments, attempt IDs, and current/source media-version links.
+A `MediaItem.generationMeta` record means that specific binary was produced by
+a provider.
+
+Every available image inspector shows `Regenerate` next to `Replace`. For an
+imported image, Regenerate creates the generated-image definition and ensures
+an asset group while preserving the imported bytes, filename, media ID, and
+provenance. The imported version becomes the definition's initial source and
+current version; it MUST NOT be relabeled as provider-generated. For an existing
+generated image, Regenerate opens its recorded definition and draft without
+submitting automatically.
+
+A successful generation adds a new media version to the same asset group,
+records complete provider provenance on that new version, and retains every
+earlier version. Conversion and current-version changes are undoable. See
+[References and Generated Images](./references.md) for the typed contract and
+editor behavior.
+
+## 7. Runtime Availability
 
 ```ts
 type MediaAvailability =
@@ -105,7 +134,7 @@ Availability is runtime state keyed by project and media ID. It is not serialize
 
 An absent Blob, failed hydration, broken thumbnail, or failed request is never by itself proof of missing durable media.
 
-## 7. Verification
+## 8. Verification
 
 Verification is deduplicated per project/media ID, bounded, cancellable, retryable with backoff and jitter, and guarded by active project plus request generation.
 
@@ -113,7 +142,7 @@ The backend verifies both project mapping and stored object, returning version/E
 
 HTML error bodies with `200`, invalid MIME/range metadata, zero or truncated objects, stale cache evidence, project-ID mismatch, and transport failures cannot establish availability. Late responses never update a different project or overwrite a newer relink.
 
-## 8. Presentation and Recovery
+## 9. Presentation and Recovery
 
 Every surface consumes the same availability result.
 
@@ -130,7 +159,7 @@ Recovery atomically updates the Media pane, timeline, preview, inspector, missin
 
 Relink validates the selected bytes before changing the item. It preserves stable identity when repairing the same version, regenerates transient thumbnails, resolves the corresponding problem, and updates every use. Confirmed removal is a separate explicit destructive action and must identify affected clips before proceeding.
 
-## 9. Thumbnail and Fallback Data
+## 10. Thumbnail and Fallback Data
 
 Thumbnail source priority is:
 
@@ -146,19 +175,32 @@ Thumbnail extraction is lazy, bounded, cached by media/version and parameters, c
 
 Timeline-specific filmstrip rendering is defined by [Timeline](./timeline.md).
 
-## 10. Inspector and Problems
+## 11. Inspector and Problems
 
-The asset inspector shows display title, true filename, metadata, availability, versions, tags, usages, and context-appropriate recovery. Its shell placement is defined by [Inspector Shell](./inspector-shell.md).
+The asset inspector shows display title, true filename, metadata, availability,
+versions, tags, usages, and context-appropriate recovery. An available image
+shows `Regenerate` immediately next to `Replace`; other media types do not. Its
+shell placement is defined by [Inspector Shell](./inspector-shell.md).
 
 Availability and import failures use structured problems and logs from [Problems, Errors & Logging](./problems-errors-logging.md). Problems are deduplicated per project/media ID. Only `confirmed_missing` creates a durable missing-media problem.
 
-## 11. Required Tests
+## 12. Required Tests
 
-Deterministic tests MUST cover import atomicity, title derivation, old-project display fallback, stable filtering/grouping, exactly one toolbar, version invariants, verification classification, project scoping, retry/cancel/late response handling, relink atomicity, shared recovery across consumers, thumbnail source priority, current-session object URLs, and persistence sanitization.
+Deterministic tests MUST cover import atomicity, title derivation, old-project
+display fallback, stable filtering/grouping, exactly one toolbar, create-menu
+keyboard behavior, generated-image placeholder creation, imported-image
+conversion without false provenance, version invariants, verification
+classification, project scoping, retry/cancel/late response handling, relink
+atomicity, shared recovery across consumers, thumbnail source priority,
+current-session object URLs, and persistence sanitization.
 
-Browser verification MUST cover import, search/group/filter composition, drag/add placement handoff, title display, restored thumbnails, backend outage, authentication failure, confirmed missing relink, and recovery without reload.
+Browser verification MUST cover import, search/group/filter composition,
+Add Scene, Add Generated Image, Regenerate beside Replace, preservation of the
+imported baseline, drag/add placement handoff, title display, restored
+thumbnails, backend outage, authentication failure, confirmed missing relink,
+and recovery without reload.
 
-## 12. Failure Modes
+## 13. Failure Modes
 
 - Display code uses filename directly and bypasses `title`.
 - Relink changes identity before validating replacement bytes.

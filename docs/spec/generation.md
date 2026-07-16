@@ -56,17 +56,29 @@ Provider schemas are authoritative for supported parameters. Adapters map the no
 
 ## 3. Unified Generation UI
 
+The prompt and reference controls are the shared surfaces defined by
+[References and Generated Images](./references.md). All modal and sidebar
+generated-image editors use the same controller, draft, schemas, job store, and
+finalizer as **Edit → Generate**. The form includes the rich `@` mention editor,
+inline character/image pills, derived reference cards, and model-supported
+reference-role selection. References invalidated by a model change remain
+visible but inactive and are omitted only after the warning contract in that
+specification.
+
 Generation uses one controller and one provider-agnostic form. There are no independent provider dialogs with separate job logic.
 
-The primary editor surface is **Edit → Generate** for a selected compatible shot or clip. An expanded picker MAY be used for generation without an existing target, but it uses the same controller, schemas, job store, and finalizer.
+The primary editor surface is **Edit → Generate** for a selected compatible shot
+or clip. New-asset generation and generated-image editing MAY render in a modal
+or sidebar, but use the same controller, schemas, draft, job store, and
+finalizer.
 
 The form presents:
 
 - mode and compatible model;
-- prompt with character/reference pills defined by [Inspector Shell](./inspector-shell.md);
+- shared `@` media mention prompt editor with inline character/image pills;
 - negative prompt only when supported;
 - schema-derived settings such as duration, dimensions, resolution, seed, and quality;
-- resolved references with origin labels;
+- derived reference cards with origin labels, availability, and supported role controls;
 - timed audio when required and supported;
 - validation, availability, cost/limit information when known;
 - submission status and recovery action.
@@ -88,7 +100,7 @@ interface GenerationContext {
   placementPolicy: "library-only" | "insert" | "replace-clip-media";
   prompt: string;
   negativePrompt?: string;
-  referenceAssetVersionIds: string[];
+  references: ResolvedGenerationReference[];
   audioAssetId?: string;
   audioRange?: { startTime: number; endTime: number };
 }
@@ -98,12 +110,25 @@ For a storyboard shot, [Storyboard](./storyboard.md) is authoritative for prompt
 
 ## 5. Reference Resolution
 
+The canonical typed tokens, reference keys, normalized roles, card behavior,
+and `ResolvedGenerationReference` contract are owned by
+[References and Generated Images](./references.md). Prompt-selected references
+are characters and image media in first-mention order. They replace the legacy
+concept of a separately selected user-reference list.
+
+Provider adapters rewrite canonical typed-ID tokens only after active
+references have been validated, deduplicated, and ordered. They map normalized
+roles to exact schema-accepted fields or provider-native prompt syntax.
+Canonical project tokens, project IDs, and media IDs MUST NOT be sent unless a
+provider schema explicitly defines that exact value. Every supported
+provider/model mapping requires an authoritative sanitized fixture; guessed
+token spellings or fields are forbidden.
+
 References are resolved in stable order:
 
 1. required source or first-frame image;
-2. characters in first-mention order from prompt pills;
-3. shot references in stored order;
-4. user-added references in selection order.
+2. prompt-mentioned characters and image media in first-mention order;
+3. shot references in stored order.
 
 Duplicates are removed by canonical asset-version ID while preserving the first occurrence and all origin labels. Resolution records media ID, version ID, origin, and provider-reachable representation.
 
@@ -192,6 +217,15 @@ Structured events cover model refresh, validation, reference resolution, audio e
 Errors use [Problems, Errors & Logging](./problems-errors-logging.md) with field-level validation, configuration, provider, transport, download, finalization, placement, and persistence codes.
 
 ## 11. Required Tests and Eval
+
+In addition to the job and finalization gates below, deterministic tests MUST
+cover typed prompt tokens, character/media mention resolution, reference-role
+capabilities, inactive invalid references, provider prompt rewriting, exact
+schema field mapping, generated-image drafts, imported-image conversion,
+dependency-cycle rejection, and version/provenance invariants. Browser
+verification MUST cover the `@` menu, inline pills, derived cards, modal and
+Shift-click sidebar navigation, Add Generated Image, and Regenerate. The fixed
+provider eval includes multiple-reference image and video cases.
 
 Deterministic tests MUST cover model normalization/cache scope, secret exclusion, schema mapping, reference order/deduplication, timed audio ranges, job transitions, reload resumption, cancellation, retry history, ownership checks, and idempotent finalization across repeated completion and multiple tabs.
 

@@ -63,7 +63,21 @@ The ordinary clip edit surface exposes capability-based tabs such as Transform, 
 - Subtitle editing follows [Audio Analysis & Subtitles](./audio-analysis-subtitles.md).
 - Generation follows [AI Generation and Providers](./generation.md).
 
-## 5. Character and Asset Reference Pills
+## 5. Character and Media Reference Mentions
+
+The complete prompt, picker, pill, reference-card, and item-navigation contract
+is [References and Generated Images](./references.md). Every prompt-capable
+surface uses the same `MediaMentionEditor`.
+
+Typing `@` opens the rich character/image picker. New selections persist typed
+stable IDs and render as atomic inline pills with a name and micro-thumbnail.
+Immediately below the prompt, the UI shows `Type @ to refer to other media`.
+
+Clicking a pill or reference card opens the referenced item's type-specific
+editor in a focus-managed modal. Shift-click opens the same component in the
+inspector sidebar. Character references route to the character editor; image
+references route to the image inspector or generated-image editor. Closing a
+modal restores focus to its invoking pill or card.
 
 This is the canonical presentation contract for references inside prompt or description fields.
 
@@ -72,11 +86,15 @@ The stable textual syntax is `@<character-slug>` or another explicitly typed ass
 - Pills show a concise label and optional thumbnail.
 - Keyboard navigation can enter, select, edit, and remove a pill.
 - Backspace at the pill boundary removes the whole token, not a partial hidden string.
-- Editing a pill exposes a searchable chooser without losing surrounding text.
+- Typing `@` opens the searchable chooser without losing surrounding text.
 - Unresolved and ambiguous tokens remain visible as errors and offer resolution.
 - The underlying stored prompt remains portable plain text plus explicit resolved IDs/provenance where required.
 
-The adjacent References pane lists resolved source assets and versions, origin labels, availability, and remove/replace actions. It does not become a second source of generation-reference truth.
+The adjacent References section is derived from prompt mentions and automatic
+generation context. It lists resolved cards, origins, availability, and any
+model-supported reference-role dropdown. Prompt membership remains the source
+of truth for user-selected references; the section does not provide a second
+add/remove mechanism.
 
 Every prompt-capable surface, including storyboard cards and generation forms, links to and follows this contract instead of redefining pills.
 

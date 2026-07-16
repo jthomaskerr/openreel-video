@@ -14,6 +14,7 @@ This directory uses one canonical functional specification per subsystem. Redire
 | Audio/subtitles | [Audio Analysis & Subtitles](./audio-analysis-subtitles.md) | Analysis, transcription, subtitle clips, caption import/edit/render/export contract |
 | Song structure | [Song Sections](./song-sections.md) | Section inference, evidence, editing, confirmation, projection |
 | AI generation | [AI Generation and Providers](./generation.md) | Provider boundary, models, references, jobs, finalization, adapters |
+| References/generated images | [References and Generated Images](./references.md) | Typed media mentions, reference cards and roles, provider rewriting, generated-image creation and regeneration |
 | Inspector | [Inspector / Right-Sidebar Shell](./inspector-shell.md) | Sidebar navigation, selection routing, reference pills, panel layout |
 | Problems/logging | [Problems, Errors & Logging](./problems-errors-logging.md) | Problem and log models, lifecycle, actions, filtering, presentation |
 | Export | [Export](./export.md) | Video, audio, image, sequence export, codecs, rendering and cancellation |
