@@ -2,7 +2,7 @@
 
 **Canonical functional spec:** [Timeline](../timeline.md).
 
-**Status:** Open regression contract.
+**Status:** Implemented and verified 2026-07-16.
 
 **Outcome:** Trimming a clip changes only the material outside the dragged edge: the retained material stays at the same timeline times, and either trim edge uses the configured timeline snap targets when snapping is enabled.
 
