@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { assertValidMediaId, resolveContainedPath } from "./storage-validation";
 
-const PENDING_DIRECTORY = ".openreel-pending-media";
+export const PENDING_MEDIA_DIRECTORY = ".openreel-pending-media";
 export const MAX_PENDING_MEDIA_BYTES = 4 * 1024 * 1024 * 1024;
 export const DEFAULT_PENDING_MEDIA_TTL_MS = 24 * 60 * 60 * 1_000;
 
@@ -44,7 +44,7 @@ async function filesMatch(leftPath: string, rightPath: string): Promise<boolean>
 }
 
 export function pendingMediaRoot(projectDir: string): string {
-  return join(projectDir, PENDING_DIRECTORY);
+  return join(projectDir, PENDING_MEDIA_DIRECTORY);
 }
 
 export function pendingUploadTempDirectory(projectDir: string): string {

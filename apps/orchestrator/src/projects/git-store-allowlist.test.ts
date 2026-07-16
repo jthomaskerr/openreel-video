@@ -85,6 +85,42 @@ test("dirty inspection supports project snapshots larger than Node's default chi
   }
 });
 
+test("cumulative commits ignore pending upload storage without deleting it", async () => {
+  const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
+  try {
+    const project = await projectStore.createProject("Pending Upload Isolation");
+    await gitStore.commit(project.id, "test: create pending upload project", {
+      allowlist: ["project.json"],
+      expectedEntries: [{ status: "A", path: "project.json" }],
+    });
+    const worktreeDir = join(repoDir, project.id);
+    const pendingEntryDir = join(
+      worktreeDir,
+      ".openreel-pending-media",
+      "11111111-1111-4111-8111-111111111111",
+    );
+    const pendingContent = join(pendingEntryDir, "content");
+    await mkdir(pendingEntryDir, { recursive: true });
+    await writeFile(pendingContent, "pending bytes");
+    const projectPath = join(worktreeDir, "project.json");
+    const saved = JSON.parse(await readFile(projectPath, "utf8"));
+    saved.name = "Pending Upload Isolation Updated";
+    saved.modifiedAt += 1;
+    await writeFile(projectPath, JSON.stringify(saved, null, 2));
+
+    const result = await gitStore.commitCumulativeProjectDiff(
+      project.id,
+      async () => undefined,
+      () => true,
+    );
+
+    assert.equal(result.kind, "committed");
+    assert.equal(await readFile(pendingContent, "utf8"), "pending bytes");
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("cumulative commit ignores metadata-only drift and rejects unrelated paths", async () => {
   const { fixtureRoot, gitStore, projectStore } = await makeStore();
   try {

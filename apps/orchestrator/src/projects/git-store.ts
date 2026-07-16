@@ -12,6 +12,7 @@ import {
   deterministicCommitMessage,
   semanticProjectChanges,
 } from "./semantic-commit";
+import { PENDING_MEDIA_DIRECTORY } from "./pending-media";
 
 const execFileAsync = promisify(execFile);
 const GIT_OUTPUT_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
@@ -428,6 +429,25 @@ export class GitStore {
     // Configure LFS for this repository without taking ownership of the user's
     // hook path. OpenReel invokes its LFS integrity operations explicitly.
     await this.git(["lfs", "install", "--local", "--skip-repo"], this.repoDir);
+
+    // Pending uploads are operational state, not project history. Keep them
+    // invisible to every project worktree without changing tracked branches.
+    const excludeDirectory = join(this.repoDir, ".git", "info");
+    const excludePath = join(excludeDirectory, "exclude");
+    const pendingMediaExclude = `/${PENDING_MEDIA_DIRECTORY}/`;
+    await mkdir(excludeDirectory, { recursive: true });
+    const excludes = existsSync(excludePath)
+      ? await readFile(excludePath, "utf-8")
+      : "";
+    if (!excludes.split(/\r?\n/).includes(pendingMediaExclude)) {
+      await writeFile(
+        excludePath,
+        excludes.trimEnd().length > 0
+          ? `${excludes.trimEnd()}\n${pendingMediaExclude}\n`
+          : `${pendingMediaExclude}\n`,
+        "utf-8",
+      );
+    }
 
     const attributesPath = join(this.repoDir, ".gitattributes");
     let attributes = "";
