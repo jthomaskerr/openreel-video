@@ -12,6 +12,7 @@ import {
   pointerToTimelineTime,
   type TimelineMediaType,
 } from "./media-drop";
+import type { ClipTrimUpdate } from "./trim-calculation";
 import { ClipComponent } from "./ClipComponent";
 import { TextClipComponent } from "./TextClipComponent";
 import { ShapeClipComponent } from "./ShapeClipComponent";
@@ -44,11 +45,7 @@ interface TrackLaneProps {
   ) => void;
   onMoveTextClip: (clipId: string, newStartTime: number) => void;
   onSnapIndicator: (time: number | null) => void;
-  onTrimClip?: (
-    clipId: string,
-    edge: "left" | "right",
-    newTime: number,
-  ) => void;
+  onTrimClip?: (clipId: string, update: ClipTrimUpdate) => void;
   onTrimTextClip: (
     clipId: string,
     edge: "left" | "right",

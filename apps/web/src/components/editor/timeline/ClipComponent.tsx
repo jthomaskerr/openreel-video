@@ -4,7 +4,13 @@ import { getEffectiveThumbnailUrl } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
-import { calculateSnap, getClipStyle, getMetadataBadge } from "./utils";
+import { calculateEdgeSnap, calculateSnap, getClipStyle, getMetadataBadge } from "./utils";
+import {
+  calculateClipTrim,
+  type ClipTrimSnapshot,
+  type ClipTrimUpdate,
+} from "./trim-calculation";
+import type { SnapSettings } from "./types";
 import { ClipContextMenu } from "./ClipContextMenu";
 import { TimelineContextMenu } from "./TimelineContextMenu";
 import { toast } from "../../../stores/notification-store";
@@ -37,16 +43,30 @@ interface ClipComponentProps {
     targetTrackId?: string,
   ) => void;
   onSnapIndicator: (time: number | null) => void;
-  onTrimClip?: (
-    clipId: string,
-    edge: "left" | "right",
-    newTime: number,
-  ) => void;
+  onTrimClip?: (clipId: string, update: ClipTrimUpdate) => void;
+}
+
+interface TrimInteractionSnapshot {
+  edge: "left" | "right";
+  originalEdgeTime: number;
+  originalRightEdge: number;
+  pointerOffsetPixels: number;
+  trim: ClipTrimSnapshot;
+  allTracks: Track[];
+  playheadPosition: number;
+  snapSettings: SnapSettings;
+  onTrimClip: NonNullable<ClipComponentProps["onTrimClip"]>;
+  onSnapIndicator: ClipComponentProps["onSnapIndicator"];
 }
 
 const AUTO_SCROLL_THRESHOLD = 80;
 const AUTO_SCROLL_SPEED = 10;
 const DRAG_THRESHOLD = 5;
+const TIMELINE_TIME_EPSILON = 1e-9;
+
+function timelineTimesMatch(a: number, b: number): boolean {
+  return Math.abs(a - b) <= TIMELINE_TIME_EPSILON * Math.max(1, Math.abs(a), Math.abs(b));
+}
 
 export const ClipComponent: React.FC<ClipComponentProps> = ({
   clip,
@@ -64,14 +84,14 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const { getMediaItem, replaceMediaAsset } = useProjectStore();
   const projectId = useProjectStore((state) => state.project.id);
   const allMediaItems = useProjectStore((state) => state.project.mediaLibrary.items);
-  const { snapSettings } = useUIStore();
+  const snapSettings = useUIStore((state) => state.snapSettings);
   const effectApplicationClipId = useUIStore(
     (state) => state.effectApplicationClipId,
   );
   const effectApplicationLabel = useUIStore(
     (state) => state.effectApplicationLabel,
   );
-  const { playheadPosition } = useTimelineStore();
+  const playheadPosition = useTimelineStore((state) => state.playheadPosition);
   const mediaItem = getMediaItem(clip.mediaId);
   const runtimeAvailabilityView = useMediaAvailabilityView(projectId, mediaItem, clip.mediaId);
   const confirmedReceipt = usePersistenceStatusStore((state) =>
@@ -86,26 +106,15 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   const [dragYOffset, setDragYOffset] = useState(0);
   const [isInvalidDrop, setIsInvalidDrop] = useState(false);
   const [isTrimming, setIsTrimming] = useState(false);
-  const [trimEdge, setTrimEdge] = useState<"left" | "right" | null>(null);
   // Snapshot of every additional selected clip at drag start. Multi-clip
   // drag applies the same time delta to each entry so they stay locked
   // together as the dragged clip moves.
   const multiDragSnapshotRef = useRef<
     Array<{ clipId: string; startTime: number; trackId: string }>
   >([]);
-  const trimStartRef = useRef<{
-    mouseX: number;
-    startTime: number;
-    duration: number;
-    inPoint: number;
-    outPoint: number;
-  }>({
-    mouseX: 0,
-    startTime: clip.startTime,
-    duration: clip.duration,
-    inPoint: clip.inPoint,
-    outPoint: clip.outPoint,
-  });
+  const trimInteractionRef = useRef<TrimInteractionSnapshot | null>(null);
+  const pixelsPerSecondRef = useRef(pixelsPerSecond);
+  pixelsPerSecondRef.current = pixelsPerSecond;
   const dragStartRef = useRef<{ mouseY: number; clipY: number; scrollTop: number }>({
     mouseY: 0,
     clipY: 0,
@@ -396,16 +405,46 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
     (edge: "left" | "right") => (e: React.MouseEvent) => {
       if (e.button !== 0) return;
       if (track.locked || !onTrimClip) return;
+      const timeline = timelineRef.current;
+      if (!timeline) return;
       e.stopPropagation();
-      setIsTrimming(true);
-      setTrimEdge(edge);
-      trimStartRef.current = {
-        mouseX: e.clientX,
+      const sourceDurationCandidate = mediaItem?.metadata?.duration;
+      const sourceDuration =
+        typeof sourceDurationCandidate === "number" &&
+        Number.isFinite(sourceDurationCandidate) &&
+        sourceDurationCandidate > 0 &&
+        sourceDurationCandidate >= clip.outPoint
+          ? sourceDurationCandidate
+          : Math.max(clip.outPoint, clip.inPoint + clip.duration);
+      const originalRightEdge = clip.startTime + clip.duration;
+      const originalEdgeTime = edge === "left" ? clip.startTime : originalRightEdge;
+      const timelineRect = timeline.getBoundingClientRect();
+      const pointerContentX = e.clientX - timelineRect.left + timeline.scrollLeft;
+      const trim: ClipTrimSnapshot = {
+        clipId: clip.id,
         startTime: clip.startTime,
         duration: clip.duration,
         inPoint: clip.inPoint,
         outPoint: clip.outPoint,
+        sourceDuration,
+        keyframes: clip.keyframes.map((keyframe) => ({ ...keyframe })),
       };
+      trimInteractionRef.current = {
+        edge,
+        originalEdgeTime,
+        originalRightEdge,
+        pointerOffsetPixels: pointerContentX - originalEdgeTime * pixelsPerSecond,
+        trim,
+        allTracks: allTracks.map((candidateTrack) => ({
+          ...candidateTrack,
+          clips: candidateTrack.clips.map((candidateClip) => ({ ...candidateClip })),
+        })),
+        playheadPosition,
+        snapSettings: { ...snapSettings },
+        onTrimClip,
+        onSnapIndicator,
+      };
+      setIsTrimming(true);
       document.body.style.cursor = "ew-resize";
     };
 
@@ -626,47 +665,77 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
   ]);
 
   useEffect(() => {
-    if (!isTrimming || !trimEdge || !onTrimClip) return;
+    const interaction = trimInteractionRef.current;
+    if (!isTrimming || !interaction) return;
+
+    let terminated = false;
+
+    const terminate = () => {
+      if (terminated) return;
+      terminated = true;
+      trimInteractionRef.current = null;
+      interaction.onSnapIndicator(null);
+      document.body.style.cursor = "";
+    };
 
     const handleMouseMove = (e: MouseEvent) => {
-      const deltaX = e.clientX - trimStartRef.current.mouseX;
-      const deltaTime = deltaX / pixelsPerSecond;
+      if (terminated || trimInteractionRef.current !== interaction) return;
+      const timeline = timelineRef.current;
+      const activePixelsPerSecond = pixelsPerSecondRef.current;
+      if (!timeline || !Number.isFinite(activePixelsPerSecond) || activePixelsPerSecond <= 0) return;
 
-      if (trimEdge === "left") {
-        // Left-edge trim: clip the beginning of the source by advancing inPoint.
-        // The clip stays in place on the timeline; only its source start offset changes.
-        const newInPoint = Math.max(
-          0,
-          trimStartRef.current.inPoint + deltaTime,
-        );
-        const maxInPoint = trimStartRef.current.outPoint - 0.1;
-        const clampedInPoint = Math.min(newInPoint, maxInPoint);
-        onTrimClip(clip.id, "left", clampedInPoint);
-      } else {
-        const newEndTime =
-          trimStartRef.current.startTime +
-          trimStartRef.current.duration +
-          deltaTime;
-        const minEndTime = trimStartRef.current.startTime + 0.1;
-        const clampedEndTime = Math.max(newEndTime, minEndTime);
-        onTrimClip(clip.id, "right", clampedEndTime);
-      }
+      const timelineRect = timeline.getBoundingClientRect();
+      const pointerContentX = e.clientX - timelineRect.left + timeline.scrollLeft;
+      const rawEdgeTime =
+        (pointerContentX - interaction.pointerOffsetPixels) / activePixelsPerSecond;
+      const snapResult = calculateEdgeSnap(
+        rawEdgeTime,
+        interaction.trim.clipId,
+        interaction.allTracks,
+        interaction.playheadPosition,
+        interaction.snapSettings,
+        activePixelsPerSecond,
+      );
+      const update = calculateClipTrim(
+        interaction.trim,
+        interaction.edge,
+        snapResult.time,
+      );
+
+      interaction.onTrimClip(interaction.trim.clipId, update);
+      const acceptedSnapPoint =
+        snapResult.snapped &&
+        snapResult.snapPoint &&
+        timelineTimesMatch(snapResult.snapPoint.time, update.edgeTime)
+          ? snapResult.snapPoint.time
+          : null;
+      interaction.onSnapIndicator(
+        acceptedSnapPoint,
+      );
     };
 
     const handleMouseUp = () => {
+      terminate();
       setIsTrimming(false);
-      setTrimEdge(null);
-      document.body.style.cursor = "";
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      terminate();
+      setIsTrimming(false);
     };
 
     window.addEventListener("mousemove", handleMouseMove);
     window.addEventListener("mouseup", handleMouseUp);
+    window.addEventListener("keydown", handleKeyDown);
 
     return () => {
       window.removeEventListener("mousemove", handleMouseMove);
       window.removeEventListener("mouseup", handleMouseUp);
+      window.removeEventListener("keydown", handleKeyDown);
+      terminate();
     };
-  }, [isTrimming, trimEdge, clip.id, pixelsPerSecond, onTrimClip]);
+  }, [isTrimming, timelineRef]);
 
   // Number of filmstrip tiles that fit across the clip width
   const tileCount = Math.max(1, Math.ceil(width / 60));
@@ -977,6 +1046,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
           {(isVideo || isImage || isAudio) && onTrimClip && (
             <>
               <div
+                data-testid={`clip-trim-left-${clip.id}`}
                 onMouseDown={handleTrimMouseDown("left")}
                 className={`absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize z-20 flex items-center justify-center transition-opacity ${
                   isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"
@@ -987,6 +1057,7 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
                 {isSelected && <div className="w-0.5 h-3 bg-primary-foreground/80 rounded-full" />}
               </div>
               <div
+                data-testid={`clip-trim-right-${clip.id}`}
                 onMouseDown={handleTrimMouseDown("right")}
                 className={`absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize z-20 flex items-center justify-center transition-opacity ${
                   isSelected ? "opacity-100" : "opacity-0 group-hover:opacity-100"

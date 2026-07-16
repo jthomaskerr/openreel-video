@@ -5,6 +5,7 @@ import type { Clip, Track, MediaItem, ProjectSaveReceipt } from "@openreel/core"
 import { ClipComponent } from "./ClipComponent";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
+import { useTimelineStore } from "../../../stores/timeline-store";
 import { usePersistenceStatusStore } from "../../../stores/persistence-status-store";
 import { mediaAvailabilityRuntime } from "../../../services/media-verification";
 
@@ -99,12 +100,77 @@ function receipt(commitSha: string, semanticFilename = "clip-source.mp4"): Proje
   };
 }
 
+const SNAP_SETTINGS = {
+  enabled: true,
+  snapToClips: true,
+  snapToPlayhead: false,
+  snapToGrid: false,
+  snapToMarkers: false,
+  gridSize: 1,
+  snapThreshold: 10,
+};
+
+function renderTrimClip({
+  clip = { ...makeClip(), startTime: 10, duration: 8, inPoint: 2, outPoint: 10 },
+  clips,
+  pixelsPerSecond = 20,
+  rectLeft = 100,
+  scrollLeft = 0,
+  onTrimClip = vi.fn(),
+  onSnapIndicator = vi.fn(),
+}: {
+  clip?: Clip;
+  clips?: Clip[];
+  pixelsPerSecond?: number;
+  rectLeft?: number;
+  scrollLeft?: number;
+  onTrimClip?: ReturnType<typeof vi.fn>;
+  onSnapIndicator?: ReturnType<typeof vi.fn>;
+} = {}) {
+  const track = { ...makeTrack(clip), clips: clips ?? [clip] };
+  const timeline = document.createElement("div");
+  timeline.scrollLeft = scrollLeft;
+  vi.spyOn(timeline, "getBoundingClientRect").mockReturnValue({
+    left: rectLeft,
+    right: rectLeft + 800,
+    top: 0,
+    bottom: 100,
+    width: 800,
+    height: 100,
+    x: rectLeft,
+    y: 0,
+    toJSON: () => ({}),
+  });
+
+  const rendered = render(
+    <div style={{ position: "relative", width: 800, height: 80 }}>
+      <ClipComponent
+        clip={clip}
+        track={track}
+        allTracks={[track]}
+        pixelsPerSecond={pixelsPerSecond}
+        isSelected
+        trackHeights={new Map([[track.id, 60]])}
+        timelineRef={{ current: timeline }}
+        onSelect={vi.fn()}
+        onMoveClip={vi.fn()}
+        onSnapIndicator={onSnapIndicator}
+        onTrimClip={onTrimClip}
+      />
+    </div>,
+  );
+
+  return { ...rendered, clip, timeline, onTrimClip, onSnapIndicator };
+}
+
 describe("ClipComponent", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mediaAvailabilityRuntime.reset();
     usePersistenceStatusStore.getState().reset();
     useUIStore.getState().clearSelection();
+    useUIStore.setState({ snapSettings: { ...SNAP_SETTINGS, enabled: false } });
+    useTimelineStore.setState({ playheadPosition: 30 });
     const clip = makeClip();
     const track = makeTrack(clip);
     useProjectStore.setState((state) => ({
@@ -599,5 +665,218 @@ describe("ClipComponent", () => {
       />,
     );
     expect(screen.getByRole("status")).toHaveTextContent(expectedLabel);
+  });
+
+  it("derives repeated left-trim moves from the immutable mousedown snapshot at zoom and scroll", () => {
+    const { timeline, onTrimClip } = renderTrimClip({
+      pixelsPerSecond: 40,
+      scrollLeft: 80,
+    });
+    const handle = screen.getByTestId("clip-trim-left-clip-1");
+
+    fireEvent.mouseDown(handle, { button: 0, clientX: 420 });
+    timeline.scrollLeft = 120;
+    fireEvent.mouseMove(window, { clientX: 500 });
+    fireEvent.mouseMove(window, { clientX: 540 });
+
+    expect(onTrimClip).toHaveBeenNthCalledWith(1, "clip-1", expect.objectContaining({
+      edge: "left",
+      edgeTime: 13,
+      startTime: 13,
+      duration: 5,
+      inPoint: 5,
+      outPoint: 10,
+    }));
+    expect(onTrimClip).toHaveBeenNthCalledWith(2, "clip-1", expect.objectContaining({
+      edgeTime: 14,
+      startTime: 14,
+      duration: 4,
+      inPoint: 6,
+    }));
+  });
+
+  it("uses edge-only snapping for both handles and reports the exact preview edge", () => {
+    useUIStore.setState({ snapSettings: { ...SNAP_SETTINGS } });
+    const clip = { ...makeClip(), startTime: 10, duration: 8, inPoint: 2, outPoint: 10 };
+    const other = { ...makeClip(), id: "other", startTime: 13, duration: 1 };
+    const { onTrimClip, onSnapIndicator } = renderTrimClip({ clip, clips: [clip, other] });
+
+    fireEvent.mouseDown(screen.getByTestId("clip-trim-left-clip-1"), {
+      button: 0,
+      clientX: 300,
+    });
+    fireEvent.mouseMove(window, { clientX: 352 });
+    fireEvent.mouseMove(window, { clientX: 374 });
+    fireEvent.mouseMove(window, { clientX: 320 });
+
+    expect(onTrimClip).toHaveBeenNthCalledWith(1, "clip-1", expect.objectContaining({
+      edge: "left",
+      edgeTime: 13,
+      startTime: 13,
+      duration: 5,
+    }));
+    expect(onTrimClip).toHaveBeenNthCalledWith(2, "clip-1", expect.objectContaining({
+      edgeTime: 14,
+      startTime: 14,
+      duration: 4,
+    }));
+    expect(onSnapIndicator.mock.calls.slice(0, 3)).toEqual([[13], [14], [null]]);
+
+    fireEvent.mouseUp(window);
+    fireEvent.mouseDown(screen.getByTestId("clip-trim-right-clip-1"), {
+      button: 0,
+      clientX: 460,
+    });
+    fireEvent.mouseMove(window, { clientX: 383 });
+
+    expect(onTrimClip).toHaveBeenLastCalledWith("clip-1", expect.objectContaining({
+      edge: "right",
+      edgeTime: 14,
+      startTime: 10,
+      inPoint: 2,
+      duration: 4,
+      outPoint: 6,
+    }));
+    expect(onSnapIndicator).toHaveBeenLastCalledWith(14);
+  });
+
+  it("excludes the trimmed clip's own edges from snapping", () => {
+    useUIStore.setState({ snapSettings: { ...SNAP_SETTINGS } });
+    const { onTrimClip, onSnapIndicator } = renderTrimClip();
+
+    fireEvent.mouseDown(screen.getByTestId("clip-trim-left-clip-1"), {
+      button: 0,
+      clientX: 300,
+    });
+    fireEvent.mouseMove(window, { clientX: 456 });
+
+    expect(onTrimClip).toHaveBeenLastCalledWith("clip-1", expect.objectContaining({
+      edgeTime: 17.8,
+    }));
+    expect(onSnapIndicator).toHaveBeenLastCalledWith(null);
+  });
+
+  it("clears the indicator when the trim clamp cannot accept the snapped edge", () => {
+    useUIStore.setState({ snapSettings: { ...SNAP_SETTINGS } });
+    const clip = { ...makeClip(), startTime: 10, duration: 8, inPoint: 2, outPoint: 10 };
+    const unreachableTarget = {
+      ...makeClip(),
+      id: "unreachable-target",
+      startTime: 18.2,
+      duration: 1,
+    };
+    const { onTrimClip, onSnapIndicator } = renderTrimClip({
+      clip,
+      clips: [clip, unreachableTarget],
+    });
+
+    fireEvent.mouseDown(screen.getByTestId("clip-trim-left-clip-1"), {
+      button: 0,
+      clientX: 300,
+    });
+    fireEvent.mouseMove(window, { clientX: 463 });
+
+    expect(onTrimClip).toHaveBeenLastCalledWith("clip-1", expect.objectContaining({
+      edgeTime: 17.9,
+      startTime: 17.9,
+      duration: 0.1,
+    }));
+    expect(onSnapIndicator).toHaveBeenLastCalledWith(null);
+  });
+
+  it("clears the trim indicator and cursor on mouseup, Escape, and unmount", () => {
+    useUIStore.setState({ snapSettings: { ...SNAP_SETTINGS } });
+    const clip = { ...makeClip(), startTime: 10, duration: 8, inPoint: 2, outPoint: 10 };
+    const other = { ...makeClip(), id: "other", startTime: 13, duration: 1 };
+    const subject = renderTrimClip({ clip, clips: [clip, other] });
+    const leftHandle = screen.getByTestId("clip-trim-left-clip-1");
+
+    fireEvent.mouseDown(leftHandle, { button: 0, clientX: 300 });
+    fireEvent.mouseMove(window, { clientX: 352 });
+    expect(document.body.style.cursor).toBe("ew-resize");
+    fireEvent.mouseUp(window);
+    expect(subject.onSnapIndicator).toHaveBeenLastCalledWith(null);
+    expect(document.body.style.cursor).toBe("");
+
+    fireEvent.mouseDown(leftHandle, { button: 0, clientX: 300 });
+    fireEvent.mouseMove(window, { clientX: 352 });
+    const callsBeforeEscape = subject.onTrimClip.mock.calls.length;
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.mouseMove(window, { clientX: 374 });
+    expect(subject.onTrimClip).toHaveBeenCalledTimes(callsBeforeEscape);
+    expect(subject.onSnapIndicator).toHaveBeenLastCalledWith(null);
+    expect(document.body.style.cursor).toBe("");
+
+    fireEvent.mouseDown(leftHandle, { button: 0, clientX: 300 });
+    fireEvent.mouseMove(window, { clientX: 352 });
+    subject.unmount();
+    expect(subject.onSnapIndicator).toHaveBeenLastCalledWith(null);
+    expect(document.body.style.cursor).toBe("");
+  });
+
+  it("does not extend right trim beyond an unknown source boundary", () => {
+    useProjectStore.setState((state) => ({
+      project: {
+        ...state.project,
+        mediaLibrary: {
+          items: [{
+            ...mediaItem("media-1"),
+            metadata: { ...mediaItem("media-1").metadata, duration: Number.NaN },
+          }],
+        },
+      },
+    }));
+    const { onTrimClip } = renderTrimClip();
+
+    fireEvent.mouseDown(screen.getByTestId("clip-trim-right-clip-1"), {
+      button: 0,
+      clientX: 460,
+    });
+    fireEvent.mouseMove(window, { clientX: 560 });
+
+    expect(onTrimClip).toHaveBeenLastCalledWith("clip-1", expect.objectContaining({
+      edge: "right",
+      edgeTime: 18,
+      duration: 8,
+      outPoint: 10,
+    }));
+  });
+
+  it("uses the existing image clip boundary when media duration metadata is zero", () => {
+    const imageMedia: MediaItem = {
+      ...mediaItem("media-1"),
+      type: "image",
+      metadata: { ...mediaItem("media-1").metadata, duration: 0 },
+    };
+    useProjectStore.setState((state) => ({
+      project: {
+        ...state.project,
+        mediaLibrary: { items: [imageMedia] },
+      },
+    }));
+    const imageClip: Clip = {
+      ...makeClip(),
+      type: "image",
+      startTime: 10,
+      duration: 8,
+      inPoint: 2,
+      outPoint: 10,
+    };
+    const { onTrimClip } = renderTrimClip({ clip: imageClip });
+
+    fireEvent.mouseDown(screen.getByTestId("clip-trim-right-clip-1"), {
+      button: 0,
+      clientX: 460,
+    });
+    fireEvent.mouseMove(window, { clientX: 440 });
+
+    expect(onTrimClip).toHaveBeenLastCalledWith("clip-1", expect.objectContaining({
+      edge: "right",
+      edgeTime: 17,
+      startTime: 10,
+      duration: 7,
+      inPoint: 2,
+      outPoint: 9,
+    }));
   });
 });
