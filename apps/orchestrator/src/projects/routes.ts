@@ -25,6 +25,7 @@ import {
   cleanupExpiredPendingMedia,
   listPendingMedia,
   MAX_PENDING_MEDIA_BYTES,
+  PendingMediaConflictError,
   pendingUploadTempDirectory,
   removePendingMedia,
   storePendingUpload,
@@ -415,7 +416,13 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         });
       } catch (err) {
         if (req.file?.path) await rm(req.file.path, { force: true }).catch(() => undefined);
-        const status = err instanceof TypeError ? 415 : err instanceof RangeError ? 413 : 500;
+        const status = err instanceof TypeError
+          ? 415
+          : err instanceof RangeError
+            ? 413
+            : err instanceof PendingMediaConflictError
+              ? 409
+              : 500;
         res.status(status).json({ error: "Failed to upload media", detail: String(err) });
       }
     },

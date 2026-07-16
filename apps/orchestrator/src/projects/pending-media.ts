@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
+import { createReadStream } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { assertValidMediaId, resolveContainedPath } from "./storage-validation";
 
 const PENDING_DIRECTORY = ".openreel-pending-media";
@@ -24,6 +26,21 @@ interface StoredPendingMediaMetadata {
   readonly mimeType: string;
   readonly byteSize: number;
   readonly uploadedAt: number;
+}
+
+export class PendingMediaConflictError extends Error {}
+
+async function fileDigest(path: string): Promise<string> {
+  const digest = crypto.createHash("sha256");
+  await pipeline(createReadStream(path), digest);
+  return digest.digest("hex");
+}
+
+async function filesMatch(leftPath: string, rightPath: string): Promise<boolean> {
+  const [left, right] = await Promise.all([stat(leftPath), stat(rightPath)]);
+  if (!left.isFile() || !right.isFile() || left.size !== right.size) return false;
+  const [leftDigest, rightDigest] = await Promise.all([fileDigest(leftPath), fileDigest(rightPath)]);
+  return leftDigest === rightDigest;
 }
 
 export function pendingMediaRoot(projectDir: string): string {
@@ -60,8 +77,17 @@ export async function storePendingUpload(
   if (!uploaded.isFile() || uploaded.size !== byteSize) throw new Error("Pending upload byte size validation failed");
 
   const directory = entryDirectory(projectDir, mediaId);
-  if (await readPendingMedia(projectDir, mediaId)) {
-    throw new Error(`Pending media ${mediaId} already exists`);
+  const existing = await readPendingMedia(projectDir, mediaId);
+  if (existing) {
+    const identicalRetry = existing.originalFilename === originalFilename
+      && existing.mimeType === mimeType
+      && existing.byteSize === byteSize
+      && await filesMatch(existing.contentPath, tempPath);
+    if (identicalRetry) {
+      await rm(tempPath, { force: true });
+      return existing;
+    }
+    throw new PendingMediaConflictError(`Pending media ${mediaId} already exists with different upload data`);
   }
   await mkdir(pendingMediaRoot(projectDir), { recursive: true });
   const replacement = join(pendingMediaRoot(projectDir), `.replacement-${mediaId}-${crypto.randomUUID()}`);

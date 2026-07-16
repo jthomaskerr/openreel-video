@@ -322,6 +322,25 @@ test("media upload remains pending without a persistence receipt or commit", asy
     assert.equal(pendingItems[0].mediaId, "media-1");
     assert.equal("contentPath" in pendingItems[0], false);
 
+    const retry = new FormData();
+    retry.set("file", new Blob(["video-bytes"], { type: "video/mp4" }), "Interview.mp4");
+    const retried = await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/media-1`, {
+      method: "POST",
+      body: retry,
+    });
+    assert.equal(retried.status, 200);
+    assert.deepEqual(await retried.json(), body);
+    assert.equal((await (await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/pending`)).json()).length, 1);
+
+    const conflict = new FormData();
+    conflict.set("file", new Blob(["other-video"], { type: "video/mp4" }), "Interview.mp4");
+    const conflicted = await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/media-1`, {
+      method: "POST",
+      body: conflict,
+    });
+    assert.equal(conflicted.status, 409);
+    assert.match((await conflicted.json()).detail, /different upload data/);
+
     const removed = await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/pending/media-1`, { method: "DELETE" });
     assert.equal(removed.status, 200);
     assert.deepEqual(await (await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/pending`)).json(), []);
