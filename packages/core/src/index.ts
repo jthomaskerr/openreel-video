@@ -18,6 +18,7 @@ export * from "./animation";
 export * from "./effects";
 export * from "./device";
 export * from "./media-availability";
+export * from "./generation/references";
 export {
   ExportEngine,
   getExportEngine,

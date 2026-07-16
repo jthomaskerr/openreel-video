@@ -193,6 +193,7 @@ function mockConfirmedBackendCreate() {
         ...settings,
       },
       mediaLibrary: { items: [] },
+      generatedImageDefinitions: [],
       timeline: { tracks: [], subtitles: [], duration: 0, markers: [] },
     };
     usePersistenceStatusStore.getState().confirmReceipt(project.id, {
@@ -288,6 +289,7 @@ describe("ProjectStore", () => {
             sampleRate: 48000, channels: 2,
           },
           mediaLibrary: { items: [] },
+          generatedImageDefinitions: [],
           timeline: { tracks: [], subtitles: [], duration: 0, markers: [] },
         };
 
@@ -439,6 +441,7 @@ describe("ProjectStore", () => {
           channels: 2
         },
         mediaLibrary: { items: [] },
+        generatedImageDefinitions: [],
         timeline: {
           tracks: [],
           subtitles: [],
@@ -487,6 +490,7 @@ describe("ProjectStore", () => {
           channels: 2
         },
         mediaLibrary: { items: [mockMediaItem] },
+        generatedImageDefinitions: [],
         timeline: {
           tracks: [
             {
@@ -1126,6 +1130,7 @@ describe("ProjectStore", () => {
               thumbnailUrl: null},
           ]
         },
+        generatedImageDefinitions: [],
         timeline: {
           tracks: [],
           subtitles: [],
@@ -1162,6 +1167,7 @@ describe("ProjectStore", () => {
           channels: 2
         },
         mediaLibrary: { items: [] },
+        generatedImageDefinitions: [],
         timeline: {
           tracks: [
             {
@@ -1246,6 +1252,7 @@ describe("ProjectStore", () => {
         channels: 2
         },
       mediaLibrary: { items: [] },
+      generatedImageDefinitions: [],
       timeline: {
         tracks: [
           {
@@ -1403,6 +1410,7 @@ describe("ProjectStore", () => {
           channels: 2
         },
         mediaLibrary: { items: [mediaItem] },
+        generatedImageDefinitions: [],
         timeline: {
           tracks: [
             {
@@ -1681,6 +1689,7 @@ describe("ProjectStore", () => {
         channels: 2
         },
       mediaLibrary: { items: [] },
+      generatedImageDefinitions: [],
       timeline: {
         tracks: [
           {
@@ -1892,6 +1901,7 @@ describe("ProjectStore", () => {
           channels: 2
         },
         mediaLibrary: { items: [] },
+        generatedImageDefinitions: [],
         timeline: {
           tracks: [
             {
@@ -1975,6 +1985,7 @@ describe("ProjectStore", () => {
           channels: 2
         },
         mediaLibrary: { items: [mediaItem] },
+        generatedImageDefinitions: [],
         timeline: {
           tracks: [
             {

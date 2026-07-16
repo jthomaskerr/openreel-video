@@ -252,6 +252,7 @@ export class AnimationImporter {
         name: processedSchema.project.name,
         createdAt: Date.now(),
         modifiedAt: Date.now(),
+        generatedImageDefinitions: [],
         timeline,
         settings: {
           width: processedSchema.project.width,

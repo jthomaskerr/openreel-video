@@ -32,6 +32,7 @@ export function createEmptyProject(
     modifiedAt: now,
     settings: { ...DEFAULT_PROJECT_SETTINGS, ...settings },
     mediaLibrary: { items: [] },
+    generatedImageDefinitions: [],
     timeline: createDefaultTimeline(),
   };
 }
@@ -46,6 +47,7 @@ export function createUnresolvedProject(): Project {
     modifiedAt: now,
     settings: { ...DEFAULT_PROJECT_SETTINGS },
     mediaLibrary: { items: [] },
+    generatedImageDefinitions: [],
     timeline: createDefaultTimeline(),
   };
 }

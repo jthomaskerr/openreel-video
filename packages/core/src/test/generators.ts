@@ -231,6 +231,7 @@ export const projectArb: fc.Arbitrary<Project> = fc.record({
   name: nameArb,
   createdAt: timestampArb,
   modifiedAt: timestampArb,
+  generatedImageDefinitions: fc.constant([]),
   settings: projectSettingsArb,
   mediaLibrary: mediaLibraryArb,
   timeline: timelineArb,
@@ -326,6 +327,7 @@ export const projectWithTracksArb: fc.Arbitrary<Project> = fc
     name: nameArb,
     createdAt: timestampArb,
     modifiedAt: timestampArb,
+    generatedImageDefinitions: fc.constant([]),
     settings: projectSettingsArb,
     mediaLibrary: fc.record({
       items: fc.array(mediaItemArb, { minLength: 1, maxLength: 5 }),

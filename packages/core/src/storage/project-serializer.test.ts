@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { IStorageEngine, MediaRecord, ProjectSummary } from "./types";
-import type { Project } from "../types";
+import type { MediaItem, Project } from "../types";
 import { ProjectSerializer, SCHEMA_VERSION } from "./project-serializer";
 
 class MemoryStorage implements IStorageEngine {
@@ -35,7 +35,7 @@ class MemoryStorage implements IStorageEngine {
   }
   close(): void {}
 }
-function projectWithMissingClip(): Project {
+function projectWithMissingClip(): Omit<Project, "generatedImageDefinitions"> {
   return {
     id: "project-import",
     name: "Import Missing Media",
@@ -83,7 +83,126 @@ function projectWithMissingClip(): Project {
         };
 }
 
+const importedImage: MediaItem = {
+  id: "media-imported-image",
+  name: "imported.png",
+  type: "image",
+  fileHandle: null,
+  blob: null,
+  metadata: {
+    duration: 0,
+    width: 1024,
+    height: 1024,
+    frameRate: 0,
+    codec: "png",
+    sampleRate: 0,
+    channels: 0,
+    fileSize: 2048,
+  },
+  thumbnailUrl: "blob:imported-image",
+  assetGroupId: "asset-generated-image",
+  isCurrent: true,
+};
+
+const definition = {
+  id: "generated-image-definition-1",
+  projectId: "project-import",
+  assetGroupId: "asset-generated-image",
+  currentMediaVersionId: "media-imported-image",
+  sourceMediaVersionId: "media-imported-image",
+  title: "Generated still",
+  draft: {
+    prompt: "cinematic still",
+    negativePrompt: "blurry",
+    roleByReferenceKey: {
+      source: "source",
+    },
+    inputs: {
+      seed: 7,
+    },
+  },
+  attemptIds: ["attempt-1"],
+  createdAt: "2026-07-16T00:00:00.000Z",
+  updatedAt: "2026-07-16T00:00:00.000Z",
+};
+
 describe("ProjectSerializer imported unresolved media", () => {
+  it("migrates a legacy project to an empty generated image definition list", () => {
+    const serializer = new ProjectSerializer(new MemoryStorage());
+    const json = JSON.stringify({ version: SCHEMA_VERSION, project: projectWithMissingClip() });
+
+    const restored = serializer.importFromJson(json);
+
+    expect(restored.generatedImageDefinitions).toEqual([]);
+  });
+
+  it.each([
+    ["another project", { ...definition, projectId: "other-project" }],
+    ["a missing asset group", { ...definition, assetGroupId: "missing-group" }],
+  ])("rejects a generated image definition that targets %s", (_reason, invalidDefinition) => {
+    const serializer = new ProjectSerializer(new MemoryStorage());
+    const project = {
+      ...projectWithMissingClip(),
+      mediaLibrary: { items: [importedImage] },
+      generatedImageDefinitions: [invalidDefinition],
+    };
+
+    expect(() =>
+      serializer.importFromJson(JSON.stringify({ version: SCHEMA_VERSION, project })),
+    ).toThrow("Invalid generated image definition");
+  });
+
+  it.each([
+    [
+      "has no current version",
+      [{ ...importedImage, isCurrent: false }],
+      definition,
+    ],
+    [
+      "has multiple current versions",
+      [importedImage, { ...importedImage, id: "media-imported-image-2" }],
+      definition,
+    ],
+    [
+      "points at a current version outside its asset group",
+      [
+        importedImage,
+        {
+          ...importedImage,
+          id: "media-other-group",
+          assetGroupId: "asset-other-group",
+          isCurrent: true,
+        },
+      ],
+      { ...definition, currentMediaVersionId: "media-other-group" },
+    ],
+  ])("rejects a generated image definition whose asset group %s", (_reason, items, invalidDefinition) => {
+    const serializer = new ProjectSerializer(new MemoryStorage());
+    const project = {
+      ...projectWithMissingClip(),
+      mediaLibrary: { items },
+      generatedImageDefinitions: [invalidDefinition],
+    };
+
+    expect(() =>
+      serializer.importFromJson(JSON.stringify({ version: SCHEMA_VERSION, project })),
+    ).toThrow("Invalid generated image definition");
+  });
+
+  it("round-trips generated image definitions without moving provenance to an imported version", () => {
+    const project: Project = {
+      ...projectWithMissingClip(),
+      mediaLibrary: { items: [importedImage] },
+      generatedImageDefinitions: [definition],
+    };
+    const serializer = new ProjectSerializer(new MemoryStorage());
+
+    const restored = serializer.importFromJson(serializer.exportToJson(project));
+
+    expect(restored.generatedImageDefinitions).toEqual([definition]);
+    expect(restored.mediaLibrary.items[0]?.generationMeta).toBeUndefined();
+  });
+
   it("imports clips with missing media as relinkable placeholders", () => {
     vi.setSystemTime(1000);
     const serializer = new ProjectSerializer(new MemoryStorage());

@@ -153,6 +153,7 @@ function makeProject(overrides: {
       channels: 2
     },
     mediaLibrary: { items: overrides.mediaItems ?? [] },
+    generatedImageDefinitions: [],
     timeline: {
       tracks: [],
       subtitles: [],

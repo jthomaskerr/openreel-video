@@ -42,6 +42,7 @@ function project(items: MediaItem[] = [media("placeholder")]): Project {
       channels: 2,
     },
     mediaLibrary: { items },
+    generatedImageDefinitions: [],
     timeline: { tracks: [], duration: 0, markers: [], subtitles: [] },
   };
 }

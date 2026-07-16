@@ -42,6 +42,7 @@ function projectWithMedia(sourceFile: {
         },
       ]
     },
+    generatedImageDefinitions: [],
     timeline: {
       tracks: [],
       subtitles: [],

@@ -1,6 +1,7 @@
 import type { Timeline } from "./timeline";
 import type { TextClip } from "../text/types";
 import type { ShapeClip, SVGClip, StickerClip } from "../graphics/types";
+import type { GeneratedImageDefinition } from "../generation/references";
 
 /**
  * Producer-independent status of the primary media source file.
@@ -54,6 +55,7 @@ export interface Project {
   readonly modifiedAt: number;
   readonly settings: ProjectSettings;
   readonly mediaLibrary: MediaLibrary;
+  readonly generatedImageDefinitions: GeneratedImageDefinition[];
   readonly timeline: Timeline;
   readonly textClips?: TextClip[];
   readonly shapeClips?: ShapeClip[];

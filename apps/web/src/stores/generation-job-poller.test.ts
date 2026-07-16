@@ -25,6 +25,7 @@ function makeProject(source: MediaItem): Project {
     modifiedAt: 1,
     settings: { width: 1920, height: 1080, frameRate: 30, sampleRate: 48000, channels: 2 },
     mediaLibrary: { items: [source] },
+    generatedImageDefinitions: [],
     timeline: { tracks: [], duration: 0, markers: [], subtitles: [] },
   };
 }

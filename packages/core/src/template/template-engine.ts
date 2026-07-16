@@ -1295,6 +1295,7 @@ export class TemplateEngine {
       name: `${template.name} - Copy`,
       createdAt: Date.now(),
       modifiedAt: Date.now(),
+      generatedImageDefinitions: [],
       settings: template.settings,
       mediaLibrary: { items: mediaItems },
       timeline: {
@@ -1711,6 +1712,7 @@ export class TemplateEngine {
       name: `${template.name} - Copy`,
       createdAt: Date.now(),
       modifiedAt: Date.now(),
+      generatedImageDefinitions: [],
       settings: template.settings,
       mediaLibrary: { items: mediaItems },
       timeline: timelineClone,

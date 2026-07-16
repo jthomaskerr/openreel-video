@@ -252,6 +252,7 @@ class ProjectManager {
       mediaLibrary: {
         items: [],
       },
+      generatedImageDefinitions: [],
     };
 
     this.currentFileHandle = null;

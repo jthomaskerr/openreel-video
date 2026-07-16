@@ -19,6 +19,7 @@ function makeProject(items: MediaItem[] = []): Project {
       channels: 2,
     },
     mediaLibrary: { items },
+    generatedImageDefinitions: [],
     timeline: { tracks: [], duration: 0, markers: [], subtitles: [] },
   };
 }

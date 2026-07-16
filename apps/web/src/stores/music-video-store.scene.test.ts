@@ -44,6 +44,7 @@ function editorProject(tracks: Track[] = [track("video-track")], media: MediaIte
     modifiedAt: 1,
     settings: { width: 1920, height: 1080, frameRate: 30, sampleRate: 48000, channels: 2 },
     mediaLibrary: { items: media },
+    generatedImageDefinitions: [],
     timeline: { tracks, subtitles: [], markers: [], duration: 0 },
   };
 }

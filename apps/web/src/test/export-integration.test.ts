@@ -186,6 +186,7 @@ describe("Export Readiness - Project Validation", () => {
         channels: 2,
       },
       mediaLibrary: { items: [] },
+      generatedImageDefinitions: [],
       timeline: {
         tracks: [customTrack],
         subtitles: [],

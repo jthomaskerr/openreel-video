@@ -33,6 +33,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
     modifiedAt: 0,
     settings: { width: 1920, height: 1080, frameRate: 30, sampleRate: 48000, channels: 2 },
     mediaLibrary: { items: [makeMediaItem()] },
+    generatedImageDefinitions: [],
     timeline: { tracks: [], subtitles: [], duration: 0, markers: [] },
     ...overrides,
   };

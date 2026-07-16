@@ -69,6 +69,7 @@ const makeProject = (): Project => ({
       },
     ],
   },
+  generatedImageDefinitions: [],
   timeline: { tracks: [], subtitles: [], duration: 0, markers: [] },
 });
 

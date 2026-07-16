@@ -181,6 +181,7 @@ export class ProjectSerializer {
   }
 
   private normalizeImportedProject(project: Project): Project {
+    const generatedImageDefinitions = this.normalizeGeneratedImageDefinitions(project);
     const itemsById = new Map(project.mediaLibrary.items.map((item) => [item.id, item]));
     const processedItems: MediaItem[] = project.mediaLibrary.items.map((item) => {
       if (!item.blob && !item.generationMeta) {
@@ -214,6 +215,7 @@ export class ProjectSerializer {
 
     return {
       ...project,
+      generatedImageDefinitions,
       timeline: {
         ...project.timeline,
         tracks: processedTracks,
@@ -223,6 +225,64 @@ export class ProjectSerializer {
         items: processedItems,
       },
     };
+  }
+
+  private normalizeGeneratedImageDefinitions(
+    project: Project,
+  ): Project["generatedImageDefinitions"] {
+    const definitions = project.generatedImageDefinitions ?? [];
+    const mediaById = new Map(project.mediaLibrary.items.map((item) => [item.id, item]));
+
+    for (const definition of definitions) {
+      if (definition.projectId !== project.id) {
+        throw new Error(
+          `Invalid generated image definition ${definition.id}: projectId does not match project`,
+        );
+      }
+
+      const groupItems = project.mediaLibrary.items.filter(
+        (item) => (item.assetGroupId ?? item.id) === definition.assetGroupId,
+      );
+      if (groupItems.length === 0) {
+        throw new Error(
+          `Invalid generated image definition ${definition.id}: asset group has no media versions`,
+        );
+      }
+
+      const currentItems = groupItems.filter((item) => item.isCurrent === true);
+      if (currentItems.length !== 1) {
+        throw new Error(
+          `Invalid generated image definition ${definition.id}: asset group must have exactly one current version`,
+        );
+      }
+
+      const assertVersionInGroup = (
+        field: "currentMediaVersionId" | "sourceMediaVersionId",
+        mediaVersionId: string | undefined,
+      ) => {
+        if (!mediaVersionId) return;
+        const media = mediaById.get(mediaVersionId);
+        if (!media || (media.assetGroupId ?? media.id) !== definition.assetGroupId) {
+          throw new Error(
+            `Invalid generated image definition ${definition.id}: ${field} is outside the asset group`,
+          );
+        }
+      };
+
+      assertVersionInGroup("currentMediaVersionId", definition.currentMediaVersionId);
+      assertVersionInGroup("sourceMediaVersionId", definition.sourceMediaVersionId);
+
+      if (
+        definition.currentMediaVersionId &&
+        definition.currentMediaVersionId !== currentItems[0].id
+      ) {
+        throw new Error(
+          `Invalid generated image definition ${definition.id}: currentMediaVersionId is not current`,
+        );
+      }
+    }
+
+    return definitions;
   }
 
   private createMissingMediaPlaceholder(clip: Clip, track: Track): MediaItem {

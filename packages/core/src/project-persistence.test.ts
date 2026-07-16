@@ -53,6 +53,7 @@ const makeSaveProject = () =>
       channels: 2,
     },
     mediaLibrary: { items: [] },
+    generatedImageDefinitions: [],
     timeline: {
       tracks: [],
       subtitles: [],

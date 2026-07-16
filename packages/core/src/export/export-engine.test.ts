@@ -167,6 +167,7 @@ const createMockProject = (overrides?: Partial<Project>): Project => ({
   name: "Test Project",
   createdAt: Date.now(),
   modifiedAt: Date.now(),
+  generatedImageDefinitions: [],
   settings: {
     width: 1920,
     height: 1080,

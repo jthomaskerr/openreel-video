@@ -87,6 +87,7 @@ function makeProject(): Project {
       channels: 2
         },
     mediaLibrary: { items: [] },
+    generatedImageDefinitions: [],
     timeline: {
       tracks: [],
       duration: 0,

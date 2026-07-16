@@ -37,6 +37,7 @@ describe("runtime availability serialization", () => {
       name: "Serialization proof",
       createdAt: 1,
       modifiedAt: 2,
+      generatedImageDefinitions: [],
       settings: { width: 1920, height: 1080, frameRate: 30, sampleRate: 48_000, channels: 2 },
       mediaLibrary: { items: [] },
       timeline: { tracks: [], subtitles: [], duration: 0, markers: [] },
