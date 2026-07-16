@@ -291,7 +291,7 @@ export function getTrackClips(track: Track): Clip[] {
 }
 
 export function canAcceptMediaType(
-  track: Track,
+  track: Pick<Track, "type">,
   mediaType: "video" | "audio" | "image" | "srt",
 ): boolean {
   // Video tracks can accept video and image
