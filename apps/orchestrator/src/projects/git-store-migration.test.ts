@@ -222,6 +222,36 @@ test("project creation reserves deterministic immutable slugs", async () => {
   }
 });
 
+test("shared repository initialization preserves an existing pre-push hook", async () => {
+  const fixtureRoot = await mkdtemp(join(tmpdir(), "openreel-git-store-hook-test-"));
+  const repoDir = await mkdtemp(join(fixtureRoot, "repo-"));
+  const hookPath = join(repoDir, ".git", "hooks", "pre-push");
+  const customHook = "#!/bin/sh\n# custom hook owned by the user\n";
+
+  try {
+    await ensureSafeTestProjectRoot(repoDir, {
+      assignedTempRoot: fixtureRoot,
+      userProjectsRoot: config.projectsRepo,
+    });
+    await execFileAsync("git", ["init"], { cwd: repoDir });
+    await execFileAsync("git", ["config", "core.hooksPath", ".git/hooks"], { cwd: repoDir });
+    await writeFile(hookPath, customHook, { mode: 0o755 });
+
+    const gitStore = new GitStore(repoDir);
+    await gitStore.ensureSharedRepo();
+
+    assert.equal(await readFile(hookPath, "utf-8"), customHook);
+    const { stdout: cleanFilter } = await execFileAsync(
+      "git",
+      ["config", "--local", "--get", "filter.lfs.clean"],
+      { cwd: repoDir },
+    );
+    assert.match(cleanFilter, /git-lfs clean/);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("concurrent same-name creation cannot reserve the same slug", async () => {
   const { fixtureRoot, projectStore } = await makeStore();
   try {

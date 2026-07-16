@@ -14,6 +14,7 @@ import {
 } from "./semantic-commit";
 
 const execFileAsync = promisify(execFile);
+const GIT_OUTPUT_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
 
 const GITATTRIBUTES = `# git-lfs tracks all media files
 media/** filter=lfs diff=lfs merge=lfs -text
@@ -223,7 +224,7 @@ export class GitStore {
   // ── Git helpers ──────────────────────────────────────────────────────────
 
   private async git(args: string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
-    return execFileAsync("git", args, { cwd });
+    return execFileAsync("git", args, { cwd, maxBuffer: GIT_OUTPUT_MAX_BUFFER_BYTES });
   }
 
   async #readHeadCommitSha(projectId: string): Promise<string | null> {
@@ -424,7 +425,9 @@ export class GitStore {
       await this.git(["init"], this.repoDir);
     }
 
-    await this.git(["lfs", "install"], this.repoDir);
+    // Configure LFS for this repository without taking ownership of the user's
+    // hook path. OpenReel invokes its LFS integrity operations explicitly.
+    await this.git(["lfs", "install", "--local", "--skip-repo"], this.repoDir);
 
     const attributesPath = join(this.repoDir, ".gitattributes");
     let attributes = "";

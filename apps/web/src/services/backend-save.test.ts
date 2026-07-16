@@ -130,6 +130,42 @@ describe("backendSaveService.load", () => {
     expect(usePersistenceStatusStore.getState().baseRevision).toBeNull();
   });
 
+  it("restores a deferred load without replacing the last confirmed receipt", async () => {
+    vi.useFakeTimers();
+    const project = makeSaveProject();
+    const confirmedReceipt = usePersistenceStatusStore.getState().confirmedReceipt;
+    const commitDueAt = Date.now() + 120_000;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          project,
+          mediaFiles: {},
+          ...makeReceipt({
+            committed: false,
+            commitDueAt,
+            projectId: project.id,
+            sourceModifiedAt: project.modifiedAt,
+          }),
+        }),
+      }),
+    );
+
+    await expect(backendSaveService.load(project.id)).resolves.toEqual(project);
+
+    expect(usePersistenceStatusStore.getState()).toMatchObject({
+      projectId: project.id,
+      phase: "deferred",
+      persistedModifiedAt: project.modifiedAt,
+      confirmedReceipt,
+      baseRevision: {
+        commitSha: confirmedReceipt?.commitSha,
+        sourceModifiedAt: project.modifiedAt,
+      },
+    });
+  });
+
   it("populates remoteUrl and blob for media files returned by the backend", async () => {
     const mediaBlob = new Blob(["video"], { type: "video/mp4" });
     vi.stubGlobal(

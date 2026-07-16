@@ -60,6 +60,31 @@ test("commit returns verified identities from the created commit", async () => {
   }
 });
 
+test("dirty inspection supports project snapshots larger than Node's default child buffer", async () => {
+  const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
+  try {
+    const project = await projectStore.createProject("Large Snapshot");
+    const projectPath = join(repoDir, project.id, "project.json");
+    const saved = JSON.parse(await readFile(projectPath, "utf8"));
+    saved.name = `Large Snapshot ${"x".repeat(1_100_000)}`;
+    await writeFile(projectPath, JSON.stringify(saved, null, 2));
+    await gitStore.commit(project.id, "test: create large snapshot project", {
+      allowlist: ["project.json"],
+      expectedEntries: [{ status: "A", path: "project.json" }],
+    });
+    saved.name += " updated";
+    saved.modifiedAt += 1;
+    await writeFile(projectPath, JSON.stringify(saved, null, 2));
+
+    const dirty = await gitStore.inspectDirtyProject(project.id);
+
+    assert.equal(dirty?.semanticChanged, true);
+    assert.equal(dirty?.sourceModifiedAt, saved.modifiedAt);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("cumulative commit ignores metadata-only drift and rejects unrelated paths", async () => {
   const { fixtureRoot, gitStore, projectStore } = await makeStore();
   try {

@@ -7,6 +7,7 @@ import express, { type Response } from "express";
 import type { Project, ProjectSaveRequest } from "@openreel/core";
 import { createProjectRouter, handleMediaSendError } from "./routes";
 import type { GitCommitReceipt, GitStore } from "./git-store";
+import type { ProjectCommitScheduler } from "./project-commit-scheduler";
 import type { ProjectStore } from "./project-store";
 import { ProjectMediaManifestAuditError, type ProjectMediaManifestSnapshot } from "./media-manifest";
 
@@ -187,6 +188,7 @@ async function withProjectRouter(
   store: Partial<ProjectStore> & { testInitialProject?: Project },
   gitStore: Partial<GitStore>,
   run: (baseUrl: string) => Promise<void>,
+  commitScheduler?: Partial<ProjectCommitScheduler>,
 ): Promise<void> {
   const tempRoot = await mkdtemp(join(tmpdir(), "openreel-routes-"));
   if (store.testInitialProject) {
@@ -206,7 +208,11 @@ async function withProjectRouter(
   app.use(express.json());
   app.use(
     "/api/projects",
-    createProjectRouter(store as unknown as ProjectStore, gitStore as unknown as GitStore),
+    createProjectRouter(
+      store as unknown as ProjectStore,
+      gitStore as unknown as GitStore,
+      commitScheduler as ProjectCommitScheduler | undefined,
+    ),
   );
 
   const server = app.listen(0, "127.0.0.1");
@@ -246,6 +252,62 @@ test("GET returns the project with a complete confirmed persistence receipt", as
       assert.deepEqual(body.lfsPayloads, auditReceipt().lfsPayloads);
     },
   );
+});
+
+test("GET returns a deferred worktree receipt while its Git commit is pending", async () => {
+  const project = projectFixture("vintage-tokyo", "Deferred Project");
+  const commitDueAt = Date.now() + 120_000;
+  let pointerSource: string | undefined;
+  let recoveredDirtyState = false;
+  const waitingStatus = {
+    projectId: project.id,
+    state: "waiting" as const,
+    sourceModifiedAt: project.modifiedAt,
+    commitDueAt,
+    error: null,
+    receipt: null,
+  };
+
+  await withProjectRouter(
+    {
+      testInitialProject: project,
+      loadProject: async () => project,
+      scanMedia: async () => ({ "media-1": "the hardest thing.mp4" }),
+      auditSnapshot: async (_project, options) => {
+        pointerSource = options?.pointerSource;
+        return auditReceipt();
+      },
+    },
+    {
+      inspectDirtyProject: async () => ({
+        sourceModifiedAt: project.modifiedAt,
+        newestChangedPathAt: commitDueAt - 120_000,
+        semanticChanged: true,
+      }),
+    },
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/projects/vintage-tokyo`);
+      assert.equal(response.status, 200);
+      const body = await response.json() as Record<string, unknown> & { project: Project };
+      assert.equal(body.project.id, project.id);
+      assert.equal(body.saved, true);
+      assert.equal(body.committed, false);
+      assert.equal(body.commitDueAt, commitDueAt);
+      assert.equal(body.sourceModifiedAt, project.modifiedAt);
+      assert.equal(body.commitSha, commitReceipt().commitSha);
+      assert.equal(body.mediaManifestDigest, auditReceipt().mediaManifestDigest);
+      assert.deepEqual(body.lfsPayloads, auditReceipt().lfsPayloads);
+      assert.equal(pointerSource, "worktree");
+    },
+    {
+      getStatus: () => undefined,
+      noteAcceptedSave: () => {
+        recoveredDirtyState = true;
+        return waitingStatus;
+      },
+    },
+  );
+  assert.equal(recoveredDirtyState, true);
 });
 
 test("project creation returns the canonical project with its confirmed persistence receipt", async () => {

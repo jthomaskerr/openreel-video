@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { stat } from "node:fs/promises";
+import { join } from "node:path";
 import type {
   MediaVerificationBatchRequest,
   MediaVerificationOutcome,
@@ -110,6 +111,19 @@ export function createProjectRouter(
 ): Router {
   const router = Router();
 
+  async function resolveCommitStatus(projectId: string) {
+    const current = commitScheduler?.getStatus(projectId);
+    if (current || !commitScheduler) return current;
+    const dirty = await gitStore.inspectDirtyProject(projectId);
+    if (!dirty) return undefined;
+    return commitScheduler.noteAcceptedSave(
+      projectId,
+      dirty.sourceModifiedAt,
+      dirty.newestChangedPathAt,
+      dirty.semanticChanged,
+    );
+  }
+
   async function confirmedProjectPayload(
     project: Project,
     mediaFiles: Record<string, string>,
@@ -134,6 +148,41 @@ export function createProjectRouter(
       commitDueAt: null,
       projectId: project.id,
       persistedAt,
+      sourceModifiedAt: project.modifiedAt,
+      commitSha: receipt.commitSha,
+      treeSha: receipt.treeSha,
+      projectBlobSha: receipt.projectBlobSha,
+      mediaManifestDigest: audit.mediaManifestDigest,
+      lfsPayloads: audit.lfsPayloads,
+    };
+  }
+
+  async function deferredProjectPayload(
+    project: Project,
+    mediaFiles: Record<string, string>,
+    commitDueAt: number | null,
+  ): Promise<{ project: Project; mediaFiles: Record<string, string> } & ProjectSaveReceipt> {
+    const receipt = await gitStore.readConfirmedReceipt(project.id);
+    if (!receipt?.commitSha || !receipt.treeSha || !receipt.projectBlobSha) {
+      throw new Error(`Project ${project.id} has no complete confirmed base receipt`);
+    }
+    const audit = await store.auditSnapshot(project, {
+      allowDanglingClips: true,
+      pointerSource: "worktree",
+    });
+    if (audit.missingEntries.length > 0
+      || audit.lfsPayloads.some((payload) => payload.local.state !== "verified")) {
+      throw new Error(`Project ${project.id} deferred media receipt failed verification`);
+    }
+    const projectStat = await stat(join(store.projectDir(project.id), "project.json"));
+    return {
+      project,
+      mediaFiles,
+      saved: true,
+      committed: false,
+      commitDueAt,
+      projectId: project.id,
+      persistedAt: projectStat.mtimeMs,
       sourceModifiedAt: project.modifiedAt,
       commitSha: receipt.commitSha,
       treeSha: receipt.treeSha,
@@ -220,7 +269,10 @@ export function createProjectRouter(
         return;
       }
       const mediaFiles = await store.scanMedia(project);
-      res.json(await confirmedProjectPayload(project, mediaFiles));
+      const status = await resolveCommitStatus(project.id);
+      res.json(status && status.state !== "clean"
+        ? await deferredProjectPayload(project, mediaFiles, status.commitDueAt)
+        : await confirmedProjectPayload(project, mediaFiles));
     } catch (err) {
       res.status(500).json({ error: "Failed to load project", detail: String(err) });
     }
@@ -350,7 +402,7 @@ export function createProjectRouter(
         res.status(404).json({ error: "Project not found" });
         return;
       }
-      const status = commitScheduler?.getStatus(req.params.id);
+      const status = await resolveCommitStatus(req.params.id);
       if (status) {
         res.json(status);
         return;
