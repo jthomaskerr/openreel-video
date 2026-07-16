@@ -4,6 +4,7 @@ import type {
   ProjectSaveConflictResponse,
   ProjectSaveDestructiveChangeRequiresIntentResponse,
   ProjectSaveMediaIncompleteResponse,
+  ProjectPersistenceStatusResponse,
   ProjectSaveReceipt,
   ProjectSaveRequest,
   RequiredMediaManifestEntry,
@@ -180,6 +181,7 @@ describe("project persistence contracts", () => {
       mediaManifestDigest: "sha256:manifest-digest",
       lfsPayloads: [],
       committed: true,
+      commitDueAt: null,
     } satisfies ProjectSaveReceipt;
 
     expect(JSON.parse(JSON.stringify(receipt))).toEqual(receipt);
@@ -188,5 +190,33 @@ describe("project persistence contracts", () => {
     expect(receipt.projectBlobSha).toBe("ffffffffffffffffffffffffffffffffffffffff");
     expect(receipt.sourceModifiedAt).toBe(1_780_000_000_123);
     expect(receipt.mediaManifestDigest).toBe("sha256:manifest-digest");
+  });
+
+  it("models deferred receipts and persistence status responses", () => {
+    const deferredReceipt = {
+      saved: true,
+      projectId: "project-1",
+      persistedAt: 1_780_000_001_000,
+      sourceModifiedAt: 1_780_000_000_123,
+      commitSha: "dddddddddddddddddddddddddddddddddddddddd",
+      treeSha: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      projectBlobSha: "ffffffffffffffffffffffffffffffffffffffff",
+      mediaManifestDigest: "sha256:manifest-digest",
+      lfsPayloads: [],
+      committed: false,
+      commitDueAt: 1_780_000_121_000,
+    } satisfies ProjectSaveReceipt;
+
+    const status = {
+      projectId: "project-1",
+      state: "waiting",
+      sourceModifiedAt: deferredReceipt.sourceModifiedAt,
+      commitDueAt: deferredReceipt.commitDueAt,
+      error: null,
+      receipt: null,
+    } satisfies ProjectPersistenceStatusResponse;
+
+    expect(JSON.parse(JSON.stringify(deferredReceipt))).toEqual(deferredReceipt);
+    expect(JSON.parse(JSON.stringify(status))).toEqual(status);
   });
 });

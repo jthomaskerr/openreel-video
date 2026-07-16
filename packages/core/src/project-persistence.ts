@@ -71,6 +71,23 @@ export interface ProjectSaveReceipt {
   readonly mediaManifestDigest: string | null;
   readonly lfsPayloads: readonly ProjectSaveLfsPayloadVerification[];
   readonly committed?: boolean;
+  readonly commitDueAt: number | null;
+}
+
+export type ProjectPersistenceState =
+  | "clean"
+  | "waiting"
+  | "committing"
+  | "retry-wait"
+  | "settled-metadata-only";
+
+export interface ProjectPersistenceStatusResponse {
+  readonly projectId: string;
+  readonly state: ProjectPersistenceState;
+  readonly sourceModifiedAt: number;
+  readonly commitDueAt: number | null;
+  readonly error: string | null;
+  readonly receipt: ProjectSaveReceipt | null;
 }
 
 export interface ProjectSaveMediaIncompleteResponse {

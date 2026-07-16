@@ -126,6 +126,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       mediaFiles,
       saved: true,
       committed: true,
+      commitDueAt: null,
       projectId: project.id,
       persistedAt,
       sourceModifiedAt: project.modifiedAt,
