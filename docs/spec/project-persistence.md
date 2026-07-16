@@ -30,6 +30,9 @@ Every writable project has a confirmed base revision containing matching `projec
 
 ### Deferred save receipts
 
+The scheduling rules that decide whether a save has a commit deadline are owned by
+[Project save and commit lifecycle](./project-lifecycle.md#quiet-period-semantics).
+
 An accepted ordinary project PUT writes the submitted snapshot to the worktree
 immediately and returns before Git commit. Its receipt has:
 
@@ -38,7 +41,8 @@ immediately and returns before Git commit. Its receipt has:
 - the current project ID and newly written `sourceModifiedAt`;
 - a finite positive `persistedAt` recording completion of the durable worktree write;
 - the existing confirmed `commitSha`, `treeSha`, and `projectBlobSha`;
-- `commitDueAt`, calculated from the backend's 120-second quiet-period deadline;
+- `commitDueAt`, equal to the lifecycle scheduler's current deadline or `null` when no
+  semantic commit is pending;
 - the canonical project snapshot, including backend-allocated media filenames.
 
 The existing Git hashes identify the confirmed base; they do not claim that the new
@@ -56,14 +60,9 @@ After the quiet period, a successful background commit produces a normal receipt
 `committed: true` and hashes for the cumulative committed snapshot.
 
 The backend exposes lightweight per-project persistence status so the frontend can
-confirm the eventual commit without repeatedly downloading the complete project. The
-status distinguishes at least:
-
-- `clean`;
-- `waiting`, with `commitDueAt`;
-- `committing`;
-- `retry-wait`, with a safe error summary;
-- `settled-metadata-only`.
+confirm the eventual commit without repeatedly downloading the complete project. Its
+phase uses the lifecycle states defined in
+[Per-project lifecycle](./project-lifecycle.md#per-project-lifecycle).
 
 The frontend polls only while a project is deferred, beginning at `commitDueAt`, and
 stops after a matching committed receipt, project change, project switch, terminal
@@ -86,15 +85,9 @@ on an older worktree snapshot. A background commit changes the confirmed hashes 
 the logical project contents. A save racing that commit must receive or resolve against
 the new confirmed base under the same project lock.
 
-### Commit eligibility
-
-Only semantic differences relative to HEAD are committed. `modifiedAt` is ignored when
-determining eligibility, preventing timestamp-only commits. All accepted changes remain
-immediately present in the worktree even when no commit is eligible.
-
-One background commit contains the cumulative semantic project and media changes
-accepted during the quiet period. Its staged path set is derived and checked against the
-project allowlist, and staged LFS pointers are verified before the ref advances.
+Commit eligibility, cumulative diff construction, path allowlisting, and LFS
+verification are defined only in
+[Background commit transaction](./project-lifecycle.md#background-commit-transaction).
 
 ## Recovery
 

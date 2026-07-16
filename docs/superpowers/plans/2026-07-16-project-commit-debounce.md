@@ -14,7 +14,8 @@ layer before dispatching work that depends on it.
 ## Fixed decisions
 
 - Ordinary project PUTs write worktree state immediately.
-- Git commit occurs after 120 seconds without a newer accepted PUT for that project.
+- Git commit occurs after 120 seconds without a newer accepted semantic change for that
+  project.
 - The delay is `config.projectCommitDebounceMs`, default `120_000`.
 - Creation, import, migration, and explicit administrative rename remain synchronous.
 - Deferred receipts use `committed: false`, retain current confirmed Git hashes, advance
@@ -23,6 +24,10 @@ layer before dispatching work that depends on it.
   replacing the last confirmed receipt.
 - A lightweight backend status endpoint confirms background completion.
 - Timers are per project and use generation/deadline rechecks inside the Git lock.
+- A save resets the timer only when canonical comparison with the preceding
+  authoritative worktree snapshot finds a semantic project or media change.
+- A `modifiedAt`-only save is written immediately but never creates, resets, or extends
+  a timer, including while a semantic commit is pending.
 - Background commits compare worktree state with HEAD and commit one cumulative diff.
 - Metadata-only differences never create commits.
 - Acknowledged worktree data is never rolled back because a background commit fails.
@@ -97,8 +102,9 @@ discovery, and status publication. Production defaults may wrap `Date.now`,
 Implement:
 
 1. one state record per project;
-2. `noteAcceptedSave(projectId, sourceModifiedAt, persistedAt)` that increments a
-   generation and resets the deadline;
+2. `noteAcceptedSave(projectId, sourceModifiedAt, persistedAt, semanticChanged)` that
+   updates authoritative source state but increments the generation and resets the
+   deadline only when `semanticChanged` is true;
 3. timer callback that reacquires/checks generation and deadline before executing;
 4. independent project timers;
 5. explicit `clean`, `waiting`, `committing`, `retry-wait`, and
@@ -114,6 +120,9 @@ Tests, all with fake time:
 - no execution before 120,000ms;
 - execution exactly at the deadline;
 - repeated notes reset the full delay;
+- metadata-only notes do not create a timer;
+- metadata-only notes preserve an existing generation and deadline while updating the
+  authoritative source timestamp;
 - stale callback exits after a newer generation;
 - two projects execute independently;
 - executor metadata-only result settles without rescheduling;
@@ -191,7 +200,8 @@ Refactor the accepted-save transaction:
 6. remove consumed/redundant pending upload records;
 7. return canonical project data and a deferred receipt using the existing confirmed
    hashes, new `sourceModifiedAt`, positive `persistedAt`, and scheduler `commitDueAt`;
-8. notify the scheduler only after foreground durability succeeds;
+8. notify the scheduler only after foreground durability succeeds, passing whether the
+   canonical before/after comparison contains a semantic change;
 9. keep exact-byte and metadata-only saves valid without Git commits;
 10. ensure recovery rolls back only a transaction that was never acknowledged.
 
@@ -206,6 +216,8 @@ Tests:
 - deferred receipt retains confirmed hashes and new source timestamp;
 - scheduler is not notified after validation/audit/write failure;
 - scheduler is notified once after durable success;
+- a metadata-only save is reported without changing an existing commit deadline;
+- a metadata-only save with no semantic dirt returns `commitDueAt: null`;
 - restart recovery never restores HEAD over an acknowledged dirty snapshot;
 - subsequent saves use confirmed hashes plus latest source timestamp;
 - commit failure is outside and cannot roll back foreground save.
@@ -317,6 +329,7 @@ worktree. It must prove:
 - PUT response observes durable worktree bytes;
 - HEAD remains unchanged before fake/short deadline;
 - multiple saves produce one cumulative commit;
+- `modifiedAt`-only saves between semantic edits do not move the original deadline;
 - committed project and media match the latest accepted snapshot;
 - status returns the final confirmed receipt;
 - worktree and index are clean except permitted metadata-only drift.

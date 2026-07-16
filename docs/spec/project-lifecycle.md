@@ -2,10 +2,14 @@
 
 ## Status and relationship
 
-This specification normatively owns the runtime lifecycle between an accepted project
-`PUT` and its eventual Git commit. The broader project lifecycle remains documented in
-[Project Lifecycle Persistence](./project.md). The overlap between these documents is
-intentional pending the separately approved consolidation review.
+This specification normatively owns scheduling, commit eligibility, Git execution,
+concurrency, restart, and failure handling between an accepted project `PUT` and its
+eventual Git commit.
+
+[Project persistence identity contract](./project-persistence.md) separately owns
+project identity, save-receipt fields, conflict bases, and frontend confirmation. This
+file links to that contract instead of restating it. The broader project lifecycle
+remains documented in [Project Lifecycle Persistence](./project.md).
 
 See the
 [project-save integrity verification runbook](../runbooks/project-save-integrity-verification.md)
@@ -15,7 +19,7 @@ for read-only receipt, Git, and LFS checks.
 
 Every accepted project save is durably and atomically written to its project worktree
 before the HTTP response is returned. Git history advances once, in the background,
-after that project has received no newer accepted save for 120 seconds.
+after that project has received no newer semantic change for 120 seconds.
 
 The 120-second quiet period is backend configuration, not a frontend delay. Its
 default is `120_000` milliseconds and it must be exposed by the orchestrator
@@ -44,7 +48,7 @@ Each project has an independent lifecycle:
 1. `clean`: the worktree has no semantic change relative to HEAD;
 2. `dirty`: at least one accepted save is durably present but not committed;
 3. `waiting`: a commit deadline is scheduled for 120 seconds after the latest accepted
-   save;
+   semantic change;
 4. `committing`: the deadline has elapsed and the worker holds the project Git lock;
 5. `retry-wait`: the worktree remains authoritative after a commit failure and a retry
    is scheduled;
@@ -68,8 +72,10 @@ Under the existing per-project transaction lock, the backend must:
    pointers;
 8. atomically write and fsync `project.json`, then fsync its directory;
 9. remove the foreground recovery journal and obsolete pending-upload records;
-10. schedule or reset that project's commit deadline;
-11. return a deferred save receipt.
+10. classify whether the accepted snapshot changed semantic state;
+11. schedule or reset that project's commit deadline only for a semantic change;
+12. return the deferred save receipt defined by
+    [Project persistence identity contract](./project-persistence.md#deferred-save-receipts).
 
 The response must not wait for Git staging, LFS pointer verification, or `git commit`.
 No acknowledged worktree write may be rolled back merely because a later background
@@ -77,8 +83,23 @@ commit fails.
 
 ## Quiet-period semantics
 
-Every accepted PUT resets the same project's deadline, including a metadata-only PUT
-received while semantic changes are already pending.
+The backend compares the newly accepted authoritative snapshot with the previously
+authoritative worktree snapshot using the canonical semantic comparison that excludes
+`modifiedAt`.
+
+A save resets the same project's deadline only when that comparison contains at least
+one semantic project or media change.
+
+Changing `modifiedAt` and nothing else:
+
+- is still written durably to `project.json` before the PUT returns;
+- does not create a timer when no semantic commit is pending;
+- does not reset or extend an existing timer;
+- does not create a Git commit.
+
+If a semantic commit is already pending, a later `modifiedAt`-only write leaves its
+original deadline unchanged. The eventual semantic commit may contain the newest
+`modifiedAt` value alongside the pending semantic changes.
 
 When the timer fires, the worker must acquire the project Git lock and recheck the
 generation and deadline inside the lock. If a newer save has arrived, the stale worker
@@ -117,7 +138,8 @@ generation check.
 
 - A save and background commit for the same project are serialized by the same lock.
 - A save accepted before the worker obtains the lock invalidates that worker generation.
-- A save accepted after a worker commits starts a new 120-second period from that save.
+- A semantic save accepted after a worker commits starts a new 120-second period from
+  that save.
 - Different projects may save and commit concurrently.
 - A stale client base is rejected even when newer state is durable only in the
   worktree.
@@ -141,8 +163,9 @@ Graceful shutdown cancels in-memory timers but does not force an early commit. D
 worktree state is recovered and scheduled at the next startup.
 
 Commit failures never discard acknowledged worktree data. They enter observable retry
-state and retry without a tight loop. A newer accepted save supersedes the failed
-generation and starts a fresh quiet period.
+state and retry without a tight loop. A newer semantic save supersedes the failed
+generation and starts a fresh quiet period. A `modifiedAt`-only save updates the
+authoritative worktree but does not postpone that retry.
 
 ## Required evidence
 
@@ -151,6 +174,9 @@ Deterministic tests must prove:
 - worktree JSON and promoted media are visible before a PUT returns;
 - HEAD and commit count remain unchanged during the quiet period;
 - repeated saves reset the deadline precisely;
+- a `modifiedAt`-only save never creates, resets, or extends a deadline;
+- a `modifiedAt`-only save during a pending semantic change leaves the original
+  deadline unchanged;
 - exactly one cumulative commit occurs after 120 seconds of quiet;
 - metadata-only saves never create a commit;
 - projects have independent timers and locks;
