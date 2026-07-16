@@ -2,17 +2,77 @@ import express from "express";
 import type { Express } from "express";
 import cors from "cors";
 import { config } from "./env";
-import { ProjectStore, createProjectRouter, GitStore } from "./projects";
+import {
+  ProjectStore,
+  createProjectRouter,
+  GitStore,
+  ProjectCommitScheduler,
+} from "./projects";
 import { neuralframesRouter, wavespeedRouter } from "./routes/index";
 import { mkdirSync } from "node:fs";
 
-export function createApp(): Express {
+export interface OrchestratorApp extends Express {
+  readonly dispose: () => void;
+}
+
+export function createApp(): OrchestratorApp {
   const gitStore = new GitStore(config.projectsRepo);
   const projectStore = new ProjectStore(gitStore);
+  const commitScheduler = new ProjectCommitScheduler({
+    debounceMs: config.projectCommitDebounceMs,
+    execute: async (projectId, _generation, shouldCommit) => {
+      let audited: Awaited<ReturnType<ProjectStore["auditSnapshot"]>> | null = null;
+      const result = await gitStore.commitCumulativeProjectDiff(
+        projectId,
+        async (project) => {
+          audited = await projectStore.auditSnapshot(project, { pointerSource: "index" });
+        },
+        shouldCommit,
+      );
+      if (result.kind === "metadata-only") return result;
+      const project = await projectStore.loadProject(projectId);
+      const completedAudit = audited as Awaited<ReturnType<ProjectStore["auditSnapshot"]>> | null;
+      if (!project || !completedAudit) {
+        throw new Error(`Committed project ${projectId} could not be audited`);
+      }
+      const persistedAt = result.receipt.commitSha
+        ? await gitStore.readCommitTimestamp(projectId, result.receipt.commitSha)
+        : null;
+      return {
+        kind: "committed",
+        receipt: {
+          saved: true,
+          committed: true,
+          commitDueAt: null,
+          projectId,
+          persistedAt,
+          sourceModifiedAt: project.modifiedAt,
+          commitSha: result.receipt.commitSha,
+          treeSha: result.receipt.treeSha,
+          projectBlobSha: result.receipt.projectBlobSha,
+          mediaManifestDigest: completedAudit.mediaManifestDigest,
+          lfsPayloads: completedAudit.lfsPayloads,
+        },
+      };
+    },
+    publishStatus: (status) => {
+      if (status.state === "retry-wait") {
+        console.error("[Persistence] background commit failed", {
+          projectId: status.projectId,
+          error: status.error,
+          retryAt: status.commitDueAt,
+        });
+      }
+    },
+  });
   void projectStore.migrateUuidDirs().catch((err) => {
     console.error("[ProjectStore] failed to migrate legacy project directories:", err);
   });
-  const app = express();
+  const app = express() as OrchestratorApp;
+  Object.defineProperty(app, "dispose", {
+    value: () => commitScheduler.dispose(),
+    enumerable: false,
+  });
 
   app.use(cors());
   app.use("/api/generate/wavespeed/upload", express.raw({ limit: "50mb", type: ["image/*", "video/*", "audio/*"] }));
@@ -36,7 +96,7 @@ export function createApp(): Express {
 
   app.use("/api/import/neuralframes", neuralframesRouter);
   app.use("/api/generate/wavespeed", wavespeedRouter);
-  app.use("/api/projects", createProjectRouter(projectStore, gitStore));
+  app.use("/api/projects", createProjectRouter(projectStore, gitStore, commitScheduler));
 
   return app;
 }

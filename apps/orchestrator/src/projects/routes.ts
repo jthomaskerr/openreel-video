@@ -21,6 +21,7 @@ import {
   type GitStagedNameStatusEntry,
 } from "./git-store";
 import { executeSaveTransaction, SaveTransactionError } from "./save-transaction";
+import type { ProjectCommitScheduler } from "./project-commit-scheduler";
 import {
   cleanupExpiredPendingMedia,
   listPendingMedia,
@@ -102,7 +103,11 @@ export function handleMediaSendError(res: Response, err?: Error): void {
 
 // ── Router factory ───────────────────────────────────────────────────────────
 
-export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Router {
+export function createProjectRouter(
+  store: ProjectStore,
+  gitStore: GitStore,
+  commitScheduler?: ProjectCommitScheduler,
+): Router {
   const router = Router();
 
   async function confirmedProjectPayload(
@@ -316,8 +321,12 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         mediaItems: incoming.mediaLibrary.items.length,
         tracks: incoming.timeline.tracks.length,
       });
-      const receipt = await executeSaveTransaction(store, gitStore, request);
-      console.info("[Persistence] Git commit confirmed", {
+      const receipt = await executeSaveTransaction(store, gitStore, request, {
+        noteAcceptedSave: commitScheduler
+          ? commitScheduler.noteAcceptedSave.bind(commitScheduler)
+          : undefined,
+      });
+      console.info("[Persistence] worktree save durable; Git commit deferred", {
         projectId: req.params.id,
         persistedAt: receipt.persistedAt,
         commitSha: receipt.commitSha,
@@ -330,6 +339,38 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       }
       console.error("[PUT /api/projects/:id] save failed:", err);
       res.status(500).json({ error: "Failed to save project", detail: String(err) });
+    }
+  });
+
+  router.get("/:id/persistence-status", async (req, res) => {
+    try {
+      assertValidProjectId(req.params.id);
+      const project = await store.loadProject(req.params.id);
+      if (!project) {
+        res.status(404).json({ error: "Project not found" });
+        return;
+      }
+      const status = commitScheduler?.getStatus(req.params.id);
+      if (status) {
+        res.json(status);
+        return;
+      }
+      const confirmed = await confirmedProjectPayload(
+        project,
+        await store.scanMedia(project),
+      );
+      res.json({
+        projectId: project.id,
+        state: "clean",
+        sourceModifiedAt: project.modifiedAt,
+        commitDueAt: null,
+        error: null,
+        receipt: confirmed,
+      });
+    } catch (error) {
+      res.status(400).json({
+        error: error instanceof Error ? error.message : "Invalid project id",
+      });
     }
   });
 

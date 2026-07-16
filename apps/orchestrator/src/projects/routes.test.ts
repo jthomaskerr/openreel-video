@@ -417,16 +417,12 @@ test("snapshot atomically attaches pending media with a collision-safe name and 
     const body = await response.json();
 
     assert.equal(response.status, 200);
-    assert.equal(commits, 1);
+    assert.equal(commits, 0);
     assert.equal(body.project.mediaLibrary.items[0].id, "media-2");
     assert.equal(body.project.mediaLibrary.items[0].name, "Interview 1.mp4");
     assert.equal(auditedProject?.mediaLibrary.items[0]?.id, "media-2");
     assert.equal(auditedProject?.mediaLibrary.items[0]?.name, "Interview 1.mp4");
-    assert.deepEqual(committedTransaction?.allowlist, ["project.json", "media/Interview 1.mp4"]);
-    assert.deepEqual(committedTransaction?.expectedEntries, [
-      { status: "A", path: "media/Interview 1.mp4" },
-      { status: "M", path: "project.json" },
-    ]);
+    assert.equal(committedTransaction, undefined);
     assert.equal(await readFile(join(store.mediaDir!(previous.id), "Interview 1.mp4"), "utf8"), "video-bytes");
     assert.deepEqual(await (await fetch(`${baseUrl}/api/projects/vintage-tokyo/media/pending`)).json(), []);
   });
@@ -542,17 +538,14 @@ test("PUT confirms persistence only after the Git commit succeeds", async () => 
     const responseReceipt = await response.json();
 
     assert.equal(response.status, 200);
-    assert.equal(commitFinished, true);
-    assert.equal(responseReceipt.committed, true);
-    assert.equal(responseReceipt.commitSha, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-    assert.equal(responseReceipt.treeSha, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
-    assert.equal(responseReceipt.projectBlobSha, "cccccccccccccccccccccccccccccccccccccccc");
+    assert.equal(commitFinished, false);
+    assert.equal(responseReceipt.committed, false);
+    assert.equal(responseReceipt.commitSha, commitReceipt().commitSha);
+    assert.equal(responseReceipt.treeSha, commitReceipt().treeSha);
+    assert.equal(responseReceipt.projectBlobSha, commitReceipt().projectBlobSha);
     assert.equal(responseReceipt.mediaManifestDigest, "sha256:manifest-digest");
     assert.deepEqual(responseReceipt.lfsPayloads, [verifiedLfsPayload]);
-    assert.match(
-      commitMessage,
-      /^update name\n\n- Update name\n\nFiles staged:\n- Update project\.json\n\nFiles changed: 1$/,
-    );
+    assert.equal(commitMessage, "");
     assert.equal(typeof responseReceipt.persistedAt, "number");
   });
 });
@@ -593,7 +586,7 @@ test("PUT writes modifiedAt-only changes without advancing the confirmed Git rev
     assert.equal(response.status, 200);
     assert.equal(commits, 0);
     assert.equal(receipt.saved, true);
-    assert.equal(receipt.committed, true);
+    assert.equal(receipt.committed, false);
     assert.equal(receipt.commitSha, "dddddddddddddddddddddddddddddddddddddddd");
     assert.equal(receipt.treeSha, "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
     assert.equal(receipt.projectBlobSha, "ffffffffffffffffffffffffffffffffffffffff");
@@ -604,7 +597,7 @@ test("PUT writes modifiedAt-only changes without advancing the confirmed Git rev
   });
 });
 
-test("PUT exposes Git commit failures instead of returning a false success", async () => {
+test("PUT durability does not wait for a background Git commit", async () => {
   const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");
   const project = { ...previous, name: "Vintage Tokyo Revised", modifiedAt: previous.modifiedAt + 1 };
   const store: Partial<ProjectStore> & { testInitialProject?: Project } = {
@@ -628,8 +621,8 @@ test("PUT exposes Git commit failures instead of returning a false success", asy
     });
     const responseBody = await response.json();
 
-    assert.equal(response.status, 500);
-    assert.match(responseBody.detail, /git index is locked/);
+    assert.equal(response.status, 200);
+    assert.equal(responseBody.committed, false);
   });
 });
 
