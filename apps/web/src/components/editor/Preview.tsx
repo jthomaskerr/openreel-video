@@ -84,6 +84,7 @@ import {
   getCachedImagePlaybackFrame,
   isImagePlaybackClip,
 } from "./preview/media-image-source";
+import { paintPlaybackBackground } from "./preview/playback-canvas";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 import {
   getPersonSegmentationEngine,
@@ -4152,6 +4153,18 @@ export const Preview: React.FC = () => {
           const hasAnyContentAtPlayhead =
             hasVisualContent || hasCurrentAudioClip;
 
+          // Audio-only and fully empty intervals still advance the playback
+          // clock. Clear the last decoded frame as soon as visual media ends.
+          if (activeClips.length === 0) {
+            paintPlaybackBackground(
+              ctx,
+              canvas.width,
+              canvas.height,
+              false,
+              previewBgRef.current,
+            );
+          }
+
           if (!hasAnyContentAtPlayhead) {
             const nextClipTime = findNextClipStartTime(currentPlayhead);
             const nextTextTime = findNextTextClipStartTime(currentPlayhead);
@@ -4584,8 +4597,13 @@ export const Preview: React.FC = () => {
             currentTextClips.length > 0 ||
             currentShapeClips.length > 0
           ) {
-            ctx.fillStyle = previewBgRef.current;
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            paintPlaybackBackground(
+              ctx,
+              canvas.width,
+              canvas.height,
+              validFrames.length > 0,
+              previewBgRef.current,
+            );
 
             const tracks = timelineTracksRef.current;
 
