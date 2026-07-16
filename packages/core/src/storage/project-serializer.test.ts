@@ -176,6 +176,31 @@ describe("ProjectSerializer imported unresolved media", () => {
       ],
       { ...definition, currentMediaVersionId: "media-other-group" },
     ],
+    [
+      "points source version outside its asset group",
+      [
+        importedImage,
+        {
+          ...importedImage,
+          id: "media-other-group",
+          assetGroupId: "asset-other-group",
+          isCurrent: true,
+        },
+      ],
+      { ...definition, sourceMediaVersionId: "media-other-group" },
+    ],
+    [
+      "points current ID at a non-current version inside its asset group",
+      [
+        importedImage,
+        {
+          ...importedImage,
+          id: "media-previous-version",
+          isCurrent: false,
+        },
+      ],
+      { ...definition, currentMediaVersionId: "media-previous-version" },
+    ],
   ])("rejects a generated image definition whose asset group %s", (_reason, items, invalidDefinition) => {
     const serializer = new ProjectSerializer(new MemoryStorage());
     const project = {
