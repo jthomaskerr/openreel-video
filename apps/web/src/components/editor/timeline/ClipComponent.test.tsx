@@ -88,6 +88,7 @@ function receipt(commitSha: string, semanticFilename = "clip-source.mp4"): Proje
     projectBlobSha: "c".repeat(40),
     mediaManifestDigest: "sha256:manifest",
     committed: true,
+    commitDueAt: null,
     lfsPayloads: [{
       mediaId: "media-1",
       semanticFilename,
@@ -498,7 +499,8 @@ describe("ClipComponent", () => {
         treeSha: "b".repeat(40),
         projectBlobSha: "c".repeat(40),
         mediaManifestDigest: "sha256:manifest",
-        committed: true,
+      committed: true,
+      commitDueAt: null,
         lfsPayloads: [{
           mediaId: "media-1",
           semanticFilename: "Interview Wide.mp4",

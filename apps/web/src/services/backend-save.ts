@@ -2,6 +2,7 @@
 import type {
   Project,
   MediaItem,
+  ProjectPersistenceStatusResponse,
   ProjectSaveReceipt,
   ProjectSettings,
   ProjectSaveRequest,
@@ -105,7 +106,7 @@ class MediaOriginalUnavailableError extends TerminalPersistenceError {
   }
 }
 
-function validateCommittedResponse(
+function validateSaveResponse(
   response: BackendSaveResponse,
   expectedProjectId: string,
   expectedSourceModifiedAt: number,
@@ -113,7 +114,7 @@ function validateCommittedResponse(
   const nonEmpty = (value: unknown): value is string =>
     typeof value === "string" && value.trim().length > 0;
   if (response.saved !== true
-    || response.committed !== true
+    || (response.committed !== true && response.committed !== false)
     || response.projectId !== expectedProjectId
     || response.project?.id !== expectedProjectId
     || response.project.modifiedAt !== expectedSourceModifiedAt
@@ -126,6 +127,8 @@ function validateCommittedResponse(
     || !nonEmpty(response.projectBlobSha)
     || !nonEmpty(response.mediaManifestDigest)
     || !Array.isArray(response.lfsPayloads)
+    || (response.commitDueAt !== null
+      && (typeof response.commitDueAt !== "number" || !Number.isFinite(response.commitDueAt)))
     || response.lfsPayloads.some((payload) =>
       !nonEmpty(payload.mediaId)
       || !nonEmpty(payload.semanticFilename)
@@ -134,7 +137,8 @@ function validateCommittedResponse(
       || payload.local.state !== "verified"
       || !Number.isFinite(payload.local.actualSize)
     )) {
-    throw new Error(`Backend returned an invalid committed persistence response for ${expectedProjectId}`);
+    const kind = response.committed === false ? "deferred" : "committed";
+    throw new Error(`Backend returned an invalid ${kind} persistence response for ${expectedProjectId}`);
   }
   return response;
 }
@@ -145,6 +149,8 @@ class BackendSaveService {
   private scheduledProject: Project | null = null;
   private scheduledSaveTimer: ReturnType<typeof setTimeout> | null = null;
   private queueDeadlineTimer: ReturnType<typeof setTimeout> | null = null;
+  private persistencePollTimer: ReturnType<typeof setTimeout> | null = null;
+  private persistencePollGeneration = 0;
   private scheduledSaveStartedAt: number | null = null;
   private saveChain: Promise<void> = Promise.resolve();
   private readonly maxScheduleWaitMs = 5_000;
@@ -163,11 +169,73 @@ class BackendSaveService {
       clearTimeout(this.queueDeadlineTimer);
       this.queueDeadlineTimer = null;
     }
+    this.persistencePollGeneration += 1;
+    if (this.persistencePollTimer) {
+      clearTimeout(this.persistencePollTimer);
+      this.persistencePollTimer = null;
+    }
     const status = usePersistenceStatusStore.getState();
     const hasMatchingConfirmedBase = preserveReceiptForProjectId != null
       && status.projectId === preserveReceiptForProjectId
       && status.baseRevision != null;
     if (!hasMatchingConfirmedBase) status.reset();
+  }
+
+  private schedulePersistenceConfirmation(
+    projectId: string,
+    receipt: ProjectSaveReceipt,
+  ): void {
+    this.persistencePollGeneration += 1;
+    const generation = this.persistencePollGeneration;
+    if (this.persistencePollTimer) clearTimeout(this.persistencePollTimer);
+    if (receipt.commitDueAt === null) {
+      this.persistencePollTimer = null;
+      return;
+    }
+
+    const poll = async (): Promise<void> => {
+      if (generation !== this.persistencePollGeneration) return;
+      try {
+        const response = await fetch(`${BASE_URL}/projects/${projectId}/persistence-status`);
+        if (!response.ok) throw new Error(`Persistence status request failed (${response.status})`);
+        const status = await response.json() as ProjectPersistenceStatusResponse;
+        if (generation !== this.persistencePollGeneration
+          || status.projectId !== projectId
+          || status.sourceModifiedAt !== receipt.sourceModifiedAt) return;
+        if (status.state === "clean" && status.receipt) {
+          const confirmed = validateSaveResponse(
+            {
+              ...status.receipt,
+              project: { id: projectId, modifiedAt: receipt.sourceModifiedAt } as Project,
+            },
+            projectId,
+            receipt.sourceModifiedAt,
+          );
+          usePersistenceStatusStore.getState().markPersisted(projectId, confirmed);
+          this.persistencePollTimer = null;
+          return;
+        }
+        const phase = status.state === "committing"
+          ? "committing"
+          : status.state === "retry-wait" ? "retry-wait" : "deferred";
+        usePersistenceStatusStore.getState().markCommitState(projectId, phase, status.error);
+        if (status.state === "waiting" || status.state === "committing" || status.state === "retry-wait") {
+          this.persistencePollTimer = setTimeout(() => void poll(), 1_000);
+        }
+      } catch (error) {
+        usePersistenceStatusStore.getState().markCommitState(
+          projectId,
+          "retry-wait",
+          error instanceof Error ? error.message : "Persistence confirmation failed",
+        );
+        this.persistencePollTimer = setTimeout(() => void poll(), 2_000);
+      }
+    };
+
+    this.persistencePollTimer = setTimeout(
+      () => void poll(),
+      Math.max(0, receipt.commitDueAt - Date.now()),
+    );
   }
 
   /**
@@ -350,7 +418,7 @@ class BackendSaveService {
       throw new Error(`Backend create failed: HTTP ${res.status}${detail ? ` — ${detail}` : ""}`);
     }
     const response = await res.json() as BackendSaveResponse;
-    const receipt = validateCommittedResponse(
+    const receipt = validateSaveResponse(
       response,
       response.project?.id ?? "",
       response.project?.modifiedAt ?? Number.NaN,
@@ -523,20 +591,18 @@ class BackendSaveService {
 
         const response = await res.json() as BackendSaveResponse;
         if (response.committed === false) {
-          if (response.saved !== true
-            || response.projectId !== project.id
-            || response.sourceModifiedAt !== snapshot.modifiedAt) {
-            throw new Error(`Backend returned an invalid deferred persistence response for ${project.id}`);
-          }
-          usePersistenceStatusStore.getState().markDeferred(project.id);
+          const receipt = validateSaveResponse(response, project.id, snapshot.modifiedAt);
+          this.applyCanonicalFilenames(project, response.project);
+          usePersistenceStatusStore.getState().markDeferred(project.id, receipt);
+          this.schedulePersistenceConfirmation(project.id, receipt);
           console.info(
-            "[Persistence] modifiedAt written but Git commit deferred until a semantic change",
+            "[Persistence] worktree save durable; Git commit deferred",
             response,
           );
           return;
         }
 
-        const receipt = validateCommittedResponse(response, project.id, snapshot.modifiedAt);
+        const receipt = validateSaveResponse(response, project.id, snapshot.modifiedAt);
         this.applyCanonicalFilenames(project, response.project);
         usePersistenceStatusStore.getState().markPersisted(project.id, receipt);
         console.info("[Persistence] Git persistence confirmed", receipt);
@@ -617,7 +683,7 @@ class BackendSaveService {
       }
       const response = await res.json() as BackendProjectResponse;
       const { project, mediaFiles } = response;
-      const receipt = validateCommittedResponse(response, projectId, project.modifiedAt);
+    const receipt = validateSaveResponse(response, projectId, project.modifiedAt);
       usePersistenceStatusStore.getState().confirmReceipt(projectId, receipt);
 
       const mediaIds = new Set(project.mediaLibrary.items.map(item => item.id));
