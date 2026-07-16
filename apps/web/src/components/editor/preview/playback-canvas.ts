@@ -1,5 +1,12 @@
 export const EMPTY_PLAYBACK_BACKGROUND = "#000000";
 
+export function shouldDrawLastGoodFrame(
+  hasActiveMediaClip: boolean,
+  hasLastGoodFrame: boolean,
+): boolean {
+  return hasActiveMediaClip && hasLastGoodFrame;
+}
+
 export function paintPlaybackBackground(
   context: Pick<CanvasRenderingContext2D, "fillStyle" | "fillRect">,
   width: number,
