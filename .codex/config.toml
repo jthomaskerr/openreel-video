@@ -1,3 +1,4 @@
 [mcp_servers.serena]
+enabled = true
 required = true
 startup_timeout_sec = 30
