@@ -119,6 +119,36 @@ afterEach(() => {
 });
 
 describe("backendSaveService.load", () => {
+  it("loads a project while its Git commit is still pending", async () => {
+    const project = {
+      ...makeProject(),
+      mediaLibrary: { items: [] },
+    };
+    const commitDueAt = Date.now() + 120_000;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        project,
+        mediaFiles: {},
+        ...makeReceipt({
+          projectId: project.id,
+          sourceModifiedAt: project.modifiedAt,
+          committed: false,
+          commitDueAt,
+        }),
+      }),
+    }));
+
+    await expect(backendSaveService.load(project.id)).resolves.toMatchObject({
+      id: project.id,
+      name: project.name,
+    });
+    expect(usePersistenceStatusStore.getState()).toMatchObject({
+      projectId: project.id,
+      phase: "deferred",
+    });
+  });
+
   it("preserves a matching confirmed base while clearing project-scoped queues", () => {
     const receipt = makeReceipt();
     usePersistenceStatusStore.getState().confirmReceipt("project-1", receipt);
