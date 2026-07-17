@@ -83,6 +83,24 @@ export class GenerationRecoveryService {
   async retryPlacement(jobId: string): Promise<GenerationJob> {
     const job = await this.require(jobId);
     const claim = await this.repository.getPlacementClaim(jobId);
+    const recoveryProjectionKey = (candidate: GenerationJob) => {
+      const checkpoint = candidate.checkpoints["placement-applied"];
+      const placement = candidate.placement;
+      return JSON.stringify([
+        candidate.status,
+        candidate.updatedAt,
+        candidate.error?.code,
+        candidate.context.placementPolicy,
+        checkpoint?.status,
+        checkpoint?.timestamp,
+        checkpoint?.status === "failed" ? checkpoint.error?.code : undefined,
+        placement?.status,
+        placement?.status === "failed" ? placement.error?.code : undefined,
+        placement?.status === "failed" ? placement.replaySafe : undefined,
+        placement?.status === "applied" ? placement.appliedAt : undefined,
+      ]);
+    };
+    const observedRecoveryProjection = recoveryProjectionKey(job);
     const isReplaySafeFailureProjection = (candidate: GenerationJob) => ["completed", "failed", "succeeded"].includes(candidate.status)
       && candidate.context.placementPolicy !== "none"
       && candidate.checkpoints["placement-applied"]?.status === "failed"
@@ -104,6 +122,7 @@ export class GenerationRecoveryService {
         if (completedCheckpoint || current.placement?.status === "applied") {
           return completedPlacementProjection(current, completedCheckpoint?.timestamp ?? (current.placement?.status === "applied" ? current.placement.appliedAt : undefined) ?? this.clock.now());
         }
+        if (recoveryProjectionKey(current) !== observedRecoveryProjection) return current;
         return { ...current, status: "failed", error, updatedAt: this.clock.now() };
       });
     }
