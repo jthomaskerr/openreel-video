@@ -41,6 +41,10 @@ import {
   SelectValue,
   SelectContent,
   SelectItem,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
 } from "@openreel/ui";
 import { GenerateAssetDialog } from "./generate/GenerateAssetDialog";
 import type { GenerateAssetDialogProps } from "./generate/GenerateAssetDialog";
@@ -56,6 +60,7 @@ import {
   useMediaAvailabilityView,
   type MediaAvailabilityView,
 } from "../../services/media-availability-view";
+import { openReferenceTarget } from "../../features/references/navigation";
 const formatDuration = (seconds: number): string => {
   const mins = Math.floor(seconds / 60);
   const secs = Math.floor(seconds % 60);
@@ -954,6 +959,7 @@ export const AssetsPanel: React.FC = () => {
   const availabilityVersion = useMediaAvailabilityVersion(projectId);
   const projectSettings = useProjectStore((s) => s.project.settings);
   const importMedia = useProjectStore((s) => s.importMedia);
+  const createGeneratedImage = useProjectStore((s) => s.createGeneratedImage);
   const updateSettings = useProjectStore((s) => s.updateSettings);
   const setGenerationStatus = useProjectStore((s) => s.setGenerationStatus);
 
@@ -1237,6 +1243,32 @@ export const AssetsPanel: React.FC = () => {
     fileInputRef.current?.click();
   }, []);
 
+  const handleCreateGeneratedImage = useCallback(async () => {
+    const result = await createGeneratedImage({ title: "Generated Image" });
+    if (!result.success || !result.definitionId || !result.mediaId) {
+      toast.error(
+        "Generated image not created",
+        result.error?.message ??
+          "The generated-image command did not return the created definition and media identifiers.",
+      );
+      return;
+    }
+
+    openReferenceTarget(
+      { kind: "generated-image", definitionId: result.definitionId },
+      "inspector",
+    );
+
+    const placeholderSelection = {
+      type: "clip" as const,
+      id: result.mediaId,
+    };
+    useUIStore.setState({
+      selectedItems: [placeholderSelection],
+      lastSelectedItem: placeholderSelection,
+    });
+  }, [createGeneratedImage]);
+
   const handleImportBackground = useCallback(
     async (preset: BackgroundPreset) => {
       setGeneratingBackground(preset.id);
@@ -1370,15 +1402,31 @@ export const AssetsPanel: React.FC = () => {
                 >
                   <Upload size={13} />
                 </button>
-                <button
-                  type="button"
-                  onClick={createSceneFromMedia}
-                  title="Create scene"
-                  aria-label="Create Scene"
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border bg-background-tertiary text-text-secondary transition-colors hover:bg-background-elevated hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
-                >
-                  <Plus size={13} />
-                </button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      title="Create media"
+                      aria-label="Create media"
+                      className="inline-flex h-8 items-center justify-center gap-1.5 rounded-md border border-border bg-background-tertiary px-2 text-xs font-medium text-text-secondary transition-colors hover:bg-background-elevated hover:text-text-primary focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+                    >
+                      <Plus size={13} />
+                      <span>Create</span>
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem onSelect={createSceneFromMedia}>
+                      Add Scene
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={() => {
+                        void handleCreateGeneratedImage();
+                      }}
+                    >
+                      Add Generated Image
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 {missingAssetsCount > 0 && (
                   <button
                     type="button"

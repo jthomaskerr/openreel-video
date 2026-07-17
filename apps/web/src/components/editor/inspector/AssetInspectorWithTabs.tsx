@@ -8,6 +8,7 @@ import { useTimelineStore } from "../../../stores/timeline-store";
 import { useMediaAvailabilityView } from "../../../services/media-availability-view";
 import { toast } from "../../../stores/notification-store";
 import { resolveAssetCategory } from "../asset-category";
+import { openReferenceTarget } from "../../../features/references/navigation";
 import {
   MetadataEditor,
   FileInfoGrid,
@@ -631,9 +632,17 @@ function AssetInspectorHeader({ item, onClose }: { item: MediaItem; onClose: () 
 // ── Asset Inspector Toolbar ────────────────────────────────────────
 
 function AssetInspectorToolbar({ item }: { item: MediaItem }) {
+  const projectId = useProjectStore((s) => s.project.id);
   const addAssetVersionFromFile = useProjectStore((s) => s.addAssetVersionFromFile);
+  const convertImportedImage = useProjectStore((s) => s.convertImportedImage);
   const deleteMediaFn = useProjectStore((s) => s.deleteMedia);
   const setInspectedAsset = useUIStore((s) => s.setInspectedAsset);
+  const availability = useMediaAvailabilityView(projectId, item);
+  const category = resolveAssetCategory(item);
+  const canRegenerate =
+    item.type === "image" &&
+    !category.isMetadata &&
+    availability.status === "available";
   const handleReplace = useCallback(() => {
     const input = document.createElement("input");
     input.type = "file";
@@ -667,6 +676,40 @@ function AssetInspectorToolbar({ item }: { item: MediaItem }) {
     input.click();
   }, [item.id, item.type, addAssetVersionFromFile, setInspectedAsset]);
 
+  const handleRegenerate = useCallback(async () => {
+    try {
+      const project = useProjectStore.getState().project;
+      const assetGroupId = item.assetGroupId ?? item.id;
+      const existingDefinition = project.generatedImageDefinitions.find(
+        (definition) => definition.assetGroupId === assetGroupId,
+      );
+
+      let definitionId = existingDefinition?.id;
+      if (!definitionId) {
+        const result = await convertImportedImage({ mediaId: item.id });
+        if (!result.success || !result.definitionId) {
+          toast.error(
+            "Regenerate unavailable",
+            result.error?.message ??
+              "The imported image could not be converted to a generated-image definition.",
+          );
+          return;
+        }
+        definitionId = result.definitionId;
+      }
+
+      openReferenceTarget(
+        { kind: "generated-image", definitionId },
+        "inspector",
+      );
+    } catch (error) {
+      toast.error(
+        "Regenerate unavailable",
+        error instanceof Error ? error.message : "Unknown generated-image error",
+      );
+    }
+  }, [convertImportedImage, item.assetGroupId, item.id]);
+
   const handleDelete = useCallback(async () => {
     await deleteMediaFn(item.id);
     setInspectedAsset(null);
@@ -690,8 +733,21 @@ function AssetInspectorToolbar({ item }: { item: MediaItem }) {
         title="Create a new current version from a local file"
       >
         <RefreshCw size={11} />
-        New Version
+        Replace
       </button>
+      {canRegenerate && (
+        <button
+          type="button"
+          onClick={() => {
+            void handleRegenerate();
+          }}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-text-secondary hover:text-text hover:bg-hover transition-colors"
+          title="Open this image in the generated-image editor"
+        >
+          <Sparkles size={11} />
+          Regenerate
+        </button>
+      )}
       {item.blob && (
         <button
           onClick={handleDownload}

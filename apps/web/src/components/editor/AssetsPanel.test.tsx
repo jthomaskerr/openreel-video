@@ -24,6 +24,9 @@ import { useMusicVideoStore } from "../../stores/music-video-store";
 import { AssetsPanel } from "./AssetsPanel";
 import { mediaAvailabilityRuntime } from "../../services/media-verification";
 
+const originalCreateGeneratedImage =
+  useProjectStore.getState().createGeneratedImage;
+
 if (!Element.prototype.hasPointerCapture) {
   Element.prototype.hasPointerCapture = () => false;
 }
@@ -82,6 +85,14 @@ function getToolbar() {
   return screen.getByRole("toolbar", { name: "Media controls" });
 }
 
+function openCreateMenuWithKeyboard() {
+  const trigger = within(getToolbar()).getByRole("button", {
+    name: "Create media",
+  });
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
+}
+
 function openSelectAndChoose(
   triggerName: RegExp | string,
   optionName: RegExp | string,
@@ -92,6 +103,9 @@ function openSelectAndChoose(
 
 describe("AssetsPanel media toolbar and missing-only transitions", () => {
   beforeEach(() => {
+    useProjectStore.setState({
+      createGeneratedImage: originalCreateGeneratedImage,
+    });
     seedProject([]);
     useMusicVideoStore.setState({ projects: {}, activeProjectId: null });
     vi.spyOn(mediaAvailabilityRuntime, "get").mockImplementation((_projectId, mediaId) => {
@@ -113,7 +127,10 @@ describe("AssetsPanel media toolbar and missing-only transitions", () => {
     cleanup();
     useUIStore.getState().clearSelection();
     useUIStore.setState({ inspectedAsset: null });
-    useProjectStore.setState({ project: createEmptyProject("Reset") });
+    useProjectStore.setState({
+      project: createEmptyProject("Reset"),
+      createGeneratedImage: originalCreateGeneratedImage,
+    });
     vi.restoreAllMocks();
   });
 
@@ -398,7 +415,7 @@ describe("AssetsPanel media toolbar and missing-only transitions", () => {
     expect(within(toolbar).getByRole("textbox", { name: "Search media" }).parentElement?.parentElement).toHaveClass(
       "min-w-0",
     );
-    expect(within(toolbar).getAllByRole("button", { name: /Import media|Show only missing assets|Relink from folder|Collapse all buckets|Expand all buckets|Large icons|Small icons|List view/ }).every((el) => toolbar.contains(el))).toBe(true);
+    expect(within(toolbar).getAllByRole("button", { name: /Import media|Create media|Show only missing assets|Relink from folder|Collapse all buckets|Expand all buckets|Large icons|Small icons|List view/ }).every((el) => toolbar.contains(el))).toBe(true);
     expect(within(toolbar).getByRole("button", { name: "Show only missing assets" })).toHaveAttribute(
       "aria-pressed",
       "false",
@@ -418,19 +435,116 @@ describe("AssetsPanel media toolbar and missing-only transitions", () => {
     expect(within(toolbar).getByRole("combobox", { name: "Group media by" })).toBeInTheDocument();
     expect(container.querySelectorAll('[role="toolbar"]').length).toBe(1);
     expect(screen.queryByRole("button", { name: "Import media" })).not.toBeNull();
-    const createSceneButton = within(toolbar).getByRole("button", { name: "Create Scene" });
-    expect(createSceneButton).toBeInTheDocument();
-    expect(createSceneButton.textContent).toBe("");
-    expect(createSceneButton.querySelector("svg")).not.toBeNull();
+    const createMenuButton = within(toolbar).getByRole("button", {
+      name: "Create media",
+    });
+    expect(createMenuButton).toHaveTextContent("Create");
+    expect(createMenuButton).toHaveAttribute("aria-haspopup", "menu");
   });
 
-  it("renders scenes as a searchable type bucket in the normal media content", () => {
+  it("opens a keyboard-accessible create menu with exactly the two media actions", async () => {
+    renderPanel();
+
+    openCreateMenuWithKeyboard();
+
+    const menuItems = await screen.findAllByRole("menuitem");
+    expect(menuItems.map((item) => item.textContent)).toEqual([
+      "Add Scene",
+      "Add Generated Image",
+    ]);
+  });
+
+  it("atomically creates, selects, opens, and preserves a generated-image placeholder", async () => {
+    renderPanel();
+
+    openCreateMenuWithKeyboard();
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Add Generated Image" }),
+    );
+
+    await waitFor(() => {
+      expect(
+        useProjectStore.getState().project.generatedImageDefinitions,
+      ).toHaveLength(1);
+    });
+
+    const createdProject = useProjectStore.getState().project;
+    const definition = createdProject.generatedImageDefinitions[0];
+    const placeholder = createdProject.mediaLibrary.items.find(
+      (item) => item.id === definition?.currentMediaVersionId,
+    );
+    expect(definition).toMatchObject({
+      currentMediaVersionId: placeholder?.id,
+      assetGroupId: placeholder?.assetGroupId,
+      attemptIds: [],
+    });
+    expect(placeholder).toMatchObject({
+      type: "image",
+      isCurrent: true,
+      generationMeta: { status: "unrealized" },
+    });
+
+    const uiState = useUIStore.getState();
+    expect(uiState.selectedItems).toEqual([
+      { type: "clip", id: placeholder?.id },
+    ]);
+    expect(uiState.referenceEditorInspectorRoute).toMatchObject({
+      editor: "generated-image",
+      definitionId: definition?.id,
+      mediaId: placeholder?.id,
+    });
+
+    act(() => {
+      useUIStore.getState().setReferenceEditorInspectorRoute(null);
+    });
+
+    expect(
+      useProjectStore
+        .getState()
+        .project.mediaLibrary.items.find((item) => item.id === placeholder?.id),
+    ).toEqual(placeholder);
+    expect(
+      useProjectStore
+        .getState()
+        .project.generatedImageDefinitions.find(
+          (candidate) => candidate.id === definition?.id,
+        ),
+    ).toEqual(definition);
+  });
+
+  it("does not select or route when generated-image creation fails", async () => {
+    const failedCreate = vi.fn().mockResolvedValue({
+      success: false,
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Could not create generated image",
+      },
+    });
+    useProjectStore.setState({ createGeneratedImage: failedCreate });
+    const before = useProjectStore.getState().project;
+
+    renderPanel();
+    openCreateMenuWithKeyboard();
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Add Generated Image" }),
+    );
+
+    await waitFor(() => expect(failedCreate).toHaveBeenCalledTimes(1));
+    expect(useProjectStore.getState().project).toBe(before);
+    expect(useUIStore.getState().selectedItems).toEqual([]);
+    expect(useUIStore.getState().referenceEditorInspectorRoute).toBeNull();
+  });
+
+  it("renders scenes as a searchable type bucket in the normal media content", async () => {
     seedProject([
       media({ id: "video-1", name: "clip.mp4", type: "video" }),
     ]);
     renderPanel();
 
-    fireEvent.click(within(getToolbar()).getByRole("button", { name: "Create Scene" }));
+    openCreateMenuWithKeyboard();
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Add Scene" }),
+    );
 
     const scenesBucket = screen.getByRole("button", { name: /Scenes 1/ });
     expect(scenesBucket).toHaveAttribute("aria-expanded", "true");
