@@ -1,4 +1,22 @@
 import type { ExportProgress } from "../export/types";
+
+const FFMPEG_PROGRESS_METRICS = {
+  framesPerSecond: 0,
+  elapsedRenderingTime: 0,
+  estimateConfidence: "warming-up",
+  visibility: "unknown",
+  backgroundThroughputRatio: null,
+  backgroundDegraded: false,
+} as const satisfies Pick<
+  ExportProgress,
+  | "framesPerSecond"
+  | "elapsedRenderingTime"
+  | "estimateConfidence"
+  | "visibility"
+  | "backgroundThroughputRatio"
+  | "backgroundDegraded"
+>;
+
 type FFmpegInstance = {
   load(options?: {
     coreURL?: string;
@@ -218,6 +236,7 @@ export class FFmpegFallback {
       }
 
       onProgress({
+        ...FFMPEG_PROGRESS_METRICS,
         phase: p < 1 ? "encoding" : "complete",
         progress: Math.min(p, 1),
         currentFrame: 0,
@@ -740,6 +759,7 @@ export class FFmpegFallback {
 
         if (onProgress) {
           onProgress({
+            ...FFMPEG_PROGRESS_METRICS,
             phase: "rendering",
             progress: frameCount / totalFrames * 0.7,
             currentFrame: frameCount,
@@ -767,6 +787,7 @@ export class FFmpegFallback {
 
       if (onProgress) {
         onProgress({
+          ...FFMPEG_PROGRESS_METRICS,
           phase: "encoding",
           progress: 0.7,
           currentFrame: totalFrames,
@@ -824,6 +845,7 @@ export class FFmpegFallback {
       this.setupProgressTracking((progress) => {
         if (onProgress) {
           onProgress({
+            ...FFMPEG_PROGRESS_METRICS,
             phase: "encoding",
             progress: 0.7 + progress.progress * 0.25,
             currentFrame: totalFrames,
@@ -840,6 +862,7 @@ export class FFmpegFallback {
 
       if (onProgress) {
         onProgress({
+          ...FFMPEG_PROGRESS_METRICS,
           phase: "muxing",
           progress: 0.95,
           currentFrame: totalFrames,
@@ -864,6 +887,7 @@ export class FFmpegFallback {
 
         if (onProgress) {
           onProgress({
+            ...FFMPEG_PROGRESS_METRICS,
             phase: "complete",
             progress: 1,
             currentFrame: totalFrames,
@@ -878,6 +902,7 @@ export class FFmpegFallback {
 
       if (onProgress) {
         onProgress({
+          ...FFMPEG_PROGRESS_METRICS,
           phase: "complete",
           progress: 1,
           currentFrame: totalFrames,
@@ -992,6 +1017,7 @@ export class FFmpegFallback {
     try {
       if (onProgress) {
         onProgress({
+          ...FFMPEG_PROGRESS_METRICS,
           phase: "preparing",
           progress: 0.05,
           currentFrame: 0,
@@ -1073,6 +1099,7 @@ export class FFmpegFallback {
       this.setupProgressTracking((progress) => {
         if (onProgress) {
           onProgress({
+            ...FFMPEG_PROGRESS_METRICS,
             phase: "encoding",
             progress: 0.1 + progress.progress * 0.85,
             currentFrame: 0,
@@ -1101,6 +1128,7 @@ export class FFmpegFallback {
 
         if (onProgress) {
           onProgress({
+            ...FFMPEG_PROGRESS_METRICS,
             phase: "complete",
             progress: 1,
             currentFrame: 0,
@@ -1115,6 +1143,7 @@ export class FFmpegFallback {
 
       if (onProgress) {
         onProgress({
+          ...FFMPEG_PROGRESS_METRICS,
           phase: "complete",
           progress: 1,
           currentFrame: 0,

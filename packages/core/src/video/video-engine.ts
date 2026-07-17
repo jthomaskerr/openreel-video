@@ -30,6 +30,7 @@ import type {
 import { getSpeedEngine } from "./speed-engine";
 import { getFrameInterpolationEngine } from "./frame-interpolation";
 import { mapTransformToOutput } from "./output-transform";
+import { calculateFrameDrawRect } from "./frame-draw-geometry";
 import {
   getStabilizedTransform,
   getVidstabEngine,
@@ -1002,41 +1003,21 @@ export class VideoEngine {
         cropDrawHeight,
       );
     } else {
-      // Treat a missing or "none" fit as "contain" so clips preserve their
-      // aspect ratio on export/compositing, matching the preview.
-      const fitMode =
-        !transform.fitMode || transform.fitMode === "none"
-          ? "contain"
-          : transform.fitMode;
-      let drawWidth = frame.width;
-      let drawHeight = frame.height;
-
-      const sourceAspect = frame.width / frame.height;
-      const canvasAspect = canvasWidth / canvasHeight;
-      if (fitMode === "stretch") {
-        drawWidth = canvasWidth;
-        drawHeight = canvasHeight;
-      } else if (fitMode === "cover") {
-        if (sourceAspect > canvasAspect) {
-          drawHeight = canvasHeight;
-          drawWidth = canvasHeight * sourceAspect;
-        } else {
-          drawWidth = canvasWidth;
-          drawHeight = canvasWidth / sourceAspect;
-        }
-      } else {
-        if (sourceAspect > canvasAspect) {
-          drawWidth = canvasWidth;
-          drawHeight = canvasWidth / sourceAspect;
-        } else {
-          drawHeight = canvasHeight;
-          drawWidth = canvasHeight * sourceAspect;
-        }
-      }
-
-      const drawX = -drawWidth * transform.anchor.x;
-      const drawY = -drawHeight * transform.anchor.y;
-      ctx.drawImage(frame, drawX, drawY, drawWidth, drawHeight);
+      const drawRect = calculateFrameDrawRect({
+        sourceWidth: frame.width,
+        sourceHeight: frame.height,
+        canvasWidth,
+        canvasHeight,
+        fitMode: transform.fitMode,
+        anchor: transform.anchor,
+      });
+      ctx.drawImage(
+        frame,
+        drawRect.x,
+        drawRect.y,
+        drawRect.width,
+        drawRect.height,
+      );
     }
 
     ctx.restore();

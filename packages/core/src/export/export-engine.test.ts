@@ -11,6 +11,7 @@ const {
   mockOutputStart,
   mockOutputFinalize,
   mockVideoSourceConfigs,
+  mockVideoSampleInits,
 } = vi.hoisted(() => {
   const mockRenderFrame = vi.fn().mockResolvedValue({
     image: { close: vi.fn() },
@@ -57,6 +58,10 @@ const {
     mockOutputStart: vi.fn().mockResolvedValue(undefined),
     mockOutputFinalize: vi.fn().mockResolvedValue(undefined),
     mockVideoSourceConfigs: [] as Array<Record<string, unknown>>,
+    mockVideoSampleInits: [] as Array<{
+      timestamp: number;
+      duration: number;
+    }>,
   };
 });
 
@@ -138,8 +143,10 @@ vi.mock("mediabunny", () => {
 
     constructor(
       _data: unknown,
-      _init: { timestamp: number; duration: number },
-    ) {}
+      init: { timestamp: number; duration: number },
+    ) {
+      mockVideoSampleInits.push(init);
+    }
   }
 
   return {
@@ -253,6 +260,7 @@ describe("ExportEngine", () => {
     });
     mockRenderAudio.mockResolvedValue({ buffer: null });
     mockVideoSourceConfigs.length = 0;
+    mockVideoSampleInits.length = 0;
   });
 
   afterEach(() => {
@@ -525,6 +533,44 @@ describe("ExportEngine", () => {
       expect(mockRenderAudio).toHaveBeenNthCalledWith(3, project, 30, 10);
       expect(mockAudioSourceAdd).toHaveBeenCalledTimes(3);
       expect(mockAudioEngine.clearCache).toHaveBeenCalled();
+    });
+
+    it("renders only the selected section and rebases media timestamps", async () => {
+      const project = createMockProject({
+        timeline: createMockTimeline({ duration: 10 }),
+      });
+      mockRenderAudio.mockResolvedValue({ buffer: { duration: 1 } });
+      await exportEngine.initialize();
+      const writableStream = {
+        seek: vi.fn().mockResolvedValue(undefined),
+        write: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+        abort: vi.fn().mockResolvedValue(undefined),
+      } as unknown as FileSystemWritableFileStream;
+
+      const generator = exportEngine.exportVideo(
+        project,
+        {
+          ...DEFAULT_VIDEO_SETTINGS,
+          frameRate: 2,
+          width: 854,
+          height: 480,
+          range: { startTime: 3, endTime: 4 },
+        },
+        writableStream,
+      );
+      while (!(await generator.next()).done) {
+        // Drain progress updates.
+      }
+
+      expect(mockRenderFrame).toHaveBeenCalledTimes(2);
+      expect(mockRenderFrame).toHaveBeenNthCalledWith(1, project, 3, 854, 480);
+      expect(mockRenderFrame).toHaveBeenNthCalledWith(2, project, 3.5, 854, 480);
+      expect(mockVideoSampleInits).toEqual([
+        { timestamp: 0, duration: 0.5 },
+        { timestamp: 0.5, duration: 0.5 },
+      ]);
+      expect(mockRenderAudio).toHaveBeenCalledWith(project, 3, 1);
     });
   });
 

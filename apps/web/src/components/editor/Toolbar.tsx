@@ -90,6 +90,10 @@ interface ExportState {
   phase: string;
   error: string | null;
   complete: boolean;
+  estimatedTimeRemaining?: number | null;
+  framesPerSecond?: number | null;
+  estimateConfidence?: "warming-up" | "observed";
+  backgroundDegraded?: boolean;
 }
 
 export const Toolbar: React.FC = () => {
@@ -286,8 +290,12 @@ export const Toolbar: React.FC = () => {
       isExporting: exportState.isExporting,
       progress: exportState.progress,
       phase: exportState.phase,
+      estimatedTimeRemaining: exportState.estimatedTimeRemaining ?? null,
+      framesPerSecond: exportState.framesPerSecond ?? null,
+      estimateConfidence: exportState.estimateConfidence ?? "warming-up",
+      backgroundDegraded: exportState.backgroundDegraded ?? false,
     });
-  }, [exportState.isExporting, exportState.progress, exportState.phase, setGlobalExportState]);
+  }, [exportState, setGlobalExportState]);
 
   useEffect(() => {
     if (deviceProfile) return;
@@ -344,6 +352,16 @@ export const Toolbar: React.FC = () => {
           ...prev,
           progress: value.progress * 100,
           phase: value.phase === "complete" ? "Complete!" : `${value.phase}...`,
+          estimatedTimeRemaining:
+            value.estimateConfidence === "observed"
+              ? value.estimatedTimeRemaining
+              : null,
+          framesPerSecond:
+            value.estimateConfidence === "observed"
+              ? value.framesPerSecond
+              : null,
+          estimateConfidence: value.estimateConfidence,
+          backgroundDegraded: value.backgroundDegraded,
         }));
       }
 

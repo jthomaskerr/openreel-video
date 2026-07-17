@@ -25,6 +25,11 @@ import { getMediaEngine } from "../media/mediabunny-engine";
 import { getWavEncoder } from "../wasm/wav";
 import { runExportFrameLoop } from "./export-frame-loop";
 import {
+  getExportFrameTiming,
+  resolveExportRange,
+  type ResolvedExportRange,
+} from "./export-range";
+import {
   ExportPerformanceTracker,
   type ExportPerformanceSnapshot,
   type ExportVisibility,
@@ -278,11 +283,36 @@ export class ExportEngine {
     const { timeline } = project;
     const timelineDuration = this.calculateTimelineDuration(timeline);
 
+    if (timelineDuration <= 0) {
+      return {
+        success: false,
+        error: this.createError(
+          "MUXER_ERROR",
+          "Timeline is empty. Add clips before exporting.",
+          "preparing",
+        ),
+      };
+    }
+
+    let exportRange: ResolvedExportRange;
+    try {
+      exportRange = resolveExportRange(timelineDuration, fullSettings.range);
+    } catch (error) {
+      return {
+        success: false,
+        error: this.createError(
+          "MUXER_ERROR",
+          error instanceof Error ? error.message : "Invalid export range",
+          "preparing",
+        ),
+      };
+    }
+
     const isMemoryIntensiveCodec =
       fullSettings.codec === "vp9" ||
       fullSettings.codec === "av1" ||
       fullSettings.codec === "h265";
-    const isLongVideo = timelineDuration > 120;
+    const isLongVideo = exportRange.duration > 120;
 
     let maxW = isMemoryIntensiveCodec ? 1920 : 3840;
     let maxH = isMemoryIntensiveCodec ? 1080 : 2160;
@@ -312,17 +342,6 @@ export class ExportEngine {
       this.videoEngine.exportMode = true;
     }
 
-    if (timelineDuration <= 0) {
-      return {
-        success: false,
-        error: this.createError(
-          "MUXER_ERROR",
-          "Timeline is empty. Add clips before exporting.",
-          "preparing",
-        ),
-      };
-    }
-
     if (!writableStream) {
       return {
         success: false,
@@ -334,7 +353,7 @@ export class ExportEngine {
       };
     }
 
-    const totalFrames = Math.ceil(timelineDuration * fullSettings.frameRate);
+    const totalFrames = Math.ceil(exportRange.duration * fullSettings.frameRate);
     let bytesWritten = 0;
     const exportStartedAt = this.now();
     this.diagnostics.emit({
@@ -452,7 +471,7 @@ export class ExportEngine {
 
       const audioPreparationStartedAt = this.now();
       try {
-        await this.encodeTimelineAudioToSource(project, audioSource);
+        await this.encodeTimelineAudioToSource(project, audioSource, exportRange);
       } finally {
         this.audioEngine?.clearCache();
       }
@@ -517,10 +536,14 @@ export class ExportEngine {
           ),
         renderAndEncode: async (frame) => {
           const renderStartedAt = this.now();
-          const time = frame / fullSettings.frameRate;
+          const timing = getExportFrameTiming(
+            exportRange,
+            fullSettings.frameRate,
+            frame,
+          );
           const rendered = await this.videoEngine!.renderFrame(
             project,
-            time,
+            timing.timelineTime,
             fullSettings.width,
             fullSettings.height,
           );
@@ -541,8 +564,8 @@ export class ExportEngine {
 
           const encodeStartedAt = this.now();
           const videoSample = new VideoSample(frameImage, {
-            timestamp: time,
-            duration: 1 / fullSettings.frameRate,
+            timestamp: timing.outputTimestamp,
+            duration: timing.frameDuration,
           });
           await videoSource.add(videoSample);
           videoSample.close();
@@ -716,9 +739,27 @@ export class ExportEngine {
       };
     }
 
+    let exportRange: ResolvedExportRange;
+    try {
+      exportRange = resolveExportRange(timelineDuration, fullSettings.range);
+    } catch (error) {
+      return {
+        success: false,
+        error: this.createError(
+          "AUDIO_ENCODE_FAILED",
+          error instanceof Error ? error.message : "Invalid export range",
+          "preparing",
+        ),
+      };
+    }
+
     try {
       yield this.createProgress("preparing", 0, 1, 0, 0);
-      const audioBuffer = await this.renderTimelineAudio(project);
+      const audioBuffer = await this.renderTimelineAudio(
+        project,
+        exportRange.startTime,
+        exportRange.duration,
+      );
 
       if (!audioBuffer) {
         throw this.createError(
@@ -750,7 +791,7 @@ export class ExportEngine {
           framesRendered: 1,
           averageSpeed: 1,
           fileSize: blob.size,
-          averageBitrate: (blob.size * 8) / timelineDuration,
+          averageBitrate: (blob.size * 8) / exportRange.duration,
         },
       };
     } catch (error) {
@@ -1225,17 +1266,13 @@ export class ExportEngine {
   private async encodeTimelineAudioToSource(
     project: Project,
     audioSource: InstanceType<typeof import("mediabunny").AudioBufferSource>,
+    range: ResolvedExportRange,
   ): Promise<void> {
-    const timelineDuration = this.calculateTimelineDuration(project.timeline);
-    if (timelineDuration <= 0) {
-      return;
-    }
-
     const chunkDuration = ExportEngine.AUDIO_EXPORT_CHUNK_DURATION_SECONDS;
 
     for (
-      let startTime = 0;
-      startTime < timelineDuration;
+      let startTime = range.startTime;
+      startTime < range.endTime;
       startTime += chunkDuration
     ) {
       if (this.abortController?.signal.aborted) {
@@ -1248,7 +1285,7 @@ export class ExportEngine {
 
       const currentChunkDuration = Math.min(
         chunkDuration,
-        timelineDuration - startTime,
+        range.endTime - startTime,
       );
       const audioBuffer = await this.renderTimelineAudio(
         project,

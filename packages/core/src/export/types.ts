@@ -12,6 +12,13 @@ export const DEFAULT_UPSCALING_SETTINGS: UpscalingSettings = {
   sharpening: 0.3,
 };
 
+export interface ExportRange {
+  /** Inclusive timeline start, in seconds. */
+  startTime: number;
+  /** Exclusive timeline end, in seconds. */
+  endTime: number;
+}
+
 export interface VideoExportSettings {
   format: "mp4" | "webm" | "mov";
   codec: "h264" | "h265" | "vp8" | "vp9" | "av1" | "prores";
@@ -27,6 +34,7 @@ export interface VideoExportSettings {
   colorDepth?: 8 | 10 | 12;
   pixelFormat?: "yuv420" | "yuv422" | "yuv444" | "rgb";
   upscaling?: UpscalingSettings;
+  range?: ExportRange;
 }
 
 export interface AudioExportSettings {
@@ -35,6 +43,7 @@ export interface AudioExportSettings {
   bitDepth: 16 | 24 | 32;
   bitrate: number;
   channels: 1 | 2;
+  range?: ExportRange;
 }
 
 export interface ImageExportSettings {

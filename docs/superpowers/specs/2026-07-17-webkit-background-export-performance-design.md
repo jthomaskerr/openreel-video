@@ -9,6 +9,7 @@ For the 480p, H.264, 30 fps regression scenario:
 - background export throughput after warmup must be at least 50% of foreground throughput on the same browser and project;
 - export must not use wall-clock timers in the per-frame loop;
 - a 1920×1080 project exported with the 480p preset must encode at 854×480 and a full-frame 16:9 clip with scale 1 must cover the 854×480 frame rather than being scaled a second time inside it;
+- users may export an explicit timeline section by entering start and end seconds; video and audio must cover the same section, output timestamps must begin at zero, and progress/ETA must use only the selected section;
 - progress must continue to update from completed frames;
 - after either 10% progress or 30 seconds of rendering, the displayed remaining-time estimate must be derived from observed end-to-end frame throughput rather than a synthetic encoder benchmark;
 - if browser-imposed background throttling still reduces observed throughput below 50% of the foreground baseline, the UI must report that explicitly and recommend foregrounding the tab. It must not silently retain an invalid estimate.
@@ -51,6 +52,12 @@ If browser verification later demonstrates unacceptable UI starvation, add a coo
 Keep clip `Transform.scale` dimensionless across output resolutions. A scale of 1 means the same full-frame fit at 1920×1080, 1280×720, and 854×480. Scale project-space position offsets by `target / project` for each axis, but do not multiply the semantic clip scale by that ratio because `drawFrameToContext()` already computes draw dimensions against the target canvas.
 
 The generated 480p browser fixture must include non-black pixels at the frame edges or corners so automated verification detects a centered, double-scaled image even when the container metadata reports the correct dimensions.
+
+### Section export
+
+The custom export dialog exposes start and end seconds. Start is inclusive, end is exclusive, and the default range is the complete timeline. Reject non-finite, negative, reversed, zero-length, and beyond-timeline ranges instead of silently clamping them.
+
+Render frames at `range.startTime + frameIndex / frameRate`, but write each `VideoSample` at `frameIndex / frameRate` so the output begins at timestamp zero. Render audio chunks beginning at `range.startTime`, stop at `range.endTime`, and append them sequentially so audio also begins at zero. Total frames, progress, initial size estimate, and remaining-time calculations use `range.endTime - range.startTime`.
 
 ### Encoder policy consistency
 
@@ -110,6 +117,8 @@ Add focused tests that fail against the current implementation and complete loca
 7. The adaptive estimator converges on a stable synthetic frame duration, resists one outlier, and recalculates after a sustained complexity change.
 8. The export UI switches from the rough preflight range to a live observed remaining time after warmup.
 9. Sustained background throughput below 50% produces the actionable warning; recovery clears it; short dips do neither.
+10. A selected one-second range renders only its frames at the correct timeline times, writes zero-based video timestamps, and renders the matching audio interval.
+11. The dialog defaults to the complete timeline, passes the same validated range to video and audio settings, and disables export for invalid ranges.
 
 Existing export-engine, export-estimator, audio-export, cancellation, file-streaming, and project persistence tests must continue to pass.
 
@@ -123,6 +132,8 @@ The browser gate passes when:
 - background export completes successfully;
 - background throughput is at least 50% of foreground throughput;
 - the output container reports 854×480 and decoded edge/corner samples prove a full-frame fixture covers the output rather than being double-scaled into a black border;
+- the custom export dialog accepts a valid start/end section and rejects a reversed or zero-length section;
+- a ranged output reports the selected duration and begins video/audio at timestamp zero;
 - no per-frame-loop timer events appear in the Web Inspector trace;
 - the live estimate updates from observed throughput and does not retain the rough preflight value;
 - cancellation, file finalization, and output playback remain correct.

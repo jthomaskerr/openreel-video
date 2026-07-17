@@ -21,6 +21,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   Button,
@@ -159,6 +160,15 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       sharpening: 0.3,
     },
   });
+  const [rangeStart, setRangeStart] = useState(0);
+  const [rangeEnd, setRangeEnd] = useState(duration);
+  const selectedDuration = Math.max(0, rangeEnd - rangeStart);
+  const isRangeValid =
+    Number.isFinite(rangeStart) &&
+    Number.isFinite(rangeEnd) &&
+    rangeStart >= 0 &&
+    rangeEnd > rangeStart &&
+    rangeEnd <= duration;
 
   const [deviceProfile, setDeviceProfile] = useState<DeviceProfile | null>(null);
   const [timeEstimate, setTimeEstimate] = useState<TimeEstimate | null>(null);
@@ -169,6 +179,8 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
 
   useEffect(() => {
     if (isOpen) {
+      setRangeStart(0);
+      setRangeEnd(duration);
       setPresets(exportPresetsManager.getAllPresets());
       setPlatforms(exportPresetsManager.getPlatforms());
       setSelectedPlatform("recommended");
@@ -181,10 +193,10 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         );
       });
     }
-  }, [isOpen, projectWidth, projectHeight]);
+  }, [isOpen, projectWidth, projectHeight, duration]);
 
   useEffect(() => {
-    if (!deviceProfile || duration <= 0) {
+    if (!deviceProfile || !isRangeValid) {
       setTimeEstimate(null);
       return;
     }
@@ -198,12 +210,19 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
       width: settings.width,
       height: settings.height,
       frameRate: settings.frameRate,
-      duration,
+      duration: selectedDuration,
       codec: settings.codec as "h264" | "h265" | "vp9" | "av1",
     });
 
     setTimeEstimate(estimate);
-  }, [deviceProfile, duration, activeTab, selectedPreset, customSettings]);
+  }, [
+    deviceProfile,
+    selectedDuration,
+    isRangeValid,
+    activeTab,
+    selectedPreset,
+    customSettings,
+  ]);
 
   const handleRunBenchmark = useCallback(async () => {
     if (isBenchmarking) return;
@@ -244,13 +263,28 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
         : exportPresetsManager.getRecommendedPresets();
 
   const handleExport = useCallback(() => {
+    if (!isRangeValid) return;
     const settings =
       activeTab === "presets" && selectedPreset
         ? (selectedPreset.settings as VideoExportSettings)
         : customSettings;
-    onExport(settings);
+    const range = { startTime: rangeStart, endTime: rangeEnd };
+    onExport({
+      ...settings,
+      range,
+      audioSettings: { ...settings.audioSettings, range },
+    });
     onClose();
-  }, [activeTab, selectedPreset, customSettings, onExport, onClose]);
+  }, [
+    activeTab,
+    selectedPreset,
+    customSettings,
+    isRangeValid,
+    rangeStart,
+    rangeEnd,
+    onExport,
+    onClose,
+  ]);
 
   const formatFileSize = (bitrate: number, durationSec: number): string => {
     const bytes = (bitrate * 1000 * durationSec) / 8;
@@ -280,6 +314,9 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             <DialogTitle className="text-lg font-bold text-text-primary">
               Export Video
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Choose export quality and an optional timeline section.
+            </DialogDescription>
           </div>
         </DialogHeader>
 
@@ -822,13 +859,66 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
           </div>
         )}
 
+        {duration > 0 && (
+          <fieldset className="border-t border-border px-4 py-3 bg-background-secondary">
+            <legend className="sr-only">Export section</legend>
+            <div className="flex items-end gap-3">
+              <div className="flex-1">
+                <Label htmlFor="export-start-time" className="text-xs text-text-secondary">
+                  Start (seconds)
+                </Label>
+                <Input
+                  id="export-start-time"
+                  type="number"
+                  min={0}
+                  max={duration}
+                  step="any"
+                  value={rangeStart}
+                  onChange={(event) => setRangeStart(event.target.valueAsNumber)}
+                  aria-invalid={!isRangeValid}
+                />
+              </div>
+              <div className="flex-1">
+                <Label htmlFor="export-end-time" className="text-xs text-text-secondary">
+                  End (seconds)
+                </Label>
+                <Input
+                  id="export-end-time"
+                  type="number"
+                  min={0}
+                  max={duration}
+                  step="any"
+                  value={rangeEnd}
+                  onChange={(event) => setRangeEnd(event.target.valueAsNumber)}
+                  aria-invalid={!isRangeValid}
+                />
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setRangeStart(0);
+                  setRangeEnd(duration);
+                }}
+              >
+                Entire timeline
+              </Button>
+            </div>
+            {!isRangeValid && (
+              <p role="alert" className="mt-2 text-xs text-red-400">
+                End must be after start and no later than {formatDuration(duration)}.
+              </p>
+            )}
+          </fieldset>
+        )}
+
         <div className="flex items-center justify-between p-4 border-t border-border bg-background-tertiary">
           <div className="flex items-center gap-4 text-xs text-text-muted">
             {duration > 0 && (
               <>
                 <div className="flex items-center gap-1">
                   <Clock size={12} />
-                  {formatDuration(duration)}
+                  {formatDuration(selectedDuration)}
                 </div>
                 <div className="flex items-center gap-1">
                   <HardDrive size={12} />~
@@ -837,7 +927,7 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
                       ? (selectedPreset.settings as VideoExportSettings)
                           .bitrate || 8000
                       : customSettings.bitrate,
-                    duration,
+                    selectedDuration,
                   )}
                 </div>
                 {timeEstimate && deviceProfile?.encoding[customSettings.codec as keyof typeof deviceProfile.encoding]?.hardware && (
@@ -855,7 +945,10 @@ export const ExportDialog: React.FC<ExportDialogProps> = ({
             </Button>
             <Button
               onClick={handleExport}
-              disabled={activeTab === "presets" && !selectedPreset}
+              disabled={
+                !isRangeValid ||
+                (activeTab === "presets" && !selectedPreset)
+              }
             >
               <Play size={16} />
               Start Export
