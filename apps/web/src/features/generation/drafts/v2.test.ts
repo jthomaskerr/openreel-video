@@ -37,11 +37,85 @@ describe("generation submission draft helpers", () => {
         target: { kind: "new-version", sourceMediaId: "source-1", placeholderMediaId: "placeholder-1" },
         context: { projectId: "p1", shotId: "shot-1", clipId: "clip-1", references: [], placementPolicy: "none" },
         providerInputs: { prompt: "hello", keep: false, count: 0, values: [] },
+        canonicalPrompt: "hello",
         references: undefined,
         audio: undefined,
         placementPolicy: "none",
+        referenceOverflowAcknowledged: false,
       }),
     );
+  });
+
+  it("ignores transient local upload values when building stable submission keys", () => {
+    const first = generationSubmissionDraftKey({
+      projectId: "p1",
+      provider: "wavespeed",
+      modelId: "m1",
+      modelSchemaVersion: "s1",
+      target: { kind: "new-version", sourceMediaId: "source-1", placeholderMediaId: "placeholder-1" },
+      context: { projectId: "p1", shotId: "shot-1", clipId: "clip-1", references: [], placementPolicy: "none" },
+      providerInputs: { prompt: "scene @{reference-1}", seed: 7 },
+      canonicalPrompt: "scene @{reference-1}",
+      references: [{
+        key: "reference-1",
+        mediaId: "ref-media-1",
+        mediaVersionId: "ref-version-1",
+        role: "reference-images",
+        order: 2,
+        canonicalTokens: ["@{reference-1}"],
+        status: "active",
+        value: "file:///tmp/reference-a.png",
+      }],
+      audio: {
+        value: "blob:audio-a",
+        sourceMediaId: "audio-media",
+        sourceVersionId: "audio-version",
+        sourceClipId: "audio-clip",
+        projectStartSeconds: 0,
+        projectEndSeconds: 1,
+        sourceStartSeconds: 0,
+        sourceEndSeconds: 1,
+        mimeType: "audio/wav",
+        sha256: "sha",
+      },
+    });
+
+    const second = generationSubmissionDraftKey({
+      projectId: "p1",
+      provider: "wavespeed",
+      modelId: "m1",
+      modelSchemaVersion: "s1",
+      target: { kind: "new-version", sourceMediaId: "source-1", placeholderMediaId: "placeholder-1" },
+      context: { projectId: "p1", shotId: "shot-1", clipId: "clip-1", references: [], placementPolicy: "none" },
+      providerInputs: { prompt: "scene @{reference-1}", seed: 7 },
+      canonicalPrompt: "scene @{reference-1}",
+      references: [{
+        key: "reference-1",
+        mediaId: "ref-media-1",
+        mediaVersionId: "ref-version-1",
+        role: "reference-images",
+        order: 2,
+        canonicalTokens: ["@{reference-1}"],
+        status: "active",
+        value: "file:///tmp/reference-b.png",
+      }],
+      audio: {
+        value: "blob:audio-b",
+        sourceMediaId: "audio-media",
+        sourceVersionId: "audio-version",
+        sourceClipId: "audio-clip",
+        projectStartSeconds: 0,
+        projectEndSeconds: 1,
+        sourceStartSeconds: 0,
+        sourceEndSeconds: 1,
+        mimeType: "audio/wav",
+        sha256: "sha",
+      },
+    });
+
+    expect(first).toBe(second);
+    expect(first).not.toContain("file:///tmp/reference-a.png");
+    expect(first).not.toContain("blob:audio-a");
   });
 
   it("flags local submission urls", () => {
@@ -100,10 +174,20 @@ describe("generation submission draft helpers", () => {
         provider: "wavespeed",
         modelId: "m1",
         modelSchemaVersion: "s1",
+        canonicalPrompt: "hello @{reference-1}",
         target: { kind: "new-version", sourceMediaId: "source-1" },
         context: { projectId: "p1", shotId: "shot-1", clipId: "clip-1", references: [], placementPolicy: "none" },
         providerInputs: { prompt: "hello" },
-        references: [{ mediaId: "ref-1", value: "file:///tmp/ref.png" }],
+        references: [{
+          key: "reference-1",
+          mediaId: "ref-1",
+          mediaVersionId: "version-1",
+          role: "reference-images",
+          order: 1,
+          canonicalTokens: ["@{reference-1}"],
+          status: "active",
+          value: "file:///tmp/ref.png",
+        }],
         audio: {
           value: "ignored",
           sourceMediaId: "audio-media",
@@ -130,6 +214,7 @@ describe("generation submission draft helpers", () => {
     expect(context.references).toEqual([
       {
         mediaId: "ref-1",
+        versionId: "version-1",
         origins: ["user"],
         remoteInput: { kind: "upload-token", value: "ref-token" },
       },

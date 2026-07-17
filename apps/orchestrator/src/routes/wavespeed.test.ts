@@ -185,6 +185,9 @@ test("submit route maps top-level references and reaches provider only after val
     assert.equal(calls[0].model, "fixture/reference-audio");
     assert.deepEqual(calls[0].inputs.references, [1, 2]);
     assert.equal(calls[0].inputs.prompt, "scene");
+    assert.equal(JSON.stringify(calls[0].inputs).includes("reference-1-media"), false);
+    assert.equal(JSON.stringify(calls[0].inputs).includes("reference-2-version"), false);
+    assert.equal(JSON.stringify(calls[0].inputs).includes("@{reference-1}"), false);
   } finally {
     (Client as any).prototype._submit = originalSubmit;
   }

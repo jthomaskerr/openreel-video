@@ -14,7 +14,9 @@ import {
 } from "./drafts/cache";
 import {
   assertNoLocalSubmissionUrls,
+  buildImmutableGenerationSubmissionDraft,
   buildGenerationSubmissionContext,
+  generationSubmissionDraftKey,
   stableSubmissionStringify,
 } from "./drafts/v2";
 
@@ -23,24 +25,33 @@ export interface GenerationDraft {
   provider: string;
   modelId: string;
   modelSchemaVersion: string;
+  canonicalPrompt?: string;
   target: { kind: "new-asset" | "new-version"; sourceMediaId?: string };
   context: Omit<GenerationContext, "target"> & { target?: never };
   providerInputs: Record<string, unknown>;
   references?: readonly GenerationReferenceDraft[];
   audio?: GenerationAudioDraft;
   placementPolicy?: GenerationContext["placementPolicy"];
+  referenceOverflowAcknowledged?: boolean;
   idempotencyKey?: string;
 }
 
 export interface GenerationReferenceDraft {
+  key?: string;
   mediaId: string;
+  mediaVersionId?: string;
   versionId?: string;
+  role?: string;
+  order?: number;
   origins?: GenerationReferenceOrigin[];
+  canonicalTokens?: readonly string[];
+  status?: "active" | "unresolved" | "ambiguous" | "unavailable" | "unsupported" | "overflow" | "cyclic";
+  reason?: string;
   value?: unknown;
 }
 
 export interface GenerationAudioDraft {
-  value: unknown;
+  value?: unknown;
   sourceMediaId?: string;
   sourceVersionId?: string;
   sourceClipId?: string;
@@ -91,6 +102,17 @@ export interface ProviderSubmitPort {
     modelSchemaVersion: string;
     inputs: Record<string, unknown>;
     context: GenerationContext;
+    references?: readonly Array<{
+      key: string;
+      mediaId: string;
+      mediaVersionId: string;
+      origins: readonly GenerationReferenceOrigin[];
+      role: string;
+      canonicalTokens: readonly string[];
+      order: number;
+      status: "active";
+      remoteInput: { kind: "upload-token"; value: string };
+    }>;
     idempotencyKey: string;
   }): Promise<{ providerJobId: string }>;
 }
@@ -171,6 +193,28 @@ function validateDraft(draft: GenerationDraft): void {
     if (!reference.mediaId) {
       throw new GenerationSubmissionError("invalid-draft", "Reference media is required", `references.${index}.mediaId`);
     }
+    const status = reference.status ?? "active";
+    if (status === "overflow" && !draft.referenceOverflowAcknowledged) {
+      throw new GenerationSubmissionError(
+        "invalid-draft",
+        "Reference overflow requires acknowledgement",
+        "references",
+      );
+    }
+    if (status === "cyclic") {
+      throw new GenerationSubmissionError(
+        "invalid-draft",
+        reference.reason ?? "Reference cycles are not allowed",
+        `references.${index}.status`,
+      );
+    }
+    if (status !== "active" && status !== "overflow") {
+      throw new GenerationSubmissionError(
+        "invalid-draft",
+        reference.reason ?? "Only active references can be submitted",
+        `references.${index}.status`,
+      );
+    }
   }
   if (draft.audio) {
     const requiredAudioFields: Array<[keyof GenerationAudioDraft, string]> = [
@@ -191,6 +235,43 @@ function validateDraft(draft: GenerationDraft): void {
       }
     }
   }
+}
+
+function normalizeReferenceDraft(
+  reference: GenerationReferenceDraft,
+  index: number,
+): Required<Pick<GenerationReferenceDraft, "mediaId">> & {
+  key: string;
+  mediaVersionId: string;
+  role: string;
+  order: number;
+  origins: readonly GenerationReferenceOrigin[];
+  canonicalTokens: readonly string[];
+  status: NonNullable<GenerationReferenceDraft["status"]>;
+  reason?: string;
+  value?: unknown;
+} {
+  const mediaVersionId = reference.mediaVersionId ?? reference.versionId ?? reference.mediaId;
+  const key = reference.key ?? `reference:${mediaVersionId}`;
+  return {
+    key,
+    mediaId: reference.mediaId,
+    mediaVersionId,
+    role: reference.role ?? "reference-images",
+    order: reference.order ?? index,
+    origins: reference.origins ?? ["user"],
+    canonicalTokens: reference.canonicalTokens ?? [`@{${key}}`],
+    status: reference.status ?? "active",
+    ...(reference.reason ? { reason: reference.reason } : {}),
+    ...(reference.value === undefined ? {} : { value: reference.value }),
+  };
+}
+
+function activeSubmissionReferences(draft: GenerationDraft) {
+  return (draft.references ?? [])
+    .map((reference, index) => normalizeReferenceDraft(reference, index))
+    .filter((reference) => reference.status === "active")
+    .sort((left, right) => left.order - right.order || left.key.localeCompare(right.key));
 }
 
 function extractPlaceholderMediaId(
@@ -269,17 +350,24 @@ function buildJob(
 
 export async function submitGeneration(draft: GenerationDraft, ports: SubmitGenerationPorts): Promise<GenerationJob> {
   validateDraft(draft);
-  const submissionKey = draft.idempotencyKey ?? stableSubmissionStringify({
+  const submissionKey = generationSubmissionDraftKey({
     projectId: draft.projectId,
     provider: draft.provider,
     modelId: draft.modelId,
     modelSchemaVersion: draft.modelSchemaVersion,
-    target: draft.target,
+    target: {
+      kind: draft.target.kind,
+      ...(draft.target.kind === "new-version" ? { sourceMediaId: draft.target.sourceMediaId ?? "" } : {}),
+      placeholderMediaId: "__submission__",
+    },
     context: draft.context,
     providerInputs: draft.providerInputs,
+    canonicalPrompt: draft.canonicalPrompt,
     references: draft.references,
     audio: draft.audio,
     placementPolicy: draft.placementPolicy ?? draft.context.placementPolicy,
+    referenceOverflowAcknowledged: draft.referenceOverflowAcknowledged,
+    idempotencyKey: draft.idempotencyKey,
   });
   const existing = inflight.get(submissionKey);
   if (existing) return existing;
@@ -299,20 +387,30 @@ async function executeSubmission(
   ports: SubmitGenerationPorts,
   submissionKey: string,
 ): Promise<GenerationJob> {
-  const placeholderMediaId = ports.ids.next("placeholder");
+  const draftCache = ports.draftCache ?? generationSubmissionDraftCache;
+  const cachedDraft = draftCache.get(submissionKey);
+  const placeholderMediaId = cachedDraft?.placeholderMediaId ?? ports.ids.next("placeholder");
   const target: GenerationTarget =
     draft.target.kind === "new-version"
       ? { kind: "new-version", sourceMediaId: draft.target.sourceMediaId!, placeholderMediaId }
       : { kind: "new-asset", placeholderMediaId };
-
-  const placeholderResult = await ports.mutations.createPlaceholder({
-    projectId: draft.projectId,
-    target,
-    sourceMediaId: draft.target.sourceMediaId,
+  const exactPlaceholderMediaId = cachedDraft
+    ? cachedDraft.placeholderMediaId
+    : extractPlaceholderMediaId(
+        await ports.mutations.createPlaceholder({
+          projectId: draft.projectId,
+          target,
+          sourceMediaId: draft.target.sourceMediaId,
+        }),
+        placeholderMediaId,
+      );
+  const orderedReferences = activeSubmissionReferences(draft);
+  const immutableDraft = buildImmutableGenerationSubmissionDraft({
+    ...draft,
+    references: orderedReferences,
   });
-  const exactPlaceholderMediaId = extractPlaceholderMediaId(placeholderResult, placeholderMediaId);
   const retryableDraft = createGenerationSubmissionRetryableDraft({
-    draft,
+    draft: immutableDraft,
     placeholderMediaId: exactPlaceholderMediaId,
     updatedAt: ports.clock.now(),
     key: submissionKey,
@@ -321,12 +419,12 @@ async function executeSubmission(
   let referenceTokens: readonly { tokenId: string }[] = [];
   try {
     await stageRetryableDraft(ports, retryableDraft);
-    if (draft.references?.length) {
+    if (orderedReferences.length) {
       if (!ports.references) {
         throw new GenerationSubmissionError("reference-upload-unavailable", "Reference upload is unavailable", "references");
       }
       const uploaded: { tokenId: string }[] = [];
-      for (const reference of draft.references) {
+      for (const reference of orderedReferences) {
         uploaded.push(await ports.references.uploadReference(reference));
       }
       referenceTokens = uploaded;
@@ -364,7 +462,7 @@ async function executeSubmission(
   let sanitizedInputs: Record<string, unknown>;
   try {
     const sanitized = ports.sanitizer?.sanitize({
-      draft,
+      draft: immutableDraft,
       references: referenceTokens,
       audio: audioToken,
     });
@@ -386,12 +484,23 @@ async function executeSubmission(
   }
 
   const context = buildGenerationSubmissionContext({
-    draft,
+    draft: immutableDraft,
     target,
     referenceTokens,
     audioToken,
   });
   assertNoLocalSubmissionUrls(context, "context");
+  const submittedReferences = orderedReferences.map((reference, index) => ({
+    key: reference.key,
+    mediaId: reference.mediaId,
+    mediaVersionId: reference.mediaVersionId,
+    origins: reference.origins,
+    role: reference.role,
+    canonicalTokens: reference.canonicalTokens,
+    order: reference.order,
+    status: "active" as const,
+    remoteInput: { kind: "upload-token" as const, value: referenceTokens[index]?.tokenId ?? "" },
+  }));
 
   let providerSubmit: { providerJobId: string };
   try {
@@ -401,6 +510,7 @@ async function executeSubmission(
       modelSchemaVersion: draft.modelSchemaVersion,
       inputs: sanitizedInputs,
       context,
+      ...(submittedReferences.length ? { references: submittedReferences } : {}),
       idempotencyKey: draft.idempotencyKey ?? submissionKey,
     });
   } catch (cause) {

@@ -25,10 +25,14 @@ function media(id: string, assetGroupId?: string): MediaItem {
     },
     thumbnailUrl: null,
     assetGroupId,
+    isCurrent: true,
   };
 }
 
-function project(items: MediaItem[] = [media("placeholder")]): Project {
+function project(
+  items: MediaItem[] = [media("placeholder")],
+  generatedImageDefinitions: Project["generatedImageDefinitions"] = [],
+): Project {
   return {
     id: "project",
     name: "test",
@@ -42,7 +46,7 @@ function project(items: MediaItem[] = [media("placeholder")]): Project {
       channels: 2,
     },
     mediaLibrary: { items },
-    generatedImageDefinitions: [],
+    generatedImageDefinitions,
     timeline: { tracks: [], duration: 0, markers: [], subtitles: [] },
   };
 }
@@ -96,8 +100,24 @@ describe("finalizeGeneratedAsset", () => {
   });
 
   it("finalizes a new immutable version in the explicit source group", async () => {
+    const definition = {
+      id: "definition-1",
+      projectId: "project",
+      assetGroupId: "source-group",
+      currentMediaVersionId: "source-v1",
+      sourceMediaVersionId: "source-v1",
+      title: "Generated still",
+      draft: {
+        prompt: "storm",
+        roleByReferenceKey: {},
+        inputs: {},
+      },
+      attemptIds: ["attempt-1"],
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+    } satisfies Project["generatedImageDefinitions"][number];
     const store: GeneratedAssetFinalizationStore = {
-      project: project([media("placeholder"), media("source-v1", "source-group")]),
+      project: project([media("placeholder"), media("source-v1", "source-group")], [definition]),
       finalizeVersion: vi.fn(async () => ok("finalize-version")),
     };
 
@@ -107,9 +127,20 @@ describe("finalizeGeneratedAsset", () => {
         sourceMediaId: "source-v1",
         placeholderMediaId: "placeholder",
       },
-      item: media("version-v2"),
+      item: {
+        ...media("version-v2"),
+        generationMeta: {
+          provider: "wavespeed",
+          model: "fixture/reference-audio",
+          prompt: "storm",
+          inputs: { seed: 7 },
+          jobId: "job-2",
+          status: "completed",
+        },
+      },
       blob: new Blob(["x"]),
       jobId: "job-2",
+      attempt: { id: "attempt-2", number: 2 },
     });
 
     expect(result).toEqual({
@@ -126,6 +157,28 @@ describe("finalizeGeneratedAsset", () => {
         idempotencyKey: "generation-finalize:job-2:new-version",
       }),
     );
+    expect(store.project.generatedImageDefinitions[0]).toMatchObject({
+      currentMediaVersionId: "placeholder",
+      sourceMediaVersionId: "source-v1",
+      attemptIds: ["attempt-1", "attempt-2"],
+    });
+    expect(store.project.mediaLibrary.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "placeholder",
+        assetGroupId: "source-group",
+        isCurrent: true,
+        generationMeta: expect.objectContaining({
+          provider: "wavespeed",
+          model: "fixture/reference-audio",
+          jobId: "job-2",
+        }),
+      }),
+      expect.objectContaining({
+        id: "source-v1",
+        assetGroupId: "source-group",
+        isCurrent: false,
+      }),
+    ]));
   });
 
   it("replays duplicate keys without appending a second shot attempt", async () => {
@@ -187,6 +240,53 @@ describe("finalizeGeneratedAsset", () => {
         idempotencyKey: "generation-shot:job-3:shot-3",
       }),
     );
+  });
+
+  it("does not append a duplicate definition attempt when finalization replays", async () => {
+    const store: GeneratedAssetFinalizationStore = {
+      project: project([media("placeholder")], [{
+        id: "definition-1",
+        projectId: "project",
+        assetGroupId: "placeholder-group",
+        currentMediaVersionId: "placeholder",
+        sourceMediaVersionId: "placeholder",
+        title: "Generated still",
+        draft: {
+          prompt: "storm",
+          roleByReferenceKey: {},
+          inputs: {},
+        },
+        attemptIds: ["attempt-1"],
+        createdAt: "2026-07-16T00:00:00.000Z",
+        updatedAt: "2026-07-16T00:00:00.000Z",
+      }]),
+      finalizePlaceholder: vi.fn(async () => ok("finalize", true)),
+    };
+
+    const input = {
+      target: { kind: "new-asset" as const, placeholderMediaId: "placeholder" },
+      item: {
+        ...media("placeholder", "placeholder-group"),
+        generationMeta: {
+          provider: "wavespeed",
+          model: "fixture/tti",
+          prompt: "storm",
+          inputs: { seed: 7 },
+          jobId: "job-5",
+          status: "completed",
+        },
+      },
+      blob: new Blob(["x"]),
+      jobId: "job-5",
+      attempt: { id: "attempt-1", number: 1 },
+    };
+
+    const first = await finalizeGeneratedAsset(store, input);
+    const second = await finalizeGeneratedAsset(store, input);
+
+    expect(first).toMatchObject({ success: true });
+    expect(second).toMatchObject({ success: true, replayed: true });
+    expect(store.project.generatedImageDefinitions[0].attemptIds).toEqual(["attempt-1"]);
   });
 
   it("returns an action failure when shot linkage is requested but the store cannot append it", async () => {

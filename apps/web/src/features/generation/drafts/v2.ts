@@ -54,9 +54,11 @@ export function generationSubmissionDraftKey(input: {
   target: GenerationTarget;
   context: Omit<GenerationContext, "target"> & { target?: never };
   providerInputs: Record<string, unknown>;
+  canonicalPrompt?: string;
   references?: GenerationDraft["references"];
   audio?: GenerationDraft["audio"];
   placementPolicy?: GenerationContext["placementPolicy"];
+  referenceOverflowAcknowledged?: boolean;
   idempotencyKey?: string;
 }): string {
   return input.idempotencyKey ?? stableSubmissionStringify({
@@ -67,10 +69,55 @@ export function generationSubmissionDraftKey(input: {
     target: input.target,
     context: input.context,
     providerInputs: input.providerInputs,
-    references: input.references,
-    audio: input.audio,
+    canonicalPrompt: input.canonicalPrompt ?? String(input.providerInputs.prompt ?? ""),
+    references: normalizeSubmissionReferences(input.references),
+    audio: normalizeSubmissionAudio(input.audio),
     placementPolicy: input.placementPolicy ?? input.context.placementPolicy,
+    referenceOverflowAcknowledged: input.referenceOverflowAcknowledged ?? false,
   });
+}
+
+function normalizeSubmissionReferences(
+  references: GenerationDraft["references"],
+): GenerationDraft["references"] {
+  return references?.map((reference, index) => ({
+    key: reference.key ?? `reference:${reference.mediaVersionId ?? reference.versionId ?? reference.mediaId}`,
+    mediaId: reference.mediaId,
+    mediaVersionId: reference.mediaVersionId ?? reference.versionId,
+    role: reference.role ?? "reference-images",
+    order: reference.order ?? index,
+    ...(reference.origins ? { origins: reference.origins } : {}),
+    ...(reference.canonicalTokens ? { canonicalTokens: reference.canonicalTokens } : {}),
+    status: reference.status ?? "active",
+    ...(reference.reason ? { reason: reference.reason } : {}),
+  }))
+    .slice()
+    .sort((left, right) => (left.order ?? 0) - (right.order ?? 0) || left.key.localeCompare(right.key));
+}
+
+function normalizeSubmissionAudio(audio: GenerationDraft["audio"]): GenerationDraft["audio"] {
+  if (!audio) return undefined;
+  return {
+    sourceMediaId: audio.sourceMediaId,
+    sourceVersionId: audio.sourceVersionId,
+    sourceClipId: audio.sourceClipId,
+    projectStartSeconds: audio.projectStartSeconds,
+    projectEndSeconds: audio.projectEndSeconds,
+    sourceStartSeconds: audio.sourceStartSeconds,
+    sourceEndSeconds: audio.sourceEndSeconds,
+    mimeType: audio.mimeType,
+    sha256: audio.sha256,
+  };
+}
+
+export function buildImmutableGenerationSubmissionDraft(draft: GenerationDraft): GenerationDraft {
+  return {
+    ...draft,
+    canonicalPrompt: draft.canonicalPrompt ?? String(draft.providerInputs.prompt ?? ""),
+    providerInputs: structuredClone(draft.providerInputs),
+    ...(draft.references ? { references: normalizeSubmissionReferences(draft.references) } : {}),
+    ...(draft.audio ? { audio: normalizeSubmissionAudio(draft.audio) } : {}),
+  };
 }
 
 function required<T>(value: T | undefined, field: string): T {
@@ -88,7 +135,9 @@ export function buildGenerationSubmissionContext(input: {
     const token = required(input.referenceTokens[index]?.tokenId, `references[${index}]`);
     return {
       mediaId: reference.mediaId,
-      ...(reference.versionId ? { versionId: reference.versionId } : {}),
+      ...(reference.mediaVersionId ?? reference.versionId
+        ? { versionId: reference.mediaVersionId ?? reference.versionId }
+        : {}),
       origins: reference.origins ?? ["user" as const],
       remoteInput: { kind: "upload-token" as const, value: token },
     };

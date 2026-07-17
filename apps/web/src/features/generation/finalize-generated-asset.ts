@@ -94,6 +94,7 @@ export async function finalizeGeneratedAsset(
   if (!finalizeResult.success) {
     return fail(mediaId, finalizeResult.error);
   }
+  reconcileProjectFinalization(store.project, input);
 
   const replayed = isReplay(finalizeResult);
   if (!hasShotAttempt(input)) {
@@ -130,6 +131,77 @@ export async function finalizeGeneratedAsset(
     shotLinked: true,
     replayed: replayed || isReplay(shotResult),
   };
+}
+
+function reconcileProjectFinalization(project: Project, input: FinalizeGeneratedAssetInput): void {
+  const mediaId = input.target.placeholderMediaId;
+  const mediaItems = project.mediaLibrary.items;
+  const placeholderIndex = mediaItems.findIndex((item) => item.id === mediaId);
+  if (placeholderIndex < 0) {
+    return;
+  }
+
+  const definition = findDefinition(project, input);
+  const assetGroupId = input.target.kind === "new-version"
+    ? mediaItems.find((item) => item.id === input.target.sourceMediaId)?.assetGroupId
+      ?? definition?.assetGroupId
+      ?? mediaItems[placeholderIndex]?.assetGroupId
+    : definition?.assetGroupId ?? mediaItems[placeholderIndex]?.assetGroupId;
+
+  if (assetGroupId) {
+    for (const item of mediaItems) {
+      if (item.assetGroupId === assetGroupId) {
+        item.isCurrent = item.id === mediaId;
+      }
+    }
+  }
+
+  mediaItems[placeholderIndex] = {
+    ...mediaItems[placeholderIndex],
+    ...input.item,
+    id: mediaId,
+    assetGroupId,
+    isCurrent: true,
+    ...(input.item.generationMeta ? { generationMeta: input.item.generationMeta } : {}),
+  };
+
+  if (!definition) {
+    return;
+  }
+
+  definition.currentMediaVersionId = mediaId;
+  if (!definition.sourceMediaVersionId) {
+    definition.sourceMediaVersionId = input.target.kind === "new-version"
+      ? input.target.sourceMediaId
+      : mediaId;
+  }
+  const attemptId = extractAttemptId(input);
+  if (attemptId && !definition.attemptIds.includes(attemptId)) {
+    definition.attemptIds = [...definition.attemptIds, attemptId];
+  }
+}
+
+function findDefinition(project: Project, input: FinalizeGeneratedAssetInput) {
+  if (input.target.kind === "new-version") {
+    return project.generatedImageDefinitions.find((definition) =>
+      definition.currentMediaVersionId === input.target.sourceMediaId
+      || definition.sourceMediaVersionId === input.target.sourceMediaId
+      || definition.assetGroupId === project.mediaLibrary.items.find((item) => item.id === input.target.sourceMediaId)?.assetGroupId,
+    );
+  }
+  return project.generatedImageDefinitions.find((definition) =>
+    definition.currentMediaVersionId === input.target.placeholderMediaId
+    || definition.assetGroupId === project.mediaLibrary.items.find((item) => item.id === input.target.placeholderMediaId)?.assetGroupId,
+  );
+}
+
+function extractAttemptId(input: FinalizeGeneratedAssetInput): string | undefined {
+  const attempt = input.attempt;
+  if (attempt && typeof attempt === "object" && "id" in attempt) {
+    const id = (attempt as { id?: unknown }).id;
+    if (typeof id === "string" && id.length > 0) return id;
+  }
+  return undefined;
 }
 
 export async function appendGeneratedShotAttempt(

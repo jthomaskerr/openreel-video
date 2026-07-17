@@ -13,6 +13,7 @@ function draft(overrides: Partial<GenerationDraft> = {}): GenerationDraft {
     provider: "wavespeed",
     modelId: "m1",
     modelSchemaVersion: "s1",
+    canonicalPrompt: "hello",
     target: { kind: "new-version", sourceMediaId: "source-1" },
     context: {
       projectId: "p1",
@@ -127,7 +128,16 @@ describe("submitGeneration", () => {
       submitGeneration(
         draft({
           idempotencyKey: "submission-key",
-          references: [{ mediaId: "ref-1", value: "file:///tmp/ref.png" }],
+          references: [{
+            key: "reference-1",
+            mediaId: "ref-1",
+            mediaVersionId: "ref-version-1",
+            role: "reference-images",
+            order: 1,
+            canonicalTokens: ["@{reference-1}"],
+            status: "active",
+            value: "file:///tmp/ref.png",
+          }],
         }),
         p,
       ),
@@ -148,8 +158,20 @@ describe("submitGeneration", () => {
     expect(p.draftCache?.get("submission-key")).toMatchObject({
       status: "failed",
       placeholderMediaId: "placeholder-1",
+      draft: {
+        canonicalPrompt: "hello",
+        references: [{
+          key: "reference-1",
+          mediaId: "ref-1",
+          mediaVersionId: "ref-version-1",
+          role: "reference-images",
+          order: 1,
+          status: "active",
+        }],
+      },
       error: { code: "generation-reference-upload-failed", retryable: true },
     });
+    expect(JSON.stringify(p.draftCache?.get("submission-key"))).not.toContain("file:///tmp/ref.png");
   });
 
   it("marks the placeholder failed and keeps a retryable draft when provider submission fails", async () => {
@@ -228,7 +250,7 @@ describe("submitGeneration", () => {
     );
     expect(draftCache?.stagePending).toHaveBeenCalledTimes(1);
     expect(draftCache?.markFailed).toHaveBeenCalledTimes(1);
-    expect(draftCache?.get).not.toHaveBeenCalled();
+    expect(draftCache?.get).toHaveBeenCalledWith("submission-key");
   });
 
   it("rejects local urls leaked from sanitization before provider submission", async () => {
@@ -249,12 +271,52 @@ describe("submitGeneration", () => {
   it("keeps reference uploads opaque in the submitted context", async () => {
     const p = ports();
     const input = draft({
-      references: [{ mediaId: "ref-1", versionId: "v1", value: "file:///tmp/ref.png" }],
+      canonicalPrompt: "hello @{reference-2} @{reference-1}",
+      referenceOverflowAcknowledged: true,
+      references: [
+        {
+          key: "reference-1",
+          mediaId: "ref-1",
+          mediaVersionId: "v1",
+          role: "reference-images",
+          order: 2,
+          canonicalTokens: ["@{reference-1}"],
+          status: "active",
+          value: "file:///tmp/ref-a.png",
+        },
+        {
+          key: "reference-2",
+          mediaId: "ref-2",
+          mediaVersionId: "v2",
+          role: "source-image",
+          order: 1,
+          canonicalTokens: ["@{reference-2}"],
+          status: "active",
+          value: "file:///tmp/ref-b.png",
+        },
+        {
+          key: "reference-3",
+          mediaId: "ref-3",
+          mediaVersionId: "v3",
+          role: "reference-images",
+          order: 3,
+          canonicalTokens: ["@{reference-3}"],
+          status: "overflow",
+          reason: "Only two references are allowed.",
+          value: "file:///tmp/ref-c.png",
+        },
+      ],
     });
 
     const job = await submitGeneration(input, p);
 
     expect(job.context.references).toEqual([
+      {
+        mediaId: "ref-2",
+        versionId: "v2",
+        origins: ["user"],
+        remoteInput: { kind: "upload-token", value: "ref-token" },
+      },
       {
         mediaId: "ref-1",
         versionId: "v1",
@@ -262,8 +324,119 @@ describe("submitGeneration", () => {
         remoteInput: { kind: "upload-token", value: "ref-token" },
       },
     ]);
+    expect(p.references?.uploadReference).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ key: "reference-2", mediaVersionId: "v2" }),
+    );
+    expect(p.references?.uploadReference).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ key: "reference-1", mediaVersionId: "v1" }),
+    );
+    expect(p.provider.submit).toHaveBeenCalledWith(expect.objectContaining({
+      references: [
+        expect.objectContaining({
+          key: "reference-2",
+          role: "source-image",
+          order: 1,
+          remoteInput: { kind: "upload-token", value: "ref-token" },
+        }),
+        expect.objectContaining({
+          key: "reference-1",
+          role: "reference-images",
+          order: 2,
+          remoteInput: { kind: "upload-token", value: "ref-token" },
+        }),
+      ],
+    }));
     expect(JSON.stringify(job.context)).not.toContain("file:///tmp/ref.png");
     expect(JSON.stringify(job.context)).not.toContain("blob:");
     expect(JSON.stringify(job.context)).not.toContain("http://localhost");
+  });
+
+  it("requires overflow acknowledgement before any mutation", async () => {
+    const p = ports();
+    await expect(submitGeneration(draft({
+      canonicalPrompt: "hello @{reference-1}",
+      references: [{
+        key: "reference-1",
+        mediaId: "ref-1",
+        mediaVersionId: "v1",
+        role: "reference-images",
+        order: 1,
+        canonicalTokens: ["@{reference-1}"],
+        status: "overflow",
+        reason: "Only one reference is allowed.",
+        value: "file:///tmp/ref.png",
+      }],
+    }), p)).rejects.toMatchObject({
+      code: "invalid-draft",
+      field: "references",
+    });
+    expect(p.mutations.createPlaceholder).not.toHaveBeenCalled();
+    expect(p.provider.submit).not.toHaveBeenCalled();
+  });
+
+  it("rejects cyclic references before any mutation", async () => {
+    const p = ports();
+    await expect(submitGeneration(draft({
+      canonicalPrompt: "hello @{reference-1}",
+      references: [{
+        key: "reference-1",
+        mediaId: "ref-1",
+        mediaVersionId: "v1",
+        role: "reference-images",
+        order: 1,
+        canonicalTokens: ["@{reference-1}"],
+        status: "cyclic",
+        reason: "This generated image would reference itself.",
+        value: "file:///tmp/ref.png",
+      }],
+    }), p)).rejects.toMatchObject({
+      code: "invalid-draft",
+      field: "references.0.status",
+    });
+    expect(p.mutations.createPlaceholder).not.toHaveBeenCalled();
+    expect(p.provider.submit).not.toHaveBeenCalled();
+  });
+
+  it("reuses the retryable placeholder on retry instead of creating a duplicate", async () => {
+    let first = true;
+    const p = ports({
+      references: {
+        uploadReference: vi.fn(async () => {
+          if (first) {
+            first = false;
+            throw new Error("upload down");
+          }
+          return { tokenId: "ref-token" };
+        }),
+      },
+    });
+    const input = draft({
+      idempotencyKey: "retry-key",
+      canonicalPrompt: "hello @{reference-1}",
+      references: [{
+        key: "reference-1",
+        mediaId: "ref-1",
+        mediaVersionId: "ref-version-1",
+        role: "reference-images",
+        order: 1,
+        canonicalTokens: ["@{reference-1}"],
+        status: "active",
+        value: "file:///tmp/ref.png",
+      }],
+    });
+
+    await expect(submitGeneration(input, p)).rejects.toMatchObject({
+      code: "generation-reference-upload-failed",
+    });
+    await expect(submitGeneration(input, p)).resolves.toMatchObject({
+      context: {
+        target: {
+          placeholderMediaId: "placeholder-1",
+        },
+      },
+    });
+    expect(p.mutations.createPlaceholder).toHaveBeenCalledTimes(1);
   });
 });
