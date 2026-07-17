@@ -354,10 +354,11 @@ test("placement completion persistence failure is repaired with the same idempot
   const stranded = await repo.getPlacementClaim("job-placement-reconcile");
   assert.equal(stranded?.state, "claimed");
 
-  await retryFinalizer.repairPlacement("job-placement-reconcile");
+  const ownerToken = (await repo.getPlacementClaim("job-placement-reconcile"))!.ownerToken;
+  await retryFinalizer.repairPlacement("job-placement-reconcile", ownerToken, "succeeded");
   const reconciled = await retryFinalizer.retryPlacement("job-placement-reconcile");
   assert.equal(reconciled.placement?.status, "applied");
-  assert.equal(retryPorts.calls.placement, 2);
+  assert.equal(retryPorts.calls.placement, 1);
 });
 
 test("a competing placement retry returns the durable job without a spin wait", async () => {
@@ -371,4 +372,76 @@ test("a competing placement retry returns the durable job without a spin wait", 
   const result = await new GenerationFinalizer(repo, createPorts({ jobId: "job-placement-pending" }).ports).retryPlacement("job-placement-pending");
   assert.equal(result.status, "succeeded");
   await repo.repairPlacement("job-placement-pending", claim.claim.ownerToken);
+});
+
+test("public placement repair requires the externally held owner token and explicit outcome", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-owner-fence-"));
+  const repo = new FileGenerationJobRepository(dir);
+  await repo.create(makeJob("job-placement-owner-fence", "create-linked-clip"));
+  const failed = createPorts({ jobId: "job-placement-owner-fence", placement: "fail" });
+  await new GenerationFinalizer(repo, failed.ports).finalize("job-placement-owner-fence", { provider: "wavespeed", providerJobId: "provider-job-1" });
+  const ownerClaim = await repo.claimPlacement("job-placement-owner-fence", "generation:job-placement-owner-fence:placement-applied");
+  assert.equal(ownerClaim.acquired, true);
+  const finalizer = new GenerationFinalizer(repo, createPorts({ jobId: "job-placement-owner-fence" }).ports);
+
+  await assert.rejects(
+    (finalizer.repairPlacement as unknown as (jobId: string) => Promise<GenerationJob>)("job-placement-owner-fence"),
+    /generation-placement-recovery-owner-required/,
+  );
+  await assert.rejects(
+    finalizer.repairPlacement("job-placement-owner-fence", "wrong-owner", "succeeded"),
+    /generation-placement-claim-fenced/,
+  );
+  assert.equal((await repo.getPlacementClaim("job-placement-owner-fence"))?.state, "claimed");
+});
+
+test("live placement owner cannot be fenced by a job-id-only or wrong-token repair", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-live-owner-"));
+  const repo = new FileGenerationJobRepository(dir);
+  await repo.create(makeJob("job-placement-live-owner", "create-linked-clip"));
+  const failed = createPorts({ jobId: "job-placement-live-owner", placement: "fail" });
+  await new GenerationFinalizer(repo, failed.ports).finalize("job-placement-live-owner", { provider: "wavespeed", providerJobId: "provider-job-1" });
+
+  let entered!: () => void;
+  let release!: () => void;
+  const enteredPromise = new Promise<void>((resolve) => { entered = resolve; });
+  const releasePromise = new Promise<void>((resolve) => { release = resolve; });
+  const live = createPorts({ jobId: "job-placement-live-owner" });
+  live.ports.placement!.place = async () => {
+    live.calls.placement += 1;
+    entered();
+    await releasePromise;
+  };
+  const liveFinalizer = new GenerationFinalizer(repo, live.ports);
+  const liveRun = liveFinalizer.retryPlacement("job-placement-live-owner");
+  await enteredPromise;
+
+  await assert.rejects(
+    (liveFinalizer.repairPlacement as unknown as (jobId: string) => Promise<GenerationJob>)("job-placement-live-owner"),
+    /generation-placement-recovery-owner-required/,
+  );
+  await assert.rejects(
+    liveFinalizer.repairPlacement("job-placement-live-owner", "wrong-owner", "succeeded"),
+    /generation-placement-claim-fenced/,
+  );
+  release();
+  const result = await liveRun;
+  assert.equal(result.placement?.status, "applied");
+  assert.equal(live.calls.placement, 1);
+});
+
+test("unknown placement outcome becomes needs-attention and blocks automatic replay", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-unknown-"));
+  const repo = new FileGenerationJobRepository(dir);
+  await repo.create(makeJob("job-placement-unknown", "create-linked-clip"));
+  const failed = createPorts({ jobId: "job-placement-unknown", placement: "fail" });
+  await new GenerationFinalizer(repo, failed.ports).finalize("job-placement-unknown", { provider: "wavespeed", providerJobId: "provider-job-1" });
+  const claim = await repo.claimPlacement("job-placement-unknown", "generation:job-placement-unknown:placement-applied");
+  const finalizer = new GenerationFinalizer(repo, createPorts({ jobId: "job-placement-unknown" }).ports);
+
+  const recovered = await finalizer.repairPlacement("job-placement-unknown", claim.claim.ownerToken, "unknown");
+  assert.equal(recovered.status, "needs-attention");
+  assert.equal(recovered.error?.code, "generation-placement-outcome-unknown");
+  assert.equal((await repo.getPlacementClaim("job-placement-unknown"))?.state, "needs-attention");
+  await assert.rejects(finalizer.retryPlacement("job-placement-unknown"), /generation-placement-outcome-unknown/);
 });
