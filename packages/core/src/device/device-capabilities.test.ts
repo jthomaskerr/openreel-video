@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { EXPORT_HARDWARE_ACCELERATION } from "../export/encoder-policy";
 import {
   getCodecRecommendations,
   getResolutionRecommendations,
   formatDeviceSummary,
+  checkCodecSupport,
   type DeviceProfile,
 } from "./device-capabilities";
 
@@ -230,4 +232,31 @@ describe("DeviceCapabilities", () => {
     });
   });
 
+  describe("checkCodecSupport", () => {
+    it("checks the shared export policy while probing hardware separately", async () => {
+      const isConfigSupported = vi
+        .fn()
+        .mockResolvedValueOnce({ supported: true, config: {} })
+        .mockResolvedValueOnce({
+          supported: true,
+          config: { hardwareAcceleration: "prefer-hardware" },
+        });
+      vi.stubGlobal("VideoEncoder", { isConfigSupported });
+
+      const result = await checkCodecSupport("avc1.42001E", 854, 480);
+
+      expect(isConfigSupported).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          hardwareAcceleration: EXPORT_HARDWARE_ACCELERATION,
+        }),
+      );
+      expect(isConfigSupported).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({ hardwareAcceleration: "prefer-hardware" }),
+      );
+      expect(result).toMatchObject({ supported: true, hardware: true });
+    });
+  });
 });
+

@@ -1,3 +1,5 @@
+import { EXPORT_HARDWARE_ACCELERATION } from "../export/encoder-policy";
+
 export type DeviceTier = "low" | "mid" | "high";
 
 export interface CpuInfo {
@@ -163,7 +165,7 @@ function detectGpu(): Omit<GpuInfo, "hasHardwareEncoding"> {
   }
 }
 
-async function checkCodecSupport(
+export async function checkCodecSupport(
   codecString: string,
   width: number,
   height: number
@@ -181,14 +183,14 @@ async function checkCodecSupport(
       framerate: 30,
     };
 
+    const requestedResult = await VideoEncoder.isConfigSupported({
+      ...baseConfig,
+      hardwareAcceleration: EXPORT_HARDWARE_ACCELERATION,
+    });
+
     const hwResult = await VideoEncoder.isConfigSupported({
       ...baseConfig,
       hardwareAcceleration: "prefer-hardware",
-    });
-
-    const swResult = await VideoEncoder.isConfigSupported({
-      ...baseConfig,
-      hardwareAcceleration: "prefer-software",
     });
 
     const isHardware =
@@ -197,7 +199,7 @@ async function checkCodecSupport(
 
     return {
       hardware: isHardware,
-      supported: hwResult.supported === true || swResult.supported === true,
+      supported: requestedResult.supported === true,
       maxResolution: { width, height },
     };
   } catch {

@@ -103,17 +103,18 @@ describe("ExportEstimator", () => {
 
       const estimate = estimateExportTime(profile, settings);
 
-      expect(estimate.confidence).toBe("measured");
-      expect(estimate.seconds).toBeCloseTo(3, 0);
+      expect(estimate.confidence).toBe("rough");
+      expect(estimate.seconds).toBeCloseTo(5, 0);
+      expect(estimate.range.maxSeconds).toBeGreaterThanOrEqual(10);
     });
 
-    it("should return estimated confidence when no benchmark", () => {
+    it("should return rough confidence when no benchmark", () => {
       const profile = createMockProfile();
       const settings = createMockSettings();
 
       const estimate = estimateExportTime(profile, settings);
 
-      expect(estimate.confidence).toBe("estimated");
+      expect(estimate.confidence).toBe("rough");
     });
 
     it("should include breakdown of rendering, encoding, and muxing", () => {
@@ -154,6 +155,42 @@ describe("ExportEstimator", () => {
       const withEffectsEstimate = estimateExportTime(profile, settingsWithEffects);
 
       expect(withEffectsEstimate.seconds).toBeGreaterThan(noEffectsEstimate.seconds);
+    });
+
+    it("should estimate slower when source video is present", () => {
+      const profile = createMockProfile();
+      const generatedFrames = createMockSettings({ hasSourceVideo: false });
+      const sourceVideo = createMockSettings({ hasSourceVideo: true });
+
+      expect(estimateExportTime(profile, sourceVideo).seconds).toBeGreaterThan(
+        estimateExportTime(profile, generatedFrames).seconds,
+      );
+    });
+
+    it("caps unrealistic benchmark optimism and returns a real-time-containing range", () => {
+      const profile = createMockProfile({
+        benchmark: {
+          framesPerSecond: 10_000,
+          codec: "h264",
+          resolution: { width: 1920, height: 1080 },
+          testedAt: Date.now(),
+        },
+      });
+
+      const estimate = estimateExportTime(
+        profile,
+        createMockSettings({
+          width: 854,
+          height: 480,
+          frameRate: 30,
+          duration: 180,
+        }),
+      );
+
+      expect(estimate.seconds).toBeGreaterThanOrEqual(90);
+      expect(estimate.range.minSeconds).toBeLessThanOrEqual(estimate.seconds);
+      expect(estimate.range.maxSeconds).toBeGreaterThanOrEqual(180);
+      expect(estimate.confidence).toBe("rough");
     });
 
     it("should format time correctly for various durations", () => {

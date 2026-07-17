@@ -1,5 +1,6 @@
 import type { DeviceProfile, BenchmarkResult } from "./device-capabilities";
 import { saveBenchmarkResult } from "./device-capabilities";
+import { EXPORT_HARDWARE_ACCELERATION } from "../export/encoder-policy";
 
 export interface ExportEstimateSettings {
   width: number;
@@ -10,12 +11,14 @@ export interface ExportEstimateSettings {
   hasEffects?: boolean;
   hasTransitions?: boolean;
   trackCount?: number;
+  hasSourceVideo?: boolean;
 }
 
 export interface TimeEstimate {
   seconds: number;
   formatted: string;
   confidence: "measured" | "estimated" | "rough";
+  range: { minSeconds: number; maxSeconds: number };
   breakdown?: {
     rendering: number;
     encoding: number;
@@ -94,6 +97,10 @@ function getComplexityMultiplier(settings: ExportEstimateSettings): number {
     multiplier *= 0.85;
   }
 
+  if (settings.hasSourceVideo) {
+    multiplier *= 0.65;
+  }
+
   if (settings.trackCount && settings.trackCount > 2) {
     multiplier *= Math.max(0.5, 1 - (settings.trackCount - 2) * 0.1);
   }
@@ -146,18 +153,24 @@ export function estimateExportTime(
         (codecSpeeds[settings.codec] || 1);
     }
 
-    const adjustedFps =
+    const benchmarkFps =
       profile.benchmark.framesPerSecond *
       resolutionFactor *
-      codecFactor *
-      getComplexityMultiplier(settings);
+      codecFactor;
 
-    const seconds = totalFrames / Math.max(1, adjustedFps);
+    const effectiveFps =
+      Math.min(benchmarkFps, settings.frameRate * 2) *
+      getComplexityMultiplier(settings);
+    const seconds = totalFrames / Math.max(1, effectiveFps);
 
     return {
       seconds,
       formatted: formatTime(seconds),
-      confidence: "measured",
+      confidence: "rough",
+      range: {
+        minSeconds: seconds * 0.75,
+        maxSeconds: Math.max(settings.duration, seconds * 2),
+      },
       breakdown: {
         rendering: seconds * 0.4,
         encoding: seconds * 0.55,
@@ -186,7 +199,11 @@ export function estimateExportTime(
   return {
     seconds,
     formatted: formatTime(seconds),
-    confidence: "estimated",
+    confidence: "rough",
+    range: {
+      minSeconds: seconds * 0.75,
+      maxSeconds: Math.max(settings.duration, seconds * 2),
+    },
     breakdown: {
       rendering: seconds * 0.4,
       encoding: seconds * 0.55,
@@ -299,12 +316,12 @@ export async function runBenchmark(
     height: HEIGHT,
     bitrate: 5_000_000,
     framerate: 30,
-    hardwareAcceleration: "prefer-hardware",
+    hardwareAcceleration: EXPORT_HARDWARE_ACCELERATION,
   };
 
   const supported = await VideoEncoder.isConfigSupported(config);
   if (!supported.supported) {
-    config.hardwareAcceleration = "prefer-software";
+    throw new Error("H.264 benchmark configuration is not supported");
   }
 
   encoder.configure(config);
