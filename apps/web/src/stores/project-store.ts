@@ -1822,9 +1822,14 @@ export const useProjectStore = create<ProjectState>()(
         // Fix legacy projects where timeline.duration was never persisted
         const computedDuration = project.timeline.tracks.reduce((max, track) =>
           track.clips.reduce((m, c) => Math.max(m, c.startTime + c.duration), max), 0);
-        const fixedProject = computedDuration > 0 && project.timeline.duration === 0
+        const durationFixedProject = computedDuration > 0 && project.timeline.duration === 0
           ? { ...project, timeline: { ...project.timeline, duration: computedDuration } }
           : project;
+
+        // Fix legacy projects saved before generatedImageDefinitions existed
+        const fixedProject = durationFixedProject.generatedImageDefinitions
+          ? durationFixedProject
+          : { ...durationFixedProject, generatedImageDefinitions: [] };
 
         syncProjectEffectsBridge(fixedProject, previousProject);
         syncProjectTransitionsBridge(fixedProject, previousProject);

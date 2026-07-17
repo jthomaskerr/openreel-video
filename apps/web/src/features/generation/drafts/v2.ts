@@ -261,7 +261,7 @@ export function buildGenerationSubmissionContext(input: {
       ...(reference.mediaVersionId ?? reference.versionId
         ? { versionId: reference.mediaVersionId ?? reference.versionId }
         : {}),
-      origins: reference.origins ?? ["user" as const],
+      origins: reference.origins ? [...reference.origins] : ["user" as const],
       remoteInput: { kind: "upload-token" as const, value: token },
     };
   });

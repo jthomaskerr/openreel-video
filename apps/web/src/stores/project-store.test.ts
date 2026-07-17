@@ -207,6 +207,7 @@ function mockConfirmedBackendCreate() {
       projectBlobSha: "c".repeat(40),
       mediaManifestDigest: "sha256:test",
       lfsPayloads: [],
+      commitDueAt: null,
     });
     return project;
   });
@@ -299,7 +300,7 @@ describe("ProjectStore", () => {
             persistedAt: now, sourceModifiedAt: now,
             commitSha: "a".repeat(40), treeSha: "b".repeat(40),
             projectBlobSha: "c".repeat(40), mediaManifestDigest: "sha256:test",
-            lfsPayloads: [],
+            lfsPayloads: [], commitDueAt: null,
           });
           return backendProject;
         });
@@ -387,6 +388,31 @@ describe("ProjectStore", () => {
     });
   });
 
+  describe("legacy project repair", () => {
+    it("backfills generatedImageDefinitions when loading a project saved before the field existed", () => {
+      const existing = useProjectStore.getState().project;
+      const { generatedImageDefinitions: _omit, ...legacyProject } = existing;
+
+      useProjectStore.getState().loadProject(legacyProject as typeof existing);
+
+      expect(useProjectStore.getState().project.generatedImageDefinitions).toEqual([]);
+    });
+
+    it("does not throw when a consumer reads generatedImageDefinitions after loading a legacy project", () => {
+      const existing = useProjectStore.getState().project;
+      const { generatedImageDefinitions: _omit, ...legacyProject } = existing;
+
+      useProjectStore.getState().loadProject(legacyProject as typeof existing);
+
+      // Mirrors AssetInspectorWithTabs.tsx's handleRegenerate access pattern,
+      // the real call site that threw before generatedImageDefinitions was backfilled.
+      expect(() => {
+        const project = useProjectStore.getState().project;
+        project.generatedImageDefinitions.find((definition) => definition.assetGroupId === "any");
+      }).not.toThrow();
+    });
+  });
+
   describe("project loading", () => {
     it("does not schedule persistence while installing an authoritative project", () => {
       const scheduleSaveSpy = vi
@@ -417,6 +443,7 @@ describe("ProjectStore", () => {
         mediaManifestDigest: "sha256:test",
         lfsPayloads: [],
         committed: true,
+        commitDueAt: null,
       });
 
       useProjectStore.getState().loadProject({ ...existing, id: "backend-project" });

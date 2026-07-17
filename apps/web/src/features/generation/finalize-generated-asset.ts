@@ -141,19 +141,20 @@ function reconcileProjectFinalization(project: Project, input: FinalizeGenerated
     return;
   }
 
-  const definition = findDefinition(project, input);
-  const assetGroupId = input.target.kind === "new-version"
-    ? mediaItems.find((item) => item.id === input.target.sourceMediaId)?.assetGroupId
+  const target = input.target;
+  const definition = findDefinition(project, target);
+  const assetGroupId = target.kind === "new-version"
+    ? mediaItems.find((item) => item.id === target.sourceMediaId)?.assetGroupId
       ?? definition?.assetGroupId
       ?? mediaItems[placeholderIndex]?.assetGroupId
     : definition?.assetGroupId ?? mediaItems[placeholderIndex]?.assetGroupId;
 
   if (assetGroupId) {
-    for (const item of mediaItems) {
+    mediaItems.forEach((item, index) => {
       if (item.assetGroupId === assetGroupId) {
-        item.isCurrent = item.id === mediaId;
+        mediaItems[index] = { ...item, isCurrent: item.id === mediaId };
       }
-    }
+    });
   }
 
   mediaItems[placeholderIndex] = {
@@ -169,29 +170,32 @@ function reconcileProjectFinalization(project: Project, input: FinalizeGenerated
     return;
   }
 
-  definition.currentMediaVersionId = mediaId;
-  if (!definition.sourceMediaVersionId) {
-    definition.sourceMediaVersionId = input.target.kind === "new-version"
-      ? input.target.sourceMediaId
-      : mediaId;
-  }
   const attemptId = extractAttemptId(input);
-  if (attemptId && !definition.attemptIds.includes(attemptId)) {
-    definition.attemptIds = [...definition.attemptIds, attemptId];
-  }
+  const nextAttemptIds = attemptId && !definition.attemptIds.includes(attemptId)
+    ? [...definition.attemptIds, attemptId]
+    : definition.attemptIds;
+
+  const definitionIndex = project.generatedImageDefinitions.findIndex((d) => d.id === definition.id);
+  project.generatedImageDefinitions[definitionIndex] = {
+    ...definition,
+    currentMediaVersionId: mediaId,
+    sourceMediaVersionId: definition.sourceMediaVersionId
+      ?? (target.kind === "new-version" ? target.sourceMediaId : mediaId),
+    attemptIds: nextAttemptIds,
+  };
 }
 
-function findDefinition(project: Project, input: FinalizeGeneratedAssetInput) {
-  if (input.target.kind === "new-version") {
+function findDefinition(project: Project, target: GeneratedAssetTarget) {
+  if (target.kind === "new-version") {
     return project.generatedImageDefinitions.find((definition) =>
-      definition.currentMediaVersionId === input.target.sourceMediaId
-      || definition.sourceMediaVersionId === input.target.sourceMediaId
-      || definition.assetGroupId === project.mediaLibrary.items.find((item) => item.id === input.target.sourceMediaId)?.assetGroupId,
+      definition.currentMediaVersionId === target.sourceMediaId
+      || definition.sourceMediaVersionId === target.sourceMediaId
+      || definition.assetGroupId === project.mediaLibrary.items.find((item) => item.id === target.sourceMediaId)?.assetGroupId,
     );
   }
   return project.generatedImageDefinitions.find((definition) =>
-    definition.currentMediaVersionId === input.target.placeholderMediaId
-    || definition.assetGroupId === project.mediaLibrary.items.find((item) => item.id === input.target.placeholderMediaId)?.assetGroupId,
+    definition.currentMediaVersionId === target.placeholderMediaId
+    || definition.assetGroupId === project.mediaLibrary.items.find((item) => item.id === target.placeholderMediaId)?.assetGroupId,
   );
 }
 

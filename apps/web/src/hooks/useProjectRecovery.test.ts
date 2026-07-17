@@ -189,6 +189,7 @@ function confirmBaseRevision(projectId: string, sourceModifiedAt = 2000): void {
     projectBlobSha: "c".repeat(40),
     mediaManifestDigest: "sha256:test",
     lfsPayloads: [],
+    commitDueAt: null,
   });
 }
 

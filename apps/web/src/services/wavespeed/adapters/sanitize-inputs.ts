@@ -11,7 +11,7 @@ export interface ResolvedProviderMedia {
   tokenId: string;
 }
 
-export interface InputFieldError extends WaveSpeedProviderInputError {}
+export type InputFieldError = WaveSpeedProviderInputError;
 
 export interface SanitizeWaveSpeedInputsArgs {
   schema: RequestSchema;
