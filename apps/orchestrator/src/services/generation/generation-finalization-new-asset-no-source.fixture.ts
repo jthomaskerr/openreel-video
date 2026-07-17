@@ -26,7 +26,10 @@ test("new-asset with no source finalizes once without shot or placement work", a
     inspect: { inspect: async () => ({ width: 10, height: 10, durationSeconds: 1 }) },
     placeholder: { finalize: async () => { finalizations += 1; return { mediaId: "media-no-source", versionId: "version-no-source" }; } },
     shot: { link: async () => { shotLinks += 1; } },
-    placement: { place: async () => { placements += 1; } },
+    placement: {
+      place: async () => { placements += 1; return { outcome: "not-applied" as const }; },
+      reconcile: async () => ({ outcome: "not-applied" as const }),
+    },
     clock: () => 10,
   });
 

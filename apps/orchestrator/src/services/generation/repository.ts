@@ -32,11 +32,12 @@ export interface PlacementClaim {
   jobId: string;
   idempotencyKey: string;
   state: "claimed" | "failed" | "completed" | "needs-attention";
+  outcome: PlacementOutcome;
   ownerToken: string;
   claimedAt: number;
 }
 
-export type PlacementRecoveryOutcome = "succeeded" | "failed" | "unknown";
+export type PlacementOutcome = "pending" | "applied" | "not-applied" | "unknown";
 
 export interface GenerationJobRepository {
   create(job: GenerationJob): Promise<GenerationJob>;
@@ -57,10 +58,7 @@ export interface GenerationJobRepository {
   releaseFinalization(jobId: string, ownerToken: string): Promise<void>;
   claimPlacement(jobId: string, idempotencyKey: string): Promise<{ claim: PlacementClaim; acquired: boolean }>;
   getPlacementClaim(jobId: string): Promise<PlacementClaim | undefined>;
-  reconcilePlacement(jobId: string, idempotencyKey: string, ownerToken: string, outcome: PlacementRecoveryOutcome): Promise<PlacementClaim>;
-  repairPlacement(jobId: string, ownerToken: string): Promise<PlacementClaim>;
-  completePlacement(jobId: string, idempotencyKey: string, ownerToken: string): Promise<void>;
-  releasePlacement(jobId: string, ownerToken: string): Promise<void>;
+  reconcilePlacement(jobId: string, idempotencyKey: string, ownerToken: string, outcome: PlacementOutcome): Promise<PlacementClaim>;
 }
 
 type FileClaim = SubmissionClaim;
@@ -288,7 +286,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
       const existing = await this.readPlacementClaim(path);
       if (existing && existing.idempotencyKey !== idempotencyKey) throw new GenerationRepositoryError("generation-placement-claim-mismatch");
       if (existing?.state === "claimed" || existing?.state === "completed" || existing?.state === "needs-attention") return { claim: existing, acquired: false };
-      const claim: PlacementClaim = { jobId, idempotencyKey, state: "claimed", ownerToken: randomUUID(), claimedAt: this.now() };
+      const claim: PlacementClaim = { jobId, idempotencyKey, state: "claimed", outcome: "pending", ownerToken: randomUUID(), claimedAt: this.now() };
       await this.atomic(path, claim);
       return { claim, acquired: true };
     });
@@ -296,48 +294,26 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
 
   async getPlacementClaim(jobId: string) { return this.readPlacementClaim(this.placementFile(jobId)); }
 
-  async reconcilePlacement(jobId: string, idempotencyKey: string, ownerToken: string, outcome: PlacementRecoveryOutcome) {
+  async reconcilePlacement(jobId: string, idempotencyKey: string, ownerToken: string, outcome: PlacementOutcome) {
     return this.withFileLock(`placement-${jobId}`, async () => {
       const path = this.placementFile(jobId);
       const claim = await this.readPlacementClaim(path);
       if (!claim || claim.idempotencyKey !== idempotencyKey) throw new GenerationRepositoryError("generation-placement-claim-mismatch");
       if (claim.ownerToken !== ownerToken) throw new GenerationRepositoryError("generation-placement-claim-fenced");
-      if (claim.state !== "claimed" && claim.state !== "completed" && claim.state !== "failed" && claim.state !== "needs-attention") throw new GenerationRepositoryError("generation-placement-claim-fenced");
-      const state: PlacementClaim["state"] = outcome === "succeeded" ? "completed" : outcome === "failed" ? "failed" : "needs-attention";
-      if (claim.state === state) return claim;
-      if (claim.state !== "claimed") throw new GenerationRepositoryError("generation-placement-claim-fenced");
-      const reconciled: PlacementClaim = { ...claim, state };
+      const state: PlacementClaim["state"] = outcome === "applied" ? "completed" : outcome === "not-applied" ? "failed" : outcome === "unknown" ? "needs-attention" : "claimed";
+      if (claim.state === state && claim.outcome === outcome) return claim;
+      if (claim.state === "completed" || claim.state === "failed" && outcome !== "not-applied" || claim.state === "needs-attention" && outcome === "pending") throw new GenerationRepositoryError("generation-placement-claim-fenced");
+      const reconciled: PlacementClaim = { ...claim, state, outcome };
       await this.atomic(path, reconciled);
       return reconciled;
     });
   }
 
-  async repairPlacement(jobId: string, ownerToken: string) {
-    const claim = await this.getPlacementClaim(jobId);
-    if (!claim) throw new GenerationRepositoryError("generation-placement-claim-fenced");
-    return this.reconcilePlacement(jobId, claim.idempotencyKey, ownerToken, "failed");
-  }
-
-  async completePlacement(jobId: string, idempotencyKey: string, ownerToken: string) {
-    return this.withFileLock(`placement-${jobId}`, async () => {
-      const path = this.placementFile(jobId); const claim = await this.readPlacementClaim(path);
-      if (!claim || claim.idempotencyKey !== idempotencyKey) throw new GenerationRepositoryError("generation-placement-claim-mismatch");
-      if (claim.state === "completed") return;
-      if (claim.state !== "claimed" || claim.ownerToken !== ownerToken) throw new GenerationRepositoryError("generation-placement-claim-fenced");
-      await this.atomic(path, { ...claim, state: "completed" });
-    });
-  }
-
-  async releasePlacement(jobId: string, ownerToken: string) {
-    return this.withFileLock(`placement-${jobId}`, async () => {
-      const path = this.placementFile(jobId); const claim = await this.readPlacementClaim(path);
-      if (!claim || claim.ownerToken !== ownerToken || claim.state !== "claimed") return;
-      await this.atomic(path, { ...claim, state: "failed" });
-    });
-  }
-
   private async readPlacementClaim(path: string): Promise<PlacementClaim | undefined> {
-    try { return JSON.parse(await readFile(path, "utf8")) as PlacementClaim; }
+    try {
+      const parsed = JSON.parse(await readFile(path, "utf8")) as PlacementClaim;
+      return { ...parsed, outcome: parsed.outcome ?? (parsed.state === "completed" ? "applied" : parsed.state === "failed" ? "not-applied" : parsed.state === "needs-attention" ? "unknown" : "pending") };
+    }
     catch (cause) { if (cause && typeof cause === "object" && "code" in cause && cause.code === "ENOENT") return undefined; throw new GenerationRepositoryError("generation-placement-claim-corrupt"); }
   }
 }

@@ -48,11 +48,36 @@ export interface PlaceGeneratedAssetResult {
   clipId: string;
   error?: ActionResult["error"];
   status?: "applied" | "skipped";
+  outcome?: "applied" | "not-applied" | "unknown" | "pending";
+}
+
+export interface GeneratedAssetPlacementReconciliation {
+  outcome: "applied" | "not-applied" | "unknown" | "pending";
+  error?: ActionResult["error"];
 }
 
 type TimedClip = Project["timeline"]["tracks"][number]["clips"][number];
 
 export async function placeGeneratedAssetOnTimeline(
+  store: GeneratedAssetPlacementStore,
+  input: PlaceGeneratedAssetInput,
+): Promise<PlaceGeneratedAssetResult> {
+  try {
+    const result = await placeGeneratedAssetOnTimelineUnsafe(store, input);
+    return { ...result, outcome: result.outcome ?? (result.success ? "applied" : "not-applied") };
+  } catch (error) {
+    return {
+      success: false,
+      placed: false,
+      trackId: "",
+      clipId: "",
+      outcome: "unknown",
+      error: { code: "ACTION_FAILED", message: error instanceof Error ? `generation-placement-outcome-unknown: ${error.message}` : "generation-placement-outcome-unknown: placement response was lost" },
+    };
+  }
+}
+
+async function placeGeneratedAssetOnTimelineUnsafe(
   store: GeneratedAssetPlacementStore,
   input: PlaceGeneratedAssetInput,
 ): Promise<PlaceGeneratedAssetResult> {
@@ -93,6 +118,24 @@ export async function placeGeneratedAssetOnTimeline(
   }
 
   return createLinkedClip(store, input, media, idempotencyKey);
+}
+
+export async function reconcileGeneratedAssetPlacement(
+  store: GeneratedAssetPlacementStore,
+  input: PlaceGeneratedAssetInput,
+): Promise<GeneratedAssetPlacementReconciliation> {
+  const policy = input.policy ?? "create-linked-clip";
+  if (policy === "none") return { outcome: "not-applied" };
+  const key = input.idempotencyKey ?? `generation-placement:${input.providerJobId ?? input.mediaId}:${input.shotId}:${policy}:${input.clipId ?? ""}`;
+  const media = store.project.mediaLibrary.items.find((item) => item.id === input.mediaId);
+  if (!media) return { outcome: "not-applied", error: { code: "MEDIA_NOT_FOUND", message: `Media with ID ${input.mediaId} not found` } };
+  if (policy === "replace-selected-clip-media") {
+    if (!input.clipId) return { outcome: "not-applied", error: { code: "CLIP_NOT_FOUND", message: "A selected clip is required for replacement" } };
+    const target = findClip(store.project, input.clipId);
+    if (!target) return { outcome: "not-applied", error: { code: "CLIP_NOT_FOUND", message: `Clip with ID ${input.clipId} not found` } };
+    return target.clip.mediaId === media.id ? { outcome: "applied" } : { outcome: "unknown" };
+  }
+  return findPlacedClip(store.project, input.shotId, media.assetGroupId ?? media.id, key) ? { outcome: "applied" } : { outcome: "unknown" };
 }
 
 async function createLinkedClip(
