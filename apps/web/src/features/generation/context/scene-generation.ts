@@ -1,15 +1,20 @@
 import type {
   GenerationContext,
+  GenerationEntryContext,
+  GenerationMode,
   GenerationPlacementPolicy,
   GenerationTarget,
   ResolvedGenerationAudio,
   ResolvedGenerationReference,
 } from "@openreel/music-video-domain/generation";
 
+export type { GenerationEntryContext } from "@openreel/music-video-domain/generation";
+
 import {
   resolveGenerationReferences,
   type ContextDiagnostic,
   type GenerationTiming,
+  type ResolvedReference,
 } from "./index";
 
 export const SCENE_AUDIO_REQUIRES_PLACEMENT =
@@ -22,7 +27,8 @@ export type SceneGenerationDisabledCode =
   | "audio-requires-selected-projection"
   | "projection-not-found"
   | "projection-scene-mismatch"
-  | "projection-timing-invalid";
+  | "projection-timing-invalid"
+  | "projection-ambiguous";
 
 export interface SceneGenerationProjection {
   clipId: string;
@@ -46,7 +52,7 @@ export type SceneGenerationContextResult =
       includeAudio: boolean;
       projection?: SceneGenerationProjection;
       timing?: {
-        source: "timeline";
+        source: "timeline" | "manual";
         startSeconds: number;
         endSeconds: number;
         durationSeconds: number;
@@ -55,24 +61,22 @@ export type SceneGenerationContextResult =
     }
   | { status: "disabled"; code: SceneGenerationDisabledCode; reason: string };
 
+type AudioSourceResolver = () => void;
+type NonProjectionEntryContext = Exclude<GenerationEntryContext, { kind: "linked-projection" }>;
 export type GenerationEntryContextInput =
-  | { kind: "new-asset"; placementPolicy?: GenerationPlacementPolicy }
-  | { kind: "unplaced-shot"; placementPolicy?: GenerationPlacementPolicy }
-  | {
-      kind: "explicit-unlinked-range";
-      startSeconds: number;
-      endSeconds: number;
+  | (NonProjectionEntryContext & {
       placementPolicy?: GenerationPlacementPolicy;
-    }
-  | {
-      kind: "selected-linked-projection";
-      projection: SceneGenerationProjection;
+      audioSourceResolver?: AudioSourceResolver;
+    })
+  | (Extract<GenerationEntryContext, { kind: "linked-projection" }> & {
+      placementPolicy?: GenerationPlacementPolicy;
       supportsAudio: boolean;
-      placementPolicy?: GenerationPlacementPolicy;
-    };
+      audioSourceResolver?: AudioSourceResolver;
+    });
 
 export interface GenerationEntryContextResult {
   kind: GenerationEntryContextInput["kind"];
+  entryContext: GenerationEntryContext;
   timingAbsent: boolean;
   timing?: GenerationTiming;
   projection?: SceneGenerationProjection;
@@ -88,13 +92,27 @@ const invalidTiming = (): { errors: ContextDiagnostic[]; warnings: [] } => ({
   warnings: [],
 });
 
+const invalidEntryContext = (code: "entry-context-invalid" | "audio-capability-required") => ({
+  errors: [{ code }],
+  warnings: [],
+});
+
+function toCanonicalEntryContext(input: GenerationEntryContextInput): GenerationEntryContext {
+  if (input.kind === "linked-projection") {
+    const { placementPolicy: _placementPolicy, supportsAudio: _supportsAudio, audioSourceResolver: _audioSourceResolver, ...entryContext } = input;
+    return entryContext;
+  }
+  const { placementPolicy: _placementPolicy, audioSourceResolver: _audioSourceResolver, ...entryContext } = input;
+  return entryContext;
+}
+
 const isFiniteRange = (startSeconds: number, endSeconds: number) =>
   Number.isFinite(startSeconds) &&
   Number.isFinite(endSeconds) &&
   startSeconds >= 0 &&
   endSeconds > startSeconds;
 
-const isValidProjectionTiming = (projection: SceneGenerationProjection) =>
+const isValidProjectionTiming = (projection: Pick<SceneGenerationProjection, "startTime" | "duration" | "inPoint" | "outPoint">) =>
   Number.isFinite(projection.startTime) &&
   projection.startTime >= 0 &&
   Number.isFinite(projection.duration) &&
@@ -107,81 +125,111 @@ const isValidProjectionTiming = (projection: SceneGenerationProjection) =>
 export function resolveGenerationEntryContext(
   input: GenerationEntryContextInput,
 ): GenerationEntryContextResult {
+  const { placementPolicy } = input;
+  const entryContext = toCanonicalEntryContext(input);
+
   if (input.kind === "new-asset" || input.kind === "unplaced-shot") {
     const defaultPlacementPolicy = "none" as const;
+    if (input.kind === "unplaced-shot" && input.shotId.length === 0) {
+      return { kind: input.kind, entryContext, timingAbsent: true, audioEligible: false, defaultPlacementPolicy, placementPolicy: placementPolicy ?? defaultPlacementPolicy, ...invalidEntryContext("entry-context-invalid") };
+    }
     return {
       kind: input.kind,
+      entryContext,
       timingAbsent: true,
       audioEligible: false,
       defaultPlacementPolicy,
-      placementPolicy: input.placementPolicy ?? defaultPlacementPolicy,
+      placementPolicy: placementPolicy ?? defaultPlacementPolicy,
       errors: [],
       warnings: [],
     };
   }
 
-  if (input.kind === "explicit-unlinked-range") {
+  if (input.kind === "unlinked-range") {
     const defaultPlacementPolicy = "create-linked-clip" as const;
-    if (!isFiniteRange(input.startSeconds, input.endSeconds)) {
+    if (input.rangeId.length === 0) {
+      return { kind: input.kind, entryContext, timingAbsent: true, audioEligible: false, defaultPlacementPolicy, placementPolicy: placementPolicy ?? defaultPlacementPolicy, ...invalidEntryContext("entry-context-invalid") };
+    }
+    if (!isFiniteRange(input.startTime, input.endTime)) {
       const invalid = invalidTiming();
       return {
         kind: input.kind,
+        entryContext,
         timingAbsent: true,
         audioEligible: false,
         defaultPlacementPolicy,
-        placementPolicy: input.placementPolicy ?? defaultPlacementPolicy,
+        placementPolicy: placementPolicy ?? defaultPlacementPolicy,
         ...invalid,
       };
     }
 
     const timing: GenerationTiming = {
       source: "manual",
-      startSeconds: input.startSeconds,
-      endSeconds: input.endSeconds,
-      durationSeconds: input.endSeconds - input.startSeconds,
+      startSeconds: input.startTime,
+      endSeconds: input.endTime,
+      durationSeconds: input.endTime - input.startTime,
     };
 
     return {
       kind: input.kind,
+      entryContext,
       timingAbsent: false,
       timing,
       audioEligible: false,
       defaultPlacementPolicy,
-      placementPolicy: input.placementPolicy ?? defaultPlacementPolicy,
+      placementPolicy: placementPolicy ?? defaultPlacementPolicy,
       errors: [],
       warnings: [],
     };
   }
 
   const defaultPlacementPolicy = "replace-selected-clip-media" as const;
-  if (!isValidProjectionTiming(input.projection)) {
+  if (input.shotId.length === 0 || input.clipId.length === 0) {
+    return { kind: input.kind, entryContext, timingAbsent: true, audioEligible: false, defaultPlacementPolicy, placementPolicy: placementPolicy ?? defaultPlacementPolicy, ...invalidEntryContext("entry-context-invalid") };
+  }
+  if (input.supportsAudio === undefined) {
+    return { kind: input.kind, entryContext, timingAbsent: true, audioEligible: false, defaultPlacementPolicy, placementPolicy: placementPolicy ?? defaultPlacementPolicy, ...invalidEntryContext("audio-capability-required") };
+  }
+  const projection = {
+    clipId: input.clipId,
+    linkedShotId: input.shotId,
+    startTime: input.startTime,
+    duration: input.endTime - input.startTime,
+    inPoint: 0,
+    outPoint: input.endTime - input.startTime,
+  } satisfies SceneGenerationProjection;
+  if (!isValidProjectionTiming(projection)) {
     const invalid = invalidTiming();
     return {
       kind: input.kind,
+      entryContext,
       timingAbsent: true,
-      projection: input.projection,
+      projection,
       audioEligible: false,
       defaultPlacementPolicy,
-      placementPolicy: input.placementPolicy ?? defaultPlacementPolicy,
+      placementPolicy: placementPolicy ?? defaultPlacementPolicy,
       ...invalid,
     };
   }
 
   const timing: GenerationTiming = {
     source: "timeline",
-    startSeconds: input.projection.startTime,
-    endSeconds: input.projection.startTime + input.projection.duration,
-    durationSeconds: input.projection.duration,
+    startSeconds: input.startTime,
+    endSeconds: input.endTime,
+    durationSeconds: input.endTime - input.startTime,
   };
+
+  if (input.supportsAudio && input.audioSourceResolver) input.audioSourceResolver();
 
   return {
     kind: input.kind,
+    entryContext,
     timingAbsent: false,
-    projection: input.projection,
+    projection,
     timing,
     audioEligible: input.supportsAudio,
     defaultPlacementPolicy,
-    placementPolicy: input.placementPolicy ?? defaultPlacementPolicy,
+    placementPolicy: placementPolicy ?? defaultPlacementPolicy,
     errors: [],
     warnings: [],
   };
@@ -214,16 +262,24 @@ export function selectSceneGenerationContext(input: {
         };
   }
 
-  const projection = input.projections.find(
+  const matchingProjections = input.projections.filter(
     (candidate) => candidate.clipId === input.projectionClipId,
   );
-  if (!projection) {
+  if (matchingProjections.length === 0) {
     return {
       status: "disabled",
       code: "projection-not-found",
       reason: "The selected timeline projection no longer exists.",
     };
   }
+  if (matchingProjections.length > 1) {
+    return {
+      status: "disabled",
+      code: "projection-ambiguous",
+      reason: "More than one timeline projection matches the selected identity.",
+    };
+  }
+  const projection = matchingProjections[0];
   if (projection.linkedShotId !== input.shotId) {
     return {
       status: "disabled",
@@ -272,7 +328,9 @@ export function selectSceneGenerationContext(input: {
   };
 }
 
-type ReferenceWithoutOrigin = Omit<ResolvedGenerationReference, "origins">;
+type ReferenceWithoutOrigin = Omit<ResolvedGenerationReference, "origins"> & {
+  uploadLeaseId: string;
+};
 
 export interface SceneGenerationReferenceGroups {
   source?: ReferenceWithoutOrigin;
@@ -291,10 +349,77 @@ export interface SceneGenerationRequest {
   providerInputs: Record<string, unknown>;
 }
 
+function assertEntryContextAgreement(input: {
+  entryContext: GenerationEntryContext;
+  selection: Extract<SceneGenerationContextResult, { status: "ready" }>;
+  audio?: ResolvedGenerationAudio;
+}): void {
+  const { entryContext, selection, audio } = input;
+  const hasSelectionTiming = selection.timing !== undefined;
+  const hasSelectionProjection = selection.projection !== undefined;
+
+  if (entryContext.kind !== "linked-projection" && audio) {
+    throw new TypeError("generation-audio-not-allowed-for-entry-context");
+  }
+
+  if (entryContext.kind === "new-asset" || entryContext.kind === "unplaced-shot") {
+    if (hasSelectionTiming || hasSelectionProjection || selection.audioInterval) {
+      throw new TypeError("generation-entry-context-selection-mismatch");
+    }
+    return;
+  }
+
+  if (entryContext.kind === "unlinked-range") {
+    if (
+      hasSelectionProjection ||
+      !selection.timing ||
+      selection.timing.source !== "manual" ||
+      selection.timing.startSeconds !== entryContext.startTime ||
+      selection.timing.endSeconds !== entryContext.endTime
+    ) {
+      throw new TypeError("generation-entry-context-selection-mismatch");
+    }
+    return;
+  }
+
+  const projection = selection.projection;
+  if (
+    !projection ||
+    !selection.timing ||
+    projection.clipId !== entryContext.clipId ||
+    projection.linkedShotId !== entryContext.shotId ||
+    projection.startTime !== entryContext.startTime ||
+    projection.startTime + projection.duration !== entryContext.endTime ||
+    selection.timing.source !== "timeline" ||
+    selection.timing.startSeconds !== entryContext.startTime ||
+    selection.timing.endSeconds !== entryContext.endTime
+  ) {
+    throw new TypeError("generation-entry-context-selection-mismatch");
+  }
+
+  if (
+    audio &&
+    !selection.includeAudio
+  ) {
+    throw new TypeError("generation-entry-context-audio-selection-mismatch");
+  }
+
+  if (
+    audio &&
+    (audio.projectStartSeconds !== entryContext.startTime ||
+      audio.projectEndSeconds !== entryContext.endTime)
+  ) {
+    throw new TypeError("generation-entry-context-audio-range-mismatch");
+  }
+}
+
 export function buildSceneGenerationRequest(input: {
   id: string;
   projectId: string;
-  shotId: string;
+  entryContext: GenerationEntryContext;
+  mode: GenerationMode;
+  prompt: string;
+  negativePrompt?: string;
   selection: Extract<SceneGenerationContextResult, { status: "ready" }>;
   target: GenerationTarget;
   placementPolicy: GenerationPlacementPolicy;
@@ -304,6 +429,7 @@ export function buildSceneGenerationRequest(input: {
   references?: SceneGenerationReferenceGroups;
   audio?: ResolvedGenerationAudio;
 }): SceneGenerationRequest {
+  assertEntryContextAgreement(input);
   const groups = input.references ?? {};
   const toResolverInput = (reference: ReferenceWithoutOrigin) => ({
     mediaId: reference.mediaId,
@@ -321,34 +447,38 @@ export function buildSceneGenerationRequest(input: {
     const identity = `${reference.mediaId}\u0000${reference.versionId ?? ""}`;
     if (!inputByIdentity.has(identity)) inputByIdentity.set(identity, reference);
   }
-  const references: ResolvedGenerationReference[] = resolveGenerationReferences({
+  const resolvedByIdentity = new Map<string, ResolvedReference>();
+  for (const reference of resolveGenerationReferences({
     source: groups.source ? toResolverInput(groups.source) : undefined,
     characters: (groups.characters ?? []).map(toResolverInput),
     shotReferences: (groups.shotReferences ?? []).map(toResolverInput),
     userReferences: (groups.userReferences ?? []).map(toResolverInput),
-  }).map((reference) => {
-    const original = inputByIdentity.get(
-      `${reference.mediaId}\u0000${reference.versionId ?? ""}`,
-    );
-    if (!original) throw new TypeError("generation-reference-resolution-mismatch");
+  })) {
+    resolvedByIdentity.set(`${reference.mediaId}\u0000${reference.versionId ?? ""}`, reference);
+  }
+  const references = Array.from(inputByIdentity.entries()).map(([identity, original], index) => {
+    const reference = resolvedByIdentity.get(identity);
+    if (!reference) throw new TypeError("generation-reference-resolution-mismatch");
     return {
-      mediaId: reference.mediaId,
-      ...(reference.versionId ? { versionId: reference.versionId } : {}),
+      ...original,
+      order: index + 1,
       origins: reference.origins,
-      remoteInput: original.remoteInput,
-    };
+    } satisfies ResolvedGenerationReference;
   });
 
   const context: GenerationContext = {
     projectId: input.projectId,
-    shotId: input.shotId,
-    ...(input.selection.projection
-      ? { clipId: input.selection.projection.clipId }
-      : {}),
-    target: input.target,
-    ...(input.selection.timing ? { timing: input.selection.timing } : {}),
+    entryContext: input.entryContext,
+    mode: input.mode,
+    prompt: input.prompt,
+    ...(input.negativePrompt ? { negativePrompt: input.negativePrompt } : {}),
     references,
-    ...(input.audio ? { audio: input.audio } : {}),
+    ...(input.audio
+      ? {
+          audioAssetId: input.audio.sourceMediaId,
+          audioRange: { startTime: input.audio.projectStartSeconds, endTime: input.audio.projectEndSeconds },
+        }
+      : {}),
     placementPolicy: input.placementPolicy,
   };
 
