@@ -13,7 +13,7 @@ import {
   type GenerationRouteIdentity,
 } from "@openreel/music-video-domain/generation";
 import type { GenerationJobRepository, PlacementClaim } from "./repository.js";
-import { GenerationPollingController, isPlacementReconciliationCandidate } from "./recovery.js";
+import { GenerationPollingController, isPlacementReconciliationCandidate, projectTerminalPlacementSuccess } from "./recovery.js";
 
 export interface GenerationProviderPort {
   /** idempotencyKey is the durable logical attempt identity and must be passed to the provider boundary. */
@@ -234,11 +234,13 @@ export class GenerationOrchestrator {
     try {
       return await this.options.finalizer.reconcilePlacement(jobId);
     } catch (cause) {
+      const terminal = await projectTerminalPlacementSuccess(this.options.repository, jobId, this.clock);
+      if (terminal) return terminal;
       const latest = await this.options.repository.get(jobId);
       if (!latest) throw new Error("generation-not-found");
       if (latest.status !== "finalizing") return latest;
       const error = { code: "generation-placement-reconciliation-failed", message: cause instanceof Error ? cause.message : "Placement reconciliation failed", retryable: true };
-      return this.options.repository.update(jobId, (current) => current.status !== "finalizing" ? current : ({ ...current, status: "needs-attention", error, updatedAt: this.clock(), checkpoints: { ...current.checkpoints, "placement-applied": { status: "failed", timestamp: this.clock(), error } }, placement: { policy: current.context.placementPolicy, status: "failed", error } }));
+      return this.options.repository.update(jobId, (current) => current.status !== "finalizing" || current.checkpoints["placement-applied"]?.status === "completed" ? current : ({ ...current, status: "needs-attention", error, updatedAt: this.clock(), checkpoints: { ...current.checkpoints, "placement-applied": { status: "failed", timestamp: this.clock(), error } }, placement: { policy: current.context.placementPolicy, status: "failed", error } }));
     }
   }
 

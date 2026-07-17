@@ -58,6 +58,17 @@ const placementCandidate = (): GenerationJob => {
   };
 };
 
+const replaySafePlacementFailure = (): GenerationJob => {
+  const failure = { code: "generation-placement-failed", message: "placement was not applied", retryable: true };
+  return {
+    ...baseJob("succeeded"),
+    context: { ...baseJob("succeeded").context, placementPolicy: "create-linked-clip" },
+    output: { mediaId: "media-1", versionId: "version-1", mimeType: "video/mp4", byteLength: 4, sha256: "hash", width: 16, height: 9, durationSeconds: 1 },
+    checkpoints: { "placement-applied": { status: "failed", timestamp: 8, error: failure } },
+    placement: { policy: "create-linked-clip", status: "failed", error: failure, replaySafe: true },
+  };
+};
+
 describe("generation recovery state machine", () => {
   it("enumerates every allowed transition and rejects invalid ones", () => {
     expect(allowedRecoveryActions("completed")).toEqual(["regenerate", "variation", "retry-finalization", "retry-placement"]);
@@ -65,6 +76,8 @@ describe("generation recovery state machine", () => {
     expect(allowedRecoveryActionsForJob(placementCandidate())).toContain("reconcile-placement");
     expect(allowedRecoveryActionsForJob(baseJob("needs-attention"))).not.toContain("reconcile-placement");
     expect(allowedRecoveryActionsForJob(placementCandidate())).not.toContain("retry-placement");
+    expect(allowedRecoveryActionsForJob(replaySafePlacementFailure())).toContain("retry-placement");
+    expect(allowedRecoveryActionsForJob({ ...replaySafePlacementFailure(), placement: { ...replaySafePlacementFailure().placement!, replaySafe: false } })).not.toContain("retry-placement");
     expect(allowedRecoveryActions("running")).toEqual(["cancel"]);
     expect(() => assertRecoveryTransition(baseJob("completed"), "cancel")).toThrow(RecoveryError);
   });
@@ -118,7 +131,7 @@ describe("generation recovery state machine", () => {
     const controller = new GenerationRecoveryController({ now: () => 40, resolveContext: vi.fn(), submit, save, reconcilePlacement: vi.fn() });
 
     const finalized = await controller.retryFinalization(baseJob("completed"));
-    const placed = await controller.retryPlacement({ ...baseJob("completed"), placement: { policy: "none", status: "failed" } });
+    const placed = await controller.retryPlacement(replaySafePlacementFailure());
 
     expect(submit).not.toHaveBeenCalled();
     expect(finalized.status).toBe("running");

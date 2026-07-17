@@ -49,7 +49,7 @@ const recoveryTransitions: RecoveryTransition[] = [
   },
   {
     action: "retry-placement",
-    from: ["completed", "failed"],
+    from: ["completed", "failed", "succeeded"],
     to: "running",
   },
   {
@@ -79,13 +79,25 @@ export function isPlacementReconciliationCandidate(job: GenerationJob): boolean 
     && ["generation-placement-outcome-unknown", "generation-placement-reconciliation-failed", "generation-placement-retry-unsafe"].includes(job.error?.code ?? "");
 }
 
+export function isPlacementRetryCandidate(job: GenerationJob): boolean {
+  return ["completed", "failed", "succeeded"].includes(job.status)
+    && job.context.placementPolicy !== "none"
+    && job.checkpoints["placement-applied"]?.status === "failed"
+    && job.placement?.status === "failed"
+    && job.placement.replaySafe === true;
+}
+
 export function allowedRecoveryActionsForJob(job: GenerationJob): RecoveryAction[] {
-  return allowedRecoveryActions(job.status).filter((action) => action !== "reconcile-placement" || isPlacementReconciliationCandidate(job));
+  return allowedRecoveryActions(job.status).filter((action) => {
+    if (action === "reconcile-placement") return isPlacementReconciliationCandidate(job);
+    if (action === "retry-placement") return isPlacementRetryCandidate(job);
+    return true;
+  });
 }
 
 export function assertRecoveryTransition(job: GenerationJob, action: RecoveryAction): RecoveryTransition {
   const transition = recoveryTransitions.find((candidate) => candidate.action === action && candidate.from.includes(job.status));
-  if (!transition) throw new RecoveryError("recovery-invalid-transition", { action, status: job.status });
+  if (!transition || action === "retry-placement" && !isPlacementRetryCandidate(job)) throw new RecoveryError("recovery-invalid-transition", { action, status: job.status });
   return transition;
 }
 
@@ -246,13 +258,7 @@ export class GenerationRecoveryController {
         ...job.checkpoints,
         "placement-applied": { status: "pending" },
       },
-      placement: job.placement
-        ? {
-            ...job.placement,
-            status: "pending",
-            error: undefined,
-          }
-        : undefined,
+      placement: job.placement ? { policy: job.placement.policy, status: "pending" } : undefined,
     });
   }
 

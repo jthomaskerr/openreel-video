@@ -19,6 +19,37 @@ export function isPlacementReconciliationCandidate(job: GenerationJob) {
     && ["generation-placement-outcome-unknown", "generation-placement-reconciliation-failed", "generation-placement-retry-unsafe"].includes(job.error?.code ?? "");
 }
 
+function completedPlacementProjection(job: GenerationJob, timestamp: number): GenerationJob {
+  if (job.status === "succeeded"
+    && job.error === undefined
+    && job.checkpoints["placement-applied"]?.status === "completed"
+    && job.placement?.status === "applied") return job;
+  const checkpointTimestamp = job.checkpoints["placement-applied"]?.status === "completed"
+    ? job.checkpoints["placement-applied"].timestamp ?? timestamp
+    : timestamp;
+  const { error: _discardedError, ...withoutError } = job;
+  return {
+    ...withoutError,
+    status: "succeeded",
+    updatedAt: timestamp,
+    checkpoints: { ...job.checkpoints, "placement-applied": { status: "completed", timestamp: checkpointTimestamp } },
+    placement: { policy: job.context.placementPolicy, status: "applied", appliedAt: job.placement?.status === "applied" ? job.placement.appliedAt ?? checkpointTimestamp : checkpointTimestamp },
+  };
+}
+
+export async function projectTerminalPlacementSuccess(repository: GenerationJobRepository, jobId: string, now: () => number): Promise<GenerationJob | undefined> {
+  const job = await repository.get(jobId);
+  if (!job) return undefined;
+  const claim = await repository.getPlacementClaim(jobId);
+  const checkpointCompleted = job.checkpoints["placement-applied"]?.status === "completed";
+  const claimApplied = claim?.phase === "terminal" && claim.state === "completed" && claim.outcome === "applied";
+  if (!checkpointCompleted && !claimApplied) return undefined;
+  const timestamp = job.checkpoints["placement-applied"]?.status === "completed"
+    ? job.checkpoints["placement-applied"].timestamp ?? claim?.terminalAt ?? now()
+    : claim?.terminalAt ?? now();
+  return repository.update(jobId, (current) => completedPlacementProjection(current, timestamp));
+}
+
 export class GenerationRecoveryService {
  constructor(private readonly repository: GenerationJobRepository, private readonly provider: RecoveryProvider, private readonly cleanup: RecoveryCleanup, private readonly clock: RecoveryClock = { now: () => Date.now() }, readonly polling = new GenerationPollingController(), private readonly placementReconciler?: PlacementReconciler) {}
 
@@ -50,9 +81,43 @@ export class GenerationRecoveryService {
   }
 
   async retryPlacement(jobId: string): Promise<GenerationJob> {
- const job = await this.require(jobId);
-    if (!["completed", "failed"].includes(job.status) || job.context.placementPolicy === "none") return this.fail(job, "generation-invalid-placement-retry-state");
-    return this.repository.update(jobId, (current) => ({ ...current, status: "running", error: undefined, updatedAt: this.clock.now(), checkpoints: Object.fromEntries(RECOVERY_CHECKPOINTS.map((name) => [name, { ...(current.checkpoints[name] ?? { status: "pending" }), ...(name === "placement-applied" ? { status: "pending" } : {}) }])), placement: { policy: current.context.placementPolicy, status: "pending" } }));
+    const job = await this.require(jobId);
+    const claim = await this.repository.getPlacementClaim(jobId);
+    const isReplaySafeFailureProjection = (candidate: GenerationJob) => ["completed", "failed", "succeeded"].includes(candidate.status)
+      && candidate.context.placementPolicy !== "none"
+      && candidate.checkpoints["placement-applied"]?.status === "failed"
+      && candidate.placement?.status === "failed"
+      && candidate.placement.replaySafe === true;
+    const replaySafeFailure = isReplaySafeFailureProjection(job)
+      && claim?.phase === "terminal"
+      && claim.state === "failed"
+      && claim.outcome === "not-applied"
+      && claim.replaySafe === true;
+    if (!replaySafeFailure) {
+      const terminalSuccess = await projectTerminalPlacementSuccess(this.repository, jobId, () => this.clock.now());
+      if (terminalSuccess) return terminalSuccess;
+      const error = this.error("generation-invalid-placement-retry-state");
+      return this.repository.update(jobId, (current) => {
+        const completedCheckpoint = current.checkpoints["placement-applied"]?.status === "completed"
+          ? current.checkpoints["placement-applied"]
+          : undefined;
+        if (completedCheckpoint || current.placement?.status === "applied") {
+          return completedPlacementProjection(current, completedCheckpoint?.timestamp ?? (current.placement?.status === "applied" ? current.placement.appliedAt : undefined) ?? this.clock.now());
+        }
+        return { ...current, status: "failed", error, updatedAt: this.clock.now() };
+      });
+    }
+    return this.repository.update(jobId, (current) => {
+      if (!isReplaySafeFailureProjection(current)) return current;
+      return {
+        ...current,
+        status: "running",
+        error: undefined,
+        updatedAt: this.clock.now(),
+        checkpoints: Object.fromEntries(RECOVERY_CHECKPOINTS.map((name) => [name, { ...(current.checkpoints[name] ?? { status: "pending" }), ...(name === "placement-applied" ? { status: "pending" } : {}) }])),
+        placement: { policy: current.context.placementPolicy, status: "pending" },
+      };
+    });
   }
 
   async reconcilePlacement(jobId: string): Promise<GenerationJob> {
@@ -66,10 +131,14 @@ export class GenerationRecoveryService {
     try {
       return await this.placementReconciler.reconcilePlacement(jobId);
     } catch (cause) {
+      const terminal = await projectTerminalPlacementSuccess(this.repository, jobId, () => this.clock.now());
+      if (terminal) return terminal;
       const latest = await this.require(jobId);
       if (latest.status !== "finalizing") return latest;
       const error: GenerationError = { code: "generation-placement-reconciliation-failed", message: cause instanceof Error ? cause.message : "Placement reconciliation failed", retryable: true };
-      return this.repository.update(jobId, (current) => current.status !== "finalizing" ? current : ({
+      return this.repository.update(jobId, (current) => current.checkpoints["placement-applied"]?.status === "completed"
+        ? completedPlacementProjection(current, current.checkpoints["placement-applied"].timestamp ?? this.clock.now())
+        : current.status !== "finalizing" ? current : ({
         ...current,
         status: "needs-attention",
         error,

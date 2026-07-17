@@ -21,6 +21,15 @@ describe("generation contracts", () => {
   it("persists literal contractVersion 2 and exact placement values", () => {
     const job = makeJob("queued");
     expect(GenerationJobSchema.parse(job)).toMatchObject({ contractVersion: 2, context: { entryContext: { kind: "new-asset" } } });
+    expect(GenerationJobSchema.parse({
+      ...job,
+      placement: {
+        policy: "create-linked-clip",
+        status: "failed",
+        error: { code: "generation-placement-failed", message: "not applied", retryable: true },
+        replaySafe: true,
+      },
+    }).placement).toMatchObject({ status: "failed", replaySafe: true });
     expect(() => GenerationJobSchema.parse({ ...job, contractVersion: 3 })).toThrow();
     expect(() => GenerationContextSchema.parse({ ...job.context, placementPolicy: "library-only" })).toThrow();
   });

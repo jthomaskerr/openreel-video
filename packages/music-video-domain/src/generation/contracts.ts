@@ -29,7 +29,7 @@ export type GenerationTarget =
   | { kind: "new-version"; sourceMediaId: string; placeholderMediaId: string };
 
 export interface GenerationTiming { source: "timeline" | "shot" | "manual"; startSeconds: number; endSeconds: number; durationSeconds: number }
-export interface GenerationPlacementState { policy: GenerationPlacementPolicy; status: "pending" | "applied" | "failed" | "skipped"; appliedAt?: number; error?: GenerationError }
+export interface GenerationPlacementState { policy: GenerationPlacementPolicy; status: "pending" | "applied" | "failed" | "skipped"; appliedAt?: number; error?: GenerationError; replaySafe?: boolean }
 export type GenerationReferenceOrigin = "source" | "character" | "shot" | "user";
 
 export interface ResolvedGenerationReference {

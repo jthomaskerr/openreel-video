@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { link, mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parseGenerationJob, serializeGenerationJob, type GenerationCheckpointName, type GenerationCheckpointState, type GenerationJob } from "@openreel/music-video-domain/generation";
 
@@ -81,9 +81,15 @@ export interface FileGenerationJobRepositoryOptions {
   lockTtlMs?: number;
   placementLeaseTtlMs?: number;
   now?: () => number;
+  legacyLockMigration?: "drained";
 }
 
 type FileClaim = SubmissionClaim;
+type LockRecord = { lockToken?: string; processToken?: string; pid?: number; claimedAt?: number };
+type ObservedLock =
+  | { format: "directory"; token: string; record: LockRecord }
+  | { format: "directory-empty" }
+  | { format: "legacy"; token?: string; record?: LockRecord; mtimeMs: number };
 const CHECKPOINT_NAMES: GenerationCheckpointName[] = ["output-claimed", "output-downloaded", "output-verified", "output-inspected", "placeholder-finalized", "shot-linked", "placement-applied"];
 
 function canonicalOutputIdentity(value: string, providerInstanceId: string) {
@@ -103,16 +109,19 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
   readonly lockTtlMs: number;
   readonly placementLeaseTtlMs: number;
   readonly now: () => number;
+  private readonly legacyLockMigrationEnabled: boolean;
 
   constructor(readonly directory: string, options?: FileGenerationJobRepositoryOptions | number, legacyNow?: () => number) {
     if (typeof options === "number") {
       this.lockTtlMs = options;
       this.placementLeaseTtlMs = options;
       this.now = legacyNow ?? (() => Date.now());
+      this.legacyLockMigrationEnabled = false;
     } else {
       this.lockTtlMs = options?.lockTtlMs ?? 30_000;
       this.placementLeaseTtlMs = options?.placementLeaseTtlMs ?? 30_000;
       this.now = options?.now ?? (() => Date.now());
+      this.legacyLockMigrationEnabled = options?.legacyLockMigration === "drained";
     }
     if (this.lockTtlMs <= 0 || this.placementLeaseTtlMs <= 0) throw new GenerationRepositoryError("generation-repository-invalid-ttl");
   }
@@ -135,55 +144,113 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
     try { await directory.sync(); } finally { await directory.close(); }
   }
 
+  private lockOwnerPath(path: string, lockToken: string) { return join(path, `owner-${lockToken}.json`); }
+
+  private async syncDirectory(path: string) {
+    const directory = await open(path, "r");
+    try { await directory.sync(); } finally { await directory.close(); }
+  }
+
   private async removeLockIfOwned(path: string, lockToken: string) {
-    try {
-      const current = JSON.parse(await readFile(path, "utf8")) as { lockToken?: string; processToken?: string };
-      const token = current.lockToken ?? current.processToken;
-      if (token === lockToken) await rm(path, { force: true });
-    } catch (cause) {
+    try { await unlink(this.lockOwnerPath(path, lockToken)); }
+    catch (cause) {
       if (!(cause && typeof cause === "object" && "code" in cause && cause.code === "ENOENT")) throw cause;
+    }
+    try {
+      await rmdir(path);
+      await this.syncDirectory(dirname(path));
+    } catch (cause) {
+      if (!(cause && typeof cause === "object" && "code" in cause && ["ENOENT", "ENOTEMPTY", "EEXIST"].includes(String(cause.code)))) throw cause;
     }
   }
 
   private async publishFileLock(path: string, lockToken: string) {
     const candidate = `${path}.${lockToken}.candidate`;
+    await mkdir(candidate, { mode: 0o700 });
     try {
-      const handle = await open(candidate, "wx", 0o600);
+      const handle = await open(this.lockOwnerPath(candidate, lockToken), "wx", 0o600);
       try {
         await handle.writeFile(JSON.stringify({ lockToken, processToken: this.processToken, pid: process.pid, claimedAt: this.now() }));
         await handle.sync();
       } finally {
         await handle.close();
       }
+      await this.syncDirectory(candidate);
       try {
-        await link(candidate, path);
-        return true;
+        await rename(candidate, path);
       } catch (cause) {
-        if (cause && typeof cause === "object" && "code" in cause && cause.code === "EEXIST") return false;
+        try {
+          const existing = await lstat(path);
+          if (existing.isDirectory() || existing.isFile()) return false;
+          throw new GenerationRepositoryError("generation-repository-lock-type-unsupported");
+        } catch (inspectionError) {
+          if (inspectionError && typeof inspectionError === "object" && "code" in inspectionError && inspectionError.code === "ENOENT") {
+            if (cause && typeof cause === "object" && "code" in cause && ["EEXIST", "ENOTEMPTY", "ENOTDIR"].includes(String(cause.code))) return false;
+            throw cause;
+          }
+          throw inspectionError;
+        }
+      }
+      try {
+        await this.syncDirectory(dirname(path));
+      } catch (cause) {
+        await this.removeLockIfOwned(path, lockToken);
         throw cause;
       }
+      return true;
     } finally {
-      await rm(candidate, { force: true });
+      await rm(candidate, { recursive: true, force: true });
     }
   }
 
-  private async reclaimStaleCorruptLock(path: string) {
+  private async observeLock(path: string): Promise<ObservedLock> {
+    const metadata = await lstat(path);
+    if (metadata.isDirectory()) {
+      const entries = await readdir(path, { withFileTypes: true });
+      if (entries.length === 0) return { format: "directory-empty" };
+      const owners = entries.filter((entry) => entry.isFile() && /^owner-.+\.json$/.test(entry.name));
+      if (entries.length !== 1 || owners.length !== 1) throw new GenerationRepositoryError("generation-repository-lock-corrupt");
+      const match = /^owner-(.+)\.json$/.exec(owners[0].name);
+      const token = match?.[1];
+      if (!token) throw new GenerationRepositoryError("generation-repository-lock-corrupt");
+      let record: LockRecord;
+      try { record = JSON.parse(await readFile(join(path, owners[0].name), "utf8")) as LockRecord; }
+      catch (cause) {
+        if (cause && typeof cause === "object" && "code" in cause && cause.code === "ENOENT") throw cause;
+        throw new GenerationRepositoryError("generation-repository-lock-corrupt", cause instanceof Error ? cause.message : String(cause));
+      }
+      if ((record.lockToken ?? record.processToken) !== token) throw new GenerationRepositoryError("generation-repository-lock-corrupt");
+      return { format: "directory", token, record };
+    }
+    if (!metadata.isFile()) throw new GenerationRepositoryError("generation-repository-lock-type-unsupported");
     try {
-      const before = await stat(path);
-      if (Date.now() - before.mtimeMs < this.lockTtlMs) return;
-      try {
-        JSON.parse(await readFile(path, "utf8"));
-        return;
-      } catch {
-        // New writers publish complete records atomically. Only an unchanged,
-        // stale record from the legacy create-then-write protocol is reclaimable.
-      }
-      const after = await stat(path);
-      if (before.ino === after.ino && before.size === after.size && before.mtimeMs === after.mtimeMs) {
-        await rm(path, { force: true });
-      }
+      const record = JSON.parse(await readFile(path, "utf8")) as LockRecord;
+      return { format: "legacy", token: record.lockToken ?? record.processToken, record, mtimeMs: metadata.mtimeMs };
+    } catch {
+      return { format: "legacy", mtimeMs: metadata.mtimeMs };
+    }
+  }
+
+  private async reclaimLegacyLock(path: string, lock: Extract<ObservedLock, { format: "legacy" }>) {
+    if (!this.legacyLockMigrationEnabled) {
+      throw new GenerationRepositoryError(
+        "generation-repository-legacy-lock-migration-required",
+        "generation-repository-legacy-lock-migration-required: every old orchestrator process must be drained before legacy lock migration",
+      );
+    }
+    if (!lock.record && Date.now() - lock.mtimeMs < this.lockTtlMs) return;
+    if (lock.record) {
+      const ownerIsLive = typeof lock.record.pid === "number"
+        ? this.processIsLive(lock.record.pid)
+        : typeof lock.record.claimedAt === "number" && this.now() - lock.record.claimedAt <= this.lockTtlMs;
+      if (ownerIsLive) return;
+    }
+    try {
+      // One-way migration for a drained, new-code-only deployment. unlink cannot
+      // remove the non-empty v2 directory a competing new process may publish.
+      await unlink(path);
     } catch (cause) {
-      if (!(cause && typeof cause === "object" && "code" in cause && cause.code === "ENOENT")) throw cause;
+      if (!(cause && typeof cause === "object" && "code" in cause && ["ENOENT", "EISDIR", "EPERM"].includes(String(cause.code)))) throw cause;
     }
   }
 
@@ -201,13 +268,22 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
         try { return await task(); } finally { await this.removeLockIfOwned(path, lockToken); }
       }
       try {
-        const lock = JSON.parse(await readFile(path, "utf8")) as { lockToken?: string; processToken?: string; pid?: number; claimedAt?: number };
-        const ownerToken = lock.lockToken ?? lock.processToken;
-        const ownerIsLive = typeof lock.pid === "number" ? this.processIsLive(lock.pid) : typeof lock.claimedAt === "number" && this.now() - lock.claimedAt <= this.lockTtlMs;
-        if (!ownerIsLive && ownerToken) await this.removeLockIfOwned(path, ownerToken);
+        const lock = await this.observeLock(path);
+        if (lock.format === "directory-empty") {
+          try { await rmdir(path); }
+          catch (cause) { if (!(cause && typeof cause === "object" && "code" in cause && ["ENOENT", "ENOTEMPTY", "EEXIST"].includes(String(cause.code)))) throw cause; }
+        } else if (lock.format === "legacy") {
+          await this.reclaimLegacyLock(path, lock);
+        } else {
+          const ownerIsLive = typeof lock.record.pid === "number"
+            ? this.processIsLive(lock.record.pid)
+            : typeof lock.record.claimedAt === "number" && this.now() - lock.record.claimedAt <= this.lockTtlMs;
+          if (!ownerIsLive) await this.removeLockIfOwned(path, lock.token);
+        }
       } catch (lockError) {
         if (lockError && typeof lockError === "object" && "code" in lockError && lockError.code === "ENOENT") continue;
-        await this.reclaimStaleCorruptLock(path);
+        if (lockError && typeof lockError === "object" && "code" in lockError && ["EISDIR", "ENOTDIR"].includes(String(lockError.code))) continue;
+        throw lockError;
       }
       await new Promise((resolve) => setTimeout(resolve, 1));
     }
