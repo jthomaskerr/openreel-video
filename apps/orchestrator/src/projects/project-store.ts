@@ -55,6 +55,7 @@ function defaultProject(overrides: {
     modifiedAt: now,
     settings: { ...defaultSettings(), ...overrides.settings },
     mediaLibrary: { items: [] },
+    generatedImageDefinitions: [],
     timeline: { tracks: [], subtitles: [], markers: [], duration: 0 },
   };
 }

@@ -72,6 +72,7 @@ function project(mediaCount: number, clipCount: number, trackCount: number): Pro
         metadata: { duration: 1, width: 1, height: 1, frameRate: 30, codec: "h264", sampleRate: 48_000, channels: 2, fileSize: 1 },
       })),
     },
+    generatedImageDefinitions: [],
     timeline: { tracks, subtitles: [], duration: clipCount, markers: [] },
   };
 }

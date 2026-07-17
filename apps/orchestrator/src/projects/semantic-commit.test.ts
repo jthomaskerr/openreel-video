@@ -8,6 +8,7 @@ const project = (modifiedAt: number): Project => ({
   id: "vintage-tokyo", name: "Vintage Tokyo", createdAt: 1, modifiedAt,
   settings: { width: 1920, height: 1080, frameRate: 30, sampleRate: 48_000, channels: 2 },
   mediaLibrary: { items: [] },
+  generatedImageDefinitions: [],
   timeline: { tracks: [], subtitles: [], duration: 0, markers: [] },
 });
 

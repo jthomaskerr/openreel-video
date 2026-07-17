@@ -34,6 +34,7 @@ function projectFixture(id: string, name: string): Project {
       channels: 2,
     },
     mediaLibrary: { items: [] },
+    generatedImageDefinitions: [],
     timeline: { tracks: [], subtitles: [], markers: [], duration: 0 },
   };
 }
