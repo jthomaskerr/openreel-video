@@ -43,6 +43,10 @@ export interface SchemaProperty {
   maxLength?: number;
   format?: string;
   items?: SchemaProperty;
+  properties?: Record<string, SchemaProperty>;
+  minItems?: number;
+  maxItems?: number;
+  multipleOf?: number;
   "x-ui-component"?: string;
   "x-ui-component-props"?: Record<string, unknown>;
   "x-rows"?: number;

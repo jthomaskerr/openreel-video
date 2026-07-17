@@ -19,6 +19,7 @@ export * from "./effects";
 export * from "./device";
 export * from "./media-availability";
 export * from "./generation/references";
+export * from "./generation/wavespeed";
 export {
   ExportEngine,
   getExportEngine,

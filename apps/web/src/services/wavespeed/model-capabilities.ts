@@ -1,5 +1,10 @@
-import type { SchemaProperty, WavespeedModel } from "./index";
 import type { GenerationModelCapability as SharedGenerationModelCapability } from "@openreel/music-video-domain/generation";
+import {
+  deriveWaveSpeedEvidence,
+  deriveWaveSpeedFieldMap,
+  type WaveSpeedCapabilityEvidenceBase,
+} from "@openreel/core/generation/wavespeed";
+import type { SchemaProperty, WavespeedModel } from "./index";
 
 export interface GenerationModelCapability extends SharedGenerationModelCapability {
   provider: "wavespeed";
@@ -18,6 +23,11 @@ export interface GenerationModelCapability extends SharedGenerationModelCapabili
   duration?: { min: number; max: number; step?: number; allowed?: number[] };
   aspectRatios?: string[];
   requestSchemaVersion: string;
+  schemaVersion: string;
+  supportsAudio: boolean;
+  sourceField?: string;
+  referenceField?: string;
+  audioField?: string;
   inputFields: ModelInputFields;
 }
 
@@ -41,13 +51,10 @@ export interface WaveSpeedModelOverride {
 
 export type WaveSpeedOverrideRegistry = Readonly<Record<string, WaveSpeedModelOverride>>;
 
-export interface CapabilityEvidence {
+export interface CapabilityEvidence extends WaveSpeedCapabilityEvidenceBase {
   classification: "request-schema-type" | "override";
   value: string;
   overrideVersion?: string;
-  acceptedFields: readonly string[];
-  referenceLimits: { min: number; max: number } | false;
-  mediaFields: Readonly<Record<string, string>>;
 }
 
 export type NormalizeWaveSpeedModelResult =
@@ -56,55 +63,23 @@ export type NormalizeWaveSpeedModelResult =
 
 type RequestSchema = WavespeedModel["api_schema"]["api_schemas"][number]["request_schema"];
 
-const SCHEMA_TYPES: Record<string, Pick<GenerationModelCapability, "output" | "mode">> = {
+const SCHEMA_TYPES: Record<
+  string,
+  Pick<GenerationModelCapability, "output" | "mode">
+> = {
   "text-to-image": { output: "image", mode: "text-to-image" },
   "image-to-image": { output: "image", mode: "image-to-image" },
   "text-to-video": { output: "video", mode: "text-to-video" },
   "image-to-video": { output: "video", mode: "image-to-video" },
 };
 
-function mediaRole(property: SchemaProperty): string | undefined {
-  const raw = property as SchemaProperty & {
-    "x-media-role"?: unknown;
-    "x-openreel-media-role"?: unknown;
-  };
-  const role = raw["x-media-role"] ?? raw["x-openreel-media-role"];
-  if (typeof role === "string") return role;
-  const accept = property["x-accept"]?.toLowerCase();
-  const component = property["x-ui-component"];
-  if (component !== "uploader" && component !== "uploaders") return undefined;
-  if (accept?.includes("audio")) return "audio";
-  if (accept?.includes("image") && property.type === "array") return "reference-images";
-  if (accept?.includes("image")) return "source-image";
-  return undefined;
-}
-
-function findConventionalField(schema: RequestSchema, names: string[]): string | undefined {
-  return names.find((name) => name in schema.properties);
-}
-
-function fieldMap(schema: RequestSchema, override?: WaveSpeedModelOverride): ModelInputFields {
-  const fields: ModelInputFields = {
-    prompt: findConventionalField(schema, ["prompt"]),
-    negativePrompt: findConventionalField(schema, ["negative_prompt"]),
-    seed: findConventionalField(schema, ["seed"]),
-    duration: findConventionalField(schema, ["duration"]),
-    aspectRatio: findConventionalField(schema, ["aspect_ratio"]),
-  };
-  for (const [key, value] of Object.entries(schema.properties)) {
-    const role = mediaRole(value);
-    if (role === "source-image" && !fields.sourceImage) fields.sourceImage = key;
-    if (role === "reference-images" && !fields.referenceImages) fields.referenceImages = key;
-    if (role === "audio" && !fields.audio) fields.audio = key;
-  }
-  return { ...fields, ...override?.fields };
-}
-
 function canonicalize(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalize).join(",")}]`;
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalize).join(",")}]`;
+  }
   if (value && typeof value === "object") {
     return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([left], [right]) => left.localeCompare(right))
       .map(([key, item]) => `${JSON.stringify(key)}:${canonicalize(item)}`)
       .join(",")}}`;
   }
@@ -113,31 +88,53 @@ function canonicalize(value: unknown): string {
 
 function stableHash(value: string): string {
   let hash = 0x811c9dc5;
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i);
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
     hash = Math.imul(hash, 0x01000193);
   }
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-function schemaVersion(schema: RequestSchema, override?: WaveSpeedModelOverride): string {
+function schemaVersion(
+  schema: RequestSchema,
+  override?: WaveSpeedModelOverride,
+): string {
   const subset = {
     type: schema.type,
     required: [...(schema.required ?? [])].sort(),
-    order: schema["x-order-properties"] ?? [],
+    ordered: [...(schema["x-order-properties"] ?? Object.keys(schema.properties))],
     properties: schema.properties,
-    overrideVersion: override?.version ?? null,
+    overrideFields: override?.fields ?? {},
   };
-  return `wavespeed-${stableHash(canonicalize(subset))}`;
+
+  return stableHash(canonicalize(subset));
 }
 
-function numericRule(property: SchemaProperty | undefined): GenerationModelCapability["duration"] {
-  if (!property || (property.type !== "integer" && property.type !== "number")) return undefined;
+function numericRule(
+  property: SchemaProperty | undefined,
+): GenerationModelCapability["duration"] | undefined {
+  if (!property || (property.type !== "integer" && property.type !== "number")) {
+    return undefined;
+  }
+
   const allowed = property.enum?.map(Number).filter(Number.isFinite);
-  const raw = property as SchemaProperty & { multipleOf?: number };
-  if (allowed?.length) return { min: Math.min(...allowed), max: Math.max(...allowed), allowed };
-  if (property.minimum == null || property.maximum == null) return undefined;
-  return { min: property.minimum, max: property.maximum, ...(raw.multipleOf ? { step: raw.multipleOf } : {}) };
+  if (allowed?.length) {
+    return {
+      min: Math.min(...allowed),
+      max: Math.max(...allowed),
+      allowed,
+    };
+  }
+
+  if (property.minimum == null || property.maximum == null) {
+    return undefined;
+  }
+
+  return {
+    min: property.minimum,
+    max: property.maximum,
+    ...(property.multipleOf ? { step: property.multipleOf } : {}),
+  };
 }
 
 export function normalizeWaveSpeedModel(
@@ -147,14 +144,17 @@ export function normalizeWaveSpeedModel(
   const entry = rawModel.api_schema?.api_schemas?.[0];
   const override = overrideRegistry[rawModel.model_id];
   const exact = entry ? SCHEMA_TYPES[entry.type.toLowerCase()] : undefined;
-  const classification = override ? "override" : "request-schema-type";
+  const classification: CapabilityEvidence["classification"] = override
+    ? "override"
+    : "request-schema-type";
+
   if (!entry?.request_schema?.properties || (!override && !exact)) {
     return {
       ok: false,
       code: "unsupported-schema",
       evidence: {
         classification,
-        value: override ? rawModel.model_id : (entry?.type ?? "missing"),
+        value: override ? rawModel.model_id : entry?.type ?? "missing",
         ...(override ? { overrideVersion: override.version } : {}),
         acceptedFields: [],
         referenceLimits: false,
@@ -162,28 +162,32 @@ export function normalizeWaveSpeedModel(
       },
     };
   }
+
   const schema = entry.request_schema;
-  const fields = fieldMap(schema, override);
-  const referenceProperty = fields.referenceImages ? schema.properties[fields.referenceImages] : undefined;
-  const arrayLimits = referenceProperty as (SchemaProperty & { minItems?: number; maxItems?: number }) | undefined;
-  const referenceLimits = referenceProperty?.type === "array"
-    ? { min: arrayLimits?.minItems ?? 0, max: arrayLimits?.maxItems ?? Number.MAX_SAFE_INTEGER }
-    : false;
+  const inputFields = deriveWaveSpeedFieldMap(schema, override?.fields);
   const evidence: CapabilityEvidence = {
     classification,
-    value: override ? rawModel.model_id : (entry?.type ?? "missing"),
+    value: override ? rawModel.model_id : entry.type,
     ...(override ? { overrideVersion: override.version } : {}),
-    acceptedFields: [...(schema["x-order-properties"] ?? Object.keys(schema.properties))],
-    referenceLimits,
-    mediaFields: Object.fromEntries(
-      Object.entries(fields).filter(([key]) => ["sourceImage", "referenceImages", "audio"].includes(key)),
-    ) as Record<string, string>,
+    ...deriveWaveSpeedEvidence(schema, inputFields),
   };
+
   for (const field of Object.values(override?.fields ?? {})) {
-    if (field && !(field in schema.properties)) return { ok: false, code: "unsupported-schema", evidence };
+    if (field && !(field in schema.properties)) {
+      return { ok: false, code: "unsupported-schema", evidence };
+    }
   }
+
   const classified = override ?? exact!;
-  const aspectProperty = fields.aspectRatio ? schema.properties[fields.aspectRatio] : undefined;
+  const durationProperty = inputFields.duration
+    ? schema.properties[inputFields.duration]
+    : undefined;
+  const aspectProperty = inputFields.aspectRatio
+    ? schema.properties[inputFields.aspectRatio]
+    : undefined;
+  const requestSchemaVersion = schemaVersion(schema, override);
+  const durationRule = numericRule(durationProperty);
+
   const capability: GenerationModelCapability = {
     provider: "wavespeed",
     modelId: rawModel.model_id,
@@ -191,34 +195,35 @@ export function normalizeWaveSpeedModel(
     output: classified.output,
     mode: classified.mode,
     accepts: {
-      prompt: Boolean(fields.prompt),
-      negativePrompt: Boolean(fields.negativePrompt),
-      sourceImage: Boolean(fields.sourceImage),
-      referenceImages: referenceLimits,
-      audio: Boolean(fields.audio),
-      seed: Boolean(fields.seed),
+      prompt: Boolean(inputFields.prompt),
+      negativePrompt: Boolean(inputFields.negativePrompt),
+      sourceImage: Boolean(inputFields.sourceImage),
+      referenceImages: evidence.referenceLimits,
+      audio: Boolean(inputFields.audio),
+      seed: Boolean(inputFields.seed),
     },
-    ...(fields.duration ? { duration: numericRule(schema.properties[fields.duration]) } : {}),
+    ...(durationRule ? { duration: durationRule } : {}),
     ...(aspectProperty?.enum ? { aspectRatios: [...aspectProperty.enum] } : {}),
-    requestSchemaVersion: schemaVersion(schema, override),
-    schemaVersion: schemaVersion(schema, override),
-    supportsAudio: Boolean(fields.audio),
-    ...(fields.sourceImage ? { sourceField: fields.sourceImage } : {}),
-    ...(fields.referenceImages ? { referenceField: fields.referenceImages } : {}),
-    ...(fields.audio ? { audioField: fields.audio } : {}),
-    ...(referenceLimits ? {
-      referenceMinimum: referenceLimits.min,
-      referenceMaximum: referenceLimits.max,
-    } : {}),
-    inputFields: fields,
+    requestSchemaVersion,
+    schemaVersion: requestSchemaVersion,
+    supportsAudio: Boolean(inputFields.audio),
+    ...(inputFields.sourceImage ? { sourceField: inputFields.sourceImage } : {}),
+    ...(inputFields.referenceImages
+      ? { referenceField: inputFields.referenceImages }
+      : {}),
+    ...(inputFields.audio ? { audioField: inputFields.audio } : {}),
+    inputFields,
   };
+
   return { ok: true, capability, evidence };
 }
 
 export function getModelDefaults(schema: RequestSchema): Record<string, unknown> {
   return Object.fromEntries(
     Object.entries(schema.properties)
-      .filter(([, property]) => Object.prototype.hasOwnProperty.call(property, "default"))
+      .filter(([, property]) =>
+        Object.prototype.hasOwnProperty.call(property, "default"),
+      )
       .map(([key, property]) => [key, property.default]),
   );
 }
