@@ -759,7 +759,8 @@ export function GenerateJobSection(props: {
           {props.job.error.field ? (
             <p className="break-words text-[11px] text-red-200 [overflow-wrap:anywhere]">
               Field: {props.job.error.field}
-2674f (feat(inspector): update generation inspector tabs)
+            <p className="break-words text-[11px] text-red-200 [overflow-wrap:anywhere]">
+              Field: {displayedError.field}
             </p>
           ) : null}
           {explanation ? (
