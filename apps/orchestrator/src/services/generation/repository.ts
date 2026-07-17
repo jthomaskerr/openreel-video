@@ -28,6 +28,14 @@ export interface FinalizationClaim {
   claimedAt: number;
 }
 
+export interface PlacementClaim {
+  jobId: string;
+  idempotencyKey: string;
+  state: "claimed" | "failed" | "completed";
+  ownerToken: string;
+  claimedAt: number;
+}
+
 export interface GenerationJobRepository {
   create(job: GenerationJob): Promise<GenerationJob>;
   get(id: string): Promise<GenerationJob | undefined>;
@@ -45,6 +53,10 @@ export interface GenerationJobRepository {
   claimFinalization(input: { jobId: string; providerInstanceId: string; providerJobId: string; outputIdentity: string; idempotencyKey: string }): Promise<{ claim: FinalizationClaim; acquired: boolean }>;
   completeFinalization(jobId: string, idempotencyKey: string, ownerToken: string): Promise<void>;
   releaseFinalization(jobId: string, ownerToken: string): Promise<void>;
+  claimPlacement(jobId: string, idempotencyKey: string): Promise<{ claim: PlacementClaim; acquired: boolean }>;
+  getPlacementClaim(jobId: string): Promise<PlacementClaim | undefined>;
+  completePlacement(jobId: string, idempotencyKey: string, ownerToken: string): Promise<void>;
+  releasePlacement(jobId: string, ownerToken: string): Promise<void>;
 }
 
 type FileClaim = SubmissionClaim;
@@ -71,6 +83,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
   private locksDir() { return join(this.directory, ".locks"); }
   private submissionFile(id: string, attempt: number) { return join(this.directory, `submission-${id}-${attempt}.json`); }
   private finalizationFile(id: string) { return join(this.directory, `finalization-${id}.json`); }
+  private placementFile(id: string) { return join(this.directory, `placement-${id}.json`); }
 
   private async init() { await mkdir(this.directory, { recursive: true }); await mkdir(this.locksDir(), { recursive: true }); }
 
@@ -115,7 +128,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
 
   private async rebuildIndex(reason?: string): Promise<Record<string, string>> {
     const index: Record<string, string> = {};
-    const names = (await readdir(this.directory)).filter((name: string) => name.endsWith(".json") && !name.startsWith("provider-index") && !name.startsWith("submission-") && !name.startsWith("finalization-"));
+    const names = (await readdir(this.directory)).filter((name: string) => name.endsWith(".json") && !name.startsWith("provider-index") && !name.startsWith("submission-") && !name.startsWith("finalization-") && !name.startsWith("placement-"));
     for (const name of names) {
       const job = await this.readJob(name.slice(0, -5));
       if (!job) continue;
@@ -188,7 +201,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
 
   async listActive(projectId: string) {
     await this.init();
-    const names = (await readdir(this.directory)).filter((name: string) => name.endsWith(".json") && !name.startsWith("provider-index") && !name.startsWith("submission-") && !name.startsWith("finalization-"));
+    const names = (await readdir(this.directory)).filter((name: string) => name.endsWith(".json") && !name.startsWith("provider-index") && !name.startsWith("submission-") && !name.startsWith("finalization-") && !name.startsWith("placement-"));
     const jobs = await Promise.all(names.map((name: string) => this.get(name.slice(0, -5))));
     return jobs.filter((job: GenerationJob | undefined): job is GenerationJob => !!job && job.context.projectId === projectId && !["completed", "failed", "canceled", "needs-attention", "succeeded"].includes(job.status));
   }
@@ -263,5 +276,42 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
     return this.withFileLock(`finalization-${jobId}`, async () => {
       const path = this.finalizationFile(jobId); const claim = await this.readFinalization(path); if (!claim || claim.ownerToken !== ownerToken || claim.state !== "claimed") return; await this.atomic(path, { ...claim, state: "failed" });
     });
+  }
+
+  async claimPlacement(jobId: string, idempotencyKey: string) {
+    return this.withFileLock(`placement-${jobId}`, async () => {
+      const path = this.placementFile(jobId);
+      const existing = await this.readPlacementClaim(path);
+      if (existing && existing.idempotencyKey !== idempotencyKey) throw new GenerationRepositoryError("generation-placement-claim-mismatch");
+      if (existing?.state === "claimed" || existing?.state === "completed") return { claim: existing, acquired: false };
+      const claim: PlacementClaim = { jobId, idempotencyKey, state: "claimed", ownerToken: randomUUID(), claimedAt: this.now() };
+      await this.atomic(path, claim);
+      return { claim, acquired: true };
+    });
+  }
+
+  async getPlacementClaim(jobId: string) { return this.readPlacementClaim(this.placementFile(jobId)); }
+
+  async completePlacement(jobId: string, idempotencyKey: string, ownerToken: string) {
+    return this.withFileLock(`placement-${jobId}`, async () => {
+      const path = this.placementFile(jobId); const claim = await this.readPlacementClaim(path);
+      if (!claim || claim.idempotencyKey !== idempotencyKey) throw new GenerationRepositoryError("generation-placement-claim-mismatch");
+      if (claim.state === "completed") return;
+      if (claim.state !== "claimed" || claim.ownerToken !== ownerToken) throw new GenerationRepositoryError("generation-placement-claim-fenced");
+      await this.atomic(path, { ...claim, state: "completed" });
+    });
+  }
+
+  async releasePlacement(jobId: string, ownerToken: string) {
+    return this.withFileLock(`placement-${jobId}`, async () => {
+      const path = this.placementFile(jobId); const claim = await this.readPlacementClaim(path);
+      if (!claim || claim.ownerToken !== ownerToken || claim.state !== "claimed") return;
+      await this.atomic(path, { ...claim, state: "failed" });
+    });
+  }
+
+  private async readPlacementClaim(path: string): Promise<PlacementClaim | undefined> {
+    try { return JSON.parse(await readFile(path, "utf8")) as PlacementClaim; }
+    catch (cause) { if (cause && typeof cause === "object" && "code" in cause && cause.code === "ENOENT") return undefined; throw new GenerationRepositoryError("generation-placement-claim-corrupt"); }
   }
 }
