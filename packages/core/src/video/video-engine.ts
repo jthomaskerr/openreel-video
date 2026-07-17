@@ -29,6 +29,7 @@ import type {
 } from "./types";
 import { getSpeedEngine } from "./speed-engine";
 import { getFrameInterpolationEngine } from "./frame-interpolation";
+import { mapTransformToOutput } from "./output-transform";
 import {
   getStabilizedTransform,
   getVidstabEngine,
@@ -560,9 +561,6 @@ export class VideoEngine {
     const width = targetWidth ?? settings.width;
     const height = targetHeight ?? settings.height;
 
-    const scaleX = width / settings.width;
-    const scaleY = height / settings.height;
-
     const activeTextClips = this.getActiveTextClips(timeline, time);
     const activeShapeClips = this.getActiveShapeClips(timeline, time);
     const activeSVGClips = this.getActiveSVGClips(timeline, time);
@@ -761,17 +759,13 @@ export class VideoEngine {
               };
             }
 
-            const scaledTransform: Transform = {
-              ...finalTransform,
-              position: {
-                x: finalTransform.position.x * scaleX,
-                y: finalTransform.position.y * scaleY,
-              },
-              scale: {
-                x: finalTransform.scale.x * scaleX,
-                y: finalTransform.scale.y * scaleY,
-              },
-            };
+            const outputTransform = mapTransformToOutput(
+              finalTransform,
+              settings.width,
+              settings.height,
+              width,
+              height,
+            );
 
             let processedBitmap = bitmap;
 
@@ -830,10 +824,10 @@ export class VideoEngine {
 
             const vidstabEng = getVidstabEngine();
             const drawTransform = vidstabEng.hasStabilized(clip.id)
-              ? scaledTransform
+              ? outputTransform
               : getStabilizedTransform(
                   clip,
-                  scaledTransform,
+                  outputTransform,
                   clipInfo.sourceTime,
                   {
                     canvasWidth: width,
