@@ -1,580 +1,830 @@
 # WaveSpeed Image and Video Generation Implementation Plan
 
-## Current State (Audited 2026-07-13 16:16 AEST)
+> **For agentic workers:** REQUIRED SUB-SKILL: Use
+> `superpowers:subagent-driven-development` or `superpowers:executing-plans` to
+> implement one package at a time. Steps use checkbox syntax for tracking.
 
-**Overall:** DETERMINISTIC FOUNDATION PARTIAL; RELEASE GATES OPEN. Canonical owner: [Generation](../../spec/generation.md#92-wavespeed). This section supersedes the earlier claim that deterministic implementation is complete.
+**Goal:** Ship one secure, resumable WaveSpeed image/video workflow whose
+references, projection-only audio, routing, finalization, and placement are
+explicit and create no duplicate provider or project artifacts.
 
-| Work package | State | Current evidence and remaining work |
+**Architecture:** The orchestrator owns provider credentials, validation,
+durable jobs, attempts, uploads, polling, recovery, and output finalization.
+The web app owns one provider-neutral draft/controller and idempotent project
+mutations. Shared strict contracts make client and server validation agree.
+
+**Tech stack:** TypeScript, React, Zustand, Zod, Vitest, filesystem-backed
+orchestrator repositories, Playwright/browser verification, WaveSpeed provider
+adapter.
+
+## Global constraints
+
+- Canonical requirements: [AI Generation and Providers](../../spec/generation.md),
+  especially sections 1 through 11 and the WaveSpeed adapter in section 9.2.
+- Compatibility entry point:
+  [WaveSpeed Image and Video Generation](../../spec/superseded/wavespeed-generation.md).
+- Provider credentials remain server-only. Never persist credentials, signed
+  URLs, upload tokens, local/blob URLs, or unredacted sensitive provider data.
+- Every durable job, output, provenance, project, media/version, mutation,
+  event, and evidence boundary rejects `blob:`/`local:` URLs with
+  `generation-local-url-forbidden`.
+- Tests use fixed IDs and clocks, no real network, no wall-clock sleeps, and
+  stable error codes.
+- Do not mark browser or provider work complete without dated, reviewable
+  evidence for the exact scenario.
+- Do not enable or describe the feature as release-ready until every gate in
+  the Definition of Done is evidenced.
+
+---
+
+## Current state, audited 2026-07-16
+
+**Overall status:** ISOLATED DETERMINISTIC MODULES EXIST; PRODUCTION WIRING,
+LIVE BROWSER PROOF, OBSERVABILITY PROOF, AND AUTHORIZED PROVIDER PROOF ARE
+INCOMPLETE.
+
+This table distinguishes code existence from active application behavior. A
+focused test reference is not evidence that the production controller calls a
+module.
+
+| Area | Isolated deterministic state | Production state and evidence gap |
 |---|---|---|
-| 1 contracts/migrations | Implemented | Shared job contracts, schemas, migrations, and tests exist. |
-| 2 deterministic context | Implemented | Timing, character-token, and reference resolvers exist with focused tests. |
-| 3 schema normalization | Implemented | Model normalization and input sanitization have deterministic tests. |
-| 4 server boundary | Partial | File job repository and orchestrator services exist; full restart/redaction/upload lifecycle proof is incomplete. |
-| 5 timed audio/cache | Not implemented | No planned exact-range PCM WAV extraction/cache artifact was found. |
-| 6 submission coordinator | Partial | `submitGeneration` exists with basic tests; complete failure-injection and placeholder-integrity matrix is absent. |
-| 7 idempotent finalization/placement | Partial | Poller, asset-version creation, and placement tests exist; explicit checkpointed finalizer and every replay/concurrency case are incomplete. |
-| 8 inspector experience | Partial | `GenerateAssetDialog` is substantial, but the complete shot-aware controller/accessibility/browser contract is unproven. |
-| 9 regenerate/cancel/recovery | Partial | Basic retry/cancel UI exists; provider cancellation, attempt history, needs-attention migration, and stage-specific recovery are incomplete. |
-| 10 observability/full verification | Not complete | No paid-provider eval, browser matrix, release-flag evidence, or complete observability proof exists. |
-
-**Next action:** implement timed audio, checkpointed finalization/recovery, and failure-injection suites before browser and paid-provider gates.
-
-**Date:** 2026-07-10  
-**Spec:** `docs/spec/generation.md` (canonical), with `docs/spec/wavespeed-generation.md` retained as the Inbox #24 compatibility entry point.  
-**Status:** Partial deterministic implementation; browser/provider/recovery gates pending.
-**Outcome:** A shot-aware WaveSpeed image/video generation flow resolves stable references and exact shot audio, survives reload/retry, finalizes one versioned asset, and applies an explicit idempotent timeline placement policy.
-
-## Current-state findings
-
-Serena semantic exploration found the existing path is useful scaffolding but not a safe base to extend in place:
-
-- `GenerateAssetDialog` creates a placeholder after provider submission, does not put its ID in the job, resets drafts on open, guesses model modes, injects local URLs, and silently skips failed KieAI reference uploads.
-- `GenerationJob` persists in browser local storage with overloaded `linkedMediaIds`; it has no typed target/context, attempt number, structured errors, output identity, placement state, or durable completion checkpoint.
-- `processGenerationJobOnce` requires a source media item, infers it from references, reads shot/timing from provider inputs, downloads in the browser, and marks placement failure as provider failure.
-- `apps/orchestrator/src/routes/wavespeed.ts` accepts a browser-supplied provider key, stores jobs in a process-local `Map`, forwards unvalidated inputs, and combines polling with output caching.
-- `StoryboardShot` already owns prompt/timing/reference IDs/output history in `packages/music-video-domain/src/types.ts`; the implementation must extend this contract rather than duplicate shot intent in clip metadata.
-- `placeGeneratedAssetOnTimeline` already prevents one class of duplicate placement and should be expanded for explicit create-versus-replace policies.
-- `InspectorTabs` and `clip-tabs.config.ts` provide the tab shell, but the current `ai` tab is not the specified shot-aware `Generate` workflow and its keyboard/ARIA behavior needs a focused audit.
-- Character data currently comes primarily from NeuralFrames metadata/import structures. There is no canonical project character slug + primary-image contract suitable for stable `@token` resolution.
-
-## Architecture decision
-
-Use the orchestrator as the authoritative generation/job/finalization boundary. Keep project media and timeline mutations in the web project store, but drive them from an orchestrator-owned, resumable finalization record with explicit checkpoints.
-
-The browser-local Zustand job store becomes a cached view/draft index, not the source of truth. Shared Zod schemas and TypeScript types live in `packages/music-video-domain/src/generation/` and are consumed by both web and orchestrator. Provider inputs remain a sanitized schema-derived record; all project identity and placement data live in `GenerationContext`.
-
-Do not add a new database framework solely for this feature. Implement a small filesystem-backed JSON repository under the orchestrator's existing data directory with atomic temp-file + rename writes and keyed locks. This fits the local-first application, survives process restart, is deterministic in tests, and can later be replaced behind the repository interface. SQLite is the main alternative if concurrent multi-process orchestrators become a requirement.
-
-## Delivery sequence
-
-## Execution protocol for Codex subagents
-
-Implementation packages are assigned to `gpt-5.4-mini` Codex subagents. The final integrated diff is reviewed by a separate `gpt-5.6-sol` Codex subagent that did not implement a work package. If the requested model cannot be selected by the Codex execution surface, dispatch stops rather than silently substituting another model.
-
-The `gpt-5.6-sol` verifier owns no implementation package. It reviews the canonical spec, this plan, all implementation diffs, focused and full gate evidence, browser evidence, and provider-eval evidence. It must return one of `PASS`, `FAIL`, or `BLOCKED`, with requirement-level findings and exact file/symbol evidence. A `PASS` requires every Definition of Done item to be evidenced; tests passing without browser and provider gates is not sufficient.
-
-This section is normative for parallel execution. A subagent owns only the files in its work package unless the package explicitly lists a shared file. When a shared file must change, the subagent records the required edit in its handoff and the integration owner applies it. Subagents must not reformat unrelated code, delete user changes, or infer contracts that are owned by an earlier package.
-
-Every package follows the same loop:
-
-1. Read this plan, the cited spec sections, the package's existing files, and the nearest tests. Do not load unrelated directories.
-2. State the package's measurable outcome before editing.
-3. Add or update a deterministic failing test for each behavior being introduced.
-4. Implement the smallest permanent change that makes the focused tests pass.
-5. Run the focused test command, TypeScript checking for the affected workspace, and lint when an affected workspace exposes a lint script.
-6. Inspect `git diff --check` and the package-scoped diff. Do not stage or commit because multiple agents share the working tree; the integration owner commits after reconciliation.
-7. Return a handoff containing files changed, contract decisions, exact commands and results, known failure modes, and any work that remains blocked by another package.
-
-Tests must use fixed IDs and timestamps, no network, no real provider credentials, and no wall-clock sleeps. Prefer table-driven tests. Error assertions use stable codes, not complete English messages. No persisted fixture may contain an API key, signed URL, upload token, `blob:` URL, or localhost provider input.
-
-### Dependency graph and execution waves
-
-| Wave | Packages | May run in parallel | Starts when | Integration gate |
-|---|---|---|---|---|
-| 0 | WP-00 | No | Immediately | Expanded plan reviewed against spec |
-| 1 | WP-01, WP-02, WP-03 | Yes | Wave 0 complete | Shared contracts compile; all three focused suites pass |
-| 2 | WP-04, WP-05 | Yes | WP-01 and relevant WP-02/WP-03 contracts merged | Restart/redaction and PCM/cache suites pass |
-| 3 | WP-06 | No | WP-04 and WP-05 merged | Failure-injection submission suite passes |
-| 4 | WP-07A, WP-07B | Yes, with disjoint ownership | WP-06 merged | Finalization and placement suites pass together |
-| 5 | WP-08, WP-09 | Yes | WP-06 and status contracts from WP-07A merged | Component and state-machine suites pass |
-| 6 | WP-10 | No | All implementation packages merged | Full deterministic, browser, and provider gates evidenced |
-
-`WP-01` owns exported shared types and schemas. `WP-02` and `WP-03` may define package-private provisional types while running in parallel, but the integration owner must replace them with `WP-01` exports before Wave 1 closes. This is the only intentional Wave 1 reconciliation point.
-
-### Repository-wide contract decisions
-
-- All durations and timeline/source positions are finite seconds. Validation rejects `NaN`, infinities, negatives, reversed ranges, and zero-length ranges. Zero is valid for a start or in-point.
-- Persisted timestamps are Unix milliseconds. Tests inject them; business logic must not call `Date.now()` internally when a timestamp parameter or clock dependency can be supplied.
-- Logical job IDs are application IDs. Provider job IDs identify attempts. Idempotency keys are derived from provider plus provider job ID and are never inferred from prompt or media identity.
-- `GenerationContext` contains project linkage only. `providerInputs` contains only keys accepted by the selected recorded schema. A serializer must make this separation visible.
-- Remote provider inputs persist only opaque upload-token IDs. Signed provider URLs may exist in memory during a provider call but never in job JSON, media provenance, browser storage, logs, or test snapshots.
-- Placement is a sub-state independent of provider completion. A completed provider job with failed placement remains completed and offers placement retry.
-- Legacy jobs missing an explicit target become terminal `needs-attention` records. Migration never treats the first reference as a version source.
-- Character slugs are normalized once when stored. Prompt resolution is exact against the canonical slug and retains stable character IDs after rename.
-
-### Standard handoff template
-
-```text
-Outcome: <measurable result>
-Files changed: <paths>
-Contracts added/consumed: <symbols and schema versions>
-Tests: <exact command and pass/fail count>
-Typecheck/lint: <exact command and result>
-Failure modes checked: <list>
-Integration notes: <shared export edits or ordering requirements>
-Unverified: <explicit gaps, or none>
-```
-
-## Executable work packages
-
-### WP-00: Plan expansion and execution control
-
-**Owner:** integration owner. **Dependencies:** none. **Owned file:** this plan.
-
-**Outcome:** Every implementation package can be assigned without requiring architectural invention, and parallel packages have non-overlapping ownership plus a stated reconciliation point.
-
-**Tasks:**
-
-1. Confirm every normative requirement in spec sections 6–17 maps to one package and one deterministic or browser/provider gate.
-2. Record current dirty files before dispatch and preserve all pre-existing modifications.
-3. Create the execution waves above. Dispatch only a wave whose dependencies are green.
-4. After each wave, review package diffs, replace provisional types with shared exports, run the combined gate, then make one conventional commit per coherent behavior.
-
-**Acceptance:** The traceability matrix at the end of this document has no unowned requirement; each package below has inputs, outputs, test cases, commands, and failure behavior.
-
-### WP-01: Shared generation contracts, schemas, and migrations
-
-**Owner:** domain-contract agent. **Dependencies:** none. **Exclusive files:** `packages/music-video-domain/src/generation/**` and generation-specific domain tests. **Shared-file requests:** `packages/music-video-domain/src/types.ts`, `packages/music-video-domain/src/index.ts`, and existing adapter fixtures are applied by the integration owner.
-
-**Outcome:** Web and orchestrator import one versioned, secret-safe contract that parses valid generation jobs and rejects ambiguous targets or malformed state.
-
-**Required public symbols:**
-
-- `GENERATION_JOB_SCHEMA_VERSION` starting at `2`.
-- `GenerationTarget`, `GenerationTiming`, `GenerationPlacementPolicy`, `GenerationPlacementState`, `GenerationReferenceOrigin`, `ResolvedGenerationReference`, `ResolvedGenerationAudio`, `GenerationContext`, `GenerationError`, `GenerationAttempt`, `GenerationCheckpointName`, `GenerationCheckpointState`, `GenerationOutput`, `GenerationJob`, and `GenerationModelCapability`.
-- Zod schemas with matching names suffixed `Schema`, plus `parseGenerationJob` and `migratePersistedGenerationJob`.
-- `SanitizedGenerationProvenance`, which permits IDs, model/schema identity, timing, hash, dimensions, sanitized inputs, and reference origins, but has no fields for secrets or temporary URLs.
-- `ProjectCharacter` with stable `id`, canonical `slug`, `displayName`, `primaryImageMediaId`, and optional `primaryImageVersionId`.
-
-**Contract details:**
-
-- Target is exactly `{kind:'new-asset', placeholderMediaId}` or `{kind:'new-version', sourceMediaId, placeholderMediaId}`.
-- Placement policy is exactly `none`, `create-linked-clip`, or `replace-selected-clip-media`; replace requires `clipId` at context validation time.
-- Job status includes `preparing`, `queued`, `running`, `completed`, `failed`, `canceling`, `canceled`, and `needs-attention` for migrated unsafe legacy records.
-- Attempt history records attempt number, provider job ID when submission occurred, start/end timestamps, terminal error, and does not duplicate current secret-bearing inputs.
-- Checkpoints separately represent output claimed/downloaded/verified/inspected, placeholder finalized, shot linked, and placement applied. Each stores status and timestamp, not arbitrary provider payload.
-- Schemas use strict objects at network and persistence boundaries. Provider inputs remain a JSON-value record and are sanitized separately by WP-03.
-
-**Deterministic tests:**
-
-1. Parse a complete new-asset and new-version job.
-2. Preserve `0`, `false`, and `[]` in JSON-valued sanitized inputs.
-3. Reject missing placeholder, replacement without clip, invalid timing, duplicate/invalid attempt numbers, and unknown boundary keys.
-4. Serialize/parse round-trip without signed URLs or temporary URLs.
-5. Migrate a reconstructable legacy job only when explicit placeholder/target fields exist.
-6. Migrate an ambiguous `linkedMediaIds` job to `needs-attention` without creating `sourceMediaId`.
-7. Convert NeuralFrames character fixtures deterministically to stable IDs/slugs; collision handling is deterministic and tested.
-
-**Focused gate:** use the domain workspace's existing test and typecheck scripts discovered from `package.json`; the suite must remain below two seconds on a warm run.
-
-**Subagent prompt:** Implement WP-01 exactly. Do not edit web or orchestrator. If shared exports/types need changes, report the exact patch in the handoff rather than editing shared files. Start from tests, keep Zod schemas strict, and prove unsafe legacy jobs never infer a source from references.
-
-### WP-02: Pure timing, character, reference, and audio-source resolvers
-
-**Owner:** context-resolver agent. **Dependencies:** consumes WP-01 concepts but may use local provisional interfaces until reconciliation. **Exclusive files:** `apps/web/src/features/generation/context/**`.
-
-**Outcome:** Given explicit project/shot/clip/media inputs, pure functions return one deterministic generation context or stable errors/warnings without network, stores, browser APIs, or provider assumptions.
-
-**Required functions:**
-
-- `resolveGenerationTiming({linkedClip, shot, manualRange})` returns `{timing, errors, warnings}` using timeline > shot > complete manual precedence.
-- `tokenizeCharacterMentions(prompt)` returns exact textual spans and first-mention canonical slug order.
-- `resolveCharacterTokens({tokens, characters, mediaVersions, priorBindings})` retains valid prior stable-ID bindings after character display-name changes and emits `unresolved-token`, `ambiguous-token`, `missing-primary-image`, or `inaccessible-primary-image` errors.
-- `resolveGenerationReferences({source, characters, shotReferences, userReferences})` merges in normative order, deduplicates by `mediaId + versionId`, and accumulates all origin labels on the first item.
-- `resolveMainAudioSource({projectAudioId, linkedMainAudioClipId, clips, media, timing})` returns a selected source or `audio-ambiguous`, `audio-unavailable`, `audio-no-coverage`, plus partial-coverage warning.
-- `projectRangeToAudioSourceRange({timing, clip})` accounts for clip start, source in-point/trim, speed, and audible intersection. It does not use a selected visual clip's in-point.
-
-**Input discipline:** Define narrow readonly input types rather than importing the project store. URLs are not resolved here. References carry canonical identity and local access state only; WP-04/WP-06 converts them to upload tokens.
-
-**Deterministic test table:**
-
-- Timing: timeline wins, valid shot fallback, complete manual fallback, zero start accepted, half-manual absent/error, negative/non-finite/reversed/equal rejected.
-- Tokens: punctuation and repeated mentions, first-mention order, exact slug rather than display-name match, rename with prior binding, slug collision ambiguity, missing/inaccessible image.
-- References: four-source order, source position retained, duplicate accumulates origins, same media/different version remains distinct, excluded automatic reference stays excluded only in draft.
-- Audio: explicit project identity wins, linked main clip second, unique fully covering eligible clip third, narration/SFX/hidden/muted/generated embedded audio excluded, ambiguous candidates do not guess.
-- Conversion: speed 0.5/1/2, non-zero in-point and trims, exact and partial overlap, empty overlap, fixed numeric expectations with tolerance no larger than one microsecond.
-
-**Focused gate:** run only context resolver tests plus web TypeScript checking. No jsdom is required.
-
-**Subagent prompt:** Implement WP-02 only under the owned directory. Use pure functions and table-driven Vitest tests. Do not touch Zustand, React, fetch, media decoding, or shared domain files. Return any provisional-to-shared type mapping in the handoff.
-
-### WP-03: WaveSpeed model normalization and input validation
-
-**Owner:** schema-adapter agent. **Dependencies:** consumes `GenerationModelCapability` from WP-01 after reconciliation. **Exclusive files:** `apps/web/src/services/wavespeed/model-capabilities.ts`, `apps/web/src/services/wavespeed/adapters/**`, `apps/web/src/services/wavespeed/__fixtures__/**`, and adjacent tests. **Deferred orchestrator mirror:** WP-04 imports the pure adapter package or moves it to shared domain during integration; do not duplicate logic.
-
-**Outcome:** Recorded WaveSpeed schemas normalize into explicit capabilities, and one pure sanitizer maps user values plus resolved media only into reviewed provider fields.
-
-**Adapter contract:**
-
-- `normalizeWaveSpeedModel(rawModel, overrideRegistry)` returns a capability or stable `unsupported-schema` result with evidence describing which schema/override established output and mode.
-- `sanitizeWaveSpeedInputs({schema, capability, draftValues, source, references, audio})` returns sanitized JSON inputs and ordered field errors.
-- Only explicit media annotations, typed array items, or a reviewed model override may identify source/reference/audio fields. Generic URI format alone is insufficient.
-- Unknown draft keys are stripped. Required, enum, numeric, string/array length, conditional source, reference min/max, audio, and duration rules are applied deterministically.
-- Defaults are exposed separately as `getModelDefaults`; sanitizer does not reapply defaults during render/submit.
-- A stable schema version is computed from a canonicalized subset of request schema plus override version. No arbitrary provider code or formulas are evaluated.
-
-**Fixtures and tests:** Include anonymized recorded schemas for each family currently returned by the existing route. Test text-to-image, image-to-image, text-to-video, image-to-video, reference-array, audio-capable, misleading `type` string, untyped URI, unknown key stripping, `false`/`0`/`[]` preservation, reference count limits, duration bounds/allowed values, and schema-version drift.
-
-**Focused gate:** adapter tests and web TypeScript checking; no network snapshots.
-
-**Subagent prompt:** Implement WP-03 in the exclusive files. First inventory existing WaveSpeed route/client schema shapes. Do not edit `schema-injector.ts` yet; the integration owner replaces callers after the adapter contract is green. Unsupported schema must fail closed, especially for URI/media mapping.
-
-### WP-04: Orchestrator security, uploads, persistence, and routes
-
-**Owner:** orchestrator agent. **Dependencies:** WP-01 and WP-03. **Exclusive files:** new files under `apps/orchestrator/src/services/generation/**` and `apps/orchestrator/src/services/wavespeed/**`, route tests. **Shared files:** request integration-owner edits to `routes/wavespeed.ts`, `app.ts`, `env.ts`, route index, and package scripts.
-
-**Outcome:** The orchestrator is the sole credential owner and authoritative durable job boundary; restart, replay, invalid input, and upload lifecycle behavior is deterministic.
-
-**Repository interface and filesystem implementation:**
-
-- `GenerationJobRepository`: create, get, update under keyed lock, find by provider completion key, list active by project, and compare-and-set checkpoint.
-- JSON files live under a configurable generation data directory. Writes use same-directory temp file, fsync where existing repository conventions require it, then atomic rename. Startup ignores/removes only demonstrably orphaned temp files.
-- Maintain durable lookup records for logical job ID and `(provider, providerJobId)`; conflicting provider keys fail with `generation-provider-id-conflict`.
-- Tests use a unique temporary directory and instantiate a second repository to prove restart recovery.
-
-**Upload repository:** validate MIME, byte limit, ownership, expiry, and reference count; return opaque IDs. Provider URL resolution is in-memory and redacted. Cleanup deletes only expired, unreferenced inputs.
-
-**Routes:** configuration status, model discovery, upload, submit, status, cancel, retry, finalization-status, placement-retry, and cleanup. Enforce existing session/project authorization, exact content types, request limits, model allowlist, timeouts, strict shared schemas, and stable safe errors. Remove browser key headers and reject them if present. Configuration exposes only boolean state.
-
-**Tests:** secret-header rejection, absent configuration, malformed/oversize bodies and files, unknown model/field stripping, ownership failures, restart recovery, concurrent duplicate submit/provider ID, upload expiry/refcount, safe cancel/retry, and redaction corpus covering headers, bearer values, provider keys, prompts when disabled, signed URLs, and upload tokens.
-
-**Focused gate:** orchestrator route/repository/redaction tests, typecheck, and `git diff --check`.
-
-### WP-05: Deterministic audio extraction and cache
-
-**Owner:** media agent. **Dependencies:** WP-02 range contract and WP-01 audio provenance. **Exclusive files:** `apps/web/src/features/generation/audio/**`.
-
-**Outcome:** Exact source ranges produce deterministic PCM WAV bytes and hashes, are cached by every byte-affecting input, and do no work for unsupported models.
-
-**Contract:** A narrow injected decoder/extractor adapter receives source identity, resolved source range, output sample rate/channels/format, and returns bytes plus actual range. Default output is PCM WAV with a documented fixed format chosen from the existing media bridge's supported deterministic path. `buildGenerationAudioCacheKey` includes project, media/version, source range, in-point/trim, speed, sample rate, channels, and format using canonical number encoding.
-
-**Tests:** generated PCM ramp/impulse fixtures verify header, sample count, exact converted range, partial-range metadata, stable SHA-256, cache reuse, invalidation for each key field, abort cleanup/object-URL revocation, and zero adapter calls when capability rejects audio.
-
-**Focused gate:** audio tests under two seconds and web typecheck. Do not invoke a real FFmpeg process in gate tests.
-
-### WP-06: Submission coordinator and draft/job cache
-
-**Owner:** submission agent. **Dependencies:** WP-01–WP-05. **Exclusive files:** `apps/web/src/features/generation/submit-generation.ts`, adjacent tests, and new V2 draft/cache modules. **Shared callers:** dialog and existing job store edits are integration-owned.
-
-**Outcome:** One accepted user action creates exactly one tracked placeholder and one provider submission, while every injected preparation failure leaves an explicit failed placeholder plus retryable draft.
-
-**Coordinator phases:** validate draft; acquire in-flight key; create/persist placeholder; resolve references; extract/upload optional audio; sanitize inputs; submit logical job; cache returned status; release key. Use injected ports for project mutations, upload, submit, clock, and ID generation. Compensations never delete the placeholder; they mark it failed with stage/error code. Optional input failures require explicit draft removal or retry, never silent omission.
-
-**Tests:** invalid draft focuses first field without mutation; double click and concurrent identical calls; Strict Mode replay; failures after placeholder, each reference, audio extraction/upload, provider submit, and local cache write; new-asset and new-version targets; exact placeholder ID in submitted context; no local/blob URL; no source inferred from reference.
-
-### WP-07A: Durable finalization state machine
-
-**Owner:** finalization agent. **Dependencies:** WP-04 and WP-06. **Exclusive files:** orchestrator finalization service and tests.
-
-**Outcome:** Repeated/reordered completion signals, restart, and two workers produce one verified output and resumable checkpoints without resubmitting the provider.
-
-**States:** claim provider completion key; download; verify MIME/size; inspect metadata through injected port; request placeholder finalization mutation; request shot linkage mutation; request placement; record terminal completion. Each successful side effect stores an idempotency key returned to the web mutation boundary. Placement failure is recorded separately and does not undo job completion.
-
-**Tests:** two concurrent callers, restart after every checkpoint, corrupted/oversize output, new asset without source, explicit new version, shot-link retry, placement retry, and provider submission count remaining one.
-
-### WP-07B: Project-store finalization and placement mutations
-
-**Owner:** project/timeline agent. **Dependencies:** WP-01 placement contracts; may start after those merge while WP-07A runs. **Exclusive files:** new V2 mutation helpers/tests and `place-generated-asset.ts` tests. **Shared existing store/action files:** integration owner applies a minimal reviewed patch.
-
-**Outcome:** Idempotency-keyed mutations finalize one placeholder, append one shot attempt, and apply at most one undo-aware timeline mutation.
-
-**Tests:** new asset group; new immutable version in exact source group; duplicate key replay; append shot generated media/attempt once; `none`; create one linked clip at exact zero/non-zero timing; replace only `mediaId` while preserving clip ID/start/duration/in-out/effects/transforms/metadata; invalid shot mismatch; placement retry; undo/redo replacement.
-
-### WP-08: Generate inspector and accessible draft experience
-
-**Owner:** UI agent. **Dependencies:** WP-06 and stable status contracts. **Exclusive files:** new `GenerateTab` and section components/tests plus a V2 draft store. **Shared tab/dialog files:** integration owner applies reviewed edits.
-
-**Outcome:** All valid entry contexts expose one accessible shot-aware Generate workflow whose draft survives selection changes and whose submit/status/recovery controls reflect the coordinator.
-
-Use the `ui-ux-pro-max` skill before implementation. Follow spec section 5 exactly. Component tests cover context visibility, model filtering, token pills, reference origins/exclusion warning, timing/audio reasons, model switch preservation/reset list, first-invalid focus and error summary, duplicate submit, draft restoration, recovery actions, `aria-live`, alerts, tab roles/relationships, roving focus/Home/End/arrows, and narrow layouts without horizontal page overflow.
-
-Browser behavior is not accepted from jsdom alone; WP-10 owns the mandatory live verification.
-
-### WP-09: Regenerate, variation, cancel, retry, and recovery
-
-**Owner:** recovery agent. **Dependencies:** WP-04, WP-06, WP-07A. **Exclusive files:** generation command/state-machine modules and tests. **Shared status UI:** integration owner applies reviewed wiring.
-
-**Outcome:** Every recovery action resumes the correct stage and preserves attempt history without duplicate provider work.
-
-Define an explicit transition table. Regenerate copies recorded configuration then re-runs live context resolution. Variation creates an editable draft only. Provider retry increments attempt and may submit a new provider job. Save retry and placement retry never submit. Cancel moves through canceling, stops polling regardless of provider support, and releases only unreferenced uploads.
-
-Tests enumerate every allowed transition and reject all others; assert provider call counts, attempt history, polling behavior, and cleanup reference counts.
-
-### WP-10: Integration, observability, browser verification, eval, and delivery
-
-**Owner:** integration owner. **Dependencies:** all packages. **Owned scope:** caller wiring, docs, fake provider harness, evidence, commits, and final verification.
-
-**Outcome:** One controller serves inspector and dialog, deterministic suites pass, live browser scenarios prove the UI behavior, and paid provider evidence meets the spec threshold before the feature flag is enabled.
-
-**Integration order:**
-
-1. Export WP-01 contracts and replace Wave 1 provisional types.
-2. Wire the WP-03 sanitizer into both client and orchestrator; delete guessing behavior only after adapter fixtures pass.
-3. Wire orchestrator routes and remove all browser key reads/headers. Add configuration migration docs before removal is committed.
-4. Wire coordinator into dialog and job cache, then finalization/store ports, then inspector/recovery UI.
-5. Add redacted structured events with injected logger tests. Do not log raw prompts unless diagnostic prompt logging is explicitly enabled.
-6. Add fake-provider integration cases from spec 14.3 and failure injection at upload, provider, save, and placement boundaries.
-7. Run affected tests after each atomic commit, then full workspace test, lint, typecheck, and build.
-8. Start the app with `pnpm dev` on port 5173 and use the browser tool for every spec section 15 scenario. Capture exact IDs and screenshots/recordings in a dated evidence directory that is ignored unless Joseph approves tracking it.
-9. Run the paid matrix only when credentials and spend authorization are available. The threshold is 100% technical pipeline cases, zero duplicates/leaks, and at least 90% subjective adherence across fixed prompts.
-
-**Stop conditions:** Do not enable `wavespeedGenerationV2`, claim UI completion, or push a release-ready commit if browser verification is unavailable. Do not run paid evals without explicit authorization. If credentials are unavailable, deterministic and fake-provider work may be complete but final status is `BLOCKED` or `DONE_WITH_CONCERNS` according to whether release readiness was requested.
-
-### 1. Shared contracts and migrations
-
-**Files:**
-
-- Add `packages/music-video-domain/src/generation/contracts.ts`
-- Add `packages/music-video-domain/src/generation/schemas.ts`
-- Update `packages/music-video-domain/src/types.ts` and `src/index.ts`
-- Update project serialization/migration fixtures in web and domain tests
-
-**Work:**
-
-- Define `GenerationContext`, target, timing, reference, audio, placement policy, output, structured error, attempt, checkpoint, and normalized model-capability contracts.
-- Add stable character identity to the project domain: ID, slug, display name, primary image media/version IDs. Migrate imported NeuralFrames characters deterministically without relying on display-name lookup at submission.
-- Extend generation provenance and `GenerationAttempt` without storing secrets, signed URLs, upload tokens, or blob URLs.
-- Version persisted generation jobs and browser drafts. Migrate old jobs to a terminal legacy state when target identity cannot be reconstructed; never guess a source from `linkedMediaIds`.
-- Add Zod schemas used at both network boundaries and fixture tests proving client/server acceptance and rejection agree.
-
-**Gate:** focused domain tests cover parse/serialize/migration, zero-valued fields, and redaction-safe provenance.
-
-### 2. Deterministic generation context
-
-**Files:**
-
-- Add `apps/web/src/features/generation/context/resolve-timing.ts`
-- Add `resolve-character-tokens.ts`, `resolve-references.ts`, `resolve-audio-source.ts`
-- Add adjacent focused tests and fixtures
-
-**Work:**
-
-- Implement timing precedence exactly: linked selected clip, valid shot range, complete manual range, absent.
-- Reject negative, non-finite, reversed, and zero-length ranges while accepting `startSeconds = 0`.
-- Tokenize canonical `@slug` text while retaining stable character IDs in the draft. Report unresolved, ambiguous, inaccessible, and missing-image tokens as blocking field errors.
-- Merge source, first-mentioned characters, shot references, and user references in stable order. Deduplicate by canonical media/version identity while retaining all origin labels.
-- Resolve the main soundtrack by explicit project audio identity before eligible timeline coverage. Return ambiguity/unavailability reasons rather than guessing.
-- Convert project time to source time from clip start, trim/in-point, speed, and audible intersection. Return partial-range warnings separately from errors.
-
-**Gate:** every resolver is a pure function with table-driven tests under two seconds.
-
-### 3. WaveSpeed schema normalization and validation
-
-**Files:**
-
-- Add `apps/web/src/services/wavespeed/model-capabilities.ts`
-- Replace `components/editor/generate/schema-injector.ts` with explicit adapters
-- Add matching orchestrator validation in `apps/orchestrator/src/services/wavespeed/`
-- Store recorded schemas in test fixtures
-
-**Work:**
-
-- Normalize API schemas into `GenerationModelCapability`; classify output/mode from explicit schema evidence plus maintained per-model overrides, never from a generic `type.includes("video")` shortcut.
-- Recognize media fields only from schema annotations or a reviewed adapter. Encode source position, reference min/max, audio field, duration bounds/steps/allowed values, and request schema version.
-- Build one sanitizer/validator contract that preserves `false`, `0`, and empty arrays, strips unknown keys server-side, and returns stable field error codes.
-- Keep cached models usable during refresh failure with a visible stale state. Treat a schema version change as mandatory draft revalidation.
-- Add cost calculation only where WaveSpeed exposes a deterministic formula that can be evaluated without arbitrary code execution.
-
-**Gate:** recorded-schema adapter tests cover every supported WaveSpeed family and prove no untyped URI receives image/audio data.
-
-### 4. Orchestrator secret, upload, and persistence boundary
-
-**Files:**
-
-- Refactor `apps/orchestrator/src/routes/wavespeed.ts`
-- Add `services/generation/job-repository.ts`, `upload-repository.ts`, `redaction.ts`, and route tests
-- Update `apps/orchestrator/src/app.ts`, `env.ts`, and package test scripts
-- Update `apps/web/src/services/wavespeed/index.ts` and settings UI/tests
-
-**Work:**
-
-- Remove `X-WaveSpeed-Api-Key` support and browser secret reads. Load only `WAVESPEED_API_KEY` in the orchestrator. Settings reports configured/unconfigured state without exposing the key.
-- Split routes into model discovery, provider-input upload, submit, status, cancel, retry, output/finalization status, and cleanup endpoints.
-- Enforce auth/session boundary, JSON/multipart content types, body/file size limits, model allowlist, shared schema validation, timeouts, and safe errors.
-- Persist logical jobs and attempts atomically. Add per-job locks and durable unique indexes represented by repository keys for `(provider, providerJobId)` and logical job ID.
-- Store upload leases with expiry and reference counts. Accept blobs/local media from the authenticated browser, return opaque upload tokens, and resolve provider-reachable URLs only inside the orchestrator.
-- Redact provider keys, authorization headers, full signed URLs, prompt text when disabled, and sensitive input fields from logs/errors.
-
-**Gate:** orchestrator restart tests recover jobs; malformed/oversized requests fail safely; redaction tests contain no known secret or signed URL.
-
-### 5. Audio extraction and cache
-
-**Files:**
-
-- Add `apps/web/src/features/generation/audio/extract-generation-audio.ts`
-- Reuse the existing media decode/FFmpeg bridge through a narrow adapter
-- Add extraction cache store and orchestrator upload client
-
-**Work:**
-
-- Extract deterministic PCM WAV at a fixed documented sample rate/channel layout unless a maintained model adapter requires another format.
-- Record requested and actual project/source ranges, sample rate, channels, byte length, MIME type, SHA-256, source IDs/version, trim, and speed.
-- Key the cache by all provenance that changes bytes: project/source/version, source range, trim, speed, and output format.
-- Reuse valid local extraction and upload leases. Revoke object URLs and release unreferenced uploads on cancel/failure/reset.
-- Skip all work for models without audio support. Surface missing timing, ambiguous source, empty intersection, and partial coverage distinctly.
-
-**Gate:** small generated PCM fixtures prove sample-accurate range conversion, stable hashes, invalidation, and no extraction for unsupported models.
-
-### 6. Submission coordinator and placeholder integrity
-
-**Files:**
-
-- Add `apps/web/src/features/generation/submit-generation.ts`
-- Refactor `GenerateAssetDialog.tsx` to consume the coordinator
-- Replace the browser job store contract and tests
-
-**Work:**
-
-- Validate the complete draft before mutation, focus the first invalid control, and produce a multi-error summary.
-- Create the placeholder first and include its exact ID in `GenerationTarget`.
-- Resolve/upload required references and optional audio; required failures block submission and optional failures require explicit removal/retry.
-- Submit only sanitized provider inputs plus typed context to the orchestrator.
-- Persist the returned logical job locally as a cache. If preparation/submission persistence fails, mark the known placeholder failed and retain the retryable per-shot draft.
-- Add an in-flight submission key to prevent double-click, Strict Mode, and retry duplicates.
-
-**Gate:** integration tests prove one placeholder/one provider submit and no untracked pending placeholder at every injected failure point.
-
-### 7. Idempotent finalization, shot history, and placement
-
-**Files:**
-
-- Replace completion logic in `useGenerationJobPoller.ts` with a thin status synchronizer
-- Add orchestrator finalization state machine/checkpoints
-- Extend `project-store` media/version and clip actions with idempotency/undo-aware APIs
-- Expand `features/music-video/timeline/place-generated-asset.ts`
-
-**Work:**
-
-- Checkpoint claim, output download, MIME/size verification, metadata inspection, placeholder finalization, shot linkage, and placement independently.
-- Finalize a new asset without a source; finalize a new version only into the explicit source asset group.
-- Append the shot attempt and generated media ID once using stable provider/logical job keys.
-- Implement `none`, `create-linked-clip`, and `replace-selected-clip-media`. Replacement changes only `mediaId`, preserves clip identity/edit state, and participates in undo.
-- Keep provider completion successful when placement fails. Persist a placement sub-status and expose retry placement without redownload or provider resubmit.
-- Ensure multiple tabs and repeated/reordered polls observe one durable completion owner.
-
-**Gate:** fake-provider integration tests cover reload, two pollers, finalization retry, placement retry, new asset, new version, exact-one clip, and undoable replacement.
-
-### 8. Generate inspector experience
-
-**Files:**
-
-- Add `components/editor/inspector/tabs/GenerateTab.tsx` and focused section components
-- Update `clip-tabs.config.ts`, `InspectorPanel.tsx`, `InspectorTabs.tsx`
-- Refactor `GenerateAssetDialog.tsx` into the expanded “Browse all models” entry point
-- Add a per-shot/new-asset draft store
-
-**Work:**
-
-- Add `Generate` for storyboard-linked image/video clips and valid asset/empty entry points; retain the unified dialog as the expanded picker.
-- Render the specified section order in one vertical scroll region. Keep provider badges/capability badges, compatible model filtering, explicit timing source, audio reason, origin-labelled references, destination policy, and persistent job card.
-- Implement accessible textual `@slug` token pills with stable identity, inline errors, recovery actions, and warnings for excluded mentioned characters.
-- Preserve compatible values on model switches and list reset fields. Apply defaults once per model selection.
-- Persist drafts by shot ID or explicit new-asset draft ID. Confirm only destructive resets, not inspector close or selection changes.
-- Upgrade the tab shell to horizontal scroll, roving focus, Home/End/arrows, correct `tablist/tab/tabpanel` linkage, and active-tab preservation.
-- Meet 280/320/420 px layouts, 200% zoom, 44 px targets where possible, reduced motion, visible labels/focus, polite live job status, and alert failures.
-
-**Gate:** component tests cover all specified contexts, field behavior, keyboard/focus/ARIA, draft restoration, duplicate-submit prevention, and recovery actions.
-
-### 9. Regenerate, variation, cancel, and recovery
-
-**Files:**
-
-- Extend job/status UI and generated asset/shot output actions
-- Add orchestrator cancel/retry endpoints and web commands
-
-**Work:**
-
-- Regenerate from recorded configuration but re-resolve current references/audio; variation opens an editable copied draft.
-- Retry keeps the logical job ID, increments attempt, records the previous provider job ID/error, and creates a new provider attempt only when needed.
-- Finalization retry and placement retry resume their checkpoint without resubmitting WaveSpeed.
-- Cancel transitions through `canceling`, calls WaveSpeed when supported, always stops local polling, and cleans only unreferenced temporary inputs.
-- Expose stable error categories and the exact recovery actions in the spec.
-
-**Gate:** state-machine tests reject invalid transitions and prove cancellation/retry history and cleanup behavior.
-
-### 10. Observability, full verification, and documentation
-
-**Files:**
-
-- Add structured generation event helpers and metrics hooks
-- Update orchestrator/web READMEs, `.env.example`, and user-facing configuration docs
-- Add fake WaveSpeed integration harness and paid eval manifest/result format
-
-**Work:**
-
-- Emit redacted events for validation, preparation, upload, submit/poll/cancel/retry, checkpoint finalization, idempotency replay, shot linkage, and placement.
-- Run focused suites, full affected workspace tests, lint, typecheck, and build.
-- Run the paid provider matrix from spec §14.4. Require 100% technical pipeline success, zero duplicates/secret leaks, and >=90% subjective adherence across fixed prompts.
-- Start `pnpm dev`, open port 5173, and execute every browser scenario in spec §15 including reload while running and injected reference/provider/save/placement failures.
-- Capture screenshots/recordings, sanitized manifests, logical/provider job IDs, media/clip IDs, audio hash/range, and exact command outputs in a dated evidence directory outside tracked generated assets unless explicitly approved.
-
-**Gate:** all deterministic gates pass, provider eval reaches threshold, and exact browser behavior is evidenced. UI completion cannot be claimed without this step.
-
-## Requirement traceability
-
-| Spec requirement | Implementation owner | Primary deterministic evidence | Live evidence |
+| Shared contracts and migrations | V2 contracts, strict schemas, migrations, and tests exist under `packages/music-video-domain/src/generation/` | Web still persists a legacy job shape; duplicated local types remain; effective client/server boundaries are not reconciled |
+| Context and references | Pure timing, token, reference, audio-source, and projection-selection functions have focused tests | General resolvers are bypassed by the live dialog; per-item reference failure state and `Deactivate` are not wired |
+| WaveSpeed normalization | Normalizer, sanitizer, fixtures, and focused tests exist | Multi-schema selection still depends on incomplete identity and a first-array-element path; live client/server submit paths bypass one shared decision |
+| Server boundary | Filesystem job and upload repositories plus limited route tests exist | Authentication/ownership, request limits/content types, allowlists, strict shared schemas, timeouts, durable pre-submit reservation, upload leases, output identity, and real route recovery remain incomplete |
+| Timed audio | Deterministic PCM WAV/hash/cache core has focused tests, including a zero-work unsupported-model path | No production decode/upload adapter calls it; live UI neither enforces projection-only eligibility nor proves zero work for non-audio models |
+| Submission | `submitGeneration` covers validation, in-flight dedupe, placeholder compensation, staged failures, and retryable drafts in tests | Inspector and dialog do not use it as one controller; optional-reference failure is still generic or silently filtered in legacy paths |
+| Finalization and placement | Checkpoint finalizer, idempotent project mutations, and placement helpers have focused tests | Active poller and routes bypass them; completed route/poller output contracts disagree; local save/finalization/placement retry is not active |
+| Recovery | Web and orchestrator state machines have unit tests | HTTP actions and inspector handlers are not connected; cancel/retry semantics are not proven in the live flow |
+| Inspector | Generate sections and component tests exist | Live inspector has no submit/status/recovery controller and can latch a no-op submit |
+| Verification and release | Focused test files exist | Dependencies were absent during the 2026-07-16 audit, so gates did not execute; no fake-provider harness, browser evidence, redacted event/metric evidence, paid-provider matrix result, or enabled release flag exists |
+
+The active route currently reports provider completion without the output
+identity required by the active browser poller. Even if that seam were patched,
+the poller still uses the legacy `linkedMediaIds[0]` finalization rule. Neither
+path is the required typed, checkpointed finalizer.
+
+## Normative decisions to implement
+
+### Context and placement defaults
+
+MINI-01 exports the exact durable `GenerationEntryContext` union and
+`GenerationPlacementPolicy` type consumed by every package. `GenerationContext`
+contains required `entryContext: GenerationEntryContext`; entry identity is not
+duplicated in or inferred from `references`. The only serialized placement
+values are `none`, `create-linked-clip`, and `replace-selected-clip-media`.
+The UI may display `none` as “Library only”, but `library-only` is not a
+serialized value.
+
+| Explicit entry context | Timing/audio eligibility | Initial placement |
+|---|---|---|
+| `entryContext: { kind: "new-asset" }` | None; never infer shot, clip, range, or audio | `none` (UI: Library only) |
+| `entryContext: { kind: "unplaced-shot"; shotId }`, even with valid stored shot timing | None until a valid projection is explicitly selected | `none` (UI: Library only) |
+| `entryContext: { kind: "unlinked-range"; rangeId; startTime; endTime; destinationTrackId? }` | That exact range for timing; no audio source and zero audio work | `create-linked-clip` |
+| `entryContext: { kind: "linked-projection"; shotId; clipId; startTime; endTime }` | That exact projection range; audio only if model capability permits | `replace-selected-clip-media` |
+
+Every placement default is visible and user-changeable. Invalid or ambiguous
+context blocks the dependent operation and never falls through to another row.
+
+### Per-reference recovery
+
+Each failed reference card retains a stable item ID, origin, order, error, and
+active state and exposes `Retry`, `Remove`, and `Deactivate`:
+
+- `Retry` retries only that item, preserves successful uploads/order, and does
+  not submit a provider job.
+- `Remove` removes the item from the active draft and revalidates.
+- `Deactivate` retains its card/origin/error, marks it inactive, excludes it
+  from provider inputs, and revalidates.
+- Removal or deactivation never makes a required source/reference silently
+  valid. Submission remains blocked with `generation-reference-required` when
+  the selected mode/model still requires it.
+
+### Multi-schema routing
+
+The requested normalized mode plus exact provider instance, provider model,
+schema, endpoint, and schema-version identifiers form the routing identity.
+Persist it on each attempt. Client and orchestrator parse and validate the same
+contract and must reach the same route. Missing, ambiguous, unsupported, stale,
+or drifted identity fails closed. Provider array order is never consulted.
+
+The paid matrix pins every routing field before authorization. An incomplete
+entry is invalid and cannot authorize or execute a provider call.
+
+### Recovery and exactly-once behavior
+
+- Provider completion plus local download/validation/save/shot-link/placement
+  failure retries only finalization; it never performs another provider submit.
+- Cancel always stops local polling and calls provider cancel when supported.
+- Provider retry increments the logical attempt and records a new provider job
+  ID. Late responses from prior/canceled attempts are ignored.
+- Reload resumes each active logical job once and produces one output, one shot
+  attempt when applicable, and at most one requested placement.
+- Models without audio capability perform zero audio resolution, extraction,
+  cache, or upload calls.
+
+### Persisted job dispositions and V2 rollback contract
+
+MINI-01 implements the exhaustive disposition matrix in section 7 of the
+canonical spec. `needs-attention` is persisted and recoverable, but is not
+automatically polled. The acceptance fixture
+`generation-job-dispositions.fixture.ts` must prove every legal transition,
+reject every illegal transition without mutation, distinguish active versus
+terminal dispositions, migrate unsafe legacy jobs without guessing, resume
+each active job once after reload, ignore canceled late responses, use a new
+provider ID on provider retry, and keep provider-submit count unchanged on
+finalization retry.
+
+V2 eligibility is `GenerationJob.contractVersion === 2` plus the server-owned
+`generationV2ReleaseEnabled` configuration flag; the release flag is never
+persisted in `GenerationJob`, `GenerationContext`, or project data. Rollback
+hides/disables every new V2 entry point and rejects new V2
+submissions before reservation/provider calls with
+`generation-v2-rollback-active`. It continues polling, cancellation, recovery,
+and finalization for already submitted V2 jobs. The deterministic fixture
+`generation-v2-rollback.fixture.ts` and browser scenario 14 must prove no new
+submit during rollback and successful completion/finalization of an already
+submitted job.
+
+### Implementation dependencies versus evidence ownership
+
+Implementation dependencies mean required code contracts or handoffs that must
+exist before a package can implement its behavior. Evidence ownership means the
+package that runs or records the proof after integration; it does not make the
+evidence owner an implementation prerequisite. MINI-01 owns shared contracts;
+MINI-05 owns the durable route ports; MINI-08 depends on both for finalization
+and recovery; MINI-11 owns shared-file integration; MINI-10 owns integrated
+deterministic, browser, observability, and paid-provider evidence. Earlier
+packages may declare evidence requests to MINI-10 without depending on MINI-10
+to implement their code.
+
+## Execution protocol and routing
+
+Every implementation package is assigned to an exact `gpt-5.6-luna` Codex
+implementer. A separate exact `gpt-5.6-sol` Codex verifier that implemented no
+package performs the integrated final review. If either exact model is
+unavailable, dispatch stops; no model substitution is allowed.
+
+The verifier reads the canonical spec, this plan, all diffs, focused/full gate
+output, browser evidence, redacted event/metric evidence, and authorized
+provider evidence. It returns exactly `PASS`, `FAIL`, or `BLOCKED` with
+requirement-level file/symbol evidence. Tests alone cannot produce `PASS`.
+
+For each package, the implementer must:
+
+1. State its measurable outcome before editing.
+2. Read only its owned files, contracts, nearest tests, and cited spec sections.
+3. Add a deterministic failing regression/acceptance test for each behavior.
+4. Implement the smallest permanent change and run the focused gate.
+5. Run the affected workspace typecheck/lint and `rtk git diff --check`.
+6. Return changed paths, exact commands/results, failure modes, and unverified
+   integration assumptions. Shared-file changes are recorded as typed handoff
+   requests for MINI-11 rather than edited concurrently. MINI-11 alone owns the
+   listed shared integration files.
+
+## Independent remaining mini work packages
+
+Packages in the same wave have disjoint owned paths and may run independently.
+Each package is narrow enough for one `gpt-5.6-luna` implementer.
+
+### MINI-01: Shared route and recovery contracts
+
+**Wave:** 1
+
+**Dependencies:** None.
+
+**Owned files:** `packages/music-video-domain/src/generation/**` and adjacent
+generation tests.
+
+**Shared-file request:** MINI-11 applies exports from
+`packages/music-video-domain/src/index.ts`.
+
+**Outcome:** One strict schema owns routing identity, `GenerationEntryContext`,
+`GenerationPlacementPolicy`, `GenerationContext`, per-reference state, attempts,
+recovery commands, checkpoints, and
+redacted provenance for both web and orchestrator.
+
+- [ ] Add routing fields for requested mode, provider instance/model,
+  provider schema/endpoint, and schema version; require them on each attempt.
+- [ ] Add stable per-reference `active | failed` state, origin/error history,
+  and command payload schemas for retry/remove/deactivate.
+- [ ] Add strict schemas for submit, status, cancel, provider retry,
+  finalization retry, placement retry, and normalized route errors.
+- [ ] Add shared fixtures proving client and server parsing accept and reject
+  identical payloads, including unknown keys and zero/false/empty values.
+- [ ] Add redaction-safe provenance fields for routing, reference origins,
+  timing/audio hash, output identity, and recovery checkpoints.
+- [ ] Add the persisted `GenerationJob` disposition union and exhaustive
+  transition matrix, including recoverable `needs-attention`, active polling
+  membership, terminality, migration, and explicit retry/cancel commands.
+- [ ] Persist `GenerationJob.contractVersion` as the literal `2`; keep
+  `generationV2ReleaseEnabled` server configuration out of all persisted job,
+  context, and project schemas.
+- [ ] Add strict fixtures for all four `GenerationEntryContext` variants and
+  assert exact `rangeId`, `shotId`, `clipId`, `startTime`, `endTime`, and optional
+  `destinationTrackId` coverage without identity inference from references.
+- [ ] Add `generation-job-dispositions.fixture.ts` with one assertion per legal
+  and illegal transition, reload/poll behavior, late-response ownership,
+  provider-retry ID history, and no-resubmit finalization recovery.
+- [ ] Add strict V2 identity/release-gate commands and
+  `generation-v2-rollback.fixture.ts`, proving rollback rejects new submissions
+  while allowing already submitted jobs to poll, cancel, recover, and finalize.
+- [ ] Add `generation-local-url-boundaries.fixture.ts` covering every durable
+  job/output/provenance/project serializer with injected `blob:` and `local:`
+  values and zero-write assertions.
+
+**Deterministic gate:** domain generation tests and domain typecheck. Tests must
+parse the exact `GenerationContext.entryContext` variants and
+`GenerationPlacementPolicy` values, require `GenerationJob.contractVersion: 2`,
+and reject missing/ambiguous routing, required inactive references, reused
+provider job ID on retry, temporary/secret/local URL values in provenance, every
+illegal job transition, unsafe legacy migration guesses, and rollback submissions.
+
+**Evidence handoff:** MINI-01 supplies fixture results and sanitized transition
+matrix to MINI-10; MINI-10 owns browser/provider execution and release evidence.
+
+**Browser evidence:** N/A for this pure shared-contract package. MINI-10's
+evidence-manifest checker proves every browser artifact parses MINI-01
+contracts.
+
+**Provider evidence:** N/A for direct execution. MINI-10 rejects every paid
+case before execution unless its request and result parse these contracts.
+
+### MINI-02: Explicit context defaults and projection-only audio
+
+**Wave:** 1
+
+**Dependencies:** None. MINI-11 later reconciles provisional local types with
+MINI-01 exports.
+
+**Owned files:** `apps/web/src/features/generation/context/**` and adjacent
+tests.
+
+**Consumes:** MINI-01 contracts after integration; local provisional test types
+may be used before reconciliation.
+
+**Outcome:** A pure resolver accepts `entryContext: GenerationEntryContext` and
+maps each explicit variant to exact timing, audio eligibility, the serialized
+`GenerationPlacementPolicy`, and stable validation errors.
+
+- [ ] Replace broad timing fallback with the four-row normative table.
+- [ ] Require explicit projection selection for shot audio; never use stored
+  shot start/end alone and never choose among multiple projections.
+- [ ] Preserve exact zero starts; reject negative, non-finite, half, equal, and
+  reversed ranges with stable codes.
+- [ ] Prove non-audio models return before audio-source resolution.
+- [ ] Return visible, changeable `GenerationPlacementPolicy` defaults without
+  mutating a saved user override; UI labels must not replace serialized values.
+
+**Deterministic gate:** table-driven context tests under two seconds. Include
+`GenerationEntryContext` fixtures for `new-asset`, `unplaced-shot` with `shotId`,
+`unlinked-range` with `rangeId`/`startTime`/`endTime` and optional
+`destinationTrackId`, and `linked-projection` with `shotId`/`clipId`/
+`startTime`/`endTime`,
+multiple projections, partial audio coverage, invalid ranges, and a zero-call
+audio-source spy for unsupported models.
+
+**Browser evidence:** MINI-10 owns scenarios 2-5 and records visible defaults,
+exact timing, required projection selection, and zero audio work for unlinked
+ranges and unsupported models.
+
+**Provider evidence:** MINI-10 owns the selected-projection audio case with
+exact requested/actual range and hash; unlinked-range cases omit audio.
+
+### MINI-03: Stable WaveSpeed multi-schema routing
+
+**Wave:** 1
+
+**Dependencies:** None. MINI-11 later connects MINI-01 and MINI-03 exports.
+
+**Owned files:** `apps/web/src/services/wavespeed/model-capabilities.ts`,
+`apps/web/src/services/wavespeed/adapters/**`,
+`apps/web/src/services/wavespeed/__fixtures__/**`, and adjacent tests.
+
+**Shared caller changes:** MINI-11.
+
+**Outcome:** One pure normalizer selects only a pinned supported routing
+identity and one sanitizer validates declared fields without array-order or URI
+guessing.
+
+- [ ] Normalize recorded multi-schema fixtures by requested mode and stable
+  model/schema/endpoint identifiers.
+- [ ] Fail closed for missing, ambiguous, unsupported, stale, and drifted
+  routes; reorder fixture schema arrays to prove invariant selection.
+- [ ] Canonicalize a schema-version fingerprint and require submit-time match.
+- [ ] Preserve declared `false`, `0`, and `[]`, strip unknown fields, and reject
+  untyped media/audio URI fields.
+- [ ] Export a maintained routing manifest schema used by paid-matrix
+  validation; reject incomplete entries.
+
+**Deterministic gate:** adapter tests and web typecheck, with no network snapshots.
+
+**Browser evidence:** MINI-10 owns scenario 7 and records the exact routing
+identity through selection, refresh, reload, and drift rejection.
+
+**Provider evidence:** MINI-10 requires every paid case to pin the exact
+provider/model/mode/schema/endpoint/version identity and forbids substitution.
+
+### MINI-04: Per-reference draft preparation and recovery
+
+**Wave:** 2 after MINI-01
+
+**Dependencies:** MINI-01.
+
+**Owned files:**
+`apps/web/src/features/generation/drafts/**`,
+`apps/web/src/features/generation/submit-generation.ts`, and adjacent tests.
+
+**Shared UI caller changes:** MINI-11.
+
+**Outcome:** A failure at reference N is represented and recovered per item,
+while successful items retain order/uploads and no provider submit occurs.
+
+- [ ] Consume the shared submit-preparation contracts with stable item ID,
+  order, active boolean, ready-or-failed preparation status, error history,
+  origin, and opaque `uploadLeaseId`.
+- [ ] Implement item-scoped retry, remove, and deactivate commands.
+- [ ] Define retry, upload, and release port interfaces for draft preparation.
+- [ ] Add a cross-boundary parser test proving client and orchestrator accept
+  and reject the same submit-preparation payloads.
+- [ ] Revalidate model/source/reference minima after remove/deactivate and
+  block with `generation-reference-required` when unsatisfied.
+- [ ] Preserve all successful uploads and ordered identities when one item is
+  retried; release only removed unreferenced leases.
+- [ ] Assert provider submit count remains zero during reference recovery and
+  one after the corrected draft is explicitly submitted.
+
+**Deterministic gate:** submission/draft tests inject first/middle/last reference
+failure, required source failure, optional remove/deactivate, retry failure,
+and successful retry without duplicate uploads or provider calls.
+
+**Browser evidence:** MINI-10 owns scenario 6 and records each failed card,
+origin, error, Retry/Remove/Deactivate result, retained order, and required
+blocking.
+
+**Provider evidence:** MINI-10 owns the multi-reference case and proves only
+active ordered references are submitted with no hidden omission or duplicate
+provider submission.
+
+### MINI-05: Strict durable orchestrator boundary
+
+**Wave:** 2 after MINI-01 and MINI-03
+
+**Dependencies:** MINI-01 and MINI-03 for shared schemas, job identity, and
+upload contracts. MINI-11 is an integration handoff, not an implementation
+dependency; MINI-10 is evidence ownership, not an implementation dependency.
+
+**Owned files:** `apps/orchestrator/src/services/generation/index.ts`,
+`apps/orchestrator/src/services/generation/lock.ts`,
+`apps/orchestrator/src/services/generation/repository.ts`,
+`apps/orchestrator/src/services/generation/uploads.ts`,
+`apps/orchestrator/src/services/wavespeed/**`, and adjacent tests. MINI-05 MUST
+NOT edit `apps/orchestrator/src/services/generation/finalization.ts`,
+`apps/orchestrator/src/services/generation/recovery.ts`,
+`apps/orchestrator/src/services/generation/observability.ts`, or
+`apps/orchestrator/src/services/generation/evidence-manifest.ts`.
+
+**Shared route/app/env/package-script changes:** MINI-11 applies only changes
+outside MINI-05's explicit owned files.
+
+**Outcome:** Provider mutation begins only after a durable logical attempt with
+`GenerationJob.contractVersion: 2` is reserved, and this package owns the submit/status/cancel/provider-retry
+boundary plus typed finalization and recovery ports. MINI-08 owns the
+finalization-retry and placement-retry implementation/wiring, and MINI-11 owns
+the shared route surface that connects those ports.
+
+- [ ] Inject provider, job/upload repositories, allowlist, authenticated
+  project owner, clock, timeout, finalizer, recovery service, and logger.
+- [ ] Resolve opaque uploads only in memory; lock atomic retain/release and
+  surface missing/corrupt state distinctly.
+- [ ] Reserve logical job/attempt before provider submit and persist provider
+  ID immediately after success.
+- [ ] Make status return normalized output identity and route completion to the
+  durable finalizer.
+- [ ] Reject local/blob URLs at job, output, provenance, repository, and route
+  persistence boundaries; preserve the stable error and zero-write behavior.
+- [ ] Enforce the V2 rollback gate before reservation/provider submission while
+  computing V2 eligibility from persisted `GenerationJob.contractVersion` plus
+  server `generationV2ReleaseEnabled` configuration, and leaving already
+  submitted V2 status, cancel, recovery, and finalization paths available.
+- [ ] Wire cancel and provider retry to their named services, and expose typed
+  finalization/recovery ports without implementing stage-specific retry wiring
+  here.
+
+**Deterministic gate:** restart-through-route, ownership, JSON/multipart size and
+content-type, model allowlist, client/server schema parity for
+`GenerationContext`/`GenerationJob`, timeout, upload lease, duplicate
+submit/provider ID, output identity, cancel, retry, and redaction tests. The
+rollback fixture must derive eligibility from `GenerationJob.contractVersion`
+and server `generationV2ReleaseEnabled`, with no persisted release flag.
+
+**Browser evidence:** MINI-10 owns scenarios 8-10 and 13 plus sanitized network
+captures proving normalized completion, ownership, limits, no browser provider
+key, and no secret/temporary/local URL leaks.
+
+**Provider evidence:** MINI-10 exercises every paid case through this boundary
+and records one provider submit per attempt, normalized status, cancel/retry,
+and output identity.
+
+**Evidence handoff:** MINI-05 exposes sanitized route/rollback counters and
+boundary rejection results; MINI-10 owns integrated browser/provider evidence.
+
+### MINI-06: Production audio adapter and zero-work capability path
+
+**Wave:** 2 after MINI-02 and MINI-05
+
+**Dependencies:** MINI-02 and MINI-05.
+
+**Owned files:** `apps/web/src/features/generation/audio/**` and adjacent tests.
+
+**Shared upload/controller caller changes:** MINI-11.
+
+**Outcome:** Exact explicitly selected valid linked ranges produce deterministic
+uploaded audio, and unsupported models perform no shot-audio work.
+
+- [ ] Use the opaque audio upload-lease ports from MINI-02 and MINI-05 rather
+  than introducing new shared upload callers here.
+- [ ] Add the production decoder/extractor and cache lifecycle behind existing
+  injected ports.
+- [ ] Record requested/actual project/source ranges, format, byte length, and
+  SHA-256 without temporary URLs in persisted provenance.
+- [ ] Make abort/reset revoke local resources and release only unreferenced
+  upload leases.
+- [ ] Return partial coverage as a warning and invalid/empty extraction as a
+  typed recoverable error.
+- [ ] Prove unsupported capability calls no resolver, decoder, cache, upload,
+  or cleanup port.
+
+**Deterministic gate:** generated PCM fixtures plus web typecheck; no real FFmpeg or
+provider process in deterministic tests.
+
+**Browser evidence:** MINI-10 owns scenarios 4-5 and records zero audio calls
+for unlinked ranges/unsupported models and exact range/hash for a selected
+projection.
+
+**Provider evidence:** MINI-10 owns the selected-projection audio-capable case;
+all non-audio and unlinked-range cases must omit audio.
+
+### MINI-07: One web controller and authoritative job cache
+
+**Wave:** 3 after MINI-02, MINI-04, MINI-05, and MINI-06
+
+**Dependencies:** MINI-02, MINI-04, MINI-05, and MINI-06.
+
+**Owned files:** new modules under
+`apps/web/src/features/generation/controller/**` and adjacent tests.
+
+**Shared callers/stores:** changes to `GenerateAssetDialog.tsx`,
+`InspectorPanel.tsx`, `apps/web/src/hooks/useGenerationJobPoller.ts`, and
+`apps/web/src/stores/generation-job-store.ts` are MINI-11 patches.
+
+**Outcome:** Inspector and dialog invoke one controller that creates one
+placeholder and one durable provider submission, carries the exact
+`entryContext: GenerationEntryContext` and `placementPolicy: GenerationPlacementPolicy`,
+reconciles authoritative status on reload, and never infers entry identity from
+references.
+
+- [ ] Compose context, references, audio, sanitizer, submit, job cache, and
+  recovery ports through one typed controller.
+- [ ] Scope drafts/jobs by project and explicit `GenerationEntryContext` identity;
+  never use references as an entry identity or duplicate its fields elsewhere.
+- [ ] Replace direct dialog submit and no-op inspector submit with the same
+  controlled lifecycle and `try/finally` release.
+- [ ] Reduce the browser poller to authoritative status synchronization; remove
+  browser output download/finalization and `linkedMediaIds[0]` inference.
+- [ ] Migrate unsafe legacy jobs to `needs-attention` without guessing a source.
+
+**Deterministic gate:** fake controller ports prove one placeholder/submit across
+double click and React replay, reload/two pollers resume once, the
+`{ kind: "new-asset" }` entry uses serialized `placementPolicy: "none"`, and the
+exact `GenerationContext` manifest reaches the server.
+
+**Browser evidence:** MINI-10 owns scenarios 1-2 and 8-10, proving dialog and
+inspector share one controller, duplicate submit is blocked, and reload resumes
+once.
+
+**Provider evidence:** MINI-10 routes every paid case through this controller
+and records the exact sanitized manifest and logical attempt IDs.
+
+### MINI-08: Durable finalization, project mutations, and recovery wiring
+
+**Wave:** 3 after MINI-01 and MINI-05
+
+**Dependencies:** MINI-01 for the disposition/checkpoint/output contracts and
+MINI-05 for durable status, provider identity, and recovery ports. MINI-11
+owns shared store/action wiring as an integration handoff; MINI-10 owns
+end-to-end evidence and is not an implementation dependency.
+
+**Owned files:**
+`apps/orchestrator/src/services/generation/finalization.ts`,
+`apps/orchestrator/src/services/generation/recovery.ts`,
+`apps/web/src/features/generation/finalize-generated-asset.ts`,
+`apps/web/src/features/generation/recovery/**`,
+`apps/web/src/features/music-video/timeline/place-generated-asset.ts`, and
+adjacent tests. Existing store/action edits are MINI-11 patches.
+
+**Outcome:** Provider completion finalizes exactly once, and every recovery
+action resumes only its owned stage.
+
+- [ ] Persist claim/download/verify/inspect/save/shot-link/placement/persistence
+  checkpoints with idempotency keys.
+- [ ] Make local save/finalization/placement retry reuse provider completion and
+  output identity with provider submit count unchanged.
+- [ ] Make provider retry increment attempt and require a new provider job ID.
+- [ ] Make cancel stop polling immediately, call provider cancel when
+  supported, reject late ownership, and clean only unreferenced inputs.
+- [ ] Preserve clip identity, timing, trim, effects, and undo/redo on replacement.
+- [ ] Finalize `entryContext.kind === "new-asset"` jobs with
+  `placementPolicy === "none"` without source media, shot timing, audio, or
+  placement calls, and add
+  `generation-finalization-new-asset-no-source.fixture.ts` proving one
+  media/version and `succeeded` with zero provider resubmits.
+- [ ] Reject `blob:`/`local:` values at every finalizer checkpoint and project
+  mutation boundary using `generation-local-url-boundaries.fixture.ts`.
+- [ ] Continue polling, cancellation, recovery, and finalization for already
+  submitted V2 jobs during rollback; reject only new V2 entry-point submits.
+
+**Deterministic gate:** concurrent callers, restart after each checkpoint, corrupt
+or oversize output, local save/shot-link/placement/persistence failure, cancel
+late response, provider retry ID history, exact-one media/version/shot/clip, and
+provider-submit call-count assertions. The no-source fixture must use
+`entryContext: { kind: "new-asset" }` and `placementPolicy: "none"`.
+
+**Browser evidence:** MINI-10 owns scenarios 9-11 and records stage-only retry,
+one output/shot/placement, preserved clip edits, and undo/redo.
+
+**Provider evidence:** MINI-10 owns cancellation, retry, and successful-job
+reload cases; finalization/placement retry must not create a second provider
+submission.
+
+**Evidence handoff:** MINI-08 supplies checkpoint traces, no-source call counts,
+URL rejection fixtures, and rollback continuation results to MINI-10.
+
+### MINI-09: Inspector recovery and accessibility presentation
+
+**Wave:** 4 after MINI-07 and MINI-08
+
+**Dependencies:** MINI-07 and MINI-08.
+
+**Owned files:**
+`apps/web/src/components/editor/inspector/tabs/generation/**`,
+`apps/web/src/components/editor/inspector/InspectorTabs.tsx`,
+`apps/web/src/components/editor/inspector/clip-tabs.config.ts`, and adjacent
+component tests. MINI-11 owns only final `InspectorPanel.tsx` wiring.
+
+**Outcome:** The live inspector exposes exact context/defaults, per-reference
+recovery, routing/audio explanations, persistent status, and every valid
+recovery action with accessible focus and announcements.
+
+- [ ] Render failed references individually with origin/error and
+  Retry/Remove/Deactivate; retain deactivated cards visibly.
+- [ ] Show the placement default and allow change before submission.
+- [ ] Show explicit projection timing/audio provenance and an unsupported-audio
+  zero-work explanation.
+- [ ] Map every stable error category to edit/revalidate/item retry/provider
+  retry/finalization retry/placement retry/cancel or a terminal explanation.
+- [ ] Complete tab roles, roving arrows/Home/End, first-invalid focus, error
+  summary, `aria-live`/alerts, visible focus, reduced motion, 280/320/420 px,
+  and 200% zoom behavior.
+
+**Deterministic gate:** component tests cover all rows above; browser acceptance is
+owned separately and cannot be inferred from jsdom.
+
+**Browser evidence:** MINI-10 owns scenarios 1, 6, and 12, including keyboard
+navigation, 280/320/420 px, 200% zoom, reduced motion, visible focus, live
+status, alerts, and no horizontal page overflow.
+
+**Provider evidence:** N/A for presentation-only behavior. MINI-10 validates
+that UI actions altering requests produce the expected sanitized manifests.
+
+### MINI-11: Shared production integration
+
+**Wave:** 5 after MINI-01 through MINI-09
+
+**Dependencies:** MINI-01 through MINI-09.
+
+**Model:** exact `gpt-5.6-luna` Codex; substitution is forbidden.
+
+**Owned files:** `packages/music-video-domain/src/index.ts`,
+`apps/orchestrator/src/routes/wavespeed.ts`,
+`apps/orchestrator/src/app.ts`, `apps/orchestrator/src/env.ts`,
+`apps/orchestrator/package.json`,
+`apps/web/src/components/editor/generate/GenerateAssetDialog.tsx`,
+`apps/web/src/components/editor/settings/SingleServiceSettings.tsx`,
+`apps/web/src/components/editor/InspectorPanel.tsx`,
+`apps/web/src/hooks/useGenerationJobPoller.ts`,
+`apps/web/src/stores/generation-job-store.ts`,
+`apps/web/src/stores/project-store.ts`, and adjacent integration tests. No other
+package may edit these files while MINI-11 runs.
+
+**Outcome:** Every green package is connected through one typed production
+path: shared exports, normalized route identity, projection-only audio,
+per-reference actions, authoritative status, checkpoint finalization/recovery,
+idempotent project actions, and one dialog/inspector controller.
+
+- [ ] Apply each typed handoff request without duplicating package-private
+  logic.
+- [ ] Remove legacy direct WaveSpeed submission, browser provider-key header,
+  browser provider-key state, `linkedMediaIds[0]` inference, browser output
+  finalization, and no-op inspector submission.
+- [ ] Wire the orchestrator config capability endpoint so browser settings read
+  only non-secret capabilities, and keep browser provider keys, provider
+  headers, and browser storage forbidden.
+- [ ] Reconcile unsafe legacy jobs to `needs-attention` without guessing a
+  source.
+- [ ] Prove completed status carries output identity and invokes the durable
+  finalizer exactly once.
+- [ ] Prove project media/version/shot/clip mutations are idempotent and
+  undo-aware.
+- [ ] Apply the V2 rollback entry-point gate using
+  `GenerationJob.contractVersion === 2` plus server
+  `generationV2ReleaseEnabled` configuration, and prove new submissions are
+  rejected before provider reservation while already submitted jobs continue
+  polling, cancellation, recovery, and finalization. Never persist the release
+  flag in `GenerationJob`, `GenerationContext`, or project data.
+- [ ] Add integration regressions for `generation-job-dispositions.fixture.ts`,
+  `generation-v2-rollback.fixture.ts`,
+  `generation-finalization-new-asset-no-source.fixture.ts`, and
+  `generation-local-url-boundaries.fixture.ts` through the production route.
+
+**Deterministic gate:** integrated web/orchestrator fake-port tests cover one
+dialog/inspector `GenerationContext` request, persisted
+`GenerationJob.contractVersion: 2`, completion output identity, reload/two
+pollers, per-reference commands, all `GenerationPlacementPolicy` defaults, and
+stage-only recovery; affected workspace typechecks pass.
+
+**Browser evidence:** MINI-10 owns mandatory scenarios 1-14 against the MINI-11
+production path. Component-only fixtures cannot satisfy this gate.
+
+**Evidence handoff:** MINI-11 supplies the integrated route/store traces and
+fixture results; MINI-10 owns browser capture, observability artifacts, and the
+release decision.
+
+**Provider evidence:** MINI-10 routes every authorized case through the MINI-11
+path and records exact routing/context IDs, one submit per attempt, and
+exactly-once output/project mutations.
+
+### MINI-10: Fake provider, observability, evidence, and release gate
+
+**Wave:** 6 after MINI-11
+
+**Dependencies:** MINI-11.
+
+**Owned files:** `apps/orchestrator/src/testing/wavespeed-fake-provider.ts`,
+`apps/orchestrator/src/routes/wavespeed.integration.test.ts`,
+`apps/orchestrator/src/services/generation/observability.ts`,
+`apps/orchestrator/src/services/generation/observability.test.ts`,
+`apps/orchestrator/src/services/generation/evidence-manifest.ts`,
+`apps/orchestrator/src/services/generation/evidence-manifest.test.ts`,
+`apps/web/e2e/wavespeed-generation.spec.ts`,
+`apps/web/src/features/generation/feature-flag.ts`,
+`docs/runbooks/wavespeed-generation.md`, `.env.example`, and directly adjacent
+fixtures. Existing `apps/web/playwright.config.ts` may be changed only if the
+scenario cannot run under its current `./e2e` test directory.
+
+**Outcome:** Deterministic integration, browser, structured event/metric, and
+authorized paid-provider evidence is complete and independently reviewable.
+
+- [ ] Add a deterministic fake provider with controlled IDs, status sequences,
+  output bytes, cancel/retry, submit counters, and failure injection without
+  sleeps.
+- [ ] Emit and test redacted structured events for every stage and recovery
+  action with the fields required by canonical section 10.
+- [ ] Record stage latency and the success/retry/cancel/reload/failure/duplicate
+  metrics listed in canonical section 10.
+- [ ] Add an evidence-manifest schema/checker requiring exact sanitized IDs,
+  routing, references, audio, provenance, errors/actions, artifact counts, and
+  dated browser/provider artifact links.
+- [ ] Run the complete deterministic disposition, rollback, no-source
+  finalization, and durable-local-URL fixture matrix and fail the release gate
+  on any illegal transition, new submit during rollback, source/audio call for
+  a new asset, or boundary write containing `blob:`/`local:`.
+- [ ] Capture explicit evidence ownership for each requirement separately from
+  implementation dependencies: package fixtures are implementation evidence;
+  MINI-10 owns integrated browser/provider/release evidence.
+- [ ] Keep the release flag disabled until the independent verifier returns
+  `PASS` after every gate.
+
+**Deterministic gate:** fake-provider technical matrix 100%, evidence manifest schema
+valid, redaction corpus zero leaks, and duplicate counters all zero.
+
+**Browser evidence:** MINI-10 owns and captures all mandatory browser scenarios
+with screenshots/recordings, sanitized network/events, exact IDs, audio
+ranges/hashes, recovery actions, and artifact counts.
+
+**Provider evidence:** MINI-10 validates the pinned paid manifest before any
+call and, only after Joseph's explicit authorization, executes and records every
+paid matrix case. Without authorization this field remains `BLOCKED`.
+
+## Decision acceptance matrix
+
+| Decision | Deterministic acceptance | Browser evidence | Paid-provider evidence after authorization |
 |---|---|---|---|
-| Canonical §1 architecture/security | WP-04, WP-06 | route, ownership, schema, and redaction tests | browser network/log inspection |
-| Canonical §2 provider/model contracts | WP-01, WP-03 | shared-schema and recorded-adapter tests | normalized model and submitted manifest inspection |
-| Canonical §3 unified generation UI | WP-06, WP-08, WP-09 | coordinator, component, keyboard, ARIA, and draft tests | shot and new-asset browser workflows |
-| Canonical §4 effective context | WP-01, WP-02, WP-06 | contract, timing, target, and duration tests | timing labels and submitted manifest |
-| Canonical §5 reference resolution | WP-02, WP-04, WP-06 | order, deduplication, character-token, and upload tests | character/reference thumbnails and manifest |
-| Canonical §6 timed audio | WP-02, WP-05, WP-06 | range conversion, PCM, hash, cache, and failure-injection tests | waveform plus recorded hash/range |
-| Canonical §7 persistent jobs | WP-01, WP-04, WP-09 | migration, restart, ownership, retry, and cancel tests | reload-during-job scenario |
-| Canonical §8 idempotent finalization | WP-07A, WP-07B | checkpoint, concurrency, media/version, placement, and undo tests | exact media, shot, and clip IDs |
-| Canonical §9.2 WaveSpeed adapter | WP-03, WP-04, WP-06 | schema mapping, server stripping, provider-state, and output tests | image/video/reference/audio provider matrix |
-| Canonical §10 observability/problems | WP-04, WP-07A, WP-08, WP-09, WP-10 | stable-error, recovery-action, and redacted-event tests | injected failure scenarios and sanitized event capture |
-| Canonical §11 tests/eval | WP-10 and independent `gpt-5.6-sol` verifier | focused/full/fake-provider command logs and eval-manifest validation | browser evidence and paid provider outputs after authorization |
+| Projection-only audio and placement defaults | Table test covers all four `GenerationEntryContext` variants with exact identity fields, invalid/ambiguous projections, exact ranges, user override, and zero audio-port calls for unlinked ranges and unsupported models; serialized values are the `GenerationPlacementPolicy` union | New asset shows no timing/audio and serialized `none` (UI: Library only); unplaced shot requires projection; an unlinked range shows timing/default placement but no audio; a selected linked projection shows exact timing and eligible audio; model switch proves no audio work | Sanitized manifests prove unlinked ranges omit audio; only the selected-projection case records requested/actual audio range/hash and routing identity |
+| Retry/Remove/Deactivate per reference | Failure at N retains successful order/uploads; each action changes only N; required minima continue to block; provider submit count remains zero until explicit valid submit | Each failed card shows origin/error/actions; deactivated card remains; removed card disappears; required validation is actionable | Ordered active-reference manifest before/after recovery; no hidden omission or duplicate provider submission |
+| Stable multi-schema routing | Reordered/missing/ambiguous/unsupported/stale/drift fixtures fail or select invariantly; client/server acceptance matrix agrees | Requested mode and route identity persist through model refresh/reload; drift blocks with refresh/revalidate action | Exact provider/model/mode/schema/endpoint/version pinned and submitted; no case substitutes a model or route |
+| Recovery and exactly once | Cancel stops poller; retry records new provider ID; finalization retry keeps provider count; reload/two pollers yield one output/shot/placement | Reload, cancel, provider failure, local save, shot-link, placement, and persistence failures expose exact recovery and finish with one output/placement | Logical/provider IDs and attempt history prove one submit per attempt and no duplicate output/media/version/shot/clip |
+| Persisted dispositions and rollback | Every legal/illegal transition, `needs-attention` recovery, terminality, `GenerationJob.contractVersion: 2` rollback rejection/continuation, and no-submit counter pass; `GenerationEntryContext` new-asset/no-source and local-URL fixtures pass | Scenario 14 hides/rejects new V2 submissions while an existing V2 job reaches finalization; scenario 2 completes a `{ kind: "new-asset" }` entry with serialized `placementPolicy: "none"` and no source media | No new paid submit during rollback recovery/finalization; sanitized evidence proves exact disposition, checkpoint, output, and artifact counts |
+
+## Mandatory browser evidence
+
+Run the app on port 5173 only after deterministic and fake-provider gates pass.
+For every scenario, capture a screenshot or recording, sanitized network/events,
+logical and provider job IDs, provider/model/mode/schema/endpoint/version,
+reference IDs/origins/order/active state, requested/actual audio timing and hash,
+output identity, media/version/shot/clip IDs, recovery error/action, and expected
+versus actual artifact counts.
+
+Required scenarios:
+
+1. Inspector and dialog produce the same sanitized request through one controller.
+2. `{ kind: "new-asset" }` has no inferred timeline/audio context and uses
+   serialized `placementPolicy: "none"` (UI: Library only).
+3. Unplaced shot blocks audio; multiple projections require explicit selection.
+4. Valid unlinked range and selected linked projection show exact timing and
+   visible/changeable default placement.
+5. Non-audio model performs no shot-audio work.
+6. Ordered source/character/shot references include per-item Retry, Remove, and
+   Deactivate, including required-reference blocking.
+7. Multi-schema routing persists exact identity; stale/drifted routing blocks.
+8. Double click, React replay, reload, and two pollers produce one placeholder,
+   one provider submit for the attempt, one output, one shot attempt when
+   applicable, and at most one requested placement.
+9. Cancel stops polling; provider retry records a new provider job ID.
+10. Provider, download, validation, save, shot-link, placement, and persistence
+    failures expose their recovery actions; finalization retries do not resubmit.
+11. All placement policies behave explicitly; replacement preserves clip state
+    and undo/redo.
+12. Keyboard-only use, 280/320/420 px, 200% zoom, reduced motion, focus/error
+    summary, live status, and alerts pass without horizontal page overflow.
+13. Browser storage, project JSON, provenance, network capture, and events have
+    zero credentials, authorization values, signed URLs, upload tokens,
+    local/blob URLs, or raw prompts when diagnostic logging is disabled.
+14. With V2 rollback active, new dialog/inspector/direct-route submissions are
+    hidden or rejected before provider reservation, while an already submitted
+    V2 job continues polling, cancellation, recovery, and finalization without
+    any new submit.
+
+## Paid-provider authorization and matrix
+
+No paid call is permitted without Joseph explicitly authorizing all of:
+
+- credential/provider instance and account/region;
+- exact model, requested mode, provider schema, endpoint, and schema version for
+  each case;
+- maximum total spend;
+- evidence-retention location and retention period.
+
+Deterministic, fake-provider, browser, observability, and manifest validation
+must already pass. The matrix covers text-to-image, image-to-image,
+text-to-video, image-to-video, multi-reference/character, selected-projection
+audio, cancellation, retry, and successful-job reload. Pass threshold is 100%
+technical cases, zero duplicates/leaks, and at least 90% subjective adherence
+across fixed prompts. A failed or incomplete case blocks enablement; never
+substitute a model, schema, endpoint, prompt, asset, or audio fixture silently.
 
 ## Canonical verification commands
 
-Subagents may narrow test paths during development. The integration owner runs these gates after reconciliation, using the actual test filenames created by the packages:
+Focused commands are run per package. After MINI-11 reconciliation, MINI-10
+runs the actual scripts exposed by each workspace:
 
 ```bash
-pnpm --filter @openreel/music-video-domain test:run
-pnpm --filter @openreel/music-video-domain typecheck
-pnpm --filter @openreel/web test:run
-pnpm --filter @openreel/web typecheck
-pnpm --filter @openreel/web lint
-pnpm --filter @openreel/orchestrator test:run
-pnpm --filter @openreel/orchestrator typecheck
-pnpm test
-pnpm typecheck
-pnpm lint
-pnpm build
-git diff --check
+rtk proxy pnpm --filter @openreel/music-video-domain test:run -- src/generation
+rtk proxy pnpm --filter @openreel/music-video-domain typecheck
+rtk proxy pnpm --filter @openreel/web test:run -- src/features/generation src/services/wavespeed src/components/editor/inspector/tabs/generation
+rtk proxy pnpm --filter @openreel/web typecheck
+rtk proxy pnpm --filter @openreel/web lint
+rtk proxy pnpm --filter @openreel/orchestrator test:run -- src/routes/wavespeed.test.ts src/services/generation src/services/wavespeed
+rtk proxy pnpm --filter @openreel/orchestrator typecheck
+rtk proxy pnpm test
+rtk proxy pnpm typecheck
+rtk proxy pnpm lint
+rtk proxy pnpm build
+rtk git diff --check
 ```
 
-Any pre-existing unrelated failure is recorded with its exact command and output. It is not silently attributed to this feature, and it does not excuse a failure in a focused WaveSpeed gate.
+If a script does not exist or dependencies are absent, record the exact blocker;
+do not translate a command that did not start into passing evidence.
 
-## Commit sequence
+## Definition of Done
 
-1. `feat(domain): add typed generation contracts and migrations`
-2. `test(generation): add context and resolver fixtures`
-3. `feat(wavespeed): normalize schemas and validate inputs`
-4. `feat(orchestrator): persist WaveSpeed jobs and secure credentials`
-5. `feat(generation): resolve references and timed audio inputs`
-6. `feat(generation): coordinate tracked placeholder submission`
-7. `feat(generation): finalize outputs idempotently`
-8. `feat(timeline): add explicit generated asset placement policies`
-9. `feat(inspector): add shot-aware Generate workflow`
-10. `feat(generation): add retry cancel variation and recovery`
-11. `test(generation): add fake-provider integration and browser fixtures`
-12. `docs(generation): document WaveSpeed operations and evidence`
+- Client and server strict schema validation agree for every accepted/rejected
+  routing and command fixture.
+- Endpoints enforce authenticated ownership, limits, content types, allowlisted
+  models, strict schemas, and timeouts.
+- Projection-only audio, all placement defaults, per-reference actions, stable
+  multi-schema routing, cancel/retry, reload, finalization retry, and every error
+  recovery action pass deterministic and fake-provider gates.
+- Models without audio perform zero shot-audio work.
+- Redacted events and all listed latency/success/retry/cancel/reload/failure/
+  duplicate metrics are evidenced with zero leaks.
+- Browser evidence records exact timing, audio, references, routing,
+  provenance, IDs, recovery failures/actions, and proves exactly one output and
+  at most one requested placement.
+- The explicitly authorized paid matrix passes its technical, leak, duplicate,
+  and subjective thresholds.
+- The exact independent `gpt-5.6-sol` verifier returns `PASS`.
 
-Each commit must keep affected focused tests green. Do not combine the secret-boundary change with the inspector UI change.
-
-## Important failure modes and controls
-
-| Failure mode | Control and evidence |
-|---|---|
-| Duplicate assets/clips from reload or two tabs | Durable completion key + checkpoint tests with concurrent pollers |
-| Placeholder cannot be finalized | Placeholder ID created before submit and required by target schema |
-| Reference mistaken for version source | Separate `GenerationTarget` and provenance-only `referenceMediaIds`; migration rejects guessing |
-| Local/blob URL reaches WaveSpeed | Opaque upload tokens and orchestrator-only URL resolution; adapter tests reject local schemes |
-| Wrong audio slice | Pure timing/source conversion tests plus PCM hash/range browser evidence |
-| Character rename breaks prompt identity | Stable character ID/slug tokens with migration and rename tests |
-| Schema drift forwards unsafe fields | Shared schema version, submit-time revalidation, server stripping, recorded fixtures |
-| Secret leaks to browser or logs | Remove key header/client storage; redaction and browser-network assertions |
-| Save/placement failure resubmits provider job | Independent finalization/placement checkpoints and injected-failure integration tests |
-| Browser job cache diverges from truth | Orchestrator authoritative status; Zustand reconciles by logical job ID on load |
-
-## Definition of done
-
-- All rows in the spec's current implementation audit have their required disposition.
-- Deterministic unit/component/integration suites pass locally and remain non-flaky.
-- Paid eval threshold passes for the maintained WaveSpeed matrix.
-- Browser verification proves the exact image, video, references, audio, reload, failure, accessibility, and narrow-panel workflows.
-- No API key, full signed URL, upload token, or blob URL appears in persistent state, provenance, logs, or captured manifests.
-- One logical successful job produces exactly one finalized media output, one shot attempt, and at most one requested timeline mutation.
-- Atomic conventional commits are pushed and restart instructions are reported.
+Until every item is evidenced, the truthful status remains incomplete and no
+browser/provider/release-complete claim is allowed.
