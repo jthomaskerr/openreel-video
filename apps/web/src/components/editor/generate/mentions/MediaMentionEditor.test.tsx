@@ -1,5 +1,11 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { LexicalEditor, TextNode } from "lexical";
+import {
+  $createRangeSelection,
+  $getRoot,
+  $setSelection,
+} from "lexical";
 import type {
   PromptReferenceDiagnostic,
   ReferenceTarget,
@@ -10,6 +16,7 @@ import {
   type MediaMentionEditorProps,
   type MediaMentionOption,
 } from "./MediaMentionEditor";
+import { $isMentionNode } from "./MentionNode";
 
 function option(
   id: string,
@@ -40,6 +47,61 @@ function diagnostic(
 
 async function flushEffects(): Promise<void> {
   await act(async () => {
+    await Promise.resolve();
+  });
+}
+
+interface LexicalRootElement extends HTMLElement {
+  readonly __lexicalEditor?: LexicalEditor;
+}
+
+function getLexicalEditor(element: HTMLElement): LexicalEditor {
+  const editor = (element as LexicalRootElement).__lexicalEditor;
+  if (editor === undefined) {
+    throw new Error("Expected a Lexical editor root");
+  }
+  return editor;
+}
+
+function getPlainTextNodeContaining(
+  text: string,
+  occurrence = 0,
+): TextNode {
+  const match = $getRoot()
+    .getAllTextNodes()
+    .filter(
+      (node) =>
+        !$isMentionNode(node) && node.getTextContent().includes(text),
+    )[occurrence];
+
+  if (match === undefined) {
+    throw new Error(
+      `No plain text node containing "${text}" at occurrence ${occurrence}`,
+    );
+  }
+
+  return match;
+}
+
+async function setLexicalTextSelection(
+  element: HTMLElement,
+  startText: string,
+  startOffset: number,
+  endText = startText,
+  endOffset = startOffset,
+): Promise<void> {
+  await act(async () => {
+    getLexicalEditor(element).update(
+      () => {
+        const startNode = getPlainTextNodeContaining(startText);
+        const endNode = getPlainTextNodeContaining(endText);
+        const selection = $createRangeSelection();
+        selection.anchor.set(startNode.getKey(), startOffset, "text");
+        selection.focus.set(endNode.getKey(), endOffset, "text");
+        $setSelection(selection);
+      },
+      { discrete: true },
+    );
     await Promise.resolve();
   });
 }
@@ -224,38 +286,27 @@ describe("MediaMentionEditor", () => {
   });
 
   it("filters @ suggestions and exposes combobox/listbox announcements before Enter selection", async () => {
-    const { changeSpy, rerender, onChange, onOpenReference } = await renderEditor({
+    const { changeSpy } = await renderEditor({
       value: "",
       options: [
         option("hero", { label: "Hero", description: "Main character" }),
-        option("helper", { label: "Helper", description: "Helpful support" }),
-        option("villain", { label: "Villain", description: "Antagonist" }),
+        option("helper", {
+          label: "Helper",
+          description: "Helpful support",
+          available: false,
+        }),
       ],
     });
 
     const editor = screen.getByRole("combobox", { name: /prompt references/i });
     await focusEditor(editor);
-    await act(async () => {
-      rerender(
-        <MediaMentionEditor
-          value="@h"
-          options={[
-            option("hero", { label: "Hero", description: "Main character" }),
-            option("helper", { label: "Helper", description: "Helpful support" }),
-            option("villain", { label: "Villain", description: "Antagonist" }),
-          ]}
-          diagnostics={[]}
-          onChange={onChange}
-          onOpenReference={onOpenReference}
-        />,
-      );
-      await Promise.resolve();
-    });
-    await flushEffects();
+    await typeText(editor, "@h");
 
     await screen.findByRole("listbox", {
       name: /media mention suggestions/i,
     });
+    const heroOption = screen.getByRole("option", { name: /hero/i });
+    const helperOption = screen.getByRole("option", { name: /helper/i });
 
     expect(editor).toHaveAttribute("aria-autocomplete", "list");
     expect(editor).toHaveAttribute("aria-haspopup", "listbox");
@@ -263,13 +314,20 @@ describe("MediaMentionEditor", () => {
       expect(editor).toHaveAttribute("aria-expanded", "true");
     });
     expect(editor).toHaveAttribute("aria-controls", "typeahead-menu");
-    expect(screen.getByRole("option", { name: /hero/i })).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /helper/i })).toBeInTheDocument();
-    expect(screen.queryByRole("option", { name: /villain/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /hero/i })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(heroOption).toBeInTheDocument();
+    expect(helperOption).toBeInTheDocument();
+    expect(heroOption).toHaveAttribute("aria-selected", "true");
+    expect(helperOption).toHaveAttribute("aria-disabled", "true");
+    expect(editor).toHaveAttribute("aria-activedescendant", heroOption.id);
+    expect(screen.getByText("2 results. 1 unavailable.")).toBeInTheDocument();
+    expect(screen.getByText("Hero. 1 of 2.")).toBeInTheDocument();
+
+    await pressKey(editor, "ArrowDown");
+    expect(helperOption).toHaveAttribute("aria-selected", "true");
+    expect(editor).toHaveAttribute("aria-activedescendant", helperOption.id);
+    expect(screen.getByText("Helper unavailable. 2 of 2.")).toBeInTheDocument();
+
+    await pressKey(editor, "ArrowUp");
 
     await pressKey(editor, "Enter");
 
@@ -445,12 +503,15 @@ describe("MediaMentionEditor", () => {
 
   it("copies canonical prompt text and pastes canonical tokens back into the editor", async () => {
     const { changeSpy } = await renderEditor({
-      value: "@{character:hero}",
+      value: "alpha @{character:hero} omega",
       options: [option("hero", { label: "Hero" })],
     });
 
     const editor = screen.getByRole("combobox", { name: /prompt references/i });
     const copied = clipboardData("");
+
+    await focusEditor(editor);
+    await setLexicalTextSelection(editor, "alpha ", 2, " omega", 3);
 
     await act(async () => {
       fireEvent.copy(editor, { clipboardData: copied });
@@ -459,10 +520,36 @@ describe("MediaMentionEditor", () => {
 
     expect(copied.setData).toHaveBeenCalledWith(
       "text/plain",
-      "@{character:hero}",
+      "pha @{character:hero} om",
     );
 
-    const pasted = clipboardData("@{media:shot-1}");
+    await setLexicalTextSelection(editor, "alpha ", 6, " omega", 0);
+
+    const pastedReplacement = clipboardData("@{media:shot-1}");
+    await act(async () => {
+      fireEvent.paste(editor, { clipboardData: pastedReplacement });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => {
+      expect(changeSpy).toHaveBeenLastCalledWith(
+        "alpha @{media:shot-1} omega",
+      );
+    });
+  });
+
+  it("pastes canonical tokens at the actual middle caret instead of appending", async () => {
+    const { changeSpy } = await renderEditor({
+      value: "alpha omega",
+      options: [option("hero", { label: "Hero" })],
+    });
+
+    const editor = screen.getByRole("combobox", { name: /prompt references/i });
+
+    await focusEditor(editor);
+    await setLexicalTextSelection(editor, "alpha omega", 6);
+
+    const pasted = clipboardData("@{media:shot-1} ");
     await act(async () => {
       fireEvent.paste(editor, { clipboardData: pasted });
       await Promise.resolve();
@@ -470,23 +557,30 @@ describe("MediaMentionEditor", () => {
 
     await waitFor(() => {
       expect(changeSpy).toHaveBeenLastCalledWith(
-        "@{character:hero}@{media:shot-1}",
+        "alpha @{media:shot-1} omega",
       );
     });
   });
 
-  it("deletes a mention atomically with Backspace and supports undo redo", async () => {
+  it("deletes a mention atomically only when Backspace is at the pill boundary and supports undo redo", async () => {
     const { changeSpy } = await renderEditor({
-      value: "@{character:hero}",
+      value: "hello @{character:hero}",
       options: [option("hero", { label: "Hero" })],
     });
 
     const editor = screen.getByRole("combobox", { name: /prompt references/i });
     await focusEditor(editor);
+    await setLexicalTextSelection(editor, "hello ", 2);
+
+    await pressKey(editor, "Backspace");
+    expect(screen.getByRole("button", { name: /hero reference/i })).toBeInTheDocument();
+    expect(changeSpy).not.toHaveBeenCalledWith("hello ");
+
+    await setLexicalTextSelection(editor, "hello ", 6);
 
     await pressKey(editor, "Backspace");
     await waitFor(() => {
-      expect(changeSpy).toHaveBeenLastCalledWith("");
+      expect(changeSpy).toHaveBeenLastCalledWith("hello ");
     });
 
     await pressKey(editor, "z", { ctrlKey: true });
@@ -500,18 +594,25 @@ describe("MediaMentionEditor", () => {
     });
   });
 
-  it("deletes a leading mention atomically with Delete", async () => {
+  it("deletes a mention atomically only when Delete is at the pill boundary", async () => {
     const { changeSpy } = await renderEditor({
-      value: "@{character:hero}",
+      value: "lead @{character:hero}",
       options: [option("hero", { label: "Hero" })],
     });
 
     const editor = screen.getByRole("combobox", { name: /prompt references/i });
     await focusEditor(editor);
+    await setLexicalTextSelection(editor, "lead ", 2);
+
+    await pressKey(editor, "Delete");
+    expect(screen.getByRole("button", { name: /hero reference/i })).toBeInTheDocument();
+    expect(changeSpy).not.toHaveBeenCalledWith("lead ");
+
+    await setLexicalTextSelection(editor, "lead ", 5);
 
     await pressKey(editor, "Delete");
     await waitFor(() => {
-      expect(changeSpy).toHaveBeenLastCalledWith("");
+      expect(changeSpy).toHaveBeenLastCalledWith("lead ");
     });
   });
 });

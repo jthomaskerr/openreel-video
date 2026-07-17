@@ -7,7 +7,6 @@ import {
   useState,
 } from "react";
 import type {
-  ClipboardEvent,
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
   ReactNode,
@@ -15,6 +14,7 @@ import type {
 import type { EditorState, LexicalNode } from "lexical";
 import {
   $createParagraphNode,
+  $getNodeByKey,
   $getSelection,
   $createTextNode,
   $getRoot,
@@ -22,6 +22,11 @@ import {
   $isLineBreakNode,
   $isRangeSelection,
   $isTextNode,
+  COMMAND_PRIORITY_HIGH,
+  COPY_COMMAND,
+  KEY_BACKSPACE_COMMAND,
+  KEY_DELETE_COMMAND,
+  PASTE_COMMAND,
 } from "lexical";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
@@ -29,6 +34,7 @@ import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { PlainTextPlugin } from "@lexical/react/LexicalPlainTextPlugin";
+import { mergeRegister } from "@lexical/utils";
 import type {
   PromptReferenceDiagnostic,
   ReferenceTarget,
@@ -108,28 +114,24 @@ function exportCanonicalPrompt(editorState: EditorState): string {
   );
 }
 
-function seedEditorFromCanonicalPrompt(
+function buildCanonicalPromptNodes(
   value: string,
   options: readonly MediaMentionOption[],
   diagnostics: readonly PromptReferenceDiagnostic[],
-): void {
+): LexicalNode[] {
   const optionsByKey = new Map(
     options.map((option) => [optionKey(option.kind, option.id), option]),
   );
-
-  const root = $getRoot();
-  root.clear();
-
-  const paragraph = $createParagraphNode();
+  const nodes: LexicalNode[] = [];
   let cursor = 0;
 
   for (const token of tokenizePromptReferences(value)) {
     if (token.start > cursor) {
-      paragraph.append($createTextNode(value.slice(cursor, token.start)));
+      nodes.push($createTextNode(value.slice(cursor, token.start)));
     }
 
     if (token.kind === "legacy-character") {
-      paragraph.append($createTextNode(token.source));
+      nodes.push($createTextNode(token.source));
       cursor = token.end;
       continue;
     }
@@ -146,7 +148,7 @@ function seedEditorFromCanonicalPrompt(
           ? "active"
           : "unresolved";
 
-    paragraph.append(
+    nodes.push(
       $createMentionNode({
         kind: token.kind,
         id: token.id,
@@ -170,7 +172,23 @@ function seedEditorFromCanonicalPrompt(
   }
 
   if (cursor < value.length) {
-    paragraph.append($createTextNode(value.slice(cursor)));
+    nodes.push($createTextNode(value.slice(cursor)));
+  }
+
+  return nodes;
+}
+
+function seedEditorFromCanonicalPrompt(
+  value: string,
+  options: readonly MediaMentionOption[],
+  diagnostics: readonly PromptReferenceDiagnostic[],
+): void {
+  const root = $getRoot();
+  root.clear();
+
+  const paragraph = $createParagraphNode();
+  for (const node of buildCanonicalPromptNodes(value, options, diagnostics)) {
+    paragraph.append(node);
   }
 
   root.append(paragraph);
@@ -343,33 +361,426 @@ function SelectionGuardPlugin({
   return null;
 }
 
-function removeEdgeMentionToken(
-  prompt: string,
+function firstLeafNode(node: LexicalNode | null): LexicalNode | null {
+  if (node === null) {
+    return null;
+  }
+  if ($isElementNode(node)) {
+    return firstLeafNode(node.getFirstChild());
+  }
+  return node;
+}
+
+function lastLeafNode(node: LexicalNode | null): LexicalNode | null {
+  if (node === null) {
+    return null;
+  }
+  if ($isElementNode(node)) {
+    return lastLeafNode(node.getLastChild());
+  }
+  return node;
+}
+
+function adjacentLeafNode(
+  node: LexicalNode,
   direction: "backward" | "forward",
-): string | null {
-  const tokens = tokenizePromptReferences(prompt).filter(
-    (token): token is Extract<
-      ReturnType<typeof tokenizePromptReferences>[number],
-      { kind: "character" | "media" }
-    > => token.kind === "character" || token.kind === "media",
+): LexicalNode | null {
+  let current: LexicalNode | null = node;
+
+  while (current !== null) {
+    const sibling =
+      direction === "backward"
+        ? current.getPreviousSibling()
+        : current.getNextSibling();
+
+    if (sibling !== null) {
+      return direction === "backward"
+        ? lastLeafNode(sibling)
+        : firstLeafNode(sibling);
+    }
+
+    current = current.getParent();
+  }
+
+  return null;
+}
+
+function selectTextBoundary(
+  node: LexicalNode | null,
+  direction: "backward" | "forward",
+): void {
+  if (node === null) {
+    return;
+  }
+
+  if ($isTextNode(node)) {
+    if (direction === "backward") {
+      node.selectEnd();
+      return;
+    }
+    node.select(0, 0);
+    return;
+  }
+
+  if ($isElementNode(node)) {
+    if (direction === "backward") {
+      node.selectEnd();
+      return;
+    }
+    node.selectStart();
+  }
+}
+
+interface SelectionPointDescriptor {
+  readonly key: string;
+  readonly offset: number;
+  readonly type: "text" | "element";
+}
+
+function getAdjacentMentionNodeAtPoint(
+  point: SelectionPointDescriptor,
+  direction: "backward" | "forward",
+): MentionNode | null {
+  const node = $getNodeByKey(point.key);
+  if (node === null) {
+    return null;
+  }
+
+  if (point.type === "text" && ($isTextNode(node) || $isMentionNode(node))) {
+    if ($isMentionNode(node)) {
+      if (direction === "backward" && point.offset === node.getTextContentSize()) {
+        return node;
+      }
+      if (direction === "forward" && point.offset === 0) {
+        return node;
+      }
+      return null;
+    }
+
+    if (direction === "backward") {
+      if (point.offset !== 0) {
+        return null;
+      }
+      const candidate = adjacentLeafNode(node, "backward");
+      return $isMentionNode(candidate) ? candidate : null;
+    }
+
+    if (point.offset !== node.getTextContentSize()) {
+      return null;
+    }
+    const candidate = adjacentLeafNode(node, "forward");
+    return $isMentionNode(candidate) ? candidate : null;
+  }
+
+  if (point.type === "element" && $isElementNode(node)) {
+    const candidate =
+      direction === "backward"
+        ? lastLeafNode(node.getChildAtIndex(point.offset - 1))
+        : firstLeafNode(node.getChildAtIndex(point.offset));
+    return $isMentionNode(candidate) ? candidate : null;
+  }
+
+  return null;
+}
+
+function removeAdjacentMention(
+  point: SelectionPointDescriptor,
+  direction: "backward" | "forward",
+): boolean {
+  const mentionNode = getAdjacentMentionNodeAtPoint(point, direction);
+  if (mentionNode === null) {
+    return false;
+  }
+
+  const previousNode = mentionNode.getPreviousSibling();
+  const nextNode = mentionNode.getNextSibling();
+  const parent = mentionNode.getParent();
+
+  mentionNode.remove();
+  if (previousNode !== null) {
+    selectTextBoundary(previousNode, "backward");
+  } else if (nextNode !== null) {
+    selectTextBoundary(nextNode, "forward");
+  } else {
+    selectTextBoundary(parent, "forward");
+  }
+
+  return true;
+}
+
+function removeMentionAtCollapsedSelection(
+  primaryDirection: "backward" | "forward",
+): boolean {
+  const selection = $getSelection();
+  if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
+    return false;
+  }
+
+  const secondaryDirection =
+    primaryDirection === "backward" ? "forward" : "backward";
+  return (
+    removeAdjacentMention(selection.anchor, primaryDirection) ||
+    removeAdjacentMention(selection.anchor, secondaryDirection)
+  );
+}
+
+interface CanonicalLeafSegment {
+  readonly nodeKey: string;
+  readonly canonicalText: string;
+  readonly canonicalStart: number;
+  readonly canonicalEnd: number;
+}
+
+interface CanonicalSelectionRange {
+  readonly start: number;
+  readonly end: number;
+  readonly canonicalText: string;
+}
+
+function collectCanonicalLeafSegments(
+  node: LexicalNode,
+  segments: CanonicalLeafSegment[],
+  canonicalCursor: number,
+): number {
+  if ($isMentionNode(node)) {
+    const canonicalText = node.getCanonicalToken();
+    segments.push({
+      nodeKey: node.getKey(),
+      canonicalText,
+      canonicalStart: canonicalCursor,
+      canonicalEnd: canonicalCursor + canonicalText.length,
+    });
+    return canonicalCursor + canonicalText.length;
+  }
+
+  if ($isLineBreakNode(node)) {
+    segments.push({
+      nodeKey: node.getKey(),
+      canonicalText: "\n",
+      canonicalStart: canonicalCursor,
+      canonicalEnd: canonicalCursor + 1,
+    });
+    return canonicalCursor + 1;
+  }
+
+  if ($isTextNode(node)) {
+    const canonicalText = node.getTextContent();
+    segments.push({
+      nodeKey: node.getKey(),
+      canonicalText,
+      canonicalStart: canonicalCursor,
+      canonicalEnd: canonicalCursor + canonicalText.length,
+    });
+    return canonicalCursor + canonicalText.length;
+  }
+
+  if ($isElementNode(node)) {
+    return node.getChildren().reduce(
+      (cursor, child) => collectCanonicalLeafSegments(child, segments, cursor),
+      canonicalCursor,
+    );
+  }
+
+  return canonicalCursor;
+}
+
+function canonicalBoundaryForNode(
+  node: LexicalNode | null,
+  edge: "start" | "end",
+  segments: readonly CanonicalLeafSegment[],
+): number {
+  if (node === null) {
+    return edge === "start"
+      ? 0
+      : segments[segments.length - 1]?.canonicalEnd ?? 0;
+  }
+
+  if ($isElementNode(node)) {
+    const child = edge === "start" ? node.getFirstChild() : node.getLastChild();
+    return canonicalBoundaryForNode(child, edge, segments);
+  }
+
+  const segment = segments.find((entry) => entry.nodeKey === node.getKey());
+  if (segment === undefined) {
+    return edge === "start"
+      ? 0
+      : segments[segments.length - 1]?.canonicalEnd ?? 0;
+  }
+
+  return edge === "start" ? segment.canonicalStart : segment.canonicalEnd;
+}
+
+function canonicalIndexFromSelectionPoint(
+  selectionPoint: SelectionPointDescriptor,
+  segments: readonly CanonicalLeafSegment[],
+): number {
+  const node = $getNodeByKey(selectionPoint.key);
+  if (node === null) {
+    return 0;
+  }
+
+  if (selectionPoint.type === "text" && ($isTextNode(node) || $isMentionNode(node))) {
+    const segment = segments.find((entry) => entry.nodeKey === node.getKey());
+    if (segment === undefined) {
+      return 0;
+    }
+
+    if ($isMentionNode(node)) {
+      return selectionPoint.offset <= 0
+        ? segment.canonicalStart
+        : segment.canonicalEnd;
+    }
+
+    const offset = Math.max(
+      0,
+      Math.min(selectionPoint.offset, node.getTextContentSize()),
+    );
+    return segment.canonicalStart + offset;
+  }
+
+  if (selectionPoint.type === "element" && $isElementNode(node)) {
+    const children = node.getChildren();
+    if (children.length === 0) {
+      return canonicalBoundaryForNode(node, "start", segments);
+    }
+    if (selectionPoint.offset <= 0) {
+      return canonicalBoundaryForNode(children[0], "start", segments);
+    }
+    if (selectionPoint.offset >= children.length) {
+      return canonicalBoundaryForNode(
+        children[children.length - 1],
+        "end",
+        segments,
+      );
+    }
+    return canonicalBoundaryForNode(children[selectionPoint.offset], "start", segments);
+  }
+
+  return 0;
+}
+
+function getCanonicalSelectionRangeFromPoints(
+  anchorPoint: SelectionPointDescriptor,
+  focusPoint: SelectionPointDescriptor,
+): CanonicalSelectionRange | null {
+  const segments: CanonicalLeafSegment[] = [];
+  let cursor = 0;
+  for (const child of $getRoot().getChildren()) {
+    cursor = collectCanonicalLeafSegments(child, segments, cursor);
+  }
+
+  const start = canonicalIndexFromSelectionPoint(anchorPoint, segments);
+  const end = canonicalIndexFromSelectionPoint(focusPoint, segments);
+  return {
+    start: Math.min(start, end),
+    end: Math.max(start, end),
+    canonicalText: segments.map((segment) => segment.canonicalText).join(""),
+  };
+}
+
+function exportCanonicalSelection(selection: ReturnType<typeof $getSelection>): string {
+  if (!$isRangeSelection(selection) || selection.isCollapsed()) {
+    return "";
+  }
+
+  const range = getCanonicalSelectionRangeFromPoints(
+    selection.anchor,
+    selection.focus,
+  );
+  if (range === null) {
+    return "";
+  }
+
+  return range.canonicalText.slice(range.start, range.end);
+}
+
+interface CanonicalEditingPluginProps {
+  readonly options: readonly MediaMentionOption[];
+  readonly diagnostics: readonly PromptReferenceDiagnostic[];
+}
+
+function clipboardDataFromEvent(
+  event: ClipboardEvent | InputEvent | KeyboardEvent | null,
+): DataTransfer | null {
+  if (event === null || !("clipboardData" in event)) {
+    return null;
+  }
+  return event.clipboardData;
+}
+
+function CanonicalEditingPlugin({
+  options,
+  diagnostics,
+}: CanonicalEditingPluginProps) {
+  const [editor] = useLexicalComposerContext();
+
+  useEffect(
+    () =>
+      mergeRegister(
+        editor.registerCommand(
+          COPY_COMMAND,
+          (event) => {
+            const clipboardData = clipboardDataFromEvent(event);
+            const canonicalSelection = exportCanonicalSelection($getSelection());
+            if (clipboardData === null || canonicalSelection.length === 0) {
+              return false;
+            }
+
+            event?.preventDefault();
+            clipboardData.setData("text/plain", canonicalSelection);
+            return true;
+          },
+          COMMAND_PRIORITY_HIGH,
+        ),
+        editor.registerCommand(
+          PASTE_COMMAND,
+          (event) => {
+            const clipboardData = clipboardDataFromEvent(event);
+            const selection = $getSelection();
+            if (clipboardData === null || !$isRangeSelection(selection)) {
+              return false;
+            }
+
+            const canonicalText = clipboardData.getData("text/plain");
+            if (canonicalText.length === 0) {
+              return false;
+            }
+
+            event.preventDefault();
+            selection.insertNodes(
+              buildCanonicalPromptNodes(canonicalText, options, diagnostics),
+            );
+            return true;
+          },
+          COMMAND_PRIORITY_HIGH,
+        ),
+        editor.registerCommand(
+          KEY_BACKSPACE_COMMAND,
+          (event) => {
+            const handled = removeMentionAtCollapsedSelection("backward");
+            if (handled) {
+              event?.preventDefault();
+            }
+            return handled;
+          },
+          COMMAND_PRIORITY_HIGH,
+        ),
+        editor.registerCommand(
+          KEY_DELETE_COMMAND,
+          (event) => {
+            const handled = removeMentionAtCollapsedSelection("forward");
+            if (handled) {
+              event?.preventDefault();
+            }
+            return handled;
+          },
+          COMMAND_PRIORITY_HIGH,
+        ),
+      ),
+    [diagnostics, editor, options],
   );
 
-  if (tokens.length === 0) {
-    return null;
-  }
-
-  const token = direction === "backward" ? tokens[tokens.length - 1] : tokens[0];
-  const before = prompt.slice(0, token.start);
-  const after = prompt.slice(token.end);
-
-  if (
-    (direction === "backward" && after.trim().length > 0) ||
-    (direction === "forward" && before.trim().length > 0)
-  ) {
-    return null;
-  }
-
-  return `${before}${after}`.replace(/^\s+/, "").replace(/\s{2,}/g, " ");
+  return null;
 }
 
 export function MediaMentionEditor({
@@ -380,8 +791,12 @@ export function MediaMentionEditor({
   onOpenReference,
 }: MediaMentionEditorProps) {
   const helpId = useId();
-  const menuId = useId();
+  const menuAnnouncementId = useId();
+  const activeAnnouncementId = useId();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuAnnouncement, setMenuAnnouncement] = useState("");
+  const [activeOptionAnnouncement, setActiveOptionAnnouncement] = useState("");
+  const [activeDescendantId, setActiveDescendantId] = useState<string | undefined>();
   const [displayValue, setDisplayValue] = useState(value);
   const localValueRef = useRef(value);
   const undoStackRef = useRef<string[]>([]);
@@ -450,25 +865,6 @@ export function MediaMentionEditor({
     onChange(nextValue);
   }, [onChange]);
 
-  const handleClipboardCapture = useCallback(
-    (event: ClipboardEvent<HTMLDivElement>) => {
-      if (event.type === "copy") {
-        event.preventDefault();
-        event.clipboardData.setData("text/plain", localValueRef.current);
-        return;
-      }
-
-      const pastedText = event.clipboardData.getData("text/plain");
-      if (!pastedText) {
-        return;
-      }
-
-      event.preventDefault();
-      applyNextValue(`${localValueRef.current}${pastedText}`);
-    },
-    [applyNextValue],
-  );
-
   const handleEditorEventCapture = useCallback(
     (event: ReactMouseEvent<HTMLDivElement> | ReactKeyboardEvent<HTMLDivElement>) => {
       const target = event.target;
@@ -490,15 +886,6 @@ export function MediaMentionEditor({
           handleRedo();
           return;
         }
-        if (lowerKey === "backspace" || lowerKey === "delete") {
-          const direction = lowerKey === "backspace" ? "backward" : "forward";
-          const nextValue = removeEdgeMentionToken(localValueRef.current, direction);
-          if (nextValue !== null) {
-            event.preventDefault();
-            applyNextValue(nextValue);
-            return;
-          }
-        }
       }
 
       const mentionElement = target.closest(
@@ -519,7 +906,19 @@ export function MediaMentionEditor({
       event.preventDefault();
       onOpenReference(targetFromElement(mentionElement), event);
     },
-    [applyNextValue, handleRedo, handleUndo, onOpenReference],
+    [handleRedo, handleUndo, onOpenReference],
+  );
+
+  const handleMenuAnnouncementChange = useCallback((message: string) => {
+    setMenuAnnouncement(message);
+  }, []);
+
+  const handleActiveOptionChange = useCallback(
+    (state: { id?: string; message?: string }) => {
+      setActiveDescendantId(state.id);
+      setActiveOptionAnnouncement(state.message ?? "");
+    },
+    [],
   );
 
   return (
@@ -528,16 +927,14 @@ export function MediaMentionEditor({
         <div
           className="rounded-lg border border-border bg-background-elevated p-3"
           onClickCapture={handleEditorEventCapture}
-          onCopyCapture={handleClipboardCapture}
-          onKeyDownCapture={handleEditorEventCapture}
-          onPasteCapture={handleClipboardCapture}
+          onKeyDown={handleEditorEventCapture}
         >
           <PlainTextPlugin
             contentEditable={
               <ContentEditable
+                aria-activedescendant={activeDescendantId}
                 aria-autocomplete="list"
-                aria-controls={menuId}
-                aria-describedby={helpId}
+                aria-describedby={`${helpId} ${menuAnnouncementId} ${activeAnnouncementId}`}
                 aria-expanded={menuOpen}
                 aria-haspopup="listbox"
                 aria-label="Prompt references"
@@ -551,8 +948,13 @@ export function MediaMentionEditor({
           <HistoryPlugin />
           <MentionTypeaheadPlugin
             options={options}
-            menuId={menuId}
+            onActiveOptionChange={handleActiveOptionChange}
+            onMenuAnnouncementChange={handleMenuAnnouncementChange}
             onMenuOpenChange={setMenuOpen}
+          />
+          <CanonicalEditingPlugin
+            options={options}
+            diagnostics={diagnostics}
           />
           <SelectionGuardPlugin selectionKey={displayValue} />
           <EditorBridge
@@ -565,6 +967,12 @@ export function MediaMentionEditor({
       </LexicalComposer>
       <p id={helpId} className="text-xs text-text-muted">
         Type @ to refer to other media
+      </p>
+      <p id={menuAnnouncementId} className="sr-only" aria-live="polite">
+        {menuAnnouncement}
+      </p>
+      <p id={activeAnnouncementId} className="sr-only" aria-live="polite">
+        {activeOptionAnnouncement}
       </p>
     </div>
   );
