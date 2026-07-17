@@ -56,6 +56,9 @@ export async function placeGeneratedAssetOnTimeline(
   store: GeneratedAssetPlacementStore,
   input: PlaceGeneratedAssetInput,
 ): Promise<PlaceGeneratedAssetResult> {
+  if ([input.mediaId, input.providerJobId, input.idempotencyKey].some((value) => typeof value === "string" && /^(?:blob:|local:|file:)/i.test(value))) {
+    return { success: false, placed: false, trackId: "", clipId: "", error: { code: "ACTION_FAILED", message: "generation-local-url-forbidden: local URL cannot cross a durable timeline boundary" } };
+  }
   const policy = input.policy ?? "create-linked-clip";
   const idempotencyKey =
     input.idempotencyKey ??

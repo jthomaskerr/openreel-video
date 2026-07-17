@@ -186,7 +186,7 @@ export class GenerationOrchestrator {
     }
     const idempotencyKey = `generation:${job.id}:finalization:${job.providerJobId}`;
     let claim: Awaited<ReturnType<GenerationJobRepository["claimFinalization"]>>;
-    try { claim = await this.options.repository.claimFinalization({ jobId: job.id, providerJobId: job.providerJobId, outputIdentity: JSON.stringify(durableOutputIdentity(output)), idempotencyKey }); }
+    try { claim = await this.options.repository.claimFinalization({ jobId: job.id, providerInstanceId: job.providerInstanceId, providerJobId: job.providerJobId, outputIdentity: JSON.stringify(durableOutputIdentity(output)), idempotencyKey }); }
     catch (cause) { return this.options.repository.update(job.id, (current) => ({ ...current, status: "needs-attention", error: stableError(cause instanceof Error ? cause.message : "generation-finalization-claim-failed"), updatedAt: this.clock() })); }
     if (!claim.acquired && claim.claim.state === "claimed") return job;
     if (!claim.acquired && claim.claim.state === "completed") return this.options.repository.update(job.id, (current) => ({ ...current, status: "succeeded", updatedAt: this.clock() }));
