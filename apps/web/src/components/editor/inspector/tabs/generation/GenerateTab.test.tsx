@@ -33,6 +33,16 @@ const isRecoveryAction = (value: string): value is RecoveryAction =>
   ].includes(value);
 
 const model = { id: "model-1", label: "WaveSpeed model", provider: "WaveSpeed" };
+const isRecoveryAction = (value: string): value is RecoveryAction =>
+  [
+    "regenerate",
+    "variation",
+    "retry-provider",
+    "retry-finalization",
+    "retry-placement",
+    "reconcile-placement",
+    "cancel",
+  ].includes(value);
 
 
 const mockedProjectStore = vi.hoisted(() => ({
@@ -658,7 +668,7 @@ describe("GenerateTab", () => {
           projectId="project-1"
           models={[model]}
           prompt="Generate this"
-          job={generationJob(error, { status, placementFailure })}
+          job={job}
           onEdit={onEdit}
           onRevalidate={onRevalidate}
           onRetryItem={onRetryItem}
@@ -934,7 +944,7 @@ describe("GenerateTab", () => {
   it("does not treat provider output URLs as durable finalization identity", () => {
     const error = generationError("finalization-checkpoint-failed");
     const unsafeJob = {
-      ...generationJob(error, { status: "needs-attention" }),
+      ...generationJob(error, { status: "completed" }),
       output: undefined,
       outputUrls: ["provider-output-1"],
     } satisfies GenerationJob;

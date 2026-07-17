@@ -811,8 +811,9 @@ export function GenerateActionsSection(props: {
     : undefined;
   const cancelAllowed =
     props.job &&
+    Boolean(props.onRecoveryAction) &&
     errorRecovery?.category !== "cancellation" &&
-    ["queued", "submitting", "running", "needs-attention"].includes(props.job.status);
+    allowedRecoveryActionsForJob(props.job).includes("cancel");
   return (
     <div
       data-testid="generation-actions"
