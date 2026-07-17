@@ -310,3 +310,65 @@ test("placement retry rejects before output and prior checkpoints exist", async 
   assert.equal(saved?.output, undefined);
   assert.equal(saved?.checkpoints["placement-applied"], undefined);
 });
+
+test("placement retry releases its claim when the pending checkpoint update fails", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-guard-"));
+  const repo = new FileGenerationJobRepository(dir);
+  await repo.create(makeJob("job-placement-update-fails", "create-linked-clip"));
+  const first = createPorts({ jobId: "job-placement-update-fails", placement: "fail" });
+  await new GenerationFinalizer(repo, first.ports).finalize("job-placement-update-fails", { provider: "wavespeed", providerJobId: "provider-job-1" });
+
+  const originalUpdate = repo.update.bind(repo);
+  let failed = true;
+  repo.update = async (...args) => {
+    if (failed) {
+      failed = false;
+      throw new Error("pending update unavailable");
+    }
+    return originalUpdate(...args);
+  };
+  const result = await new GenerationFinalizer(repo, createPorts({ jobId: "job-placement-update-fails" }).ports).retryPlacement("job-placement-update-fails");
+  assert.equal(result.placement?.status, "failed");
+  assert.equal((await repo.getPlacementClaim("job-placement-update-fails"))?.state, "failed");
+});
+
+test("placement completion persistence failure is repaired with the same idempotency key", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-reconcile-"));
+  const repo = new FileGenerationJobRepository(dir);
+  await repo.create(makeJob("job-placement-reconcile", "create-linked-clip"));
+  const first = createPorts({ jobId: "job-placement-reconcile", placement: "fail" });
+  await new GenerationFinalizer(repo, first.ports).finalize("job-placement-reconcile", { provider: "wavespeed", providerJobId: "provider-job-1" });
+
+  const originalComplete = repo.completePlacement.bind(repo);
+  let completionWriteFailed = true;
+  repo.completePlacement = async (...args) => {
+    if (completionWriteFailed) {
+      completionWriteFailed = false;
+      throw new Error("claim completion unavailable");
+    }
+    return originalComplete(...args);
+  };
+  const retryPorts = createPorts({ jobId: "job-placement-reconcile" });
+  const retryFinalizer = new GenerationFinalizer(repo, retryPorts.ports);
+  await assert.rejects(retryFinalizer.retryPlacement("job-placement-reconcile"), /claim completion unavailable/);
+  const stranded = await repo.getPlacementClaim("job-placement-reconcile");
+  assert.equal(stranded?.state, "claimed");
+
+  await retryFinalizer.repairPlacement("job-placement-reconcile");
+  const reconciled = await retryFinalizer.retryPlacement("job-placement-reconcile");
+  assert.equal(reconciled.placement?.status, "applied");
+  assert.equal(retryPorts.calls.placement, 2);
+});
+
+test("a competing placement retry returns the durable job without a spin wait", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-pending-"));
+  const repo = new FileGenerationJobRepository(dir);
+  await repo.create(makeJob("job-placement-pending", "create-linked-clip"));
+  const first = createPorts({ jobId: "job-placement-pending", placement: "fail" });
+  await new GenerationFinalizer(repo, first.ports).finalize("job-placement-pending", { provider: "wavespeed", providerJobId: "provider-job-1" });
+  const claim = await repo.claimPlacement("job-placement-pending", "generation:job-placement-pending:placement-applied");
+  assert.equal(claim.acquired, true);
+  const result = await new GenerationFinalizer(repo, createPorts({ jobId: "job-placement-pending" }).ports).retryPlacement("job-placement-pending");
+  assert.equal(result.status, "succeeded");
+  await repo.repairPlacement("job-placement-pending", claim.claim.ownerToken);
+});

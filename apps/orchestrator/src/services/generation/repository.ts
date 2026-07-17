@@ -55,6 +55,7 @@ export interface GenerationJobRepository {
   releaseFinalization(jobId: string, ownerToken: string): Promise<void>;
   claimPlacement(jobId: string, idempotencyKey: string): Promise<{ claim: PlacementClaim; acquired: boolean }>;
   getPlacementClaim(jobId: string): Promise<PlacementClaim | undefined>;
+  repairPlacement(jobId: string, ownerToken: string): Promise<PlacementClaim>;
   completePlacement(jobId: string, idempotencyKey: string, ownerToken: string): Promise<void>;
   releasePlacement(jobId: string, ownerToken: string): Promise<void>;
 }
@@ -291,6 +292,17 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
   }
 
   async getPlacementClaim(jobId: string) { return this.readPlacementClaim(this.placementFile(jobId)); }
+
+  async repairPlacement(jobId: string, ownerToken: string) {
+    return this.withFileLock(`placement-${jobId}`, async () => {
+      const path = this.placementFile(jobId);
+      const claim = await this.readPlacementClaim(path);
+      if (!claim || claim.state !== "claimed" || claim.ownerToken !== ownerToken) throw new GenerationRepositoryError("generation-placement-claim-fenced");
+      const repaired = { ...claim, state: "failed" as const };
+      await this.atomic(path, repaired);
+      return repaired;
+    });
+  }
 
   async completePlacement(jobId: string, idempotencyKey: string, ownerToken: string) {
     return this.withFileLock(`placement-${jobId}`, async () => {
