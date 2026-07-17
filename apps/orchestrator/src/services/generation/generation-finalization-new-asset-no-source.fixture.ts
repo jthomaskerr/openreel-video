@@ -44,7 +44,7 @@ test("new-asset with no source finalizes once without shot or placement work", a
     routes: [{ identity: route, schemaFingerprint: "schema", clientSchemaFingerprint: "schema", serverSchemaFingerprint: "schema", clientAcceptance: true, serverAcceptance: true, configurationVersion: "v2" }],
     releaseEnabled: true,
     owner: () => true,
-    finalizer: { finalize: async () => {} },
+    finalizer: { finalize: async () => {}, reconcilePlacement: async () => { throw new Error("generation-placement-reconciliation-unavailable"); } },
     requestBoundary: { validate: () => {} },
     clock: () => 2,
   });

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { GenerationJob } from "@openreel/music-video-domain/generation";
 import { GenerationFinalizer, type FinalizationPorts } from "./finalization.js";
-import { FileGenerationJobRepository } from "./repository.js";
+import { isPlacementReconciliationCandidate } from "./recovery.js";
+import { FileGenerationJobRepository, GenerationRepositoryError } from "./repository.js";
 
 const makeJob = (id = "job-1", placementPolicy: GenerationJob["context"]["placementPolicy"] = "none"): GenerationJob => ({
   schemaVersion: 2,
@@ -119,7 +120,7 @@ function createPorts(options?: {
         assert.equal(output.mediaId, "asset-1");
         assert.equal(output.versionId, "version-1");
         assert.equal(idempotencyKey, `generation:${jobId}:placement-applied`);
-        if (placementOutcome === "fail") return { outcome: "not-applied", error: { code: "generation-placement-failed", message: "timeline offline", retryable: true } };
+        if (placementOutcome === "fail") return { outcome: "not-applied", replaySafe: true, error: { code: "generation-placement-failed", message: "timeline offline", retryable: true } };
         if (placementOutcome === "throw") throw new Error("timeline response lost");
         return { outcome: "applied" };
       },
@@ -130,6 +131,31 @@ function createPorts(options?: {
   };
 
   return { log, ports, calls };
+}
+
+function createManualPlacementLeaseScheduler() {
+  let heartbeat: (() => Promise<void>) | undefined;
+  let active = false;
+  let stops = 0;
+  return {
+    scheduler: {
+      start(input: { tick: () => Promise<void> }) {
+        heartbeat = input.tick;
+        active = true;
+        return {
+          stop: async () => {
+            active = false;
+            stops += 1;
+          },
+        };
+      },
+    },
+    tick: async () => {
+      if (active) await heartbeat?.();
+    },
+    isActive: () => active,
+    stopCount: () => stops,
+  };
 }
 
 test("concurrent finalize calls share one run and do not resubmit work", async () => {
@@ -357,10 +383,45 @@ test("placement completion persistence failure is repaired with the same idempot
   const retryPorts = createPorts({ jobId: "job-placement-reconcile" });
   const retryFinalizer = new GenerationFinalizer(repo, retryPorts.ports);
   await assert.rejects(retryFinalizer.retryPlacement("job-placement-reconcile"), /claim completion unavailable/);
-  await retryFinalizer.reconcilePlacement("job-placement-reconcile");
-  const reconciled = await retryFinalizer.retryPlacement("job-placement-reconcile");
+  const reconciled = await new GenerationFinalizer(new FileGenerationJobRepository(dir), retryPorts.ports).retryPlacement("job-placement-reconcile");
   assert.equal(reconciled.placement?.status, "applied");
   assert.equal(retryPorts.calls.placement, 1);
+});
+
+test("outer finalization completion failure repairs from the terminal placement projection", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-finalization-completion-repair-"));
+  const repo = new FileGenerationJobRepository(dir);
+  const jobId = "job-finalization-completion-repair";
+  await repo.create(makeJob(jobId, "create-linked-clip"));
+  const completeFinalization = repo.completeFinalization.bind(repo);
+  let failCompletion = true;
+  repo.completeFinalization = async (...args) => {
+    if (failCompletion) {
+      failCompletion = false;
+      throw new Error("finalization completion unavailable");
+    }
+    return completeFinalization(...args);
+  };
+
+  const result = await new GenerationFinalizer(repo, createPorts({ jobId }).ports)
+    .finalize(jobId, { provider: "wavespeed", providerJobId: "provider-job-1" });
+
+  assert.equal(result.status, "succeeded");
+  assert.equal(result.placement?.status, "applied");
+  assert.equal(result.checkpoints["placement-applied"]?.status, "completed");
+  const completedClaim = await repo.getFinalizationClaim(jobId);
+  assert.equal(completedClaim?.state, "completed");
+  assert.ok(completedClaim);
+
+  await writeFile(join(dir, `finalization-${jobId}.json`), JSON.stringify({ ...completedClaim, state: "claimed" }));
+  const restartedRepository = new FileGenerationJobRepository(dir);
+  const restartedPorts = createPorts({ jobId });
+  const restarted = await new GenerationFinalizer(restartedRepository, restartedPorts.ports)
+    .finalize(jobId, { provider: "wavespeed", providerJobId: "provider-job-1" });
+  assert.equal(restarted.status, "succeeded");
+  assert.equal(restarted.placement?.status, "applied");
+  assert.equal(restartedPorts.calls.placement, 0);
+  assert.equal((await restartedRepository.getFinalizationClaim(jobId))?.state, "completed");
 });
 
 test("public placement reconciliation requires no repository token", async () => {
@@ -422,6 +483,308 @@ test("live placement owner plus service reconciliation remains pending without l
   assert.equal(live.calls.placement, 1);
 });
 
+test("placement heartbeat keeps a live external call owned beyond its original lease", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-live-heartbeat-"));
+  let now = 100;
+  const repository = new FileGenerationJobRepository(dir, 30, () => now);
+  await repository.create(makeJob("job-placement-live-heartbeat", "create-linked-clip"));
+  const failed = createPorts({ jobId: "job-placement-live-heartbeat", placement: "fail" });
+  await new GenerationFinalizer(repository, failed.ports).finalize("job-placement-live-heartbeat", { provider: "wavespeed", providerJobId: "provider-job-1" });
+
+  let entered!: () => void;
+  let release!: () => void;
+  const enteredPromise = new Promise<void>((resolve) => { entered = resolve; });
+  const releasePromise = new Promise<void>((resolve) => { release = resolve; });
+  const live = createPorts({ jobId: "job-placement-live-heartbeat" });
+  const heartbeat = createManualPlacementLeaseScheduler();
+  live.ports.placementLeaseScheduler = heartbeat.scheduler;
+  live.ports.placement!.place = async () => {
+    live.calls.placement += 1;
+    entered();
+    await releasePromise;
+    return { outcome: "applied" };
+  };
+  const liveRun = new GenerationFinalizer(repository, live.ports).retryPlacement("job-placement-live-heartbeat");
+  await enteredPromise;
+
+  const initialClaim = await repository.getPlacementClaim("job-placement-live-heartbeat");
+  assert.equal(initialClaim?.phase, "invocation-armed");
+  assert.equal(typeof initialClaim?.leaseExpiresAt, "number");
+  const originalLeaseExpiry = initialClaim!.leaseExpiresAt;
+  now = originalLeaseExpiry - 5;
+  await heartbeat.tick();
+  now = originalLeaseExpiry + 1;
+
+  const recoveryRepository = new FileGenerationJobRepository(dir, 30, () => now);
+  const firstRecovery = await recoveryRepository.recoverPlacement("job-placement-live-heartbeat", "generation:job-placement-live-heartbeat:placement-applied");
+  assert.equal(firstRecovery.kind, "owner-live");
+  assert.equal(firstRecovery.claim.ownerToken, initialClaim?.ownerToken);
+  now = originalLeaseExpiry + 20;
+  await heartbeat.tick();
+  now = originalLeaseExpiry + 31;
+  const secondRecovery = await recoveryRepository.recoverPlacement("job-placement-live-heartbeat", "generation:job-placement-live-heartbeat:placement-applied");
+  assert.equal(secondRecovery.kind, "owner-live");
+  assert.equal(secondRecovery.claim.ownerToken, initialClaim?.ownerToken);
+  let reconciliationCalls = 0;
+  const observer = createPorts({ jobId: "job-placement-live-heartbeat" });
+  observer.ports.placement!.reconcile = async () => {
+    reconciliationCalls += 1;
+    return { outcome: "not-applied" };
+  };
+  const pending = await new GenerationFinalizer(recoveryRepository, observer.ports).reconcilePlacement("job-placement-live-heartbeat");
+  assert.equal(pending.placement?.status, "pending");
+  assert.equal(reconciliationCalls, 0);
+
+  release();
+  const completed = await liveRun;
+  assert.equal(completed.placement?.status, "applied");
+  assert.equal(live.calls.placement, 1);
+  assert.equal((await recoveryRepository.getPlacementClaim("job-placement-live-heartbeat"))?.state, "completed");
+  assert.equal(heartbeat.isActive(), false);
+  assert.equal(heartbeat.stopCount(), 1);
+  const completedLease = (await recoveryRepository.getPlacementClaim("job-placement-live-heartbeat"))?.leaseExpiresAt;
+  now += 100;
+  await heartbeat.tick();
+  assert.equal((await recoveryRepository.getPlacementClaim("job-placement-live-heartbeat"))?.leaseExpiresAt, completedLease);
+});
+
+test("fresh finalizer reconciliation safely retries a stale owner that crashed before placement invocation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-restart-before-invoke-"));
+  let now = 100;
+  const firstRepository = new FileGenerationJobRepository(dir, 10, () => now);
+  await firstRepository.create(makeJob("job-placement-restart-before-invoke", "create-linked-clip"));
+  const failed = createPorts({ jobId: "job-placement-restart-before-invoke", placement: "fail" });
+  await new GenerationFinalizer(firstRepository, failed.ports).finalize("job-placement-restart-before-invoke", { provider: "wavespeed", providerJobId: "provider-job-1" });
+  const completedFinalization = await firstRepository.getFinalizationClaim("job-placement-restart-before-invoke");
+  assert.ok(completedFinalization);
+  await writeFile(join(dir, "finalization-job-placement-restart-before-invoke.json"), JSON.stringify({ ...completedFinalization, state: "claimed" }));
+  const abandoned = await firstRepository.claimPlacement("job-placement-restart-before-invoke", "generation:job-placement-restart-before-invoke:placement-applied");
+  assert.equal(abandoned.claim.phase, "reserved");
+
+  now = 111;
+  const restartedRepository = new FileGenerationJobRepository(dir, 10, () => now);
+  const restartedPorts = createPorts({ jobId: "job-placement-restart-before-invoke" });
+  const result = await new GenerationFinalizer(restartedRepository, restartedPorts.ports).reconcilePlacement("job-placement-restart-before-invoke");
+  assert.equal(result.placement?.status, "applied");
+  assert.equal(restartedPorts.calls.placement, 1);
+  const durable = await new FileGenerationJobRepository(dir, 10, () => now).getPlacementClaim("job-placement-restart-before-invoke");
+  assert.equal(durable?.state, "completed");
+  assert.notEqual(durable?.ownerToken, abandoned.claim.ownerToken);
+  assert.equal((await restartedRepository.getFinalizationClaim("job-placement-restart-before-invoke"))?.state, "completed");
+});
+
+test("fresh finalizer reconciles a stale invoked placement by stable key and durably stores every outcome", async () => {
+  const cases = [
+    { outcome: "applied" as const, claimState: "completed" as const, jobStatus: "succeeded" as const, placementStatus: "applied" as const },
+    { outcome: "not-applied" as const, claimState: "needs-attention" as const, jobStatus: "needs-attention" as const, placementStatus: "failed" as const },
+    { outcome: "unknown" as const, claimState: "needs-attention" as const, jobStatus: "needs-attention" as const, placementStatus: "failed" as const },
+  ];
+
+  for (const testCase of cases) {
+    const jobId = `job-placement-restart-${testCase.outcome}`;
+    const dir = await mkdtemp(join(tmpdir(), `generation-placement-restart-${testCase.outcome}-`));
+    let now = 100;
+    const firstRepository = new FileGenerationJobRepository(dir, 10, () => now);
+    await firstRepository.create(makeJob(jobId, "create-linked-clip"));
+    const failed = createPorts({ jobId, placement: "fail" });
+    await new GenerationFinalizer(firstRepository, failed.ports).finalize(jobId, { provider: "wavespeed", providerJobId: "provider-job-1" });
+    const abandoned = await firstRepository.claimPlacement(jobId, `generation:${jobId}:placement-applied`);
+    await firstRepository.markPlacementInvocationStarted(jobId, `generation:${jobId}:placement-applied`, abandoned.claim.ownerToken);
+    now = 111;
+
+    const reconciliationKeys: string[] = [];
+    let reconciliationCalls = 0;
+    const restartedPorts = createPorts({ jobId });
+    restartedPorts.ports.placement!.reconcile = async ({ idempotencyKey }) => {
+      reconciliationCalls += 1;
+      reconciliationKeys.push(idempotencyKey);
+      return { outcome: testCase.outcome };
+    };
+    const restartedRepository = new FileGenerationJobRepository(dir, 10, () => now);
+    const result = await new GenerationFinalizer(restartedRepository, restartedPorts.ports).reconcilePlacement(jobId);
+    assert.equal(restartedPorts.calls.placement, 0);
+    assert.equal(reconciliationCalls, 1);
+    assert.deepEqual(reconciliationKeys, [`generation:${jobId}:placement-applied`]);
+    assert.equal(result.status, testCase.jobStatus);
+    assert.equal(result.placement?.status, testCase.placementStatus);
+
+    const durableRepository = new FileGenerationJobRepository(dir, 10, () => now);
+    const durableClaim = await durableRepository.getPlacementClaim(jobId);
+    assert.equal(durableClaim?.state, testCase.claimState);
+    assert.equal(durableClaim?.outcome, testCase.outcome);
+    assert.notEqual(durableClaim?.ownerToken, abandoned.claim.ownerToken);
+    const durableJob = await durableRepository.get(jobId);
+    assert.equal(durableJob?.status, testCase.jobStatus);
+    assert.equal(durableJob?.placement?.status, testCase.placementStatus);
+    if (testCase.outcome !== "applied") {
+      const replayPorts = createPorts({ jobId });
+      const replay = await new GenerationFinalizer(durableRepository, replayPorts.ports).retryPlacement(jobId);
+      assert.equal(replay.status, "needs-attention");
+      assert.equal(replayPorts.calls.placement, 0);
+    }
+  }
+});
+
+test("legacy pending claims migrate conservatively to reconciliation and never blind replay", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-legacy-"));
+  let now = 100;
+  const firstRepository = new FileGenerationJobRepository(dir, 10, () => now);
+  const jobId = "job-placement-legacy";
+  await firstRepository.create(makeJob(jobId, "create-linked-clip"));
+  const failed = createPorts({ jobId, placement: "fail" });
+  await new GenerationFinalizer(firstRepository, failed.ports).finalize(jobId, { provider: "wavespeed", providerJobId: "provider-job-1" });
+  await writeFile(join(dir, `placement-${jobId}.json`), JSON.stringify({
+    jobId,
+    idempotencyKey: `generation:${jobId}:placement-applied`,
+    state: "claimed",
+    outcome: "pending",
+    ownerToken: "legacy-owner",
+    claimedAt: 100,
+  }));
+  now = 111;
+
+  let reconciliationCalls = 0;
+  const ports = createPorts({ jobId });
+  ports.ports.placement!.reconcile = async ({ idempotencyKey }) => {
+    reconciliationCalls += 1;
+    assert.equal(idempotencyKey, `generation:${jobId}:placement-applied`);
+    return { outcome: "unknown" };
+  };
+  const restartedRepository = new FileGenerationJobRepository(dir, 10, () => now);
+  const result = await new GenerationFinalizer(restartedRepository, ports.ports).retryPlacement(jobId);
+
+  assert.equal(reconciliationCalls, 1);
+  assert.equal(ports.calls.placement, 0);
+  assert.equal(result.status, "needs-attention");
+  const durable = await restartedRepository.getPlacementClaim(jobId);
+  assert.equal(durable?.schemaVersion, 2);
+  assert.equal(durable?.phase, "terminal");
+  assert.equal(durable?.outcome, "unknown");
+});
+
+test("a failed durable invocation arm makes zero external placement calls", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-arm-failure-"));
+  const repository = new FileGenerationJobRepository(dir);
+  const jobId = "job-placement-arm-failure";
+  await repository.create(makeJob(jobId, "create-linked-clip"));
+  const failed = createPorts({ jobId, placement: "fail" });
+  await new GenerationFinalizer(repository, failed.ports).finalize(jobId, { provider: "wavespeed", providerJobId: "provider-job-1" });
+  repository.markPlacementInvocationStarted = async () => {
+    throw new GenerationRepositoryError("generation-placement-claim-fenced");
+  };
+  const ports = createPorts({ jobId });
+
+  const result = await new GenerationFinalizer(repository, ports.ports).retryPlacement(jobId);
+
+  assert.equal(ports.calls.placement, 0);
+  assert.notEqual(result.status, "failed");
+  assert.equal(result.placement?.status, "pending");
+});
+
+test("a delayed original owner cannot downgrade recovery whether it returns before or after recovery commits", async () => {
+  for (const recoveryFirst of [false, true]) {
+    const dir = await mkdtemp(join(tmpdir(), `generation-placement-owner-loss-${recoveryFirst ? "recovery" : "owner"}-`));
+    let now = 100;
+    const ownerRepository = new FileGenerationJobRepository(dir, 10, () => now);
+    const jobId = `job-placement-owner-loss-${recoveryFirst ? "recovery" : "owner"}`;
+    await ownerRepository.create(makeJob(jobId, "create-linked-clip"));
+    let entered!: () => void;
+    let release!: () => void;
+    const enteredPromise = new Promise<void>((resolve) => { entered = resolve; });
+    const releasePromise = new Promise<void>((resolve) => { release = resolve; });
+    const ownerPorts = createPorts({ jobId });
+    const heartbeat = createManualPlacementLeaseScheduler();
+    ownerPorts.ports.placementLeaseScheduler = heartbeat.scheduler;
+    ownerPorts.ports.placement!.place = async () => {
+      ownerPorts.calls.placement += 1;
+      entered();
+      await releasePromise;
+      return { outcome: "applied" };
+    };
+    const ownerRun = new GenerationFinalizer(ownerRepository, ownerPorts.ports).finalize(jobId, { provider: "wavespeed", providerJobId: "provider-job-1" });
+    await enteredPromise;
+    now = 111;
+
+    const recoveryRepository = new FileGenerationJobRepository(dir, 10, () => now);
+    let reconciliationCalls = 0;
+    const recoveryPorts = createPorts({ jobId });
+    recoveryPorts.ports.placement!.reconcile = async () => {
+      reconciliationCalls += 1;
+      return { outcome: "applied" };
+    };
+    const recover = () => new GenerationFinalizer(recoveryRepository, recoveryPorts.ports).reconcilePlacement(jobId);
+
+    let recovered: GenerationJob;
+    if (recoveryFirst) {
+      recovered = await recover();
+      release();
+      await ownerRun;
+    } else {
+      release();
+      const ownerResult = await ownerRun;
+      assert.notEqual(ownerResult.status, "failed");
+      recovered = await recover();
+    }
+
+    assert.equal(recovered.status, "succeeded");
+    assert.equal(reconciliationCalls, 1);
+    assert.equal(ownerPorts.calls.placement, 1);
+    const durableJob = await recoveryRepository.get(jobId);
+    const durableClaim = await recoveryRepository.getPlacementClaim(jobId);
+    assert.equal(durableJob?.status, "succeeded");
+    assert.equal(durableJob?.placement?.status, "applied");
+    assert.equal(durableClaim?.state, "completed");
+    assert.equal(durableClaim?.outcome, "applied");
+  }
+});
+
+test("a stale terminal projection cannot downgrade a newer applied reconciliation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-projection-race-"));
+  const ownerRepository = new FileGenerationJobRepository(dir);
+  const jobId = "job-placement-projection-race";
+  await ownerRepository.create(makeJob(jobId, "create-linked-clip"));
+  await new GenerationFinalizer(ownerRepository, createPorts({ jobId, placement: "fail" }).ports)
+    .finalize(jobId, { provider: "wavespeed", providerJobId: "provider-job-1" });
+
+  let projectionEntered!: () => void;
+  let releaseProjection!: () => void;
+  const projectionEnteredPromise = new Promise<void>((resolve) => { projectionEntered = resolve; });
+  const releaseProjectionPromise = new Promise<void>((resolve) => { releaseProjection = resolve; });
+  const compareAndSetCheckpoint = ownerRepository.compareAndSetCheckpoint.bind(ownerRepository);
+  let pauseUnknownProjection = true;
+  ownerRepository.compareAndSetCheckpoint = async (id, checkpoint, state) => {
+    if (pauseUnknownProjection && checkpoint === "placement-applied" && state.status === "failed") {
+      pauseUnknownProjection = false;
+      projectionEntered();
+      await releaseProjectionPromise;
+    }
+    return compareAndSetCheckpoint(id, checkpoint, state);
+  };
+  const ownerPorts = createPorts({ jobId });
+  ownerPorts.ports.placement!.place = async () => {
+    ownerPorts.calls.placement += 1;
+    return { outcome: "unknown" };
+  };
+  const ownerRun = new GenerationFinalizer(ownerRepository, ownerPorts.ports).retryPlacement(jobId);
+  await projectionEnteredPromise;
+
+  const recoveryRepository = new FileGenerationJobRepository(dir);
+  const recoveryPorts = createPorts({ jobId, reconcile: "applied" });
+  const recovered = await new GenerationFinalizer(recoveryRepository, recoveryPorts.ports).reconcilePlacement(jobId);
+  releaseProjection();
+  const staleResult = await ownerRun;
+
+  assert.equal(recovered.status, "succeeded");
+  assert.equal(staleResult.status, "succeeded");
+  assert.equal(staleResult.placement?.status, "applied");
+  assert.equal(ownerPorts.calls.placement, 1);
+  const durable = await recoveryRepository.get(jobId);
+  assert.equal(durable?.status, "succeeded");
+  assert.equal(durable?.placement?.status, "applied");
+  assert.equal(durable?.checkpoints["placement-applied"]?.status, "completed");
+  assert.equal((await recoveryRepository.getPlacementClaim(jobId))?.outcome, "applied");
+});
+
 test("main finalization projects pending before the placement port completes", async () => {
   const dir = await mkdtemp(join(tmpdir(), "generation-placement-pending-main-"));
   const repo = new FileGenerationJobRepository(dir);
@@ -476,6 +839,45 @@ test("unknown placement outcome becomes needs-attention and blocks automatic rep
   const stillBlocked = await finalizer.retryPlacement("job-placement-unknown");
   assert.equal(stillBlocked.status, "needs-attention");
   assert.equal(ports.calls.placement, 1);
+});
+
+test("post-invocation not-applied requires explicit replay-safe proof", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-not-applied-unsafe-"));
+  const repo = new FileGenerationJobRepository(dir);
+  const jobId = "job-placement-not-applied-unsafe";
+  await repo.create(makeJob(jobId, "create-linked-clip"));
+  const ports = createPorts({ jobId });
+  ports.ports.placement!.place = async () => {
+    ports.calls.placement += 1;
+    return { outcome: "not-applied", error: { code: "MEDIA_NOT_FOUND", message: "timeline media was unavailable", retryable: true } };
+  };
+
+  const result = await new GenerationFinalizer(repo, ports.ports).finalize(jobId, { provider: "wavespeed", providerJobId: "provider-job-1" });
+
+  assert.equal(result.status, "needs-attention");
+  assert.equal(result.error?.code, "generation-placement-retry-unsafe");
+  assert.equal(result.placement?.status, "failed");
+  assert.equal((await repo.getPlacementClaim(jobId))?.replaySafe, false);
+  assert.equal(ports.calls.placement, 1);
+});
+
+test("adapter-specific unknown errors project a canonical recoverable disposition", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-unknown-canonical-"));
+  const repo = new FileGenerationJobRepository(dir);
+  const jobId = "job-placement-unknown-canonical";
+  await repo.create(makeJob(jobId, "create-linked-clip"));
+  const ports = createPorts({ jobId });
+  ports.ports.placement!.place = async () => ({
+    outcome: "unknown",
+    error: { code: "MEDIA_NOT_FOUND", message: "timeline media was unavailable", retryable: true },
+  });
+
+  const result = await new GenerationFinalizer(repo, ports.ports).finalize(jobId, { provider: "wavespeed", providerJobId: "provider-job-1" });
+
+  assert.equal(result.status, "needs-attention");
+  assert.equal(result.error?.code, "generation-placement-outcome-unknown");
+  assert.equal(result.error?.message, "timeline media was unavailable");
+  assert.equal(isPlacementReconciliationCandidate(result), true);
 });
 
 test("completed placement claim repairs stale job and checkpoint without placing again", async () => {

@@ -12,8 +12,8 @@ import {
   type GenerationJob,
   type GenerationRouteIdentity,
 } from "@openreel/music-video-domain/generation";
-import type { GenerationJobRepository } from "./repository.js";
-import { GenerationPollingController } from "./recovery.js";
+import type { GenerationJobRepository, PlacementClaim } from "./repository.js";
+import { GenerationPollingController, isPlacementReconciliationCandidate } from "./recovery.js";
 
 export interface GenerationProviderPort {
   /** idempotencyKey is the durable logical attempt identity and must be passed to the provider boundary. */
@@ -34,6 +34,7 @@ export interface GenerationProviderStatus {
 
 export interface GenerationFinalizerPort {
   finalize(input: { job: GenerationJob; output: GenerationOutputIdentity; idempotencyKey: string }): Promise<void>;
+  reconcilePlacement(jobId: string): Promise<GenerationJob>;
 }
 
 export interface GenerationRouteManifestEntry { identity: GenerationRouteIdentity; schemaFingerprint: string; clientSchemaFingerprint: string; serverSchemaFingerprint: string; clientAcceptance: boolean; serverAcceptance: boolean; configurationVersion: string }
@@ -70,6 +71,20 @@ function routeKey(route: GenerationRouteIdentity) { return [route.providerInstan
 function routeBaseKey(route: GenerationRouteIdentity) { return [route.providerInstanceId, route.providerModelId, route.requestedMode].join("\u0001"); }
 function completeRoute(route: GenerationRouteIdentity) { return Object.values(route).every((value) => typeof value === "string" && value.trim().length > 0); }
 function stableError(code: string, message = code, retryable = true) { return { code, message, retryable } as const; }
+const PLACEMENT_RECONCILIATION_ERRORS = new Set(["generation-placement-outcome-unknown", "generation-placement-reconciliation-failed", "generation-placement-retry-unsafe"]);
+function hasPlacementReconciliationIntent(job: GenerationJob) {
+  return job.status === "finalizing"
+    && job.context.placementPolicy !== "none"
+    && job.checkpoints["placement-applied"]?.status === "failed"
+    && PLACEMENT_RECONCILIATION_ERRORS.has(job.error?.code ?? "");
+}
+function placementClaimRequiresResume(job: GenerationJob, claim: PlacementClaim) {
+  if (claim.phase !== "terminal") return true;
+  if (claim.outcome === "unknown" || claim.outcome === "not-applied" && claim.replaySafe === false) return true;
+  if (claim.outcome === "applied") return job.checkpoints["placement-applied"]?.status !== "completed" || job.placement?.status !== "applied";
+  if (claim.outcome === "not-applied") return job.checkpoints["placement-applied"]?.status !== "failed" || job.placement?.status !== "failed";
+  return false;
+}
 function outputIdentity(value: GenerationProviderStatus): GenerationOutputIdentity {
   const urls = value.outputUrls;
   const mediaIds = value.outputMediaIds;
@@ -174,6 +189,10 @@ export class GenerationOrchestrator {
   }
 
   private async dispatchFinalization(job: GenerationJob, transientOutput?: GenerationOutputIdentity) {
+    const placementClaim = job.context.placementPolicy === "none" ? undefined : await this.options.repository.getPlacementClaim(job.id);
+    if (hasPlacementReconciliationIntent(job) || placementClaim && placementClaimRequiresResume(job, placementClaim)) {
+      return this.dispatchPlacementReconciliation(job.id);
+    }
     if (!job.providerJobId || !job.outputMediaIds?.length) return this.options.repository.update(job.id, (current) => ({ ...current, status: "needs-attention", error: stableError("generation-output-identity-missing") }));
     let output = transientOutput;
     if (!output) {
@@ -199,6 +218,28 @@ export class GenerationOrchestrator {
     if (!job.providerJobId || !job.outputMediaIds?.length || !["needs-attention", "finalizing"].includes(job.status)) throw new Error("generation-invalid-finalization-retry-state");
     const ready = await this.options.repository.update(job.id, (current) => ({ ...current, status: "finalizing", updatedAt: this.clock() }));
     return this.dispatchFinalization(ready);
+  }
+
+  async reconcilePlacement(input: GenerationJobCommand): Promise<GenerationJob> {
+    const job = await this.requireOwned(input);
+    if (!isPlacementReconciliationCandidate(job)) throw new Error("generation-invalid-placement-reconciliation-state");
+    await this.options.repository.update(job.id, (current) => {
+      if (!isPlacementReconciliationCandidate(current)) throw new Error("generation-invalid-placement-reconciliation-state");
+      return { ...current, status: "finalizing", updatedAt: this.clock() };
+    });
+    return this.dispatchPlacementReconciliation(job.id);
+  }
+
+  private async dispatchPlacementReconciliation(jobId: string): Promise<GenerationJob> {
+    try {
+      return await this.options.finalizer.reconcilePlacement(jobId);
+    } catch (cause) {
+      const latest = await this.options.repository.get(jobId);
+      if (!latest) throw new Error("generation-not-found");
+      if (latest.status !== "finalizing") return latest;
+      const error = { code: "generation-placement-reconciliation-failed", message: cause instanceof Error ? cause.message : "Placement reconciliation failed", retryable: true };
+      return this.options.repository.update(jobId, (current) => current.status !== "finalizing" ? current : ({ ...current, status: "needs-attention", error, updatedAt: this.clock(), checkpoints: { ...current.checkpoints, "placement-applied": { status: "failed", timestamp: this.clock(), error } }, placement: { policy: current.context.placementPolicy, status: "failed", error } }));
+    }
   }
 
   async repairFinalization(input: GenerationJobCommand): Promise<GenerationJob> {

@@ -28,7 +28,7 @@ test("rollback preserves continuation for submitted V2 jobs while blocking new s
     status: async ({ providerJobId }) => ({ providerJobId, status: statuses.get(providerJobId.replace("provider-", "")) ?? "running", outputMediaIds: ["provider-output-1"] }),
     cancel: async () => {},
   };
-  const makeOrchestrator = (releaseEnabled: boolean, finalizer = { finalize: async ({ idempotencyKey }: { idempotencyKey: string }) => { finalizerCalls += 1; if (idempotencyKey.includes("recover-job") && failFirstFinalization) { failFirstFinalization = false; throw new Error("finalizer retry"); } } }) => new GenerationOrchestrator({
+  const makeOrchestrator = (releaseEnabled: boolean, finalizer = { finalize: async ({ idempotencyKey }: { idempotencyKey: string }) => { finalizerCalls += 1; if (idempotencyKey.includes("recover-job") && failFirstFinalization) { failFirstFinalization = false; throw new Error("finalizer retry"); } }, reconcilePlacement: async () => { throw new Error("generation-placement-reconciliation-unavailable"); } }) => new GenerationOrchestrator({
     repository, provider, releaseEnabled, owner: () => true, finalizer,
     routes: [{ identity: route, schemaFingerprint: "schema", clientSchemaFingerprint: "schema", serverSchemaFingerprint: "schema", clientAcceptance: true, serverAcceptance: true, configurationVersion: "v2" }],
     requestBoundary: { validate: () => {} }, clock: () => 2,

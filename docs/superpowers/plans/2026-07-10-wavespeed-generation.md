@@ -561,6 +561,16 @@ submission.
 **Evidence handoff:** MINI-08 supplies checkpoint traces, no-source call counts,
 URL rejection fixtures, and rollback continuation results to MINI-10.
 
+**Typed MINI-11 recovery handoff:** wire the authenticated `reconcile-placement`
+command to `GenerationRecoveryService.reconcilePlacement(jobId)` with
+`GenerationFinalizer` injected as the structural reconciler; hydrate the
+returned durable job into the shared store; expose the action only when
+`isPlacementReconciliationCandidate(job)` is true; never poll
+`needs-attention` or invoke browser-side placement; and migrate the current
+poller's direct placement call onto the durable claim/reconciliation protocol.
+MINI-08 owns the typed orchestrator and web command contracts only. MINI-11
+owns the shared route, store, poller, and visible action integration.
+
 ### MINI-09: Inspector recovery and accessibility presentation
 
 **Wave:** 4 after MINI-07 and MINI-08
