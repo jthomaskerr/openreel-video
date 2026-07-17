@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Keep supported WebKit exports running near foreground speed when the editor is backgrounded, and replace the misleading preflight promise with measured live throughput and remaining time.
+**Goal:** Keep supported WebKit exports running near foreground speed when the editor is backgrounded, preserve full-frame composition at the selected output resolution, and replace the misleading preflight promise with measured live throughput and remaining time.
 
-**Architecture:** Extract the per-frame loop and throughput accounting into deterministic core utilities, then make `ExportEngine` delegate scheduling, progress, encoder policy, and sanitized diagnostics to those utilities. Propagate the richer progress contract through the UI store into a focused overlay component. Retain browser-selected encoding through one shared `no-preference` policy and validate the result with a generated, private-media-free WebKit fixture.
+**Architecture:** Separate project-space position conversion from dimensionless clip scale so target-resolution rendering cannot apply the resolution ratio twice. Extract the per-frame loop and throughput accounting into deterministic core utilities, then make `ExportEngine` delegate scheduling, progress, encoder policy, and sanitized diagnostics to those utilities. Propagate the richer progress contract through the UI store into a focused overlay component. Retain browser-selected encoding through one shared `no-preference` policy and validate performance, metadata, and decoded pixel coverage with a generated, private-media-free WebKit fixture.
 
 **Tech Stack:** TypeScript, Vitest, React, Zustand, MediaBunny 1.25.3, WebCodecs, Playwright WebKit 26.5.
 
@@ -12,6 +12,7 @@
 
 - Work in `/Volumes/Joseph/Projects1/ai-agents/openreel-video`; preserve unrelated dirty project-save changes.
 - The per-frame export loop must not install or await wall-clock timers.
+- A scale-1 full-frame clip from a 1920×1080 project must cover an 854×480 export frame; output conversion scales project-space positions but preserves dimensionless clip scale.
 - Background throughput after warmup must be at least 50% of foreground throughput in the WebKit gate.
 - Preflight estimates are `rough`; only real end-to-end export samples become `observed`.
 - A background warning requires an established foreground baseline, at least 15 seconds hidden, at least 30 hidden frames, and throughput below 50% of the foreground rate.
@@ -25,6 +26,8 @@
 ## File Structure
 
 - Create `packages/core/src/export/export-frame-loop.ts`: timer-free frame orchestration and cancellation/cleanup cadence.
+- Create `packages/core/src/video/output-transform.ts`: map project-space position offsets to output pixels while preserving semantic clip scale.
+- Modify `packages/core/src/video/video-engine.ts`: use the output-transform mapper instead of multiplying clip scale by the output ratio.
 - Create `packages/core/src/export/export-performance.ts`: EWMA throughput, scene-change reset, ETA, visibility baselines, and degradation state.
 - Create `packages/core/src/export/encoder-policy.ts`: the single requested acceleration policy.
 - Create `packages/core/src/export/export-diagnostics.ts`: typed, sanitized diagnostic events and sink.
@@ -39,7 +42,127 @@
 
 ---
 
-### Task 1: Timer-Free Frame Loop
+### Task 1: Preserve Full-Frame Composition at 480p
+
+**Files:**
+- Create: `packages/core/src/video/output-transform.ts`
+- Create: `packages/core/src/video/output-transform.test.ts`
+- Modify: `packages/core/src/video/video-engine.ts:559-563,758-772`
+
+**Interfaces:**
+- Consumes: the timeline `Transform`, project dimensions, and target dimensions.
+- Produces:
+
+```ts
+import type { Transform } from "../types/timeline";
+
+export function mapTransformToOutput(
+  transform: Transform,
+  projectWidth: number,
+  projectHeight: number,
+  targetWidth: number,
+  targetHeight: number,
+): Transform;
+```
+
+- [ ] **Step 1: Write the failing transform regression test**
+
+```ts
+import type { Transform } from "../types/timeline";
+import { mapTransformToOutput } from "./output-transform";
+
+const makeTransform = (overrides: Partial<Transform> = {}): Transform => ({
+  position: { x: 0, y: 0 },
+  scale: { x: 1, y: 1 },
+  rotation: 0,
+  anchor: { x: 0.5, y: 0.5 },
+  opacity: 1,
+  ...overrides,
+});
+
+it("scales project-space position but preserves semantic clip scale at 480p", () => {
+  const mapped = mapTransformToOutput(
+    makeTransform({ position: { x: 100, y: 50 }, scale: { x: 1, y: 1 } }),
+    1920,
+    1080,
+    854,
+    480,
+  );
+
+  expect(mapped.position.x).toBeCloseTo(100 * 854 / 1920, 6);
+  expect(mapped.position.y).toBeCloseTo(50 * 480 / 1080, 6);
+  expect(mapped.scale).toEqual({ x: 1, y: 1 });
+});
+
+it("preserves intentional zoom independently of output resolution", () => {
+  const mapped = mapTransformToOutput(
+    makeTransform({ scale: { x: 1.25, y: 0.8 } }),
+    1920,
+    1080,
+    854,
+    480,
+  );
+  expect(mapped.scale).toEqual({ x: 1.25, y: 0.8 });
+});
+```
+
+- [ ] **Step 2: Run the focused test and verify RED**
+
+Run: `rtk pnpm --filter @openreel/core exec vitest run src/video/output-transform.test.ts`
+
+Expected: FAIL because `output-transform.ts` does not exist.
+
+- [ ] **Step 3: Implement the coordinate mapper and use it in VideoEngine**
+
+```ts
+export function mapTransformToOutput(
+  transform: Transform,
+  projectWidth: number,
+  projectHeight: number,
+  targetWidth: number,
+  targetHeight: number,
+): Transform {
+  return {
+    ...transform,
+    position: {
+      x: transform.position.x * targetWidth / projectWidth,
+      y: transform.position.y * targetHeight / projectHeight,
+    },
+    scale: { ...transform.scale },
+  };
+}
+```
+
+Replace the inline `scaledTransform` construction in `VideoEngine.renderFrame()` with:
+
+```ts
+const outputTransform = mapTransformToOutput(
+  finalTransform,
+  settings.width,
+  settings.height,
+  width,
+  height,
+);
+```
+
+Pass `outputTransform` to stabilization and drawing. Remove the now-unused `scaleX` and `scaleY` locals. `drawFrameToContext()` remains responsible for contain/cover/stretch sizing against the target canvas.
+
+- [ ] **Step 4: Run the regression test and verify GREEN**
+
+Run: `rtk pnpm --filter @openreel/core exec vitest run src/video/output-transform.test.ts`
+
+Expected: both coordinate-space tests pass under 100 ms.
+
+- [ ] **Step 5: Commit**
+
+```bash
+rtk git add packages/core/src/video/output-transform.ts packages/core/src/video/output-transform.test.ts packages/core/src/video/video-engine.ts
+rtk git commit -m "fix(core): preserve clip scale across export resolutions"
+```
+
+---
+
+### Task 2: Timer-Free Frame Loop
 
 **Files:**
 - Create: `packages/core/src/export/export-frame-loop.ts`
@@ -140,7 +263,7 @@ rtk git commit -m "fix(core): remove timer dependency from export frame loop"
 
 ---
 
-### Task 2: Observed Throughput and Background Degradation
+### Task 3: Observed Throughput and Background Degradation
 
 **Files:**
 - Create: `packages/core/src/export/export-performance.ts`
@@ -248,7 +371,7 @@ rtk git commit -m "feat(core): measure live export throughput"
 
 ---
 
-### Task 3: Shared Encoder Policy and Honest Preflight Range
+### Task 4: Shared Encoder Policy and Honest Preflight Range
 
 **Files:**
 - Create: `packages/core/src/export/encoder-policy.ts`
@@ -326,7 +449,7 @@ rtk git commit -m "fix(core): align export policy and preflight estimates"
 
 ---
 
-### Task 4: ExportEngine Integration and Sanitized Diagnostics
+### Task 5: ExportEngine Integration and Sanitized Diagnostics
 
 **Files:**
 - Create: `packages/core/src/export/export-diagnostics.ts`
@@ -403,7 +526,7 @@ rtk git commit -m "fix(core): make export progress timer independent"
 
 ---
 
-### Task 5: Progress State and Accessible Overlay
+### Task 6: Progress State and Accessible Overlay
 
 **Files:**
 - Create: `apps/web/src/components/editor/ExportProgressOverlay.tsx`
@@ -489,7 +612,7 @@ rtk git commit -m "feat(web): show observed export throughput"
 
 ---
 
-### Task 6: Rough Estimate Copy and Project Complexity
+### Task 7: Rough Estimate Copy and Project Complexity
 
 **Files:**
 - Modify: `apps/web/src/components/editor/ExportDialog.tsx:58-65,120-240,742-758`
@@ -529,7 +652,7 @@ rtk git commit -m "fix(web): label export estimates as rough"
 
 ---
 
-### Task 7: WebKit Foreground/Background Gate
+### Task 8: WebKit Foreground/Background Gate
 
 **Files:**
 - Create: `apps/web/playwright.webkit-export.config.ts`
@@ -537,8 +660,9 @@ rtk git commit -m "fix(web): label export estimates as rough"
 - Create: `apps/web/e2e/helpers/generated-export-fixture.ts`
 
 **Interfaces:**
-- The helper generates a four-second 854×480 H.264 source in WebKit using MediaBunny and returns an in-memory project plus writable stream.
+- The helper generates a four-second 1920×1080 H.264 source with a bright four-pixel perimeter in WebKit using MediaBunny, places it as a scale-1 full-frame clip in a 1920×1080 project, and returns the project plus writable stream.
 - The spec runs the same export in a foreground page and a background page and returns sanitized metrics only. The deterministic core regression test, not a page-global timer spy, proves the export loop installs no timers.
+- The helper decodes the first exported frame and reports the fraction of non-black pixels in its four-pixel perimeter; the expected value is at least 0.9.
 
 - [ ] **Step 1: Add the WebKit-only config**
 
@@ -559,7 +683,7 @@ export default defineConfig({
 
 - [ ] **Step 2: Implement the generated fixture and failing background test**
 
-Generate colored canvas frames and a short tone; do not read Vintage Tokyo or commit binary media. Run foreground first to establish fps. Start the second export, call `foregroundPage.bringToFront()` so the export page becomes hidden, wait until the export reports a hidden visibility sample, and assert:
+Generate colored canvas frames with a bright perimeter and a short tone; do not read Vintage Tokyo or commit binary media. Export the 1920×1080 project with explicit 854×480 settings. Decode the first output frame, count perimeter pixels whose RGB sum exceeds 30, and divide by the perimeter sample count. Run foreground first to establish fps. Start the second export, call `foregroundPage.bringToFront()` so the export page becomes hidden, wait until the export reports a hidden visibility sample, and assert:
 
 ```ts
 expect(background.visibilitySamples).toContain("hidden");
@@ -573,19 +697,20 @@ expect(background.output.height).toBe(480);
 expect(background.output.frameRate).toBe(30);
 expect(background.output.hasVideo).toBe(true);
 expect(background.output.hasAudio).toBe(true);
+expect(background.output.perimeterNonBlackRatio).toBeGreaterThanOrEqual(0.9);
 ```
 
 - [ ] **Step 3: Run the gate against the pre-repair commit and verify RED**
 
 Run: `rtk pnpm --filter @openreel/web exec playwright test --config=playwright.webkit-export.config.ts`
 
-Expected: background throughput falls below 50% because WebKit clamps the current five-frame timer batch. Keep the deterministic core test as the direct proof that the repair removes the frame-loop timer.
+Expected: the current code fails because background throughput is timer-clamped and the decoded 854×480 perimeter is black after clip scale is multiplied by `854 / 1920`. Keep the deterministic core test as the direct proof that the repair removes the frame-loop timer.
 
 - [ ] **Step 4: Run the gate against the implementation and verify GREEN**
 
 Run the same command.
 
-Expected: foreground and background exports complete, background/foreground ratio is at least 0.5, the export page records hidden visibility, progress advances from warming-up to observed, and the generated output metadata is correct.
+Expected: foreground and background exports complete, background/foreground ratio is at least 0.5, the export page records hidden visibility, progress advances from warming-up to observed, output metadata is correct, and at least 90% of sampled perimeter pixels are non-black.
 
 - [ ] **Step 5: Commit**
 
@@ -596,10 +721,10 @@ rtk git commit -m "test(web): gate WebKit background export throughput"
 
 ---
 
-### Task 8: Full Verification and Delivery Evidence
+### Task 9: Full Verification and Delivery Evidence
 
 **Files:**
-- Modify only if evidence reveals a defect: files from Tasks 1-7.
+- Modify only if evidence reveals a defect: files from Tasks 1-8.
 - Record sanitized command output in the final handoff; do not commit generated videos, traces, or private project data.
 
 - [ ] **Step 1: Run affected tests from the dependency graph**
@@ -608,6 +733,7 @@ Run `tokensave_affected` for the changed source files, then execute its focused 
 
 ```bash
 rtk pnpm --filter @openreel/core exec vitest run src/export src/device
+rtk pnpm --filter @openreel/core exec vitest run src/video/output-transform.test.ts
 rtk pnpm --filter @openreel/web exec vitest run src/components/editor/ExportProgressOverlay.test.tsx src/components/editor/ExportDialog.test.tsx src/components/editor/Toolbar.test.tsx src/stores/ui-store.test.ts
 ```
 
@@ -630,7 +756,7 @@ Expected: the 50% throughput, timer-free, output metadata, and completion assert
 
 - [ ] **Step 4: Verify the real editor flow in WebKit**
 
-Open `/#/editor?projectId=vintage-tokyo`, select 480p H.264, start export, record foreground throughput, background the editor for at least 30 frames and 15 seconds, then foreground it. In Web Inspector, confirm no timer event originates from the frame loop. Confirm the overlay changes from rough to observed ETA, progress remains active, no degradation warning appears when the ratio remains at least 0.5, cancellation remains responsive, and the final file plays with correct audio/video duration. If the ratio remains below 0.5, stop and evaluate the dedicated-worker escalation required by the spec.
+Open `/#/editor?projectId=vintage-tokyo`, select 480p H.264, start export, record foreground throughput, background the editor for at least 30 frames and 15 seconds, then foreground it. In Web Inspector, confirm no timer event originates from the frame loop. Confirm the overlay changes from rough to observed ETA, progress remains active, no degradation warning appears when the ratio remains at least 0.5, cancellation remains responsive, and the final file reports 854×480, plays with correct audio/video duration, and fills the expected 16:9 frame without the centered black border shown in the regression screenshot. If the ratio remains below 0.5, stop and evaluate the dedicated-worker escalation required by the spec.
 
 - [ ] **Step 5: Run final diff and safety checks**
 
@@ -649,4 +775,4 @@ Use one conventional commit per independently verified correction. Do not amend 
 
 ## Completion Standard
 
-The work is complete only when all deterministic tests, type checking, linting, the generated WebKit gate, and the real Vintage Tokyo foreground/background verification pass. Report exact commands, test counts, foreground/background fps and ratio, effective encoder configuration, output metadata, and any remaining browser-imposed limitation. No application restart is required beyond reloading the Vite page after implementation changes.
+The work is complete only when all deterministic tests, type checking, linting, the generated WebKit gate, and the real Vintage Tokyo foreground/background verification pass. Report exact commands, test counts, foreground/background fps and ratio, effective encoder configuration, output metadata, decoded perimeter coverage, and any remaining browser-imposed limitation. No application restart is required beyond reloading the Vite page after implementation changes.

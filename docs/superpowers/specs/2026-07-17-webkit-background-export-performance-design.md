@@ -8,6 +8,7 @@ For the 480p, H.264, 30 fps regression scenario:
 
 - background export throughput after warmup must be at least 50% of foreground throughput on the same browser and project;
 - export must not use wall-clock timers in the per-frame loop;
+- a 1920×1080 project exported with the 480p preset must encode at 854×480 and a full-frame 16:9 clip with scale 1 must cover the 854×480 frame rather than being scaled a second time inside it;
 - progress must continue to update from completed frames;
 - after either 10% progress or 30 seconds of rendering, the displayed remaining-time estimate must be derived from observed end-to-end frame throughput rather than a synthetic encoder benchmark;
 - if browser-imposed background throttling still reduces observed throughput below 50% of the foreground baseline, the UI must report that explicitly and recommend foregrounding the tab. It must not silently retain an invalid estimate.
@@ -31,6 +32,8 @@ The foreground pipeline is therefore capable of approximately real-time or faste
 
 The pre-export estimate is a separate defect. The benchmark measures generated frames through a foreground `VideoEncoder` configured with `prefer-hardware`, while real export performs source decoding, canvas copies, compositing, cache maintenance, file streaming, and a `VideoSampleSource` configured with `prefer-software`. Calling the benchmark result “measured” overstates what was measured and permits estimates such as 15 seconds for work that follows a materially different path.
 
+The 480p output has a separate compositing defect. The file metadata is correctly 854×480; QuickTime's 1654×930 “Current Size” is the playback window size. However, `VideoEngine.renderFrame()` multiplies a clip's semantic scale by `854 / 1920`, then `drawFrameToContext()` independently fits that frame to the already-downscaled 854×480 canvas. A full-frame scale of 1 therefore becomes approximately 0.445 after fitting, producing a centered picture approximately 380×214 pixels inside the 854×480 encoded frame. Output-resolution conversion must scale project-space positions, not apply the resolution ratio a second time to a dimensionless clip scale.
+
 ## Design
 
 ### Export scheduling
@@ -42,6 +45,12 @@ The loop already crosses asynchronous backpressure boundaries through frame deco
 Keep cancellation checks at least once per frame. Keep resource cleanup deterministic. Cache cleanup may remain frame-count based, but its cost must be measured separately from decode, render, encode, and stream-write time.
 
 If browser verification later demonstrates unacceptable UI starvation, add a cooperative task yield behind a small scheduling abstraction. Any such implementation must have a WebKit test proving it is not visibility-timer throttled before adoption.
+
+### Output-resolution transforms
+
+Keep clip `Transform.scale` dimensionless across output resolutions. A scale of 1 means the same full-frame fit at 1920×1080, 1280×720, and 854×480. Scale project-space position offsets by `target / project` for each axis, but do not multiply the semantic clip scale by that ratio because `drawFrameToContext()` already computes draw dimensions against the target canvas.
+
+The generated 480p browser fixture must include non-black pixels at the frame edges or corners so automated verification detects a centered, double-scaled image even when the container metadata reports the correct dimensions.
 
 ### Encoder policy consistency
 
@@ -94,12 +103,13 @@ Add focused tests that fail against the current implementation and complete loca
 
 1. Exporting multiple frames does not install or await a per-frame or per-batch timer. Run with fake timers configured to model a one-second background clamp and prove frame completion is independent of timer advancement.
 2. Cancellation remains observable once per frame after the timer yield is removed.
-3. Cache cleanup still runs at its documented frame-count cadence and cleanup failures are surfaced through structured diagnostics rather than silently ignored.
-4. Capability probing, benchmarking, and real export request the same acceleration policy.
-5. The preflight estimator labels an encoder-only benchmark as `rough`, not `measured` end-to-end evidence.
-6. The adaptive estimator converges on a stable synthetic frame duration, resists one outlier, and recalculates after a sustained complexity change.
-7. The export UI switches from the rough preflight range to a live observed remaining time after warmup.
-8. Sustained background throughput below 50% produces the actionable warning; recovery clears it; short dips do neither.
+3. Mapping a clip transform from 1920×1080 to 854×480 scales project-space position offsets but preserves a semantic scale of 1; the rendered 480p frame has no unintended black border.
+4. Cache cleanup still runs at its documented frame-count cadence and cleanup failures are surfaced through structured diagnostics rather than silently ignored.
+5. Capability probing, benchmarking, and real export request the same acceleration policy.
+6. The preflight estimator labels an encoder-only benchmark as `rough`, not `measured` end-to-end evidence.
+7. The adaptive estimator converges on a stable synthetic frame duration, resists one outlier, and recalculates after a sustained complexity change.
+8. The export UI switches from the rough preflight range to a live observed remaining time after warmup.
+9. Sustained background throughput below 50% produces the actionable warning; recovery clears it; short dips do neither.
 
 Existing export-engine, export-estimator, audio-export, cancellation, file-streaming, and project persistence tests must continue to pass.
 
@@ -112,6 +122,7 @@ The browser gate passes when:
 - foreground export completes successfully;
 - background export completes successfully;
 - background throughput is at least 50% of foreground throughput;
+- the output container reports 854×480 and decoded edge/corner samples prove a full-frame fixture covers the output rather than being double-scaled into a black border;
 - no per-frame-loop timer events appear in the Web Inspector trace;
 - the live estimate updates from observed throughput and does not retain the rough preflight value;
 - cancellation, file finalization, and output playback remain correct.
@@ -121,6 +132,7 @@ Verify the Vintage Tokyo project separately as a representative manual scenario,
 ## Failure Modes
 
 - Removing the timer without retaining async backpressure could starve UI work. Browser verification must confirm progress controls and cancellation remain responsive.
+- Preserving semantic clip scale while converting output resolution could expose code that incorrectly stores pixel-based values in `Transform.scale`. The pure transform test and browser pixel-coverage assertion distinguish scale from project-space position.
 - Forcing hardware acceleration may be slower or unsupported for some codec and resolution combinations. Shared `no-preference` policy avoids treating GPU use as the goal.
 - A live estimate based on too few frames may oscillate. Warmup, bounded smoothing, and confidence state prevent false precision.
 - Background media decode may still be throttled by WebKit independently of timers. The throughput threshold and warning make this visible. If the browser gate remains below 50% after the timer repair, evaluate a dedicated worker and do not declare the performance repair complete until the gate passes.
@@ -143,5 +155,6 @@ Completion requires:
 - foreground and background WebKit measurements from the committed fixture;
 - a sanitized export diagnostic sample;
 - an output video that plays through and has the expected duration, dimensions, frame rate, video, and audio;
+- decoded 480p frame evidence showing the full-frame fixture reaches the expected edges without the centered black border;
 - browser verification of progress, adaptive ETA, warning behavior, cancellation, and successful finalization;
 - exact commands and results recorded in the implementation handoff.
