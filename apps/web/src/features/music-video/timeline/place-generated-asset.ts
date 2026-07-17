@@ -96,6 +96,7 @@ async function placeGeneratedAssetOnTimelineUnsafe(
       trackId: "",
       clipId: "",
       status: "skipped",
+      outcome: "not-applied",
     };
   }
 
