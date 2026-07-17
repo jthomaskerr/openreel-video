@@ -142,6 +142,38 @@ test("invalid placement retry preserves success committed before its failure upd
     assert.equal(result.checkpoints["placement-applied"]?.status, "completed");
     assert.equal(result.placement?.status, "applied");
 });
+test("invalid placement retry preserves reconciliation that advances before its failure update", async () => {
+    let current = placementCandidate();
+    const reconciling: GenerationJob = {
+      ...current,
+      status: "finalizing",
+      updatedAt: 9,
+      error: undefined,
+      checkpoints: { ...current.checkpoints, "placement-applied": { status: "pending", timestamp: 9 } },
+      placement: { policy: "create-linked-clip", status: "pending" },
+    };
+    const repository = {
+      get: async () => current,
+      getPlacementClaim: async () => undefined,
+      update: async (_id: string, mutate: (candidate: GenerationJob) => GenerationJob) => {
+        current = reconciling;
+        current = mutate(current);
+        return current;
+      },
+      compareAndSetCheckpoint: async () => true,
+      create: async () => current,
+      findByProviderCompletion: async () => undefined,
+      listActive: async () => [],
+    } as any;
+    const service = new GenerationRecoveryService(repository, { submit: async () => ({ providerJobId: "never" }) }, { releaseUnreferenced: async () => {} }, { now: () => 10 });
+
+    const result = await service.retryPlacement("job-1");
+
+    assert.equal(result.status, "finalizing");
+    assert.equal(result.error, undefined);
+    assert.equal(result.checkpoints["placement-applied"]?.status, "pending");
+    assert.equal(result.placement?.status, "pending");
+});
 test("finalization retry rewinds only the failed finalization stage", async () => {
     const initial = job("failed");
     initial.checkpoints = {
