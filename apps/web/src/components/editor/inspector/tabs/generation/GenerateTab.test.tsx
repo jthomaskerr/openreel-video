@@ -18,8 +18,19 @@ import type {
 import type { GenerationEntryContextResult } from "../../../../../features/generation/context/scene-generation";
 import type { GenerationAudioProvenance } from "../../../../../features/generation/audio";
 import type { RecoveryAction } from "../../../../../features/generation/recovery/state-machine";
+import { allowedRecoveryActionsForJob } from "../../../../../features/generation/recovery/state-machine";
 
 const model = { id: "model-1", label: "WaveSpeed model", provider: "WaveSpeed" };
+const isRecoveryAction = (value: string): value is RecoveryAction =>
+  [
+    "regenerate",
+    "variation",
+    "retry-provider",
+    "retry-finalization",
+    "retry-placement",
+    "reconcile-placement",
+    "cancel",
+  ].includes(value);
 
 
 const mockedProjectStore = vi.hoisted(() => ({
@@ -237,7 +248,8 @@ function generationJob(
     providerSchemaVersion: "2026-07",
   };
   const status = options.status ?? "failed";
-  const needsFinalizationIdentity = status === "needs-attention";
+  const needsFinalizationIdentity =
+    status === "needs-attention" || status === "completed";
   return {
     schemaVersion: 2,
     contractVersion: 2,
@@ -634,16 +646,17 @@ describe("GenerateTab", () => {
         category === "cancellation"
           ? "running"
           : category === "download" || category === "finalization" || category === "placement" || category === "persistence"
-            ? "needs-attention"
+            ? "completed"
             : "failed";
       const placementFailure = category === "placement";
+      const job = generationJob(error, { status, placementFailure });
 
       render(
         <GenerateTab
           projectId="project-1"
           models={[model]}
           prompt="Generate this"
-          job={generationJob(error, { status, placementFailure })}
+          job={job}
           onEdit={onEdit}
           onRevalidate={onRevalidate}
           onRetryItem={onRetryItem}
@@ -655,6 +668,9 @@ describe("GenerateTab", () => {
       expect(alert).toHaveTextContent(code);
       const action = within(alert).getByRole("button", { name: label });
       expect(within(alert).getAllByRole("button")).toEqual([action]);
+      if (isRecoveryAction(expectedAction)) {
+        expect(allowedRecoveryActionsForJob(job)).toContain(expectedAction);
+      }
       fireEvent.click(action);
 
       if (expectedAction === "edit") expect(onEdit).toHaveBeenCalledTimes(1);
@@ -721,6 +737,37 @@ describe("GenerateTab", () => {
     expect(within(alert).getAllByRole("button")).toEqual([action]);
   });
 
+  it.each([
+    ["queued", true, true],
+    ["running", true, true],
+    ["submitting", true, false],
+    ["needs-attention", true, false],
+    ["queued", false, false],
+  ] as const)(
+    "renders footer cancel for %s with dispatcher=%s only when canonically eligible",
+    (status, hasDispatcher, expectedVisible) => {
+      const job = generationJob(undefined, { status });
+      const onRecoveryAction = hasDispatcher ? vi.fn() : undefined;
+      expect(allowedRecoveryActionsForJob(job).includes("cancel")).toBe(
+        status === "queued" || status === "running",
+      );
+
+      render(
+        <GenerateTab
+          projectId="project-1"
+          models={[model]}
+          prompt="Generate this"
+          job={job}
+          onRecoveryAction={onRecoveryAction}
+        />,
+      );
+
+      const cancel = screen.queryByRole("button", { name: "Cancel generation" });
+      if (expectedVisible) expect(cancel).toBeEnabled();
+      else expect(cancel).toBeNull();
+    },
+  );
+
   it("classifies an unknown error as terminal and explains why no retry is safe", () => {
     render(
       <GenerateTab
@@ -786,6 +833,7 @@ describe("GenerateTab", () => {
     );
 
     const alert = screen.getByRole("alert", { name: "Generation error" });
+    expect(allowedRecoveryActionsForJob(job)).toContain("reconcile-placement");
     fireEvent.click(within(alert).getByRole("button", { name: "Check placement" }));
     expect(onRecoveryAction).toHaveBeenCalledWith("reconcile-placement");
     expect(within(alert).queryByRole("button", { name: "Retry placement" })).toBeNull();
@@ -884,7 +932,7 @@ describe("GenerateTab", () => {
   it("does not treat provider output URLs as durable finalization identity", () => {
     const error = generationError("finalization-checkpoint-failed");
     const unsafeJob = {
-      ...generationJob(error, { status: "needs-attention" }),
+      ...generationJob(error, { status: "completed" }),
       output: undefined,
       outputUrls: ["provider-output-1"],
     } satisfies GenerationJob;

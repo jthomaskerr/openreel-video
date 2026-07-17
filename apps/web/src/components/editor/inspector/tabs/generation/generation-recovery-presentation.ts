@@ -1,5 +1,10 @@
 import type { GenerationError, GenerationJob } from "@openreel/music-video-domain/generation";
-import type { RecoveryAction } from "../../../../../features/generation/recovery/state-machine";
+import {
+  allowedRecoveryActionsForJob,
+  isPlacementReconciliationCandidate,
+  isPlacementRetryCandidate,
+  type RecoveryAction,
+} from "../../../../../features/generation/recovery/state-machine";
 
 export const CANONICAL_GENERATION_ERROR_CATEGORIES = [
   "validation",
@@ -120,6 +125,20 @@ const INTEGRITY_ERROR_TERMS = [
 const isIntegrityError = (code: string) =>
   includesAny(code.toLowerCase(), INTEGRITY_ERROR_TERMS);
 
+const RECOVERY_ACTIONS: readonly RecoveryAction[] = [
+  "regenerate",
+  "variation",
+  "retry-provider",
+  "retry-finalization",
+  "retry-placement",
+  "reconcile-placement",
+  "cancel",
+];
+
+const isRecoveryAction = (
+  action: GenerationRecoveryPresentationAction,
+): action is RecoveryAction => RECOVERY_ACTIONS.includes(action as RecoveryAction);
+
 export function classifyGenerationError(
   error: GenerationError,
 ): CanonicalGenerationErrorCategory | "unknown" {
@@ -221,7 +240,6 @@ const hasPriorProviderIdentity = (job: GenerationJob) => {
 };
 
 const hasDurableFinalizationIdentity = (job: GenerationJob) =>
-  job.status === "needs-attention" &&
   hasPriorProviderIdentity(job) &&
   Boolean(job.output?.mediaId && job.output.versionId);
 
@@ -239,31 +257,12 @@ const hasMatchingProviderTerminalError = (
   );
 };
 
-const canCancel = (job: GenerationJob) =>
-  (["queued", "submitting", "running", "needs-attention"] as const).includes(
-    job.status as "queued" | "submitting" | "running" | "needs-attention",
-  );
-
 const isAmbiguousPlacement = (error: GenerationError) =>
   includesAny(error.code, [
     "placement-outcome-unknown",
     "placement-reconciliation",
     "placement-retry-unsafe",
   ]);
-
-const isPlacementReconciliationCandidate = (job: GenerationJob) =>
-  job.status === "needs-attention" &&
-  hasPriorProviderIdentity(job) &&
-  job.context.placementPolicy !== "none" &&
-  Boolean(job.output?.mediaId && job.output.versionId) &&
-  job.checkpoints["placement-applied"]?.status === "failed";
-
-const isReplaySafePlacementFailure = (job: GenerationJob) =>
-  job.status === "needs-attention" &&
-  job.context.placementPolicy !== "none" &&
-  job.checkpoints["placement-applied"]?.status === "failed" &&
-  job.placement?.status === "failed" &&
-  job.placement.replaySafe === true;
 
 const terminal = (
   category: GenerationRecoveryPresentation["category"],
@@ -276,6 +275,7 @@ export function resolveGenerationRecoveryPresentation(
   const error = job.error;
   if (!error) return undefined;
   const category = classifyGenerationError(error);
+  const allowedActions = new Set(allowedRecoveryActionsForJob(job));
 
   if (category === "unknown") {
     return terminal(
@@ -354,7 +354,7 @@ export function resolveGenerationRecoveryPresentation(
   }
 
   if (category === "provider") {
-    if (job.status !== "failed") {
+    if (!allowedActions.has("retry-provider")) {
       return terminal(
         category,
         `The persisted ${job.status} state does not permit a safe provider retry.`,
@@ -384,14 +384,17 @@ export function resolveGenerationRecoveryPresentation(
         "The persisted cancellation state is invalid, so another cancellation request is unsafe.",
       );
     }
-    if (!canCancel(job)) {
+    if (!allowedActions.has("cancel")) {
       return terminal(category, `A ${job.status} job cannot be canceled safely.`);
     }
   }
 
   if (category === "placement") {
     if (isAmbiguousPlacement(error)) {
-      if (!isPlacementReconciliationCandidate(job)) {
+      if (
+        !allowedActions.has("reconcile-placement") ||
+        !isPlacementReconciliationCandidate(job)
+      ) {
         return terminal(
           category,
           "Placement outcome is ambiguous, but durable output identity and a failed placement checkpoint are required before reconciliation.",
@@ -404,7 +407,10 @@ export function resolveGenerationRecoveryPresentation(
         explanation: "Reconcile whether placement was applied before any direct retry.",
       };
     }
-    if (!isReplaySafePlacementFailure(job)) {
+    if (
+      !allowedActions.has("retry-placement") ||
+      !isPlacementRetryCandidate(job)
+    ) {
       return terminal(
         category,
         "Direct placement retry is unsafe until a failed, replay-safe checkpoint is proven.",
@@ -433,6 +439,16 @@ export function resolveGenerationRecoveryPresentation(
 
   if (
     (category === "download" || category === "finalization" || category === "persistence") &&
+    !allowedActions.has("retry-finalization")
+  ) {
+    return terminal(
+      category,
+      `The canonical recovery state does not permit finalization retry from ${job.status}.`,
+    );
+  }
+
+  if (
+    (category === "download" || category === "finalization" || category === "persistence") &&
     !hasDurableFinalizationIdentity(job)
   ) {
     if (
@@ -452,5 +468,12 @@ export function resolveGenerationRecoveryPresentation(
     );
   }
 
-  return { category, ...DEFAULT_RECOVERY_BY_CATEGORY[category] };
+  const presentation = DEFAULT_RECOVERY_BY_CATEGORY[category];
+  if (isRecoveryAction(presentation.action) && !allowedActions.has(presentation.action)) {
+    return terminal(
+      category,
+      `The canonical recovery state does not permit ${presentation.action} from ${job.status}.`,
+    );
+  }
+  return { category, ...presentation };
 }

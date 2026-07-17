@@ -15,7 +15,6 @@ export const InspectorTabPanel: React.FC<InspectorTabPanelProps> = ({ tab, activ
     <div
       id={`inspector-panel-${tab}`}
       role="tabpanel"
-      aria-labelledby={`inspector-tab-${tab}`}
       hidden
     />
   );
