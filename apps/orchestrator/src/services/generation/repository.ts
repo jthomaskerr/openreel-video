@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, open } from "node:fs/promises";
-import { join } from "node:path";
+import { link, mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { parseGenerationJob, serializeGenerationJob, type GenerationCheckpointName, type GenerationCheckpointState, type GenerationJob } from "@openreel/music-video-domain/generation";
 
 export class GenerationRepositoryError extends Error {
@@ -29,15 +29,27 @@ export interface FinalizationClaim {
 }
 
 export interface PlacementClaim {
+  schemaVersion: 2;
   jobId: string;
   idempotencyKey: string;
   state: "claimed" | "failed" | "completed" | "needs-attention";
   outcome: PlacementOutcome;
   ownerToken: string;
+  ownerEpoch: number;
+  phase: "reserved" | "invocation-armed" | "reconciling" | "terminal";
   claimedAt: number;
+  lastRenewedAt: number;
+  leaseExpiresAt: number;
+  replaySafe?: boolean;
+  terminalAt?: number;
 }
 
 export type PlacementOutcome = "pending" | "applied" | "not-applied" | "unknown";
+export type PlacementRecovery =
+  | { kind: "owner-live"; claim: PlacementClaim }
+  | { kind: "safe-retry"; claim: PlacementClaim }
+  | { kind: "reconcile"; claim: PlacementClaim }
+  | { kind: "resolved"; claim: PlacementClaim };
 
 export interface GenerationJobRepository {
   create(job: GenerationJob): Promise<GenerationJob>;
@@ -58,7 +70,17 @@ export interface GenerationJobRepository {
   releaseFinalization(jobId: string, ownerToken: string): Promise<void>;
   claimPlacement(jobId: string, idempotencyKey: string): Promise<{ claim: PlacementClaim; acquired: boolean }>;
   getPlacementClaim(jobId: string): Promise<PlacementClaim | undefined>;
-  reconcilePlacement(jobId: string, idempotencyKey: string, ownerToken: string, outcome: PlacementOutcome): Promise<PlacementClaim>;
+  readonly placementLeaseTtlMs: number;
+  renewPlacement(jobId: string, idempotencyKey: string, ownerToken: string): Promise<PlacementClaim>;
+  markPlacementInvocationStarted(jobId: string, idempotencyKey: string, ownerToken: string): Promise<PlacementClaim>;
+  recoverPlacement(jobId: string, idempotencyKey: string): Promise<PlacementRecovery>;
+  reconcilePlacement(jobId: string, idempotencyKey: string, ownerToken: string, outcome: PlacementOutcome, options?: { replaySafe?: boolean }): Promise<PlacementClaim>;
+}
+
+export interface FileGenerationJobRepositoryOptions {
+  lockTtlMs?: number;
+  placementLeaseTtlMs?: number;
+  now?: () => number;
 }
 
 type FileClaim = SubmissionClaim;
@@ -78,7 +100,22 @@ function canonicalOutputIdentity(value: string, providerInstanceId: string) {
 /** Filesystem repository with durable CAS claims and rebuildable provider index. */
 export class FileGenerationJobRepository implements GenerationJobRepository {
   private readonly processToken = randomUUID();
-  constructor(readonly directory: string, readonly lockTtlMs = 30_000, readonly now = () => Date.now()) {}
+  readonly lockTtlMs: number;
+  readonly placementLeaseTtlMs: number;
+  readonly now: () => number;
+
+  constructor(readonly directory: string, options?: FileGenerationJobRepositoryOptions | number, legacyNow?: () => number) {
+    if (typeof options === "number") {
+      this.lockTtlMs = options;
+      this.placementLeaseTtlMs = options;
+      this.now = legacyNow ?? (() => Date.now());
+    } else {
+      this.lockTtlMs = options?.lockTtlMs ?? 30_000;
+      this.placementLeaseTtlMs = options?.placementLeaseTtlMs ?? 30_000;
+      this.now = options?.now ?? (() => Date.now());
+    }
+    if (this.lockTtlMs <= 0 || this.placementLeaseTtlMs <= 0) throw new GenerationRepositoryError("generation-repository-invalid-ttl");
+  }
 
   private file(id: string) { return join(this.directory, `${id}.json`); }
   private indexFile() { return join(this.directory, "provider-index.json"); }
@@ -94,24 +131,85 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
     const handle = await open(tmp, "w", 0o600);
     try { await handle.writeFile(typeof value === "string" ? value : JSON.stringify(value)); await handle.sync(); } finally { await handle.close(); }
     await rename(tmp, path);
+    const directory = await open(dirname(path), "r");
+    try { await directory.sync(); } finally { await directory.close(); }
+  }
+
+  private async removeLockIfOwned(path: string, lockToken: string) {
+    try {
+      const current = JSON.parse(await readFile(path, "utf8")) as { lockToken?: string; processToken?: string };
+      const token = current.lockToken ?? current.processToken;
+      if (token === lockToken) await rm(path, { force: true });
+    } catch (cause) {
+      if (!(cause && typeof cause === "object" && "code" in cause && cause.code === "ENOENT")) throw cause;
+    }
+  }
+
+  private async publishFileLock(path: string, lockToken: string) {
+    const candidate = `${path}.${lockToken}.candidate`;
+    try {
+      const handle = await open(candidate, "wx", 0o600);
+      try {
+        await handle.writeFile(JSON.stringify({ lockToken, processToken: this.processToken, pid: process.pid, claimedAt: this.now() }));
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      try {
+        await link(candidate, path);
+        return true;
+      } catch (cause) {
+        if (cause && typeof cause === "object" && "code" in cause && cause.code === "EEXIST") return false;
+        throw cause;
+      }
+    } finally {
+      await rm(candidate, { force: true });
+    }
+  }
+
+  private async reclaimStaleCorruptLock(path: string) {
+    try {
+      const before = await stat(path);
+      if (Date.now() - before.mtimeMs < this.lockTtlMs) return;
+      try {
+        JSON.parse(await readFile(path, "utf8"));
+        return;
+      } catch {
+        // New writers publish complete records atomically. Only an unchanged,
+        // stale record from the legacy create-then-write protocol is reclaimable.
+      }
+      const after = await stat(path);
+      if (before.ino === after.ino && before.size === after.size && before.mtimeMs === after.mtimeMs) {
+        await rm(path, { force: true });
+      }
+    } catch (cause) {
+      if (!(cause && typeof cause === "object" && "code" in cause && cause.code === "ENOENT")) throw cause;
+    }
+  }
+
+  private processIsLive(pid: number) {
+    try { process.kill(pid, 0); return true; }
+    catch (cause) { return Boolean(cause && typeof cause === "object" && "code" in cause && cause.code === "EPERM"); }
   }
 
   private async withFileLock<T>(key: string, task: () => Promise<T>): Promise<T> {
     await this.init();
     const path = join(this.locksDir(), `${key}.lock`);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      try {
-        const handle = await open(path, "wx", 0o600);
-        try { await handle.writeFile(JSON.stringify({ processToken: this.processToken, claimedAt: this.now() })); await handle.sync(); } finally { await handle.close(); }
-        try { return await task(); } finally { await rm(path, { force: true }); }
-      } catch (cause) {
-        if (!(cause && typeof cause === "object" && "code" in cause && cause.code === "EEXIST")) throw cause;
-        try {
-          const lock = JSON.parse(await readFile(path, "utf8")) as { claimedAt?: number };
-          if (typeof lock.claimedAt === "number" && this.now() - lock.claimedAt > this.lockTtlMs) await rm(path, { force: true });
-        } catch { await rm(path, { force: true }); }
-        await new Promise((resolve) => setTimeout(resolve, 1));
+      const lockToken = randomUUID();
+      if (await this.publishFileLock(path, lockToken)) {
+        try { return await task(); } finally { await this.removeLockIfOwned(path, lockToken); }
       }
+      try {
+        const lock = JSON.parse(await readFile(path, "utf8")) as { lockToken?: string; processToken?: string; pid?: number; claimedAt?: number };
+        const ownerToken = lock.lockToken ?? lock.processToken;
+        const ownerIsLive = typeof lock.pid === "number" ? this.processIsLive(lock.pid) : typeof lock.claimedAt === "number" && this.now() - lock.claimedAt <= this.lockTtlMs;
+        if (!ownerIsLive && ownerToken) await this.removeLockIfOwned(path, ownerToken);
+      } catch (lockError) {
+        if (lockError && typeof lockError === "object" && "code" in lockError && lockError.code === "ENOENT") continue;
+        await this.reclaimStaleCorruptLock(path);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1));
     }
     throw new GenerationRepositoryError("generation-repository-lock-timeout");
   }
@@ -285,8 +383,9 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
       const path = this.placementFile(jobId);
       const existing = await this.readPlacementClaim(path);
       if (existing && existing.idempotencyKey !== idempotencyKey) throw new GenerationRepositoryError("generation-placement-claim-mismatch");
-      if (existing?.state === "claimed" || existing?.state === "completed" || existing?.state === "needs-attention") return { claim: existing, acquired: false };
-      const claim: PlacementClaim = { jobId, idempotencyKey, state: "claimed", outcome: "pending", ownerToken: randomUUID(), claimedAt: this.now() };
+      if (existing?.state === "claimed" || existing?.state === "completed" || existing?.state === "needs-attention" || existing?.state === "failed" && existing.replaySafe === false) return { claim: existing, acquired: false };
+      const now = this.now();
+      const claim: PlacementClaim = { schemaVersion: 2, jobId, idempotencyKey, state: "claimed", outcome: "pending", ownerToken: randomUUID(), ownerEpoch: (existing?.ownerEpoch ?? 0) + 1, phase: "reserved", claimedAt: now, lastRenewedAt: now, leaseExpiresAt: now + this.placementLeaseTtlMs };
       await this.atomic(path, claim);
       return { claim, acquired: true };
     });
@@ -294,16 +393,82 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
 
   async getPlacementClaim(jobId: string) { return this.readPlacementClaim(this.placementFile(jobId)); }
 
-  async reconcilePlacement(jobId: string, idempotencyKey: string, ownerToken: string, outcome: PlacementOutcome) {
+  async renewPlacement(jobId: string, idempotencyKey: string, ownerToken: string) {
+    return this.withFileLock(`placement-${jobId}`, async () => {
+      const path = this.placementFile(jobId);
+      const claim = await this.readPlacementClaim(path);
+      const now = this.now();
+      if (!claim || claim.idempotencyKey !== idempotencyKey) throw new GenerationRepositoryError("generation-placement-claim-mismatch");
+      if (claim.ownerToken !== ownerToken || claim.state !== "claimed" || claim.phase === "terminal" || now >= claim.leaseExpiresAt) throw new GenerationRepositoryError("generation-placement-claim-fenced");
+      const renewed: PlacementClaim = {
+        ...claim,
+        lastRenewedAt: Math.max(claim.lastRenewedAt, now),
+        leaseExpiresAt: Math.max(claim.leaseExpiresAt, now + this.placementLeaseTtlMs),
+      };
+      await this.atomic(path, renewed);
+      return renewed;
+    });
+  }
+
+  async markPlacementInvocationStarted(jobId: string, idempotencyKey: string, ownerToken: string) {
+    return this.withFileLock(`placement-${jobId}`, async () => {
+      const path = this.placementFile(jobId);
+      const claim = await this.readPlacementClaim(path);
+      const now = this.now();
+      if (!claim || claim.idempotencyKey !== idempotencyKey) throw new GenerationRepositoryError("generation-placement-claim-mismatch");
+      if (claim.ownerToken !== ownerToken || claim.state !== "claimed" || now >= claim.leaseExpiresAt || !["reserved", "invocation-armed"].includes(claim.phase)) throw new GenerationRepositoryError("generation-placement-claim-fenced");
+      if (claim.phase === "invocation-armed") return claim;
+      const armed: PlacementClaim = {
+        ...claim,
+        phase: "invocation-armed",
+        lastRenewedAt: Math.max(claim.lastRenewedAt, now),
+        leaseExpiresAt: Math.max(claim.leaseExpiresAt, now + this.placementLeaseTtlMs),
+      };
+      await this.atomic(path, armed);
+      return armed;
+    });
+  }
+
+  async recoverPlacement(jobId: string, idempotencyKey: string): Promise<PlacementRecovery> {
+    return this.withFileLock(`placement-${jobId}`, async () => {
+      const path = this.placementFile(jobId);
+      const claim = await this.readPlacementClaim(path);
+      if (!claim || claim.idempotencyKey !== idempotencyKey) throw new GenerationRepositoryError("generation-placement-claim-mismatch");
+      if (claim.phase === "terminal") {
+        if (claim.outcome === "unknown" || claim.outcome === "not-applied" && claim.replaySafe === false) {
+          const now = this.now();
+          const reconciling: PlacementClaim = { ...claim, state: "claimed", outcome: "pending", ownerToken: randomUUID(), ownerEpoch: claim.ownerEpoch + 1, phase: "reconciling", claimedAt: now, lastRenewedAt: now, leaseExpiresAt: now + this.placementLeaseTtlMs, replaySafe: false, terminalAt: undefined };
+          await this.atomic(path, reconciling);
+          return { kind: "reconcile", claim: reconciling };
+        }
+        return { kind: "resolved", claim };
+      }
+      const now = this.now();
+      if (now < claim.leaseExpiresAt) return { kind: "owner-live", claim };
+      if (claim.phase === "reserved") {
+        const retryable: PlacementClaim = { ...claim, state: "failed", outcome: "not-applied", phase: "terminal", replaySafe: true, terminalAt: now };
+        await this.atomic(path, retryable);
+        return { kind: "safe-retry", claim: retryable };
+      }
+      const reconciling: PlacementClaim = { ...claim, ownerToken: randomUUID(), ownerEpoch: claim.ownerEpoch + 1, phase: "reconciling", claimedAt: now, lastRenewedAt: now, leaseExpiresAt: now + this.placementLeaseTtlMs, replaySafe: false };
+      await this.atomic(path, reconciling);
+      return { kind: "reconcile", claim: reconciling };
+    });
+  }
+
+  async reconcilePlacement(jobId: string, idempotencyKey: string, ownerToken: string, outcome: PlacementOutcome, options?: { replaySafe?: boolean }) {
     return this.withFileLock(`placement-${jobId}`, async () => {
       const path = this.placementFile(jobId);
       const claim = await this.readPlacementClaim(path);
       if (!claim || claim.idempotencyKey !== idempotencyKey) throw new GenerationRepositoryError("generation-placement-claim-mismatch");
       if (claim.ownerToken !== ownerToken) throw new GenerationRepositoryError("generation-placement-claim-fenced");
-      const state: PlacementClaim["state"] = outcome === "applied" ? "completed" : outcome === "not-applied" ? "failed" : outcome === "unknown" ? "needs-attention" : "claimed";
+      if (claim.phase !== "terminal" && this.now() >= claim.leaseExpiresAt) throw new GenerationRepositoryError("generation-placement-claim-fenced");
+      const replaySafe = outcome === "not-applied" ? options?.replaySafe ?? claim.phase === "reserved" : undefined;
+      const state: PlacementClaim["state"] = outcome === "applied" ? "completed" : outcome === "not-applied" ? replaySafe ? "failed" : "needs-attention" : outcome === "unknown" ? "needs-attention" : "claimed";
       if (claim.state === state && claim.outcome === outcome) return claim;
-      if (claim.state === "completed" || claim.state === "failed" && outcome !== "not-applied" || claim.state === "needs-attention" && outcome === "pending") throw new GenerationRepositoryError("generation-placement-claim-fenced");
-      const reconciled: PlacementClaim = { ...claim, state, outcome };
+      if (claim.phase === "terminal") throw new GenerationRepositoryError("generation-placement-claim-fenced");
+      const terminal = outcome !== "pending";
+      const reconciled: PlacementClaim = { ...claim, state, outcome, ...(terminal ? { phase: "terminal", terminalAt: this.now() } : {}), ...(outcome === "not-applied" ? { replaySafe } : {}) };
       await this.atomic(path, reconciled);
       return reconciled;
     });
@@ -311,8 +476,19 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
 
   private async readPlacementClaim(path: string): Promise<PlacementClaim | undefined> {
     try {
-      const parsed = JSON.parse(await readFile(path, "utf8")) as PlacementClaim;
-      return { ...parsed, outcome: parsed.outcome ?? (parsed.state === "completed" ? "applied" : parsed.state === "failed" ? "not-applied" : parsed.state === "needs-attention" ? "unknown" : "pending") };
+      const parsed = JSON.parse(await readFile(path, "utf8")) as Partial<PlacementClaim> & Pick<PlacementClaim, "jobId" | "idempotencyKey" | "state" | "ownerToken" | "claimedAt">;
+      const outcome = parsed.outcome ?? (parsed.state === "completed" ? "applied" : parsed.state === "failed" ? "not-applied" : parsed.state === "needs-attention" ? "unknown" : "pending");
+      const phase = parsed.phase ?? (parsed.state === "claimed" && outcome === "pending" ? "invocation-armed" : "terminal");
+      return {
+        ...parsed,
+        schemaVersion: 2,
+        outcome,
+        ownerEpoch: parsed.ownerEpoch ?? 1,
+        phase,
+        lastRenewedAt: parsed.lastRenewedAt ?? parsed.claimedAt,
+        leaseExpiresAt: parsed.leaseExpiresAt ?? parsed.claimedAt + this.placementLeaseTtlMs,
+        ...(outcome === "not-applied" ? { replaySafe: parsed.replaySafe ?? false } : {}),
+      } as PlacementClaim;
     }
     catch (cause) { if (cause && typeof cause === "object" && "code" in cause && cause.code === "ENOENT") return undefined; throw new GenerationRepositoryError("generation-placement-claim-corrupt"); }
   }

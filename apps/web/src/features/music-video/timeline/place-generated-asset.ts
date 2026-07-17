@@ -14,8 +14,8 @@ export interface GeneratedAssetPlacementStore {
     },
   ) => Promise<ActionResult>;
   /** Replace only the media identity of an existing clip. Implementations must
-   * record this as one undoable action and may use the idempotency key to
-   * replay a completed mutation. */
+   * record this as one undoable action and persist the idempotency key as the
+   * operation receipt used to replay/reconcile a completed mutation. */
   replaceClipMedia?: (
     clipId: string,
     mediaId: string,
@@ -129,14 +129,14 @@ export async function reconcileGeneratedAssetPlacement(
   if (policy === "none") return { outcome: "not-applied" };
   const key = input.idempotencyKey ?? `generation-placement:${input.providerJobId ?? input.mediaId}:${input.shotId}:${policy}:${input.clipId ?? ""}`;
   const media = store.project.mediaLibrary.items.find((item) => item.id === input.mediaId);
-  if (!media) return { outcome: "not-applied", error: { code: "MEDIA_NOT_FOUND", message: `Media with ID ${input.mediaId} not found` } };
+  if (!media) return { outcome: "unknown", error: { code: "MEDIA_NOT_FOUND", message: `Media with ID ${input.mediaId} is unavailable; absence cannot prove a delayed placement will not commit` } };
   if (policy === "replace-selected-clip-media") {
-    if (!input.clipId) return { outcome: "not-applied", error: { code: "CLIP_NOT_FOUND", message: "A selected clip is required for replacement" } };
+    if (!input.clipId) return { outcome: "unknown", error: { code: "CLIP_NOT_FOUND", message: "A selected clip is required to reconcile replacement" } };
     const target = findClip(store.project, input.clipId);
-    if (!target) return { outcome: "not-applied", error: { code: "CLIP_NOT_FOUND", message: `Clip with ID ${input.clipId} not found` } };
-    return target.clip.mediaId === media.id ? { outcome: "applied" } : { outcome: "unknown" };
+    if (!target) return { outcome: "unknown", error: { code: "CLIP_NOT_FOUND", message: `Clip with ID ${input.clipId} is unavailable; absence cannot prove a delayed replacement will not commit` } };
+    return target.clip.mediaId === media.id && target.clip.metadata?.idempotencyKey === key ? { outcome: "applied" } : { outcome: "unknown" };
   }
-  return findPlacedClip(store.project, input.shotId, media.assetGroupId ?? media.id, key) ? { outcome: "applied" } : { outcome: "unknown" };
+  return findPlacedClip(store.project, key) ? { outcome: "applied" } : { outcome: "unknown" };
 }
 
 async function createLinkedClip(
@@ -160,7 +160,7 @@ async function createLinkedClip(
   }
 
   const assetGroupId = media.assetGroupId ?? media.id;
-  const duplicate = findPlacedClip(store.project, input.shotId, assetGroupId, idempotencyKey);
+  const duplicate = findPlacedClip(store.project, idempotencyKey);
   if (duplicate) {
     return {
       success: true,
@@ -273,7 +273,7 @@ async function replaceSelectedClipMedia(
     };
   }
 
-  if (target.clip.mediaId === mediaId) {
+  if (target.clip.mediaId === mediaId && target.clip.metadata?.idempotencyKey === idempotencyKey) {
     return {
       success: true,
       placed: false,
@@ -354,21 +354,11 @@ async function findOrCreateTrack(
 
 function findPlacedClip(
   project: Project,
-  shotId: string,
-  assetGroupId: string,
   idempotencyKey: string,
 ): { trackId: string; clipId: string } | null {
   for (const track of project.timeline.tracks) {
     for (const clip of track.clips) {
       if (clip.metadata?.idempotencyKey === idempotencyKey) {
-        return { trackId: track.id, clipId: clip.id };
-      }
-    }
-  }
-
-  for (const track of project.timeline.tracks) {
-    for (const clip of track.clips) {
-      if (clip.metadata?.shotId === shotId && clip.metadata?.assetGroupId === assetGroupId) {
         return { trackId: track.id, clipId: clip.id };
       }
     }

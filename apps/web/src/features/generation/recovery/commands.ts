@@ -13,30 +13,30 @@ export interface RecoveryCommandResultMap {
   "retry-provider": GenerationJob;
   "retry-finalization": GenerationJob;
   "retry-placement": GenerationJob;
+  "reconcile-placement": GenerationJob;
   cancel: GenerationJob;
 }
 
 export interface RecoveryCommandModule {
-  execute(name: RecoveryCommandName, context: RecoveryCommandContext): Promise<GenerationJob | RecoveryDraft>;
+  execute<Name extends RecoveryCommandName>(name: Name, context: RecoveryCommandContext): Promise<RecoveryCommandResultMap[Name]>;
 }
 
 export function createRecoveryCommandModule(controller: GenerationRecoveryController): RecoveryCommandModule {
+  const handlers: {
+    [Name in RecoveryCommandName]: (context: RecoveryCommandContext) => Promise<RecoveryCommandResultMap[Name]>;
+  } = {
+    regenerate: ({ job }) => controller.regenerate(job),
+    variation: async ({ job }) => controller.variation(job),
+    "retry-provider": ({ job }) => controller.retryProvider(job),
+    "retry-finalization": ({ job }) => controller.retryFinalization(job),
+    "retry-placement": ({ job }) => controller.retryPlacement(job),
+    "reconcile-placement": ({ job }) => controller.reconcilePlacement(job),
+    cancel: ({ job }) => controller.cancel(job),
+  };
+
   return {
-    async execute(name, context) {
-      switch (name) {
-        case "regenerate":
-          return controller.regenerate(context.job);
-        case "variation":
-          return controller.variation(context.job);
-        case "retry-provider":
-          return controller.retryProvider(context.job);
-        case "retry-finalization":
-          return controller.retryFinalization(context.job);
-        case "retry-placement":
-          return controller.retryPlacement(context.job);
-        case "cancel":
-          return controller.cancel(context.job);
-      }
+    execute(name, context) {
+      return handlers[name](context);
     },
   };
 }

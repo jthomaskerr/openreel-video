@@ -9,9 +9,18 @@ export interface RecoveryProvider {
 const RECOVERY_CHECKPOINTS = ["output-claimed", "output-downloaded", "output-verified", "output-inspected", "placeholder-finalized", "shot-linked", "placement-applied"] as const;
 export interface RecoveryCleanup { releaseUnreferenced(job: GenerationJob): Promise<void> }
 export interface RecoveryClock { now(): number }
+export interface PlacementReconciler { reconcilePlacement(jobId: string): Promise<GenerationJob> }
+
+export function isPlacementReconciliationCandidate(job: GenerationJob) {
+  return job.status === "needs-attention"
+    && job.context.placementPolicy !== "none"
+    && Boolean(job.output?.mediaId && job.output.versionId)
+    && job.checkpoints["placement-applied"]?.status === "failed"
+    && ["generation-placement-outcome-unknown", "generation-placement-reconciliation-failed", "generation-placement-retry-unsafe"].includes(job.error?.code ?? "");
+}
 
 export class GenerationRecoveryService {
- constructor(private readonly repository: GenerationJobRepository, private readonly provider: RecoveryProvider, private readonly cleanup: RecoveryCleanup, private readonly clock: RecoveryClock = { now: () => Date.now() }, readonly polling = new GenerationPollingController()) {}
+ constructor(private readonly repository: GenerationJobRepository, private readonly provider: RecoveryProvider, private readonly cleanup: RecoveryCleanup, private readonly clock: RecoveryClock = { now: () => Date.now() }, readonly polling = new GenerationPollingController(), private readonly placementReconciler?: PlacementReconciler) {}
 
   async retryProvider(jobId: string): Promise<GenerationJob> {
     const job = await this.require(jobId);
@@ -44,6 +53,31 @@ export class GenerationRecoveryService {
  const job = await this.require(jobId);
     if (!["completed", "failed"].includes(job.status) || job.context.placementPolicy === "none") return this.fail(job, "generation-invalid-placement-retry-state");
     return this.repository.update(jobId, (current) => ({ ...current, status: "running", error: undefined, updatedAt: this.clock.now(), checkpoints: Object.fromEntries(RECOVERY_CHECKPOINTS.map((name) => [name, { ...(current.checkpoints[name] ?? { status: "pending" }), ...(name === "placement-applied" ? { status: "pending" } : {}) }])), placement: { policy: current.context.placementPolicy, status: "pending" } }));
+  }
+
+  async reconcilePlacement(jobId: string): Promise<GenerationJob> {
+    const job = await this.require(jobId);
+    if (!isPlacementReconciliationCandidate(job)) throw new Error("generation-invalid-placement-reconciliation-state");
+    if (!this.placementReconciler) throw new Error("generation-placement-reconciliation-unavailable");
+    await this.repository.update(jobId, (current) => {
+      if (!isPlacementReconciliationCandidate(current)) throw new Error("generation-invalid-placement-reconciliation-state");
+      return { ...current, status: "finalizing", updatedAt: this.clock.now() };
+    });
+    try {
+      return await this.placementReconciler.reconcilePlacement(jobId);
+    } catch (cause) {
+      const latest = await this.require(jobId);
+      if (latest.status !== "finalizing") return latest;
+      const error: GenerationError = { code: "generation-placement-reconciliation-failed", message: cause instanceof Error ? cause.message : "Placement reconciliation failed", retryable: true };
+      return this.repository.update(jobId, (current) => current.status !== "finalizing" ? current : ({
+        ...current,
+        status: "needs-attention",
+        error,
+        updatedAt: this.clock.now(),
+        checkpoints: { ...current.checkpoints, "placement-applied": { status: "failed", timestamp: this.clock.now(), error } },
+        placement: { policy: current.context.placementPolicy, status: "failed", error },
+      }));
+    }
   }
 
   async cancel(jobId: string): Promise<GenerationJob> {

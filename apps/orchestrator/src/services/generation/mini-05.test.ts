@@ -27,7 +27,7 @@ const manifestRoute = {
 };
 
 const requestBoundary = { validate: validateGenerationRequestBoundary };
-const finalizer: GenerationFinalizerPort = { finalize: async () => {} };
+const finalizer: GenerationFinalizerPort = { finalize: async () => {}, reconcilePlacement: async () => { throw new Error("generation-placement-reconciliation-unavailable"); } };
 const request = { contentType: "application/json", byteLength: 100, maxBytes: 1024, timeoutMs: 1000, maxTimeoutMs: 1000 };
 
 function job(id = "job-1"): GenerationJob {
@@ -131,6 +131,215 @@ test("cancel stops local polling and retry uses a new provider identity", async 
   assert.notEqual(retried.providerJobId, "provider-job-1-1");
 });
 
+test("needs-attention placement reconciliation delegates through the owned finalizer port", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "generation-mini-08-placement-reconcile-"));
+  const repository = new FileGenerationJobRepository(directory);
+  const unknown = { code: "generation-placement-outcome-unknown", message: "placement response lost", retryable: false };
+  const unresolved: GenerationJob = {
+    ...job("placement-reconcile"),
+    status: "needs-attention",
+    providerJobId: "provider-placement-reconcile-1",
+    attempts: [{ ...job("placement-reconcile").attempts[0], providerJobId: "provider-placement-reconcile-1" }],
+    context: { ...job("placement-reconcile").context, placementPolicy: "create-linked-clip" },
+    output: { mediaId: "media-1", versionId: "version-1", mimeType: "video/mp4", byteLength: 4, sha256: "hash", width: 16, height: 9, durationSeconds: 1 },
+    checkpoints: {
+      "output-claimed": { status: "completed", timestamp: 993 },
+      "output-downloaded": { status: "completed", timestamp: 994 },
+      "output-verified": { status: "completed", timestamp: 995 },
+      "output-inspected": { status: "completed", timestamp: 996 },
+      "placeholder-finalized": { status: "completed", timestamp: 997 },
+      "shot-linked": { status: "completed", timestamp: 998 },
+      "placement-applied": { status: "failed", timestamp: 999, error: unknown },
+    },
+    placement: {
+      policy: "create-linked-clip",
+      status: "failed",
+      error: unknown,
+    },
+    error: unknown,
+  };
+  await repository.create(unresolved);
+  const reconciliations: string[] = [];
+  const placementFinalizer = {
+    finalize: async () => {},
+    reconcilePlacement: async (jobId: string) => {
+      reconciliations.push(jobId);
+      assert.equal((await repository.get(jobId))?.status, "finalizing");
+      return repository.update(jobId, (current) => ({
+        ...current,
+        status: "succeeded",
+        error: undefined,
+        placement: { policy: current.context.placementPolicy, status: "applied", appliedAt: 1000 },
+      }));
+    },
+  };
+  const service = new GenerationOrchestrator({
+    repository,
+    provider: provider([]),
+    owner: ({ ownerId, projectId }) => ownerId === "owner-1" && projectId === "project-1",
+    routes: [manifestRoute],
+    releaseEnabled: true,
+    requestBoundary,
+    finalizer: placementFinalizer,
+    clock: () => 1000,
+  });
+
+  const result = await service.reconcilePlacement({ ownerId: "owner-1", projectId: "project-1", jobId: unresolved.id });
+  assert.deepEqual(reconciliations, [unresolved.id]);
+  assert.equal(result.status, "succeeded");
+  assert.equal(result.placement?.status, "applied");
+});
+
+test("status resumes a crashed finalizing placement through reconciliation instead of false success", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "generation-mini-08-placement-resume-"));
+  const repository = new FileGenerationJobRepository(directory);
+  const jobId = "placement-resume";
+  const providerJobId = "provider-placement-resume-1";
+  const placementKey = `generation:${jobId}:placement-applied`;
+  const unknown = { code: "generation-placement-outcome-unknown", message: "placement response lost", retryable: false };
+  const finalizing: GenerationJob = {
+    ...job(jobId),
+    status: "finalizing",
+    providerJobId,
+    outputMediaIds: ["media-1"],
+    attempts: [{ ...job(jobId).attempts[0], providerJobId }],
+    context: { ...job(jobId).context, placementPolicy: "create-linked-clip" },
+    output: { mediaId: "media-1", versionId: "version-1", mimeType: "video/mp4", byteLength: 4, sha256: "hash", width: 16, height: 9, durationSeconds: 1 },
+    checkpoints: {
+      "output-claimed": { status: "completed", timestamp: 993 },
+      "output-downloaded": { status: "completed", timestamp: 994 },
+      "output-verified": { status: "completed", timestamp: 995 },
+      "output-inspected": { status: "completed", timestamp: 996 },
+      "placeholder-finalized": { status: "completed", timestamp: 997 },
+      "shot-linked": { status: "completed", timestamp: 998 },
+      "placement-applied": { status: "failed", timestamp: 999, error: unknown },
+    },
+    placement: { policy: "create-linked-clip", status: "failed", error: unknown },
+    error: unknown,
+  };
+  await repository.create(finalizing);
+  const placement = await repository.claimPlacement(jobId, placementKey);
+  await repository.markPlacementInvocationStarted(jobId, placementKey, placement.claim.ownerToken);
+  await repository.reconcilePlacement(jobId, placementKey, placement.claim.ownerToken, "unknown");
+  const finalizationKey = `generation:${jobId}:finalization:${providerJobId}`;
+  const finalization = await repository.claimFinalization({
+    jobId,
+    providerInstanceId: finalizing.providerInstanceId,
+    providerJobId,
+    outputIdentity: JSON.stringify({ providerJobId, outputMediaIds: ["media-1"] }),
+    idempotencyKey: finalizationKey,
+  });
+  await repository.completeFinalization(jobId, finalizationKey, finalization.claim.ownerToken);
+  let finalizations = 0;
+  let reconciliations = 0;
+  const placementFinalizer: GenerationFinalizerPort = {
+    finalize: async () => { finalizations += 1; },
+    reconcilePlacement: async (id) => {
+      reconciliations += 1;
+      const recovery = await repository.recoverPlacement(id, placementKey);
+      assert.equal(recovery.kind, "reconcile");
+      if (recovery.kind !== "reconcile") throw new Error("expected placement reconciliation ownership");
+      await repository.reconcilePlacement(id, placementKey, recovery.claim.ownerToken, "applied");
+      return repository.update(id, (current) => ({
+        ...current,
+        status: "succeeded",
+        error: undefined,
+        checkpoints: { ...current.checkpoints, "placement-applied": { status: "completed", timestamp: 1000 } },
+        placement: { policy: current.context.placementPolicy, status: "applied", appliedAt: 1000 },
+      }));
+    },
+  };
+  const completedProvider: GenerationProviderPort = {
+    ...provider([]),
+    status: async ({ providerJobId: id }) => ({ providerJobId: id, status: "completed", outputMediaIds: ["media-1"] }),
+  };
+  const service = new GenerationOrchestrator({
+    repository,
+    provider: completedProvider,
+    owner: () => true,
+    routes: [manifestRoute],
+    releaseEnabled: true,
+    requestBoundary,
+    finalizer: placementFinalizer,
+    clock: () => 1000,
+  });
+
+  const result = await service.status({ ownerId: "owner-1", projectId: "project-1", jobId });
+
+  assert.equal(result.status, "succeeded");
+  assert.equal(result.placement?.status, "applied");
+  assert.equal(reconciliations, 1);
+  assert.equal(finalizations, 0);
+});
+
+test("status fails closed when placement reconciliation intent survives but its claim is missing", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "generation-mini-08-placement-intent-missing-claim-"));
+  const repository = new FileGenerationJobRepository(directory);
+  const jobId = "placement-intent-missing-claim";
+  const providerJobId = "provider-placement-intent-missing-claim-1";
+  const unknown = { code: "generation-placement-outcome-unknown", message: "placement response lost", retryable: false };
+  const finalizing: GenerationJob = {
+    ...job(jobId),
+    status: "finalizing",
+    providerJobId,
+    outputMediaIds: ["media-1"],
+    attempts: [{ ...job(jobId).attempts[0], providerJobId }],
+    context: { ...job(jobId).context, placementPolicy: "create-linked-clip" },
+    output: { mediaId: "media-1", versionId: "version-1", mimeType: "video/mp4", byteLength: 4, sha256: "hash", width: 16, height: 9, durationSeconds: 1 },
+    checkpoints: {
+      "output-claimed": { status: "completed", timestamp: 993 },
+      "output-downloaded": { status: "completed", timestamp: 994 },
+      "output-verified": { status: "completed", timestamp: 995 },
+      "output-inspected": { status: "completed", timestamp: 996 },
+      "placeholder-finalized": { status: "completed", timestamp: 997 },
+      "shot-linked": { status: "completed", timestamp: 998 },
+      "placement-applied": { status: "failed", timestamp: 999, error: unknown },
+    },
+    placement: { policy: "create-linked-clip", status: "failed", error: unknown },
+    error: unknown,
+  };
+  await repository.create(finalizing);
+  const finalizationKey = `generation:${jobId}:finalization:${providerJobId}`;
+  const finalization = await repository.claimFinalization({
+    jobId,
+    providerInstanceId: finalizing.providerInstanceId,
+    providerJobId,
+    outputIdentity: JSON.stringify({ providerJobId, outputMediaIds: ["media-1"] }),
+    idempotencyKey: finalizationKey,
+  });
+  await repository.completeFinalization(jobId, finalizationKey, finalization.claim.ownerToken);
+  let finalizations = 0;
+  let reconciliations = 0;
+  const placementFinalizer: GenerationFinalizerPort = {
+    finalize: async () => { finalizations += 1; },
+    reconcilePlacement: async () => {
+      reconciliations += 1;
+      throw new Error("generation-placement-reconciliation-unavailable");
+    },
+  };
+  const completedProvider: GenerationProviderPort = {
+    ...provider([]),
+    status: async ({ providerJobId: id }) => ({ providerJobId: id, status: "completed", outputMediaIds: ["media-1"] }),
+  };
+  const service = new GenerationOrchestrator({
+    repository,
+    provider: completedProvider,
+    owner: () => true,
+    routes: [manifestRoute],
+    releaseEnabled: true,
+    requestBoundary,
+    finalizer: placementFinalizer,
+    clock: () => 1000,
+  });
+
+  const result = await service.status({ ownerId: "owner-1", projectId: "project-1", jobId });
+
+  assert.equal(result.status, "needs-attention");
+  assert.equal(result.error?.code, "generation-placement-reconciliation-failed");
+  assert.equal(reconciliations, 1);
+  assert.equal(finalizations, 0);
+});
+
 test("two service instances share one durable submission claim", async () => {
   const directory = await mkdtemp(join(tmpdir(), "generation-mini-05-claim-"));
   let submits = 0;
@@ -213,7 +422,7 @@ test("rollback cannot be bypassed by a caller-controlled property", async () => 
 test("completion claims valid output and invokes the finalizer once", async () => {
   const directory = await mkdtemp(join(tmpdir(), "generation-mini-05-finalize-"));
   let finalizations = 0;
-  const finalizer: GenerationFinalizerPort = { finalize: async ({ output }) => { finalizations += 1; assert.deepEqual(output.outputUrls, ["https://cdn.example/output.mp4"]); } };
+  const finalizer: GenerationFinalizerPort = { finalize: async ({ output }) => { finalizations += 1; assert.deepEqual(output.outputUrls, ["https://cdn.example/output.mp4"]); }, reconcilePlacement: async () => { throw new Error("generation-placement-reconciliation-unavailable"); } };
   const repository = new FileGenerationJobRepository(directory);
   const service = new GenerationOrchestrator({ repository, provider: { ...provider([]), status: async ({ providerJobId }) => ({ providerJobId, status: "completed", outputUrls: ["https://cdn.example/output.mp4"] }) }, finalizer, requestBoundary, routes: [manifestRoute], releaseEnabled: true, owner: () => true, clock: () => 1000 });
   await service.submit({ ownerId: "owner-1", job: job("finalize"), request });

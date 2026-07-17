@@ -6,6 +6,7 @@ export type RecoveryAction =
   | "retry-provider"
   | "retry-finalization"
   | "retry-placement"
+  | "reconcile-placement"
   | "cancel";
 
 export type RecoveryTransition = {
@@ -52,6 +53,11 @@ const recoveryTransitions: RecoveryTransition[] = [
     to: "running",
   },
   {
+    action: "reconcile-placement",
+    from: ["needs-attention"],
+    to: "finalizing",
+  },
+  {
     action: "cancel",
     from: ["preparing", "queued", "running"],
     to: "canceling",
@@ -63,6 +69,18 @@ const recoveryTransitions: RecoveryTransition[] = [
 
 export function allowedRecoveryActions(status: GenerationJob["status"]): RecoveryAction[] {
   return recoveryTransitions.filter((transition) => transition.from.includes(status)).map((transition) => transition.action);
+}
+
+export function isPlacementReconciliationCandidate(job: GenerationJob): boolean {
+  return job.status === "needs-attention"
+    && job.context.placementPolicy !== "none"
+    && Boolean(job.output?.mediaId && job.output.versionId)
+    && job.checkpoints["placement-applied"]?.status === "failed"
+    && ["generation-placement-outcome-unknown", "generation-placement-reconciliation-failed", "generation-placement-retry-unsafe"].includes(job.error?.code ?? "");
+}
+
+export function allowedRecoveryActionsForJob(job: GenerationJob): RecoveryAction[] {
+  return allowedRecoveryActions(job.status).filter((action) => action !== "reconcile-placement" || isPlacementReconciliationCandidate(job));
 }
 
 export function assertRecoveryTransition(job: GenerationJob, action: RecoveryAction): RecoveryTransition {
@@ -88,6 +106,7 @@ export interface RecoveryPorts {
   resolveContext(input: { job: GenerationJob }): Promise<GenerationJob["context"]>;
   submit(input: { job: GenerationJob; attemptNumber: number }): Promise<{ providerJobId: string }>;
   save(job: GenerationJob): Promise<GenerationJob>;
+  reconcilePlacement(input: { jobId: string }): Promise<GenerationJob>;
   cancelProvider?(input: { provider: string; providerJobId: string }): Promise<void>;
   cleanupUploads?(job: GenerationJob): Promise<void>;
   stopPolling?(jobId: string): void;
@@ -235,6 +254,12 @@ export class GenerationRecoveryController {
           }
         : undefined,
     });
+  }
+
+  async reconcilePlacement(job: GenerationJob): Promise<GenerationJob> {
+    assertRecoveryTransition(job, "reconcile-placement");
+    if (!isPlacementReconciliationCandidate(job)) throw new RecoveryError("recovery-invalid-placement-reconciliation-candidate", { jobId: job.id });
+    return this.ports.reconcilePlacement({ jobId: job.id });
   }
 
   async cancel(job: GenerationJob): Promise<GenerationJob> {
