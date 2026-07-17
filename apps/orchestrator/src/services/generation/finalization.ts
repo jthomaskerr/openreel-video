@@ -175,14 +175,29 @@ export class GenerationFinalizer {
   async retryPlacement(jobId: string): Promise<GenerationJob> {
     const job = await this.requireJob(jobId);
     if (job.context.placementPolicy === "none" || !this.ports.placement) return job;
+    const currentShotId = shotId(job);
+    const requiredCheckpoints: GenerationCheckpointName[] = ["output-downloaded", "output-verified", "output-inspected", "placeholder-finalized"];
+    if (currentShotId && this.ports.shot) requiredCheckpoints.push("shot-linked");
+    if (!job.output?.mediaId || !job.output.versionId || requiredCheckpoints.some((checkpoint) => !completed(job, checkpoint))) {
+      throw new Error("generation-placement-retry-precondition");
+    }
+    const placementKey = idempotencyKey(jobId, "placement-applied");
+    const claim = await this.repository.claimPlacement(jobId, placementKey);
+    if (!claim.acquired) {
+      if (claim.claim.state === "completed") return this.requireJob(jobId);
+      if (claim.claim.state === "claimed") return this.waitForPlacement(jobId);
+      return this.requireJob(jobId);
+    }
     await this.repository.update(jobId, (current) => ({ ...current, checkpoints: { ...current.checkpoints, "placement-applied": { status: "pending" } }, placement: { policy: current.context.placementPolicy, status: "pending" } }));
     try {
       const current = await this.requireJob(jobId);
-      await this.ports.placement.place({ job: current, output: current.output!, idempotencyKey: idempotencyKey(jobId, "placement-applied") });
+      await this.ports.placement.place({ job: current, output: current.output!, idempotencyKey: placementKey });
       await this.mark(jobId, "placement-applied", { status: "completed", timestamp: this.now() });
+      await this.repository.completePlacement(jobId, placementKey, claim.claim.ownerToken);
       return this.repository.update(jobId, (currentJob) => ({ ...currentJob, status: "succeeded", placement: { policy: currentJob.context.placementPolicy, status: "applied", appliedAt: this.now() }, updatedAt: this.now() }));
     } catch (error) {
       const failure = errorFrom(error, "generation-placement-failed");
+      await this.repository.releasePlacement(jobId, claim.claim.ownerToken);
       await this.mark(jobId, "placement-applied", { status: "failed", timestamp: this.now(), error: failure });
       return this.repository.update(jobId, (current) => ({ ...current, status: "succeeded", placement: { policy: current.context.placementPolicy, status: "failed", error: failure }, updatedAt: this.now() }));
     }
@@ -202,6 +217,14 @@ export class GenerationFinalizer {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
     return this.fail(await this.requireJob(id), "placeholder-finalized", { code: "generation-finalization-claim-timeout", message: "Finalization claim did not complete", retryable: true });
+  }
+  private async waitForPlacement(id: string) {
+    for (let attempt = 0; attempt < 100_000; attempt += 1) {
+      const claim = await this.repository.getPlacementClaim(id);
+      if (claim?.state === "completed" || claim?.state === "failed") return this.requireJob(id);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    throw new Error("generation-placement-claim-timeout");
   }
   private rejectCompletion(job: GenerationJob, code: string, message: string) { return { ...job, error: { code, message, retryable: false } }; }
   private async fail(job: GenerationJob, checkpoint: GenerationCheckpointName, error: GenerationError) {

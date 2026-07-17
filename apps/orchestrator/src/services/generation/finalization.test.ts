@@ -274,3 +274,39 @@ test("stage-only placement recovery executes only placement and preserves earlie
   assert.equal(retried.checkpoints["placeholder-finalized"]?.status, "completed");
   assert.equal(retried.checkpoints["shot-linked"]?.status, "completed");
 });
+
+test("concurrent placement retries across finalizer instances place exactly once", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-finalize-placement-claim-"));
+  const repo = new FileGenerationJobRepository(dir);
+  await repo.create(makeJob("job-placement-concurrent", "create-linked-clip"));
+  const failed = createPorts({ jobId: "job-placement-concurrent", placement: "fail" });
+  await new GenerationFinalizer(repo, failed.ports).finalize("job-placement-concurrent", { provider: "wavespeed", providerJobId: "provider-job-1" });
+
+  const left = createPorts({ jobId: "job-placement-concurrent" });
+  const right = createPorts({ jobId: "job-placement-concurrent" });
+  const [leftResult, rightResult] = await Promise.all([
+    new GenerationFinalizer(new FileGenerationJobRepository(dir), left.ports).retryPlacement("job-placement-concurrent"),
+    new GenerationFinalizer(new FileGenerationJobRepository(dir), right.ports).retryPlacement("job-placement-concurrent"),
+  ]);
+
+  assert.equal(leftResult.status, "succeeded");
+  assert.equal(rightResult.status, "succeeded");
+  assert.equal(left.calls.placement + right.calls.placement, 1);
+});
+
+test("placement retry rejects before output and prior checkpoints exist", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-finalize-placement-precondition-"));
+  const repo = new FileGenerationJobRepository(dir);
+  await repo.create(makeJob("job-placement-premature", "create-linked-clip"));
+  const ports = createPorts({ jobId: "job-placement-premature" });
+
+  await assert.rejects(
+    new GenerationFinalizer(repo, ports.ports).retryPlacement("job-placement-premature"),
+    /generation-placement-retry-precondition/,
+  );
+  assert.deepEqual(ports.calls, { download: 0, verify: 0, inspect: 0, placeholder: 0, shot: 0, placement: 0 });
+  const saved = await repo.get("job-placement-premature");
+  assert.equal(saved?.status, "queued");
+  assert.equal(saved?.output, undefined);
+  assert.equal(saved?.checkpoints["placement-applied"], undefined);
+});
