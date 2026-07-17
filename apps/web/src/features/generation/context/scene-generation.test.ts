@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
 
+import type {
+  GenerationContext,
+  GenerationEntryContext as CanonicalGenerationEntryContext,
+  ResolvedGenerationAudio,
+  ResolvedGenerationReference,
+} from "@openreel/music-video-domain/generation";
+
 import {
   buildSceneGenerationRequest,
   SCENE_AUDIO_REQUIRES_PLACEMENT,
   SCENE_AUDIO_REQUIRES_SELECTION,
   resolveGenerationEntryContext,
   selectSceneGenerationContext,
+  type GenerationEntryContext,
   type SceneGenerationProjection,
 } from "./scene-generation";
 
@@ -21,6 +29,20 @@ const projection = (
   inPoint: 2,
   outPoint: 6,
   ...overrides,
+});
+
+const audioFixture = (): ResolvedGenerationAudio => ({
+  sourceMediaId: "audio-media",
+  sourceVersionId: "audio-version",
+  sourceClipId: "audio-clip",
+  projectStartSeconds: 12,
+  projectEndSeconds: 16,
+  sourceStartSeconds: 4,
+  sourceEndSeconds: 8,
+  mimeType: "audio/wav",
+  sha256: "audio-sha",
+  uploadLeaseId: "audio-token",
+  preparationStatus: "preparing",
 });
 
 describe("scene generation context truth table", () => {
@@ -135,7 +157,7 @@ describe("generation entry context resolver", () => {
     ],
     [
       "unplaced shot",
-      { kind: "unplaced-shot" as const },
+      { kind: "unplaced-shot" as const, shotId: "shot-1" },
       {
         timingAbsent: true,
         audioEligible: false,
@@ -146,9 +168,11 @@ describe("generation entry context resolver", () => {
     [
       "explicit unlinked range",
       {
-        kind: "explicit-unlinked-range" as const,
-        startSeconds: 0.5,
-        endSeconds: 2.5,
+        kind: "unlinked-range" as const,
+        rangeId: "range-1",
+        startTime: 0,
+        endTime: 2.5,
+        destinationTrackId: "track-1",
       },
       {
         timingAbsent: false,
@@ -157,22 +181,20 @@ describe("generation entry context resolver", () => {
         placementPolicy: "create-linked-clip",
         timing: {
           source: "manual",
-          startSeconds: 0.5,
+          startSeconds: 0,
           endSeconds: 2.5,
-          durationSeconds: 2,
+          durationSeconds: 2.5,
         },
       },
     ],
     [
       "selected linked projection",
       {
-        kind: "selected-linked-projection" as const,
-        projection: projection("clip-b", "shot-1", {
-          startTime: 20,
-          duration: 5,
-          inPoint: 3,
-          outPoint: 8,
-        }),
+        kind: "linked-projection" as const,
+        shotId: "shot-1",
+        clipId: "clip-b",
+        startTime: 20,
+        endTime: 25,
         supportsAudio: true,
       },
       {
@@ -195,10 +217,70 @@ describe("generation entry context resolver", () => {
       expect(resolveGenerationEntryContext(input)).toMatchObject(expected),
   );
 
+  it("preserves the complete explicit entry identity", () => {
+    const entryContext: GenerationEntryContext = {
+      kind: "unlinked-range",
+      rangeId: "range-1",
+      startTime: 0,
+      endTime: 2,
+      destinationTrackId: "track-1",
+    };
+
+    expect(resolveGenerationEntryContext(entryContext).entryContext).toEqual(entryContext);
+  });
+
+  it("requires explicit model audio capability", () => {
+    expect(
+      resolveGenerationEntryContext({
+        kind: "linked-projection",
+        shotId: "shot-1",
+        clipId: "clip-1",
+        startTime: 0,
+        endTime: 2,
+        // @ts-expect-error linked projection capability is required by the input contract
+      }),
+    ).toMatchObject({ errors: [{ code: "audio-capability-required" }] });
+  });
+
+  it.each([
+    [{ kind: "unplaced-shot", shotId: "" } as const, "entry-context-invalid"],
+    [{ kind: "unlinked-range", rangeId: "", startTime: 0, endTime: 2 } as const, "entry-context-invalid"],
+    [{ kind: "linked-projection", shotId: "", clipId: "clip-1", startTime: 0, endTime: 2, supportsAudio: false } as const, "entry-context-invalid"],
+  ] as const)("rejects empty entry identifier %#", (input, code) => {
+    expect(resolveGenerationEntryContext(input).errors).toEqual([{ code }]);
+  });
+
+  it("does not call the audio port for any non-audio entry or unsupported projection", () => {
+    const resolveAudioSource = () => {
+      throw new Error("audio port must not be called");
+    };
+    const entries = [
+      { kind: "new-asset" as const },
+      { kind: "unplaced-shot" as const, shotId: "shot-1" },
+      { kind: "unlinked-range" as const, rangeId: "range-1", startTime: 0, endTime: 2 },
+    ];
+
+    entries.forEach((entry) =>
+      resolveGenerationEntryContext({ ...entry, audioSourceResolver: resolveAudioSource }),
+    );
+    resolveGenerationEntryContext({
+      kind: "linked-projection",
+      shotId: "shot-1",
+      clipId: "clip-1",
+      startTime: 0,
+      endTime: 2,
+      supportsAudio: false,
+      audioSourceResolver: resolveAudioSource,
+    });
+  });
+
   it("honors an override on a selected projection", () => {
     const result = resolveGenerationEntryContext({
-      kind: "selected-linked-projection",
-      projection: projection("clip-b"),
+      kind: "linked-projection",
+      shotId: "shot-1",
+      clipId: "clip-b",
+      startTime: 12,
+      endTime: 16,
       supportsAudio: false,
       placementPolicy: "none",
     });
@@ -211,44 +293,51 @@ describe("generation entry context resolver", () => {
   });
 
   it.each([
-    ["zero span", { kind: "explicit-unlinked-range" as const, startSeconds: 0, endSeconds: 0 }],
+    ["zero span", { kind: "unlinked-range" as const, rangeId: "r", startTime: 0, endTime: 0 }],
     [
       "half span with non-finite end",
       {
-        kind: "explicit-unlinked-range" as const,
-        startSeconds: 0.5,
-        endSeconds: Number.NaN,
+        kind: "unlinked-range" as const,
+        rangeId: "r",
+        startTime: 0.5,
+        endTime: Number.NaN,
       },
     ],
     [
       "negative start",
       {
-        kind: "explicit-unlinked-range" as const,
-        startSeconds: -1,
-        endSeconds: 2,
+        kind: "unlinked-range" as const,
+        rangeId: "r",
+        startTime: -1,
+        endTime: 2,
       },
     ],
     [
       "equal bounds",
       {
-        kind: "explicit-unlinked-range" as const,
-        startSeconds: 2,
-        endSeconds: 2,
+        kind: "unlinked-range" as const,
+        rangeId: "r",
+        startTime: 2,
+        endTime: 2,
       },
     ],
     [
       "reversed bounds",
       {
-        kind: "explicit-unlinked-range" as const,
-        startSeconds: 4,
-        endSeconds: 3,
+        kind: "unlinked-range" as const,
+        rangeId: "r",
+        startTime: 4,
+        endTime: 3,
       },
     ],
     [
       "invalid selected projection",
       {
-        kind: "selected-linked-projection" as const,
-        projection: projection("clip-b", "shot-1", { duration: 0 }),
+        kind: "linked-projection" as const,
+        shotId: "shot-1",
+        clipId: "clip-b",
+        startTime: 12,
+        endTime: 12,
         supportsAudio: true,
       },
     ],
@@ -257,6 +346,17 @@ describe("generation entry context resolver", () => {
 
     expect(result.errors).toEqual([{ code: "timing-invalid" }]);
     expect(result.audioEligible).toBe(false);
+  });
+
+  it("rejects duplicate selected projection identities", () => {
+    expect(
+      selectSceneGenerationContext({
+        shotId: "shot-1",
+        includeAudio: true,
+        projectionClipId: "clip-1",
+        projections: [projection("clip-1"), projection("clip-1")],
+      }),
+    ).toMatchObject({ status: "disabled", code: "projection-ambiguous" });
   });
 });
 
@@ -270,30 +370,32 @@ describe("scene generation request fixture", () => {
     });
     if (selection.status !== "ready") throw new Error(selection.reason);
 
-    const ref = (mediaId: string, token: string) => ({
+    const ref = (mediaId: string, token: string): Omit<ResolvedGenerationReference, "origins"> => ({
+      id: `${mediaId}-ref`,
+      order: 0,
       mediaId,
-      remoteInput: { kind: "upload-token" as const, value: token },
+      state: "active",
+      preparationStatus: "preparing",
+      errorHistory: [],
+      uploadLeaseId: token,
     });
-    const audio = {
-      sourceMediaId: "audio-media",
-      sourceVersionId: "audio-version",
-      sourceClipId: "audio-clip",
-      projectStartSeconds: 12,
-      projectEndSeconds: 16,
-      sourceStartSeconds: 4,
-      sourceEndSeconds: 8,
-      mimeType: "audio/wav",
-      sha256: "audio-sha",
-      remoteInput: { kind: "upload-token" as const, value: "audio-token" },
-    };
+    const audio = audioFixture();
 
     const request = buildSceneGenerationRequest({
       id: "request-1",
       projectId: "project-1",
-      shotId: "shot-1",
+      entryContext: {
+        kind: "linked-projection",
+        shotId: "shot-1",
+        clipId: "clip-b",
+        startTime: 12,
+        endTime: 16,
+      },
       selection,
       target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
       placementPolicy: "none",
+      mode: "image-to-video",
+      prompt: "A scene",
       modelId: "provider/model",
       modelSchemaVersion: "schema-v7",
       providerInputs: { prompt: "A scene" },
@@ -301,45 +403,186 @@ describe("scene generation request fixture", () => {
         source: ref("source", "source-token"),
         characters: [ref("character", "character-token")],
         shotReferences: [ref("shared", "shared-token")],
-        userReferences: [
-          ref("shared", "ignored-lower-precedence-token"),
-          ref("user", "user-token"),
-        ],
+        userReferences: [ref("shared", "user-shared-token"), ref("user", "user-token")],
       },
       audio,
     });
 
-    expect(request).toEqual({
+    expect(request).toMatchObject({
       id: "request-1",
       projectId: "project-1",
       provider: "wavespeed",
       modelId: "provider/model",
       modelSchemaVersion: "schema-v7",
-      providerInputs: { prompt: "A scene" },
       context: {
         projectId: "project-1",
-        shotId: "shot-1",
-        clipId: "clip-b",
-        target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
-        timing: {
-          source: "timeline",
-          startSeconds: 12,
-          endSeconds: 16,
-          durationSeconds: 4,
+        entryContext: {
+          kind: "linked-projection",
+          shotId: "shot-1",
+          clipId: "clip-b",
+          startTime: 12,
+          endTime: 16,
         },
-        references: [
-          { ...ref("source", "source-token"), origins: ["source"] },
-          { ...ref("character", "character-token"), origins: ["character"] },
-          {
-            ...ref("shared", "shared-token"),
-            origins: ["shot", "user"],
-          },
-          { ...ref("user", "user-token"), origins: ["user"] },
-        ],
-        audio,
+        mode: "image-to-video",
+        prompt: "A scene",
         placementPolicy: "none",
+        audioAssetId: "audio-media",
+        audioRange: { startTime: 12, endTime: 16 },
       },
+      providerInputs: { prompt: "A scene" },
     });
+
+    expect(request.context.references).toHaveLength(4);
+    expect(request.context.references.map((reference: ResolvedGenerationReference) => reference.order)).toEqual([1, 2, 3, 4]);
+    expect(request.context.references[0]).toMatchObject({
+      mediaId: "source",
+      origins: ["source"],
+      preparationStatus: "preparing",
+      uploadLeaseId: "source-token",
+    });
+    expect(request.context.references[0]).toMatchObject({ id: "source-ref", state: "active", errorHistory: [] });
+    expect(request.context.references[1]).toMatchObject({
+      mediaId: "character",
+      origins: ["character"],
+      preparationStatus: "preparing",
+      uploadLeaseId: "character-token",
+    });
+    expect(request.context.references[2]).toMatchObject({
+      mediaId: "shared",
+      origins: ["shot", "user"],
+      preparationStatus: "preparing",
+      uploadLeaseId: "shared-token",
+    });
+    expect(request.context.references[3]).toMatchObject({
+      mediaId: "user",
+      origins: ["user"],
+      preparationStatus: "preparing",
+      uploadLeaseId: "user-token",
+    });
+  });
+
+  it("returns a canonical GenerationContext without unsafe casts", () => {
+    const canonicalEntryContext: CanonicalGenerationEntryContext = { kind: "new-asset" };
+    const request = buildSceneGenerationRequest({
+      id: "request-canonical",
+      projectId: "project-1",
+      entryContext: canonicalEntryContext,
+      mode: "text-to-image",
+      prompt: "Library asset",
+      selection: { status: "ready", includeAudio: false },
+      target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
+      placementPolicy: "none",
+      modelId: "provider/model",
+      modelSchemaVersion: "schema-v1",
+      providerInputs: {},
+    });
+
+    const context: GenerationContext = request.context;
+    expect(context.entryContext).toEqual(canonicalEntryContext);
+    expect(context.placementPolicy).toBe("none");
+  });
+
+  it.each([
+    { kind: "new-asset" as const },
+    { kind: "unplaced-shot" as const, shotId: "shot-1" },
+    { kind: "unlinked-range" as const, rangeId: "range-1", startTime: 0, endTime: 4 },
+  ])("rejects audio for %s entry contexts", (entryContext) => {
+    expect(() =>
+      buildSceneGenerationRequest({
+        id: "request-audio-mismatch",
+        projectId: "project-1",
+        entryContext,
+        mode: "image-to-video",
+        prompt: "Scene",
+        selection: { status: "ready", includeAudio: false },
+        target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
+        placementPolicy: entryContext.kind === "unlinked-range" ? "create-linked-clip" : "none",
+        modelId: "provider/model",
+        modelSchemaVersion: "schema-v1",
+        providerInputs: {},
+        audio: audioFixture(),
+      }),
+    ).toThrow("generation-audio-not-allowed-for-entry-context");
+  });
+
+  it("rejects linked selection timing that differs from entryContext", () => {
+    const selection = selectSceneGenerationContext({
+      shotId: "shot-1",
+      includeAudio: true,
+      projectionClipId: "clip-b",
+      projections: [projection("clip-b", "shot-1", { startTime: 12, duration: 4 })],
+    });
+    if (selection.status !== "ready") throw new Error(selection.reason);
+
+    expect(() =>
+      buildSceneGenerationRequest({
+        id: "request-selection-mismatch",
+        projectId: "project-1",
+        entryContext: { kind: "linked-projection", shotId: "shot-1", clipId: "clip-b", startTime: 13, endTime: 17 },
+        mode: "image-to-video",
+        prompt: "Scene",
+        selection,
+        target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
+        placementPolicy: "replace-selected-clip-media",
+        modelId: "provider/model",
+        modelSchemaVersion: "schema-v1",
+        providerInputs: {},
+      }),
+    ).toThrow("generation-entry-context-selection-mismatch");
+  });
+
+  it("rejects linked audio range that differs from entryContext", () => {
+    const selection = selectSceneGenerationContext({
+      shotId: "shot-1",
+      includeAudio: true,
+      projectionClipId: "clip-b",
+      projections: [projection("clip-b")],
+    });
+    if (selection.status !== "ready") throw new Error(selection.reason);
+
+    expect(() =>
+      buildSceneGenerationRequest({
+        id: "request-audio-range-mismatch",
+        projectId: "project-1",
+        entryContext: { kind: "linked-projection", shotId: "shot-1", clipId: "clip-b", startTime: 12, endTime: 16 },
+        mode: "image-to-video",
+        prompt: "Scene",
+        selection,
+        target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
+        placementPolicy: "replace-selected-clip-media",
+        modelId: "provider/model",
+        modelSchemaVersion: "schema-v1",
+        providerInputs: {},
+        audio: { ...audioFixture(), projectStartSeconds: 13, projectEndSeconds: 17 },
+      }),
+    ).toThrow("generation-entry-context-audio-range-mismatch");
+  });
+
+  it("rejects linked audio when selection explicitly disables audio", () => {
+    const selection = selectSceneGenerationContext({
+      shotId: "shot-1",
+      includeAudio: false,
+      projectionClipId: "clip-b",
+      projections: [projection("clip-b")],
+    });
+    if (selection.status !== "ready") throw new Error(selection.reason);
+
+    expect(() =>
+      buildSceneGenerationRequest({
+        id: "request-audio-selection-mismatch",
+        projectId: "project-1",
+        entryContext: { kind: "linked-projection", shotId: "shot-1", clipId: "clip-b", startTime: 12, endTime: 16 },
+        mode: "image-to-video",
+        prompt: "Scene",
+        selection,
+        target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
+        placementPolicy: "replace-selected-clip-media",
+        modelId: "provider/model",
+        modelSchemaVersion: "schema-v1",
+        providerInputs: {},
+        audio: audioFixture(),
+      }),
+    ).toThrow("generation-entry-context-audio-selection-mismatch");
   });
 
   it("does not add timing or clip identity to an unplaced visual request", () => {
@@ -354,7 +597,9 @@ describe("scene generation request fixture", () => {
       buildSceneGenerationRequest({
         id: "request-1",
         projectId: "project-1",
-        shotId: "shot-1",
+        entryContext: { kind: "new-asset" },
+        mode: "text-to-image",
+        prompt: "",
         selection,
         target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
         placementPolicy: "none",
@@ -364,14 +609,15 @@ describe("scene generation request fixture", () => {
       }).context,
     ).toEqual({
       projectId: "project-1",
-      shotId: "shot-1",
-      target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
+      entryContext: { kind: "new-asset" },
+      mode: "text-to-image",
+      prompt: "",
       references: [],
       placementPolicy: "none",
     });
   });
 
-  it("preserves a user-selected placement override on a selected projection", () => {
+  it("preserves user-selected placement override on selected projection", () => {
     const selection = selectSceneGenerationContext({
       shotId: "shot-1",
       includeAudio: true,
@@ -384,7 +630,9 @@ describe("scene generation request fixture", () => {
       buildSceneGenerationRequest({
         id: "request-2",
         projectId: "project-1",
-        shotId: "shot-1",
+        entryContext: { kind: "linked-projection", shotId: "shot-1", clipId: "clip-b", startTime: 12, endTime: 16 },
+        mode: "image-to-video",
+        prompt: "A scene",
         selection,
         target: {
           kind: "new-version",
