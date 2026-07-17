@@ -17,7 +17,8 @@ import {
   buildImmutableGenerationSubmissionDraft,
   buildGenerationSubmissionContext,
   generationSubmissionDraftKey,
-  stableSubmissionStringify,
+  normalizeProviderNeutralInputs,
+  ProviderNeutralInputError,
 } from "./drafts/v2";
 
 export interface GenerationDraft {
@@ -43,7 +44,7 @@ export interface GenerationReferenceDraft {
   versionId?: string;
   role?: string;
   order?: number;
-  origins?: GenerationReferenceOrigin[];
+  origins?: readonly GenerationReferenceOrigin[];
   canonicalTokens?: readonly string[];
   status?: "active" | "unresolved" | "ambiguous" | "unavailable" | "unsupported" | "overflow" | "cyclic";
   reason?: string;
@@ -102,7 +103,7 @@ export interface ProviderSubmitPort {
     modelSchemaVersion: string;
     inputs: Record<string, unknown>;
     context: GenerationContext;
-    references?: readonly Array<{
+    references?: ReadonlyArray<{
       key: string;
       mediaId: string;
       mediaVersionId: string;
@@ -185,6 +186,18 @@ function validateDraft(draft: GenerationDraft): void {
   }
   if (!draft.providerInputs || typeof draft.providerInputs !== "object" || Array.isArray(draft.providerInputs)) {
     throw new GenerationSubmissionError("invalid-draft", "Inputs are required", "providerInputs");
+  }
+  try {
+    normalizeProviderNeutralInputs(draft.providerInputs);
+  } catch (cause) {
+    if (cause instanceof ProviderNeutralInputError) {
+      throw new GenerationSubmissionError(
+        "invalid-draft",
+        "Provider inputs must contain only provider-neutral values",
+        cause.path,
+      );
+    }
+    throw cause;
   }
   for (const [index, reference] of (draft.references ?? []).entries()) {
     if (!reference || typeof reference !== "object") {
@@ -350,29 +363,35 @@ function buildJob(
 
 export async function submitGeneration(draft: GenerationDraft, ports: SubmitGenerationPorts): Promise<GenerationJob> {
   validateDraft(draft);
+  const snapshot = buildImmutableGenerationSubmissionDraft({
+    ...draft,
+    references: activeSubmissionReferences(draft),
+  });
   const submissionKey = generationSubmissionDraftKey({
-    projectId: draft.projectId,
-    provider: draft.provider,
-    modelId: draft.modelId,
-    modelSchemaVersion: draft.modelSchemaVersion,
-    target: {
-      kind: draft.target.kind,
-      ...(draft.target.kind === "new-version" ? { sourceMediaId: draft.target.sourceMediaId ?? "" } : {}),
-      placeholderMediaId: "__submission__",
-    },
-    context: draft.context,
-    providerInputs: draft.providerInputs,
-    canonicalPrompt: draft.canonicalPrompt,
-    references: draft.references,
-    audio: draft.audio,
-    placementPolicy: draft.placementPolicy ?? draft.context.placementPolicy,
-    referenceOverflowAcknowledged: draft.referenceOverflowAcknowledged,
-    idempotencyKey: draft.idempotencyKey,
+    projectId: snapshot.projectId,
+    provider: snapshot.provider,
+    modelId: snapshot.modelId,
+    modelSchemaVersion: snapshot.modelSchemaVersion,
+    target: snapshot.target.kind === "new-version"
+      ? {
+          kind: "new-version",
+          sourceMediaId: snapshot.target.sourceMediaId ?? "",
+          placeholderMediaId: "__submission__",
+        }
+      : { kind: "new-asset", placeholderMediaId: "__submission__" },
+    context: snapshot.context,
+    providerInputs: snapshot.providerInputs,
+    canonicalPrompt: snapshot.canonicalPrompt,
+    references: snapshot.references,
+    audio: snapshot.audio,
+    placementPolicy: snapshot.placementPolicy ?? snapshot.context.placementPolicy,
+    referenceOverflowAcknowledged: snapshot.referenceOverflowAcknowledged,
+    idempotencyKey: snapshot.idempotencyKey,
   });
   const existing = inflight.get(submissionKey);
   if (existing) return existing;
 
-  const operation = executeSubmission(draft, ports, submissionKey);
+  const operation = executeSubmission(snapshot, ports, submissionKey);
   inflight.set(submissionKey, operation);
   void operation
     .finally(() => {
@@ -383,7 +402,7 @@ export async function submitGeneration(draft: GenerationDraft, ports: SubmitGene
 }
 
 async function executeSubmission(
-  draft: GenerationDraft,
+  snapshot: GenerationDraft,
   ports: SubmitGenerationPorts,
   submissionKey: string,
 ): Promise<GenerationJob> {
@@ -391,26 +410,22 @@ async function executeSubmission(
   const cachedDraft = draftCache.get(submissionKey);
   const placeholderMediaId = cachedDraft?.placeholderMediaId ?? ports.ids.next("placeholder");
   const target: GenerationTarget =
-    draft.target.kind === "new-version"
-      ? { kind: "new-version", sourceMediaId: draft.target.sourceMediaId!, placeholderMediaId }
+    snapshot.target.kind === "new-version"
+      ? { kind: "new-version", sourceMediaId: snapshot.target.sourceMediaId!, placeholderMediaId }
       : { kind: "new-asset", placeholderMediaId };
+  const orderedReferences = activeSubmissionReferences(snapshot);
   const exactPlaceholderMediaId = cachedDraft
     ? cachedDraft.placeholderMediaId
     : extractPlaceholderMediaId(
         await ports.mutations.createPlaceholder({
-          projectId: draft.projectId,
+          projectId: snapshot.projectId,
           target,
-          sourceMediaId: draft.target.sourceMediaId,
+          sourceMediaId: snapshot.target.sourceMediaId,
         }),
         placeholderMediaId,
       );
-  const orderedReferences = activeSubmissionReferences(draft);
-  const immutableDraft = buildImmutableGenerationSubmissionDraft({
-    ...draft,
-    references: orderedReferences,
-  });
   const retryableDraft = createGenerationSubmissionRetryableDraft({
-    draft: immutableDraft,
+    draft: snapshot,
     placeholderMediaId: exactPlaceholderMediaId,
     updatedAt: ports.clock.now(),
     key: submissionKey,
@@ -431,7 +446,7 @@ async function executeSubmission(
     }
   } catch (cause) {
     return failSubmission(ports, {
-      draft,
+      draft: snapshot,
       stage: "reference-upload",
       cause,
       placeholderMediaId: exactPlaceholderMediaId,
@@ -442,15 +457,15 @@ async function executeSubmission(
 
   let audioToken: { tokenId: string } | undefined;
   try {
-    if (draft.audio) {
+    if (snapshot.audio) {
       if (!ports.audio) {
         throw new GenerationSubmissionError("audio-upload-unavailable", "Audio upload is unavailable", "audio");
       }
-      audioToken = await ports.audio.uploadAudio(draft.audio);
+      audioToken = await ports.audio.uploadAudio(snapshot.audio);
     }
   } catch (cause) {
     return failSubmission(ports, {
-      draft,
+      draft: snapshot,
       stage: "audio-upload",
       cause,
       placeholderMediaId: exactPlaceholderMediaId,
@@ -462,11 +477,11 @@ async function executeSubmission(
   let sanitizedInputs: Record<string, unknown>;
   try {
     const sanitized = ports.sanitizer?.sanitize({
-      draft: immutableDraft,
+      draft: snapshot,
       references: referenceTokens,
       audio: audioToken,
     });
-    sanitizedInputs = sanitized?.inputs ?? { ...draft.providerInputs };
+    sanitizedInputs = sanitized?.inputs ?? { ...snapshot.providerInputs };
     if ((sanitized?.errors ?? []).length) {
       const [firstError] = sanitized!.errors!;
       throw new GenerationSubmissionError("invalid-input", "Provider inputs are invalid", firstError.field, false);
@@ -474,7 +489,7 @@ async function executeSubmission(
     assertNoLocalSubmissionUrls(sanitizedInputs, "providerInputs");
   } catch (cause) {
     return failSubmission(ports, {
-      draft,
+      draft: snapshot,
       stage: "sanitize",
       cause,
       placeholderMediaId: exactPlaceholderMediaId,
@@ -484,7 +499,7 @@ async function executeSubmission(
   }
 
   const context = buildGenerationSubmissionContext({
-    draft: immutableDraft,
+    draft: snapshot,
     target,
     referenceTokens,
     audioToken,
@@ -505,17 +520,17 @@ async function executeSubmission(
   let providerSubmit: { providerJobId: string };
   try {
     providerSubmit = await ports.provider.submit({
-      provider: draft.provider,
-      modelId: draft.modelId,
-      modelSchemaVersion: draft.modelSchemaVersion,
+      provider: snapshot.provider,
+      modelId: snapshot.modelId,
+      modelSchemaVersion: snapshot.modelSchemaVersion,
       inputs: sanitizedInputs,
       context,
       ...(submittedReferences.length ? { references: submittedReferences } : {}),
-      idempotencyKey: draft.idempotencyKey ?? submissionKey,
+      idempotencyKey: snapshot.idempotencyKey ?? submissionKey,
     });
   } catch (cause) {
     return failSubmission(ports, {
-      draft,
+      draft: snapshot,
       stage: "submit",
       cause,
       placeholderMediaId: exactPlaceholderMediaId,
@@ -524,7 +539,7 @@ async function executeSubmission(
     });
   }
 
-  const job = buildJob(draft, providerSubmit.providerJobId, context, sanitizedInputs, ports.ids, ports.clock);
+  const job = buildJob(snapshot, providerSubmit.providerJobId, context, sanitizedInputs, ports.ids, ports.clock);
 
   try {
     await ports.cache.put(job);
@@ -532,7 +547,7 @@ async function executeSubmission(
     return job;
   } catch (cause) {
     return failSubmission(ports, {
-      draft,
+      draft: snapshot,
       stage: "cache",
       cause,
       placeholderMediaId: exactPlaceholderMediaId,

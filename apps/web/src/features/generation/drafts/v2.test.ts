@@ -118,6 +118,28 @@ describe("generation submission draft helpers", () => {
     expect(first).not.toContain("blob:audio-a");
   });
 
+  it.each([
+    ["blob URL", "blob:provider-input-a"],
+    ["file URL", "file:///tmp/provider-input-a.png"],
+    [
+      "expiring signed URL",
+      "https://uploads.example.com/object?X-Amz-Expires=60&X-Amz-Signature=signature-a",
+    ],
+  ])("rejects a nested %s from provider-neutral submission keys", (_label, transientValue) => {
+    expect(() => generationSubmissionDraftKey({
+      projectId: "p1",
+      provider: "wavespeed",
+      modelId: "m1",
+      modelSchemaVersion: "s1",
+      target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
+      context: { projectId: "p1", references: [], placementPolicy: "none" },
+      providerInputs: {
+        prompt: "scene",
+        nested: { transport: transientValue },
+      },
+    })).toThrow(/providerInputs\.nested\.transport/);
+  });
+
   it("flags local submission urls", () => {
     expect(isLocalSubmissionUrl("blob:abc")).toBe(true);
     expect(isLocalSubmissionUrl("file:///tmp/x.png")).toBe(true);

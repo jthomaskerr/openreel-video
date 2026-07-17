@@ -6,6 +6,7 @@ import {
   type SubmitGenerationPorts,
 } from "./submit-generation";
 import { createGenerationSubmissionDraftCache } from "./drafts/cache";
+import { generationSubmissionDraftKey } from "./drafts/v2";
 
 function draft(overrides: Partial<GenerationDraft> = {}): GenerationDraft {
   return {
@@ -75,6 +76,29 @@ describe("submitGeneration", () => {
     expect(p.cache.put).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["blob URL", "blob:provider-input-a"],
+    ["file URL", "file:///tmp/provider-input-a.png"],
+    [
+      "expiring signed URL",
+      "https://uploads.example.com/object?X-Amz-Expires=60&X-Amz-Signature=signature-a",
+    ],
+  ])("rejects a nested %s in provider inputs before any mutation", async (_label, transientValue) => {
+    const p = ports();
+
+    await expect(submitGeneration(draft({
+      providerInputs: {
+        prompt: "hello",
+        nested: { transport: transientValue },
+      },
+    }), p)).rejects.toMatchObject({
+      code: "invalid-draft",
+      field: "providerInputs.nested.transport",
+    });
+    expect(p.mutations.createPlaceholder).not.toHaveBeenCalled();
+    expect(p.provider.submit).not.toHaveBeenCalled();
+  });
+
   it("creates one placeholder and one provider submit for concurrent replay", async () => {
     const p = ports();
     const first = submitGeneration(draft(), p);
@@ -91,6 +115,118 @@ describe("submitGeneration", () => {
         }),
       }),
     );
+  });
+
+  it("submits the validated snapshot when the caller mutates the draft while placeholder creation is pending", async () => {
+    let resolvePlaceholder!: (value: string) => void;
+    const placeholder = new Promise<string>((resolve) => {
+      resolvePlaceholder = resolve;
+    });
+    const uploadReference = vi.fn(async () => ({ tokenId: "ref-token" }));
+    const uploadAudio = vi.fn(async () => ({ tokenId: "audio-token" }));
+    const providerSubmit = vi.fn(async () => ({ providerJobId: "provider-1" }));
+    const p = ports({
+      mutations: {
+        createPlaceholder: vi.fn(() => placeholder),
+        markPlaceholderFailed: vi.fn(async () => {}),
+      },
+      references: { uploadReference },
+      audio: { uploadAudio },
+      provider: { submit: providerSubmit },
+    });
+    const input = draft({
+      canonicalPrompt: "original @{reference-1}",
+      providerInputs: {
+        prompt: "original @{reference-1}",
+        options: { guidance: 7 },
+      },
+      references: [{
+        key: "reference-1",
+        mediaId: "ref-media-1",
+        mediaVersionId: "ref-version-1",
+        role: "source-image",
+        order: 1,
+        origins: ["user"],
+        canonicalTokens: ["@{reference-1}"],
+        status: "active",
+      }],
+      audio: {
+        sourceMediaId: "audio-media-1",
+        sourceVersionId: "audio-version-1",
+        sourceClipId: "audio-clip-1",
+        projectStartSeconds: 0,
+        projectEndSeconds: 1,
+        sourceStartSeconds: 2,
+        sourceEndSeconds: 3,
+        mimeType: "audio/wav",
+        sha256: "audio-sha-1",
+      },
+    });
+    const original = structuredClone(input);
+    const expectedKey = generationSubmissionDraftKey({
+      projectId: original.projectId,
+      provider: original.provider,
+      modelId: original.modelId,
+      modelSchemaVersion: original.modelSchemaVersion,
+      target: original.target.kind === "new-version"
+        ? {
+            kind: "new-version",
+            sourceMediaId: original.target.sourceMediaId ?? "",
+            placeholderMediaId: "__submission__",
+          }
+        : { kind: "new-asset", placeholderMediaId: "__submission__" },
+      context: original.context,
+      providerInputs: original.providerInputs,
+      canonicalPrompt: original.canonicalPrompt,
+      references: original.references,
+      audio: original.audio,
+      placementPolicy: original.placementPolicy ?? original.context.placementPolicy,
+      referenceOverflowAcknowledged: original.referenceOverflowAcknowledged,
+    });
+
+    const submission = submitGeneration(input, p);
+    expect(p.mutations.createPlaceholder).toHaveBeenCalledTimes(1);
+
+    input.provider = "mutated-provider";
+    input.modelId = "mutated-model";
+    input.canonicalPrompt = "mutated prompt";
+    input.context.shotId = "mutated-shot";
+    input.providerInputs.prompt = "mutated prompt";
+    (input.providerInputs.options as { guidance: number }).guidance = 99;
+    input.references![0]!.mediaId = "mutated-reference";
+    input.references![0]!.status = "cyclic";
+    input.audio!.sourceMediaId = "mutated-audio";
+
+    resolvePlaceholder("placeholder-1");
+    const job = await submission;
+
+    expect(uploadReference).toHaveBeenCalledWith(expect.objectContaining({
+      key: "reference-1",
+      mediaId: "ref-media-1",
+      mediaVersionId: "ref-version-1",
+      role: "source-image",
+      status: "active",
+    }));
+    expect(uploadAudio).toHaveBeenCalledWith(expect.objectContaining({
+      sourceMediaId: "audio-media-1",
+      sourceVersionId: "audio-version-1",
+      sha256: "audio-sha-1",
+    }));
+    expect(providerSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      provider: "wavespeed",
+      modelId: "m1",
+      inputs: {
+        prompt: "original @{reference-1}",
+        options: { guidance: 7 },
+      },
+      context: expect.objectContaining({ shotId: "shot-1" }),
+      idempotencyKey: expectedKey,
+    }));
+    expect(job).toMatchObject({
+      provider: "wavespeed",
+      modelId: "m1",
+      context: { shotId: "shot-1" },
+    });
   });
 
   it("uses the explicit target instead of deriving from references", async () => {

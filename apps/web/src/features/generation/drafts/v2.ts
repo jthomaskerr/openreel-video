@@ -46,6 +46,124 @@ export function assertNoLocalSubmissionUrls(value: unknown, path = "value"): voi
   }
 }
 
+const EXPIRING_TRANSPORT_QUERY_PARAMETERS = new Set([
+  "expires",
+  "key-pair-id",
+  "se",
+  "sig",
+  "signature",
+  "sv",
+  "x-amz-algorithm",
+  "x-amz-credential",
+  "x-amz-date",
+  "x-amz-expires",
+  "x-amz-security-token",
+  "x-amz-signature",
+  "x-goog-algorithm",
+  "x-goog-credential",
+  "x-goog-date",
+  "x-goog-expires",
+  "x-goog-signature",
+]);
+
+const TRANSIENT_TRANSPORT_FIELD_NAMES = new Set([
+  "bloburl",
+  "downloadurl",
+  "downloaduri",
+  "expiresat",
+  "expiresin",
+  "expiration",
+  "expiry",
+  "fileurl",
+  "localurl",
+  "presignedurl",
+  "signedurl",
+  "uploadtoken",
+  "uploadurl",
+  "uploaduri",
+]);
+
+export class ProviderNeutralInputError extends TypeError {
+  constructor(readonly path: string, reason: string) {
+    super(`${reason} at ${path}`);
+    this.name = "ProviderNeutralInputError";
+  }
+}
+
+function isExpiringTransportUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return [...url.searchParams.keys()].some((key) =>
+      EXPIRING_TRANSPORT_QUERY_PARAMETERS.has(key.toLowerCase()),
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isTransientTransportFieldName(key: string): boolean {
+  return TRANSIENT_TRANSPORT_FIELD_NAMES.has(key.replace(/[-_]/g, "").toLowerCase());
+}
+
+function normalizeProviderNeutralValue(
+  value: unknown,
+  path: string,
+  ancestors: WeakSet<object>,
+): unknown {
+  if (value === undefined || value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new ProviderNeutralInputError(path, "Provider-neutral numbers must be finite");
+    }
+    return value;
+  }
+  if (typeof value === "string") {
+    if (isLocalSubmissionUrl(value) || isExpiringTransportUrl(value)) {
+      throw new ProviderNeutralInputError(path, "Provider-neutral inputs cannot include transport URLs");
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    if (ancestors.has(value)) {
+      throw new ProviderNeutralInputError(path, "Provider-neutral inputs cannot be cyclic");
+    }
+    ancestors.add(value);
+    const normalized = value.map((entry, index) =>
+      normalizeProviderNeutralValue(entry, `${path}[${index}]`, ancestors),
+    );
+    ancestors.delete(value);
+    return normalized;
+  }
+  if (typeof value === "object") {
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new ProviderNeutralInputError(path, "Provider-neutral inputs must use plain data objects");
+    }
+    if (ancestors.has(value)) {
+      throw new ProviderNeutralInputError(path, "Provider-neutral inputs cannot be cyclic");
+    }
+    ancestors.add(value);
+    const normalized: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value)) {
+      const entryPath = `${path}.${key}`;
+      if (entry !== undefined && entry !== null && isTransientTransportFieldName(key)) {
+        throw new ProviderNeutralInputError(entryPath, "Provider-neutral inputs cannot include transport fields");
+      }
+      normalized[key] = normalizeProviderNeutralValue(entry, entryPath, ancestors);
+    }
+    ancestors.delete(value);
+    return normalized;
+  }
+  throw new ProviderNeutralInputError(path, `Unsupported provider-neutral value: ${typeof value}`);
+}
+
+export function normalizeProviderNeutralInputs(
+  inputs: Record<string, unknown>,
+  path = "providerInputs",
+): Record<string, unknown> {
+  return normalizeProviderNeutralValue(inputs, path, new WeakSet()) as Record<string, unknown>;
+}
+
 export function generationSubmissionDraftKey(input: {
   projectId: string;
   provider: string;
@@ -61,6 +179,7 @@ export function generationSubmissionDraftKey(input: {
   referenceOverflowAcknowledged?: boolean;
   idempotencyKey?: string;
 }): string {
+  const providerInputs = normalizeProviderNeutralInputs(input.providerInputs);
   return input.idempotencyKey ?? stableSubmissionStringify({
     projectId: input.projectId,
     provider: input.provider,
@@ -68,7 +187,7 @@ export function generationSubmissionDraftKey(input: {
     modelSchemaVersion: input.modelSchemaVersion,
     target: input.target,
     context: input.context,
-    providerInputs: input.providerInputs,
+    providerInputs,
     canonicalPrompt: input.canonicalPrompt ?? String(input.providerInputs.prompt ?? ""),
     references: normalizeSubmissionReferences(input.references),
     audio: normalizeSubmissionAudio(input.audio),
@@ -111,12 +230,16 @@ function normalizeSubmissionAudio(audio: GenerationDraft["audio"]): GenerationDr
 }
 
 export function buildImmutableGenerationSubmissionDraft(draft: GenerationDraft): GenerationDraft {
-  return {
+  const snapshot = structuredClone({
     ...draft,
-    canonicalPrompt: draft.canonicalPrompt ?? String(draft.providerInputs.prompt ?? ""),
-    providerInputs: structuredClone(draft.providerInputs),
-    ...(draft.references ? { references: normalizeSubmissionReferences(draft.references) } : {}),
-    ...(draft.audio ? { audio: normalizeSubmissionAudio(draft.audio) } : {}),
+    providerInputs: normalizeProviderNeutralInputs(draft.providerInputs),
+  });
+  return {
+    ...snapshot,
+    canonicalPrompt: snapshot.canonicalPrompt ?? String(snapshot.providerInputs.prompt ?? ""),
+    providerInputs: snapshot.providerInputs,
+    ...(snapshot.references ? { references: normalizeSubmissionReferences(snapshot.references) } : {}),
+    ...(snapshot.audio ? { audio: normalizeSubmissionAudio(snapshot.audio) } : {}),
   };
 }
 
