@@ -1,11 +1,47 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MediaItem } from "@openreel/core";
 
 import {
+  openReferenceTarget,
   type ReferenceEditorRoute,
   referencePlacementFromEvent,
+  rememberReferenceInvoker,
+  restoreReferenceInvoker,
   resolveReferenceEditorRoute,
 } from "./navigation";
+
+const mockedStores = vi.hoisted(() => ({
+  projectStore: {
+    project: {
+      timeline: {
+        tracks: [],
+      },
+      generatedImageDefinitions: [],
+    },
+    getMediaItem: (_mediaId: string): MediaItem | undefined => undefined,
+  },
+  uiStore: {
+    openModal: vi.fn(),
+    closeModal: vi.fn(),
+    clearSelection: vi.fn(),
+    setInspectedAsset: vi.fn(),
+    setInspectorSelection: vi.fn(),
+    setReferenceEditorInspectorRoute: vi.fn(),
+    setSidebarTab: vi.fn(),
+  },
+}));
+
+vi.mock("../../stores/project-store", () => ({
+  useProjectStore: {
+    getState: () => mockedStores.projectStore,
+  },
+}));
+
+vi.mock("../../stores/ui-store", () => ({
+  useUIStore: {
+    getState: () => mockedStores.uiStore,
+  },
+}));
 
 interface TestClip {
   id: string;
@@ -79,6 +115,25 @@ function expectRoute<TEditor extends ReferenceEditorRoute["editor"]>(
 }
 
 describe("reference navigation", () => {
+  beforeEach(() => {
+    mockedStores.projectStore = {
+      project: {
+        timeline: {
+          tracks: [],
+        },
+        generatedImageDefinitions: [],
+      },
+      getMediaItem: (_mediaId: string) => undefined,
+    };
+    mockedStores.uiStore.openModal.mockReset();
+    mockedStores.uiStore.closeModal.mockReset();
+    mockedStores.uiStore.clearSelection.mockReset();
+    mockedStores.uiStore.setInspectedAsset.mockReset();
+    mockedStores.uiStore.setInspectorSelection.mockReset();
+    mockedStores.uiStore.setReferenceEditorInspectorRoute.mockReset();
+    mockedStores.uiStore.setSidebarTab.mockReset();
+  });
+
   it("routes a normal click to the modal and a Shift-click to the inspector", () => {
     expect(referencePlacementFromEvent({ shiftKey: false })).toBe("modal");
     expect(referencePlacementFromEvent({ shiftKey: true })).toBe("inspector");
@@ -183,5 +238,44 @@ describe("reference navigation", () => {
       code: "DEFINITION_NOT_FOUND",
       details: { definitionId: "definition-missing-1" },
     });
+  });
+
+  it("clears the remembered modal invoker before an inspector transition closes the modal", () => {
+    const staleInvoker = document.createElement("button");
+    const currentFocus = document.createElement("button");
+    document.body.appendChild(staleInvoker);
+    document.body.appendChild(currentFocus);
+    currentFocus.focus();
+    rememberReferenceInvoker(staleInvoker);
+
+    mockedStores.projectStore = snapshot({
+      mediaItems: [image("media-imported-1")],
+    }) as any;
+
+    let restoredToStaleInvoker = false;
+    mockedStores.uiStore.closeModal.mockImplementation(() => {
+      restoreReferenceInvoker();
+      restoredToStaleInvoker = document.activeElement === staleInvoker;
+    });
+
+    openReferenceTarget(
+      { kind: "imported-image", mediaId: "media-imported-1" },
+      "inspector",
+    );
+
+    expect(mockedStores.uiStore.closeModal).toHaveBeenCalledTimes(1);
+    expect(restoredToStaleInvoker).toBe(false);
+    expect(document.activeElement).toBe(currentFocus);
+    expect(
+      mockedStores.uiStore.setReferenceEditorInspectorRoute,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        editor: "imported-image",
+        mediaId: "media-imported-1",
+      }),
+    );
+
+    staleInvoker.remove();
+    currentFocus.remove();
   });
 });

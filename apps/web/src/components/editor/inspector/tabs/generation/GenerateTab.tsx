@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import type { ReferenceTarget } from "@openreel/core";
 import { generationDraftKey, useGenerationDraftStore, type GenerationDraftState, type GenerationDraftScope } from "../../../../../features/generation/drafts";
 import {
   GenerateActionsSection,
@@ -24,6 +25,7 @@ export interface GenerateReference {
   label: string;
   origins: string[];
   excluded?: boolean;
+  target?: ReferenceTarget;
 }
 
 export interface GenerateJob {

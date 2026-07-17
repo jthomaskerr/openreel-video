@@ -278,6 +278,7 @@ export function openReferenceTarget(
     return route;
   }
 
+  clearReferenceInvoker();
   ui.closeModal();
   ui.clearSelection();
   ui.setInspectedAsset(null);

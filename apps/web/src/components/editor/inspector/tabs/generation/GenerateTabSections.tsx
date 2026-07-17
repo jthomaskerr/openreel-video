@@ -1,5 +1,10 @@
 import { AlertCircle, Loader2, RotateCcw, Sparkles, X } from "lucide-react";
 import type React from "react";
+import type { ReferenceTarget } from "@openreel/core";
+import {
+  openReferenceTarget,
+  referencePlacementFromEvent,
+} from "../../../../../features/references/navigation";
 
 export function GenerateHeaderSection(props: { contextLabel: string; description: string }) {
   return (
@@ -134,25 +139,76 @@ export function GeneratePromptSection(props: {
   );
 }
 
-export function GenerateReferenceSection(props: { references?: Array<{ id: string; label: string; origins: string[]; excluded?: boolean }> }) {
+export function GenerateReferenceSection(props: {
+  references?: Array<{
+    id: string;
+    label: string;
+    origins: string[];
+    excluded?: boolean;
+    target?: ReferenceTarget;
+  }>;
+}) {
   return (
     <section className="border-b border-border/60 px-3 py-3">
       <h3 className="text-sm font-medium text-text-primary">References</h3>
       {props.references?.length ? (
-        <ul className="mt-2 space-y-2">
-          {props.references.map((reference) => (
-            <li key={reference.id} className="min-w-0 text-sm text-text-primary">
-              <div className="flex min-w-0 items-start gap-2">
-                <span className={reference.excluded ? "line-through text-text-secondary" : ""}>{reference.label}</span>
-                {reference.excluded ? (
-                  <span className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-300">
-                    excluded
+        <ul className="mt-2 grid gap-2">
+          {props.references.map((reference) => {
+            const content = (
+              <div className="space-y-2">
+                <div className="flex min-w-0 items-start justify-between gap-2">
+                  <span
+                    className={[
+                      "min-w-0 truncate text-sm font-medium",
+                      reference.excluded
+                        ? "line-through text-text-secondary"
+                        : "text-text-primary",
+                    ].join(" ")}
+                  >
+                    {reference.label}
                   </span>
+                  {reference.excluded ? (
+                    <span className="shrink-0 rounded border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-300">
+                      excluded
+                    </span>
+                  ) : null}
+                </div>
+                <p className="text-[11px] text-text-muted">
+                  {reference.origins.join(" · ")}
+                </p>
+                {reference.target ? (
+                  <p className="text-[11px] text-text-secondary">
+                    Click to edit. Hold Shift to open in the inspector.
+                  </p>
                 ) : null}
               </div>
-              <p className="text-[11px] text-text-muted">{reference.origins.join(" · ")}</p>
-            </li>
-          ))}
+            );
+
+            return (
+              <li key={reference.id} className="min-w-0">
+                {reference.target ? (
+                  <button
+                    type="button"
+                    data-testid={`generate-reference-trigger-${reference.id}`}
+                    onClick={(event) =>
+                      openReferenceTarget(
+                        reference.target!,
+                        referencePlacementFromEvent(event),
+                        { invoker: event.currentTarget },
+                      )
+                    }
+                    className="w-full rounded-xl border border-border bg-background-elevated p-3 text-left transition-colors hover:border-primary/40 focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    {content}
+                  </button>
+                ) : (
+                  <div className="rounded-xl border border-border bg-background-elevated p-3">
+                    {content}
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <p className="mt-2 text-sm text-text-secondary">No references selected.</p>
