@@ -262,7 +262,7 @@ export class GenerationFinalizer {
       const failure = (replaySafe
         ? result.error ?? { code: "generation-placement-failed", message: "Placement was not applied", retryable: true }
         : { code: "generation-placement-retry-unsafe", message: result.error?.message ?? "Placement was not observed, but the prior invocation may still commit; explicit reconciliation is required", retryable: false }) satisfies GenerationError;
-      return this.commitPlacementProjection(jobId, claim, { status: "failed", timestamp: this.now(), error: failure }, (currentJob) => ({ ...currentJob, status: replaySafe ? "succeeded" : "needs-attention", error: replaySafe ? undefined : failure, placement: { policy: currentJob.context.placementPolicy, status: "failed", error: failure }, updatedAt: this.now() }));
+      return this.commitPlacementProjection(jobId, claim, { status: "failed", timestamp: this.now(), error: failure }, (currentJob) => ({ ...currentJob, status: replaySafe ? "succeeded" : "needs-attention", error: replaySafe ? undefined : failure, placement: { policy: currentJob.context.placementPolicy, status: "failed", error: failure, replaySafe }, updatedAt: this.now() }));
     }
     if (result.outcome === "pending") {
       return this.commitPlacementProjection(jobId, claim, { status: "pending", timestamp: this.now() }, (currentJob) => ({ ...currentJob, placement: { policy: currentJob.context.placementPolicy, status: "pending" }, updatedAt: this.now() }));

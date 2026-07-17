@@ -17,7 +17,33 @@ function placementCandidate(): GenerationJob {
   };
 }
 
-function repo(initial: GenerationJob) { let current = initial; return { get: async () => current, update: async (_id: string, mutate: (j: GenerationJob) => GenerationJob) => (current = mutate(current)), compareAndSetCheckpoint: async () => true, create: async () => current, findByProviderCompletion: async () => undefined, listActive: async () => [] } as any; }
+function repo(initial: GenerationJob, placementClaim?: unknown) { let current = initial; return { get: async () => current, update: async (_id: string, mutate: (j: GenerationJob) => GenerationJob) => (current = mutate(current)), compareAndSetCheckpoint: async () => true, create: async () => current, findByProviderCompletion: async () => undefined, listActive: async () => [], getPlacementClaim: async () => placementClaim } as any; }
+
+function replaySafePlacementFailure(status: GenerationJob["status"] = "succeeded"): GenerationJob {
+  const failure = { code: "generation-placement-failed", message: "placement was not applied", retryable: true };
+  return {
+    ...job(status),
+    output: { mediaId: "media-1", versionId: "version-1", mimeType: "video/mp4", byteLength: 4, sha256: "hash", width: 16, height: 9, durationSeconds: 1 },
+    checkpoints: { "placement-applied": { status: "failed", timestamp: 8, error: failure } },
+    placement: { policy: "create-linked-clip", status: "failed", error: failure, replaySafe: true },
+  };
+}
+
+const replaySafeClaim = {
+  schemaVersion: 2,
+  jobId: "job-1",
+  idempotencyKey: "generation:job-1:placement-applied",
+  state: "failed",
+  outcome: "not-applied",
+  ownerToken: "placement-owner",
+  ownerEpoch: 1,
+  phase: "terminal",
+  claimedAt: 1,
+  lastRenewedAt: 1,
+  leaseExpiresAt: 2,
+  replaySafe: true,
+  terminalAt: 8,
+};
 
 test("retries provider with one new attempt and never rewrites history", async () => {
     const repository = repo(job()); let submits = 0; const provider = { submit: async () => { submits++; return { providerJobId: "provider-2" }; } }; const service = new GenerationRecoveryService(repository, provider, { releaseUnreferenced: async () => {} }, { now: () => 9 });
@@ -31,10 +57,90 @@ test("rejects a provider retry that reuses an earlier provider job ID", async ()
     assert.equal(submits, 1); assert.equal(result.status, "failed"); assert.equal(result.error?.code, "generation-provider-retry-id-reused"); assert.equal(result.attempts.length, 1);
 });
 test("finalization and placement retries do not call provider", async () => {
-    const repository = repo(job("completed")); let submits = 0; const provider = { submit: async () => { submits++; return { providerJobId: "never" }; } }; const service = new GenerationRecoveryService(repository, provider, { releaseUnreferenced: async () => {} }, { now: () => 9 });
+    const repository = repo(replaySafePlacementFailure("completed"), replaySafeClaim); let submits = 0; const provider = { submit: async () => { submits++; return { providerJobId: "never" }; } }; const service = new GenerationRecoveryService(repository, provider, { releaseUnreferenced: async () => {} }, { now: () => 9 });
     const before = await repository.get("job-1");
     await service.retryFinalization("job-1"); await service.retryPlacement("job-1"); assert.equal(submits, 0);
     assert.equal((await repository.get("job-1"))?.checkpoints["placeholder-finalized"]?.status, before?.checkpoints["placeholder-finalized"]?.status ?? "pending");
+});
+
+test("a succeeded replay-safe placement failure exposes stage-only retry without provider submission", async () => {
+    const repository = repo(replaySafePlacementFailure(), replaySafeClaim);
+    let submits = 0;
+    const service = new GenerationRecoveryService(repository, { submit: async () => { submits += 1; return { providerJobId: "never" }; } }, { releaseUnreferenced: async () => {} }, { now: () => 9 });
+
+    const result = await service.retryPlacement("job-1");
+
+    assert.equal(submits, 0);
+    assert.equal(result.status, "running");
+    assert.equal(result.checkpoints["placement-applied"]?.status, "pending");
+    assert.equal(result.placement?.status, "pending");
+});
+test("a stale placement retry cannot downgrade an already-applied success", async () => {
+    const applied = job("succeeded");
+    applied.checkpoints = { "placement-applied": { status: "completed", timestamp: 8 } };
+    applied.placement = { policy: "create-linked-clip", status: "applied", appliedAt: 8 };
+    const repository = repo(applied, { ...replaySafeClaim, state: "completed", outcome: "applied", replaySafe: undefined });
+    const service = new GenerationRecoveryService(repository, { submit: async () => ({ providerJobId: "never" }) }, { releaseUnreferenced: async () => {} }, { now: () => 9 });
+
+    const result = await service.retryPlacement("job-1");
+
+    assert.equal(result.status, "succeeded");
+    assert.equal(result.error, undefined);
+    assert.equal(result.checkpoints["placement-applied"]?.status, "completed");
+    assert.equal(result.placement?.status, "applied");
+});
+test("placement retry revalidates current state inside the atomic update", async () => {
+    let current = replaySafePlacementFailure();
+    const applied = job("succeeded");
+    applied.checkpoints = { "placement-applied": { status: "completed", timestamp: 8 } };
+    applied.placement = { policy: "create-linked-clip", status: "applied", appliedAt: 8 };
+    const repository = {
+      get: async () => current,
+      getPlacementClaim: async () => replaySafeClaim,
+      update: async (_id: string, mutate: (candidate: GenerationJob) => GenerationJob) => {
+        current = applied;
+        current = mutate(current);
+        return current;
+      },
+      compareAndSetCheckpoint: async () => true,
+      create: async () => current,
+      findByProviderCompletion: async () => undefined,
+      listActive: async () => [],
+    } as any;
+    const service = new GenerationRecoveryService(repository, { submit: async () => ({ providerJobId: "never" }) }, { releaseUnreferenced: async () => {} }, { now: () => 9 });
+
+    const result = await service.retryPlacement("job-1");
+
+    assert.equal(result.status, "succeeded");
+    assert.equal(result.checkpoints["placement-applied"]?.status, "completed");
+    assert.equal(result.placement?.status, "applied");
+});
+test("invalid placement retry preserves success committed before its failure update", async () => {
+    let current = placementCandidate();
+    const applied = job("succeeded");
+    applied.checkpoints = { "placement-applied": { status: "completed", timestamp: 8 } };
+    applied.placement = { policy: "create-linked-clip", status: "applied", appliedAt: 8 };
+    const repository = {
+      get: async () => current,
+      getPlacementClaim: async () => undefined,
+      update: async (_id: string, mutate: (candidate: GenerationJob) => GenerationJob) => {
+        current = applied;
+        current = mutate(current);
+        return current;
+      },
+      compareAndSetCheckpoint: async () => true,
+      create: async () => current,
+      findByProviderCompletion: async () => undefined,
+      listActive: async () => [],
+    } as any;
+    const service = new GenerationRecoveryService(repository, { submit: async () => ({ providerJobId: "never" }) }, { releaseUnreferenced: async () => {} }, { now: () => 9 });
+
+    const result = await service.retryPlacement("job-1");
+
+    assert.equal(result.status, "succeeded");
+    assert.equal(result.error, undefined);
+    assert.equal(result.checkpoints["placement-applied"]?.status, "completed");
+    assert.equal(result.placement?.status, "applied");
 });
 test("finalization retry rewinds only the failed finalization stage", async () => {
     const initial = job("failed");
@@ -138,4 +244,30 @@ test("a thrown placement reconciler returns to explicit recoverable needs-attent
     assert.equal(result.error?.code, "generation-placement-reconciliation-failed");
     assert.match(result.error?.message ?? "", /transport unavailable/);
     assert.equal(result.checkpoints["placement-applied"]?.status, "failed");
+});
+
+test("reconciliation catch projects an applied claim and never regresses its completed checkpoint", async () => {
+    const appliedClaim = { ...replaySafeClaim, state: "completed", outcome: "applied", replaySafe: undefined, terminalAt: 9 };
+    const repository = repo(placementCandidate(), appliedClaim);
+    const service = new GenerationRecoveryService(
+      repository,
+      { submit: async () => ({ providerJobId: "never" }) },
+      { releaseUnreferenced: async () => {} },
+      { now: () => 10 },
+      undefined,
+      { reconcilePlacement: async () => {
+        await repository.update("job-1", (current: GenerationJob) => ({
+          ...current,
+          checkpoints: { ...current.checkpoints, "placement-applied": { status: "completed", timestamp: 9 } },
+        }));
+        throw new Error("job update failed after applied claim");
+      } },
+    );
+
+    const result = await service.reconcilePlacement("job-1");
+
+    assert.equal(result.status, "succeeded");
+    assert.equal(result.error, undefined);
+    assert.equal(result.checkpoints["placement-applied"]?.status, "completed");
+    assert.equal(result.placement?.status, "applied");
 });

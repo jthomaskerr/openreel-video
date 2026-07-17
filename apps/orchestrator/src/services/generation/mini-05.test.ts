@@ -190,6 +190,67 @@ test("needs-attention placement reconciliation delegates through the owned final
   assert.equal(result.placement?.status, "applied");
 });
 
+test("owned reconciliation catch preserves an applied claim and completed checkpoint across restart", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "generation-mini-08-placement-monotonic-"));
+  const repository = new FileGenerationJobRepository(directory);
+  const jobId = "placement-monotonic";
+  const providerJobId = "provider-placement-monotonic-1";
+  const placementKey = `generation:${jobId}:placement-applied`;
+  const unknown = { code: "generation-placement-outcome-unknown", message: "placement response lost", retryable: false };
+  const unresolved: GenerationJob = {
+    ...job(jobId),
+    status: "needs-attention",
+    providerJobId,
+    attempts: [{ ...job(jobId).attempts[0], providerJobId }],
+    context: { ...job(jobId).context, placementPolicy: "create-linked-clip" },
+    output: { mediaId: "media-1", versionId: "version-1", mimeType: "video/mp4", byteLength: 4, sha256: "hash", width: 16, height: 9, durationSeconds: 1 },
+    checkpoints: {
+      "output-claimed": { status: "completed", timestamp: 993 },
+      "output-downloaded": { status: "completed", timestamp: 994 },
+      "output-verified": { status: "completed", timestamp: 995 },
+      "output-inspected": { status: "completed", timestamp: 996 },
+      "placeholder-finalized": { status: "completed", timestamp: 997 },
+      "shot-linked": { status: "completed", timestamp: 998 },
+      "placement-applied": { status: "failed", timestamp: 999, error: unknown },
+    },
+    placement: { policy: "create-linked-clip", status: "failed", error: unknown },
+    error: unknown,
+  };
+  await repository.create(unresolved);
+  const ownership = await repository.claimPlacement(jobId, placementKey);
+  await repository.markPlacementInvocationStarted(jobId, placementKey, ownership.claim.ownerToken);
+  let reconciliations = 0;
+  const placementFinalizer = {
+    finalize: async () => {},
+    reconcilePlacement: async (currentJobId: string) => {
+      reconciliations += 1;
+      await repository.reconcilePlacement(currentJobId, placementKey, ownership.claim.ownerToken, "applied");
+      await repository.compareAndSetCheckpoint(currentJobId, "placement-applied", { status: "completed", timestamp: 1000 });
+      throw new Error("job update failed after applied claim");
+    },
+  };
+  const options = {
+    repository,
+    provider: provider([]),
+    owner: ({ ownerId, projectId }: { ownerId: string; projectId: string }) => ownerId === "owner-1" && projectId === "project-1",
+    routes: [manifestRoute],
+    releaseEnabled: true,
+    requestBoundary,
+    finalizer: placementFinalizer,
+    clock: () => 1001,
+  };
+
+  const result = await new GenerationOrchestrator(options).reconcilePlacement({ ownerId: "owner-1", projectId: "project-1", jobId });
+
+  assert.equal(result.status, "succeeded");
+  assert.equal(result.error, undefined);
+  assert.equal(result.checkpoints["placement-applied"]?.status, "completed");
+  assert.equal(result.placement?.status, "applied");
+  const restarted = await new GenerationOrchestrator(options).status({ ownerId: "owner-1", projectId: "project-1", jobId });
+  assert.deepEqual(restarted, result);
+  assert.equal(reconciliations, 1);
+});
+
 test("status resumes a crashed finalizing placement through reconciliation instead of false success", async () => {
   const directory = await mkdtemp(join(tmpdir(), "generation-mini-08-placement-resume-"));
   const repository = new FileGenerationJobRepository(directory);
