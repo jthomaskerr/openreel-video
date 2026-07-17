@@ -1,5 +1,5 @@
 import "../../../test/install-local-storage-mock";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { Clip, Track, MediaItem, ProjectSaveReceipt } from "@openreel/core";
 import { ClipComponent } from "./ClipComponent";
@@ -16,6 +16,28 @@ vi.mock("../../../bridges/transition-bridge", () => ({
     createTransition: () => ({ success: false }),
     getTransition: () => null,
   }),
+}));
+
+const waveformBridgeMocks = vi.hoisted(() => ({
+  generateMultiResolutionWaveform: vi.fn(),
+}));
+
+const waveSurferMocks = vi.hoisted(() => ({
+  create: vi.fn(),
+  destroy: vi.fn(),
+  load: vi.fn(),
+  on: vi.fn(),
+  zoom: vi.fn(),
+}));
+
+vi.mock("../../../bridges/media-bridge", () => ({
+  getMediaBridge: () => ({
+    generateMultiResolutionWaveform: waveformBridgeMocks.generateMultiResolutionWaveform,
+  }),
+}));
+
+vi.mock("wavesurfer.js", () => ({
+  default: { create: waveSurferMocks.create },
 }));
 
 function mediaItem(id: string): MediaItem {
@@ -880,5 +902,57 @@ describe("ClipComponent", () => {
       inPoint: 2,
       outPoint: 9,
     }));
+  });
+
+  it("draws multi-resolution video-backed audio without mounting playback media", async () => {
+    waveSurferMocks.load.mockResolvedValue(undefined);
+    waveSurferMocks.create.mockReturnValue({
+      destroy: waveSurferMocks.destroy,
+      load: waveSurferMocks.load,
+      on: waveSurferMocks.on,
+      zoom: waveSurferMocks.zoom,
+    });
+    waveformBridgeMocks.generateMultiResolutionWaveform.mockResolvedValue({
+      mediaId: "media-1",
+      duration: 10,
+      resolutions: new Map([
+        [20, { peaks: new Float32Array(200).fill(0.25), rms: new Float32Array(200), sampleRate: 48_000, duration: 10, samplesPerSecond: 20 }],
+        [200, { peaks: new Float32Array(2_000).fill(0.5), rms: new Float32Array(2_000), sampleRate: 48_000, duration: 10, samplesPerSecond: 200 }],
+      ]),
+    });
+    const clip: Clip = { ...makeClip(), type: "audio", trackId: "audio-track" };
+    const track: Track = { ...makeTrack(clip), id: "audio-track", type: "audio" };
+    const blob = new Blob(["audio"], { type: "video/mp4" });
+    useProjectStore.setState((state) => ({
+      project: {
+        ...state.project,
+        mediaLibrary: { items: [{ ...mediaItem("media-1"), blob }] },
+        timeline: { ...state.project.timeline, tracks: [track] },
+      },
+    }));
+    const props = {
+      clip,
+      track,
+      allTracks: [track],
+      pixelsPerSecond: 20,
+      isSelected: false,
+      trackHeights: new Map([[track.id, 60]]),
+      timelineRef: { current: document.createElement("div") },
+      onSelect: vi.fn(),
+      onMoveClip: vi.fn(),
+      onTrimClip: vi.fn(),
+      onSnapIndicator: vi.fn(),
+    };
+    const { container, rerender } = render(<ClipComponent {...props} />);
+
+    const waveform = await screen.findByTestId("timeline-waveform-clip-1");
+    await waitFor(() => expect(waveform).toHaveAttribute("data-samples-per-second", "20"));
+    expect(waveformBridgeMocks.generateMultiResolutionWaveform).toHaveBeenCalledWith(blob, "media-1");
+    expect(container.querySelector("audio, video")).toBeNull();
+    expect(waveSurferMocks.load).toHaveBeenCalledWith("", [expect.any(Float32Array)], 5);
+
+    rerender(<ClipComponent {...props} pixelsPerSecond={100} />);
+    await waitFor(() => expect(waveform).toHaveAttribute("data-samples-per-second", "200"));
+    await waitFor(() => expect(waveSurferMocks.zoom).toHaveBeenLastCalledWith(100));
   });
 });
