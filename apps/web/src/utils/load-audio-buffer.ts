@@ -9,6 +9,33 @@ export interface LoadAudioBufferOptions {
   onProgress?: (progress: AudioLoadProgress) => void;
 }
 
+export async function getOrLoadCachedAudioBuffer(
+  cache: Map<string, AudioBuffer | null>,
+  inFlight: Map<string, Promise<AudioBuffer | null>>,
+  cacheKey: string,
+  load: () => Promise<AudioBuffer | null>,
+): Promise<AudioBuffer | null> {
+  if (cache.has(cacheKey)) {
+    return cache.get(cacheKey) ?? null;
+  }
+
+  const activeLoad = inFlight.get(cacheKey);
+  if (activeLoad) {
+    return activeLoad;
+  }
+
+  const pendingLoad = load()
+    .then((audioBuffer) => {
+      cache.set(cacheKey, audioBuffer);
+      return audioBuffer;
+    })
+    .finally(() => {
+      inFlight.delete(cacheKey);
+    });
+  inFlight.set(cacheKey, pendingLoad);
+  return pendingLoad;
+}
+
 export const loadAudioBuffer = async (
   audioContext: AudioContext | BaseAudioContext,
   blob: Blob,
