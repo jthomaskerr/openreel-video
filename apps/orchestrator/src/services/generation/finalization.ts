@@ -6,7 +6,7 @@ import type {
   GenerationJob,
   GenerationOutput,
 } from "@openreel/music-video-domain/generation";
-import type { GenerationJobRepository } from "./repository.js";
+import type { GenerationJobRepository, PlacementRecoveryOutcome } from "./repository.js";
 import { KeyedLock } from "./lock.js";
 
 export interface DownloadedGenerationOutput {
@@ -187,6 +187,7 @@ export class GenerationFinalizer {
     if (!claim.acquired) {
       if (claim.claim.state === "completed") return this.requireJob(jobId);
       if (claim.claim.state === "claimed") return this.requireJob(jobId);
+      if (claim.claim.state === "needs-attention") throw new Error("generation-placement-outcome-unknown");
       return this.requireJob(jobId);
     }
     let placementSucceeded = false;
@@ -207,12 +208,24 @@ export class GenerationFinalizer {
     }
   }
 
-  /** Explicit operator recovery for a durable claim whose owner may have crashed. */
-  async repairPlacement(jobId: string): Promise<GenerationJob> {
-    const claim = await this.repository.getPlacementClaim(jobId);
-    if (!claim || claim.state !== "claimed") throw new Error("generation-placement-claim-repair-unavailable");
-    await this.repository.repairPlacement(jobId, claim.ownerToken);
-    return this.requireJob(jobId);
+  /** Explicit recovery requires an externally held owner token and a declared outcome. */
+  async repairPlacement(jobId: string, ownerToken: string, outcome: PlacementRecoveryOutcome): Promise<GenerationJob> {
+    if (!ownerToken?.trim()) throw new Error("generation-placement-recovery-owner-required");
+    if (!["succeeded", "failed", "unknown"].includes(outcome)) throw new Error("generation-placement-recovery-outcome-required");
+    const placementKey = idempotencyKey(jobId, "placement-applied");
+    await this.repository.reconcilePlacement(jobId, placementKey, ownerToken, outcome);
+    if (outcome === "succeeded") {
+      await this.mark(jobId, "placement-applied", { status: "completed", timestamp: this.now() });
+      return this.repository.update(jobId, (currentJob) => ({ ...currentJob, status: "succeeded", placement: { policy: currentJob.context.placementPolicy, status: "applied", appliedAt: this.now() }, updatedAt: this.now() }));
+    }
+    if (outcome === "failed") {
+      const failure = { code: "generation-placement-recovery-failed", message: "Placement did not succeed before the external request", retryable: true } satisfies GenerationError;
+      await this.mark(jobId, "placement-applied", { status: "failed", timestamp: this.now(), error: failure });
+      return this.repository.update(jobId, (currentJob) => ({ ...currentJob, status: "succeeded", placement: { policy: currentJob.context.placementPolicy, status: "failed", error: failure }, updatedAt: this.now() }));
+    }
+    const unknown = { code: "generation-placement-outcome-unknown", message: "Placement outcome is unknown; explicit reconciliation is required before retry", retryable: false } satisfies GenerationError;
+    await this.mark(jobId, "placement-applied", { status: "failed", timestamp: this.now(), error: unknown });
+    return this.repository.update(jobId, (currentJob) => ({ ...currentJob, status: "needs-attention", placement: { policy: currentJob.context.placementPolicy, status: "failed", error: unknown }, error: unknown, updatedAt: this.now() }));
   }
 
   private async mark(id: string, checkpoint: GenerationCheckpointName, state: GenerationCheckpointState) {

@@ -31,10 +31,12 @@ export interface FinalizationClaim {
 export interface PlacementClaim {
   jobId: string;
   idempotencyKey: string;
-  state: "claimed" | "failed" | "completed";
+  state: "claimed" | "failed" | "completed" | "needs-attention";
   ownerToken: string;
   claimedAt: number;
 }
+
+export type PlacementRecoveryOutcome = "succeeded" | "failed" | "unknown";
 
 export interface GenerationJobRepository {
   create(job: GenerationJob): Promise<GenerationJob>;
@@ -55,6 +57,7 @@ export interface GenerationJobRepository {
   releaseFinalization(jobId: string, ownerToken: string): Promise<void>;
   claimPlacement(jobId: string, idempotencyKey: string): Promise<{ claim: PlacementClaim; acquired: boolean }>;
   getPlacementClaim(jobId: string): Promise<PlacementClaim | undefined>;
+  reconcilePlacement(jobId: string, idempotencyKey: string, ownerToken: string, outcome: PlacementRecoveryOutcome): Promise<PlacementClaim>;
   repairPlacement(jobId: string, ownerToken: string): Promise<PlacementClaim>;
   completePlacement(jobId: string, idempotencyKey: string, ownerToken: string): Promise<void>;
   releasePlacement(jobId: string, ownerToken: string): Promise<void>;
@@ -284,7 +287,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
       const path = this.placementFile(jobId);
       const existing = await this.readPlacementClaim(path);
       if (existing && existing.idempotencyKey !== idempotencyKey) throw new GenerationRepositoryError("generation-placement-claim-mismatch");
-      if (existing?.state === "claimed" || existing?.state === "completed") return { claim: existing, acquired: false };
+      if (existing?.state === "claimed" || existing?.state === "completed" || existing?.state === "needs-attention") return { claim: existing, acquired: false };
       const claim: PlacementClaim = { jobId, idempotencyKey, state: "claimed", ownerToken: randomUUID(), claimedAt: this.now() };
       await this.atomic(path, claim);
       return { claim, acquired: true };
@@ -293,15 +296,26 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
 
   async getPlacementClaim(jobId: string) { return this.readPlacementClaim(this.placementFile(jobId)); }
 
-  async repairPlacement(jobId: string, ownerToken: string) {
+  async reconcilePlacement(jobId: string, idempotencyKey: string, ownerToken: string, outcome: PlacementRecoveryOutcome) {
     return this.withFileLock(`placement-${jobId}`, async () => {
       const path = this.placementFile(jobId);
       const claim = await this.readPlacementClaim(path);
-      if (!claim || claim.state !== "claimed" || claim.ownerToken !== ownerToken) throw new GenerationRepositoryError("generation-placement-claim-fenced");
-      const repaired = { ...claim, state: "failed" as const };
-      await this.atomic(path, repaired);
-      return repaired;
+      if (!claim || claim.idempotencyKey !== idempotencyKey) throw new GenerationRepositoryError("generation-placement-claim-mismatch");
+      if (claim.ownerToken !== ownerToken) throw new GenerationRepositoryError("generation-placement-claim-fenced");
+      if (claim.state !== "claimed" && claim.state !== "completed" && claim.state !== "failed" && claim.state !== "needs-attention") throw new GenerationRepositoryError("generation-placement-claim-fenced");
+      const state: PlacementClaim["state"] = outcome === "succeeded" ? "completed" : outcome === "failed" ? "failed" : "needs-attention";
+      if (claim.state === state) return claim;
+      if (claim.state !== "claimed") throw new GenerationRepositoryError("generation-placement-claim-fenced");
+      const reconciled: PlacementClaim = { ...claim, state };
+      await this.atomic(path, reconciled);
+      return reconciled;
     });
+  }
+
+  async repairPlacement(jobId: string, ownerToken: string) {
+    const claim = await this.getPlacementClaim(jobId);
+    if (!claim) throw new GenerationRepositoryError("generation-placement-claim-fenced");
+    return this.reconcilePlacement(jobId, claim.idempotencyKey, ownerToken, "failed");
   }
 
   async completePlacement(jobId: string, idempotencyKey: string, ownerToken: string) {
