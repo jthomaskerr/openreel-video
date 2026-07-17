@@ -18,3 +18,23 @@ test("provider completion lookup requires provider instance identity", async () 
   );
   assert.equal((await repo.findByProviderCompletion("wavespeed", "provider-1", "wavespeed-prod"))?.id, "prod-lookup");
 });
+
+test("placement claim repair is explicit and fenced to the claimed owner", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-repair-"));
+  const repo = new FileGenerationJobRepository(dir);
+  await repo.create(job("placement-repair"));
+
+  const claimed = await repo.claimPlacement("placement-repair", "placement-key");
+  assert.equal(claimed.acquired, true);
+  await assert.rejects(
+    repo.repairPlacement("placement-repair", "wrong-owner"),
+    /generation-placement-claim-fenced/,
+  );
+  assert.equal((await repo.getPlacementClaim("placement-repair"))?.state, "claimed");
+
+  const repaired = await repo.repairPlacement("placement-repair", claimed.claim.ownerToken);
+  assert.equal(repaired.state, "failed");
+  const reacquired = await repo.claimPlacement("placement-repair", "placement-key");
+  assert.equal(reacquired.acquired, true);
+  assert.notEqual(reacquired.claim.ownerToken, claimed.claim.ownerToken);
+});
