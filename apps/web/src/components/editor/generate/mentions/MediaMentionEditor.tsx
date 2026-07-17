@@ -509,19 +509,14 @@ function removeAdjacentMention(
 }
 
 function removeMentionAtCollapsedSelection(
-  primaryDirection: "backward" | "forward",
+  direction: "backward" | "forward",
 ): boolean {
   const selection = $getSelection();
   if (!$isRangeSelection(selection) || !selection.isCollapsed()) {
     return false;
   }
 
-  const secondaryDirection =
-    primaryDirection === "backward" ? "forward" : "backward";
-  return (
-    removeAdjacentMention(selection.anchor, primaryDirection) ||
-    removeAdjacentMention(selection.anchor, secondaryDirection)
-  );
+  return removeAdjacentMention(selection.anchor, direction);
 }
 
 interface CanonicalLeafSegment {

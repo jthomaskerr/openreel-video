@@ -562,25 +562,34 @@ describe("MediaMentionEditor", () => {
     });
   });
 
-  it("deletes a mention atomically only when Backspace is at the pill boundary and supports undo redo", async () => {
+  it("does not delete a following mention when Backspace is immediately before it", async () => {
     const { changeSpy } = await renderEditor({
-      value: "hello @{character:hero}",
+      value: "lead @{character:hero}",
       options: [option("hero", { label: "Hero" })],
     });
 
     const editor = screen.getByRole("combobox", { name: /prompt references/i });
     await focusEditor(editor);
-    await setLexicalTextSelection(editor, "hello ", 2);
+    await setLexicalTextSelection(editor, "lead ", 5);
 
     await pressKey(editor, "Backspace");
     expect(screen.getByRole("button", { name: /hero reference/i })).toBeInTheDocument();
-    expect(changeSpy).not.toHaveBeenCalledWith("hello ");
+    expect(changeSpy).not.toHaveBeenCalledWith("lead ");
+  });
 
-    await setLexicalTextSelection(editor, "hello ", 6);
+  it("deletes a preceding mention atomically with Backspace and supports undo redo", async () => {
+    const { changeSpy } = await renderEditor({
+      value: "@{character:hero} tail",
+      options: [option("hero", { label: "Hero" })],
+    });
+
+    const editor = screen.getByRole("combobox", { name: /prompt references/i });
+    await focusEditor(editor);
+    await setLexicalTextSelection(editor, " tail", 0);
 
     await pressKey(editor, "Backspace");
     await waitFor(() => {
-      expect(changeSpy).toHaveBeenLastCalledWith("hello ");
+      expect(changeSpy).toHaveBeenLastCalledWith(" tail");
     });
 
     await pressKey(editor, "z", { ctrlKey: true });
@@ -594,7 +603,22 @@ describe("MediaMentionEditor", () => {
     });
   });
 
-  it("deletes a mention atomically only when Delete is at the pill boundary", async () => {
+  it("does not delete a preceding mention when Delete is immediately after it", async () => {
+    const { changeSpy } = await renderEditor({
+      value: "@{character:hero} tail",
+      options: [option("hero", { label: "Hero" })],
+    });
+
+    const editor = screen.getByRole("combobox", { name: /prompt references/i });
+    await focusEditor(editor);
+    await setLexicalTextSelection(editor, " tail", 0);
+
+    await pressKey(editor, "Delete");
+    expect(screen.getByRole("button", { name: /hero reference/i })).toBeInTheDocument();
+    expect(changeSpy).not.toHaveBeenCalledWith(" tail");
+  });
+
+  it("deletes a following mention atomically with Delete", async () => {
     const { changeSpy } = await renderEditor({
       value: "lead @{character:hero}",
       options: [option("hero", { label: "Hero" })],
@@ -602,12 +626,6 @@ describe("MediaMentionEditor", () => {
 
     const editor = screen.getByRole("combobox", { name: /prompt references/i });
     await focusEditor(editor);
-    await setLexicalTextSelection(editor, "lead ", 2);
-
-    await pressKey(editor, "Delete");
-    expect(screen.getByRole("button", { name: /hero reference/i })).toBeInTheDocument();
-    expect(changeSpy).not.toHaveBeenCalledWith("lead ");
-
     await setLexicalTextSelection(editor, "lead ", 5);
 
     await pressKey(editor, "Delete");
