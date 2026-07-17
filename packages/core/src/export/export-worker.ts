@@ -1,4 +1,5 @@
 import type { VideoExportSettings } from "./types";
+import { EXPORT_HARDWARE_ACCELERATION } from "./encoder-policy";
 
 interface WorkerMessage {
   type:
@@ -141,7 +142,7 @@ async function initialize(
       codec: videoCodec,
       bitrate: settings.bitrate ? settings.bitrate * 1000 : QUALITY_MEDIUM,
       keyFrameInterval: settings.keyframeInterval / settings.frameRate,
-      hardwareAcceleration: "prefer-hardware",
+      hardwareAcceleration: EXPORT_HARDWARE_ACCELERATION,
     });
 
     audioSource = new AudioSampleSource({

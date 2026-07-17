@@ -63,6 +63,12 @@ export interface ExportProgress {
   readonly totalFrames: number;
   readonly bytesWritten: number;
   readonly currentBitrate: number;
+  readonly framesPerSecond: number;
+  readonly elapsedRenderingTime: number;
+  readonly estimateConfidence: "warming-up" | "observed";
+  readonly visibility: "visible" | "hidden" | "unknown";
+  readonly backgroundThroughputRatio: number | null;
+  readonly backgroundDegraded: boolean;
 }
 
 export interface ExportPreset {

@@ -18,6 +18,12 @@ function makeOptions(
   };
 }
 
+async function executeFrameLoop(options: ExportFrameLoopOptions): Promise<void> {
+  for await (const _frame of runExportFrameLoop(options)) {
+    // Consume completion notifications as ExportEngine does.
+  }
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
@@ -29,7 +35,7 @@ describe("runExportFrameLoop", () => {
     const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
     const rendered: number[] = [];
 
-    await runExportFrameLoop(
+    await executeFrameLoop(
       makeOptions({
         totalFrames: 12,
         renderAndEncode: async (frame) => {
@@ -45,7 +51,7 @@ describe("runExportFrameLoop", () => {
   it("cleans every five completed frames", async () => {
     const cleanup = vi.fn();
 
-    await runExportFrameLoop(makeOptions({ totalFrames: 11, cleanup }));
+    await executeFrameLoop(makeOptions({ totalFrames: 11, cleanup }));
 
     expect(cleanup.mock.calls.map(([frame]) => frame)).toEqual([4, 9]);
   });
@@ -55,7 +61,7 @@ describe("runExportFrameLoop", () => {
     const rendered: number[] = [];
 
     await expect(
-      runExportFrameLoop(
+      executeFrameLoop(
         makeOptions({
           totalFrames: 3,
           signal: controller.signal,

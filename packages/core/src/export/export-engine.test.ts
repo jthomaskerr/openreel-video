@@ -10,6 +10,7 @@ const {
   mockAudioSourceAdd,
   mockOutputStart,
   mockOutputFinalize,
+  mockVideoSourceConfigs,
 } = vi.hoisted(() => {
   const mockRenderFrame = vi.fn().mockResolvedValue({
     image: { close: vi.fn() },
@@ -55,6 +56,7 @@ const {
     mockAudioSourceAdd: vi.fn().mockResolvedValue(undefined),
     mockOutputStart: vi.fn().mockResolvedValue(undefined),
     mockOutputFinalize: vi.fn().mockResolvedValue(undefined),
+    mockVideoSourceConfigs: [] as Array<Record<string, unknown>>,
   };
 });
 
@@ -119,7 +121,9 @@ vi.mock("mediabunny", () => {
     add = mockVideoSourceAdd;
     close = vi.fn();
 
-    constructor(_config: Record<string, unknown>) {}
+    constructor(config: Record<string, unknown>) {
+      mockVideoSourceConfigs.push(config);
+    }
   }
 
   class MockAudioBufferSource {
@@ -154,6 +158,7 @@ vi.mock("mediabunny", () => {
 });
 
 import { ExportEngine, getExportEngine } from "./export-engine";
+import { EXPORT_HARDWARE_ACCELERATION } from "./encoder-policy";
 import {
   DEFAULT_VIDEO_SETTINGS,
   DEFAULT_AUDIO_SETTINGS,
@@ -235,7 +240,7 @@ describe("ExportEngine", () => {
   let exportEngine: ExportEngine;
 
   beforeEach(() => {
-    exportEngine = new ExportEngine();
+    exportEngine = new ExportEngine({ diagnostics: vi.fn() });
     vi.clearAllMocks();
     mockVideoEngine.isInitialized.mockReturnValue(false);
     mockAudioEngine.isInitialized.mockReturnValue(false);
@@ -247,6 +252,7 @@ describe("ExportEngine", () => {
       height: 1080,
     });
     mockRenderAudio.mockResolvedValue({ buffer: null });
+    mockVideoSourceConfigs.length = 0;
   });
 
   afterEach(() => {
@@ -406,6 +412,79 @@ describe("ExportEngine", () => {
   });
 
   describe("video export", () => {
+    it("emits sanitized lifecycle and observed-progress diagnostics", async () => {
+      const diagnostics = vi.fn();
+      let now = 0;
+      exportEngine.dispose();
+      exportEngine = new ExportEngine({
+        diagnostics,
+        now: () => (now += 25),
+        visibility: () => "visible",
+      });
+      const project = createMockProject({
+        timeline: createMockTimeline({ duration: 1 }),
+      });
+      await exportEngine.initialize();
+      const writableStream = {
+        seek: vi.fn().mockResolvedValue(undefined),
+        write: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+        abort: vi.fn().mockResolvedValue(undefined),
+      } as unknown as FileSystemWritableFileStream;
+
+      const progress = [];
+      const generator = exportEngine.exportVideo(
+        project,
+        { ...DEFAULT_VIDEO_SETTINGS, frameRate: 1, width: 854, height: 480 },
+        writableStream,
+      );
+      while (true) {
+        const result = await generator.next();
+        if (result.done) break;
+        progress.push(result.value);
+      }
+
+      expect(progress.some((sample) => sample.estimateConfidence === "observed")).toBe(true);
+      expect(diagnostics.mock.calls.map(([event]) => event.event)).toEqual(
+        expect.arrayContaining([
+          "export-start",
+          "export-preparation",
+          "export-performance",
+          "export-finished",
+        ]),
+      );
+    });
+
+    it("uses the shared acceleration policy without installing frame-loop timers", async () => {
+      const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
+      const project = createMockProject({
+        timeline: createMockTimeline({ duration: 10 }),
+      });
+      await exportEngine.initialize();
+      const writableStream = {
+        seek: vi.fn().mockResolvedValue(undefined),
+        write: vi.fn().mockResolvedValue(undefined),
+        close: vi.fn().mockResolvedValue(undefined),
+        abort: vi.fn().mockResolvedValue(undefined),
+      } as unknown as FileSystemWritableFileStream;
+
+      const generator = exportEngine.exportVideo(
+        project,
+        { ...DEFAULT_VIDEO_SETTINGS, frameRate: 1, width: 854, height: 480 },
+        writableStream,
+      );
+      while (!(await generator.next()).done) {
+        // Consume all progress samples.
+      }
+
+      expect(mockVideoSourceConfigs[0]).toEqual(
+        expect.objectContaining({
+          hardwareAcceleration: EXPORT_HARDWARE_ACCELERATION,
+        }),
+      );
+      expect(timeoutSpy).not.toHaveBeenCalled();
+    });
+
     it("should render long export audio in chunks and clear cached audio", async () => {
       const project = createMockProject({
         timeline: createMockTimeline({

@@ -23,6 +23,24 @@ import { graphicsEngine } from "../graphics/graphics-engine";
 import { UpscalingEngine, getUpscalingEngine } from "../video/upscaling";
 import { getMediaEngine } from "../media/mediabunny-engine";
 import { getWavEncoder } from "../wasm/wav";
+import { runExportFrameLoop } from "./export-frame-loop";
+import {
+  ExportPerformanceTracker,
+  type ExportPerformanceSnapshot,
+  type ExportVisibility,
+} from "./export-performance";
+import { EXPORT_HARDWARE_ACCELERATION } from "./encoder-policy";
+import {
+  createExportDiagnostics,
+  type ExportDiagnosticSink,
+  type ExportDiagnostics,
+} from "./export-diagnostics";
+
+export interface ExportEngineRuntime {
+  now(): number;
+  visibility(): ExportVisibility;
+  diagnostics: ExportDiagnosticSink;
+}
 
 export class ExportEngine {
   private static readonly AUDIO_EXPORT_CHUNK_DURATION_SECONDS = 15;
@@ -37,6 +55,20 @@ export class ExportEngine {
     framesRendered: number;
   } | null = null;
   private exportWorker: Worker | null = null;
+  private readonly now: () => number;
+  private readonly visibility: () => ExportVisibility;
+  private readonly diagnostics: ExportDiagnostics;
+
+  constructor(runtime: Partial<ExportEngineRuntime> = {}) {
+    this.now = runtime.now ?? (() => performance.now());
+    this.visibility =
+      runtime.visibility ??
+      (() => {
+        if (typeof document === "undefined") return "unknown";
+        return document.visibilityState === "hidden" ? "hidden" : "visible";
+      });
+    this.diagnostics = createExportDiagnostics(runtime.diagnostics);
+  }
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -304,6 +336,18 @@ export class ExportEngine {
 
     const totalFrames = Math.ceil(timelineDuration * fullSettings.frameRate);
     let bytesWritten = 0;
+    const exportStartedAt = this.now();
+    this.diagnostics.emit({
+      event: "export-start",
+      browser:
+        typeof navigator === "undefined" ? "unknown" : navigator.userAgent,
+      codec: fullSettings.codec,
+      width: fullSettings.width,
+      height: fullSettings.height,
+      frameRate: fullSettings.frameRate,
+      totalFrames,
+      requestedAcceleration: EXPORT_HARDWARE_ACCELERATION,
+    });
 
     try {
       yield this.createProgress("preparing", 0, totalFrames, 0, 0);
@@ -379,7 +423,19 @@ export class ExportEngine {
         bitrate: fullSettings.bitrate ? fullSettings.bitrate * 1000 : QUALITY_MEDIUM,
         keyFrameInterval:
           fullSettings.keyframeInterval / fullSettings.frameRate,
-        hardwareAcceleration: "prefer-software",
+        hardwareAcceleration: EXPORT_HARDWARE_ACCELERATION,
+        onEncoderConfig: (config: VideoEncoderConfig) => {
+          this.diagnostics.emit({
+            event: "encoder-config",
+            codec: config.codec,
+            width: config.width,
+            height: config.height,
+            frameRate: config.framerate ?? fullSettings.frameRate,
+            bitrate: config.bitrate ?? fullSettings.bitrate * 1000,
+            requestedAcceleration: EXPORT_HARDWARE_ACCELERATION,
+            effectiveAcceleration: config.hardwareAcceleration ?? null,
+          });
+        },
       });
       const audioSource = new AudioBufferSource({
         codec: audioCodecResult.codec as "aac" | "opus" | "mp3",
@@ -394,14 +450,17 @@ export class ExportEngine {
 
       await output.start();
 
+      const audioPreparationStartedAt = this.now();
       try {
         await this.encodeTimelineAudioToSource(project, audioSource);
       } finally {
         this.audioEngine?.clearCache();
       }
       audioSource.close();
+      const audioPreparationMs = this.now() - audioPreparationStartedAt;
 
       const mediaEngine = getMediaEngine();
+      const decoderPreparationStartedAt = this.now();
       const videoMediaIds: string[] = [];
       for (const track of project.timeline.tracks) {
         if (track.type !== "video") continue;
@@ -417,67 +476,121 @@ export class ExportEngine {
                 mediaItem.blob,
                 fullSettings.width,
               );
-            } catch {}
+            } catch (error) {
+              this.diagnostics.emit({
+                event: "decoder-fallback",
+                assetId: mediaItem.id,
+                operation: "create-export-decoder",
+                fallback: "video-element-decoder",
+              });
+              this.diagnostics.error("decoder-initialization", error);
+            }
           }
         }
       }
+      this.diagnostics.emit({
+        event: "export-preparation",
+        audioMs: audioPreparationMs,
+        decodersMs: this.now() - decoderPreparationStartedAt,
+      });
 
-      for (let frame = 0; frame < totalFrames; frame++) {
-        if (this.abortController.signal.aborted) {
-          throw this.createError(
+      const renderingStartedAt = this.now();
+      const performanceTracker = new ExportPerformanceTracker(
+        totalFrames,
+        renderingStartedAt,
+      );
+      const signal = this.abortController.signal;
+      let performanceSnapshot: ExportPerformanceSnapshot | undefined;
+      let decodeRenderMs = 0;
+      let encodeWriteMs = 0;
+      let cleanupMs = 0;
+      let cleanupCount = 0;
+
+      const frameLoop = runExportFrameLoop({
+        totalFrames,
+        signal,
+        createCancelledError: () =>
+          this.createError(
             "CANCELLED",
             "Export cancelled by user",
             "rendering",
-          );
-        }
-
-        const time = frame / fullSettings.frameRate;
-        const rendered = await this.videoEngine!.renderFrame(
-          project,
-          time,
-          fullSettings.width,
-          fullSettings.height,
-        );
-        const shouldUpscale = this.shouldApplyUpscaling(project, fullSettings);
-        let frameImage = rendered.image;
-
-        if (shouldUpscale && this.upscalingEngine?.isInitialized()) {
-          const upscaled = await this.upscalingEngine.upscaleImageBitmap(
-            frameImage,
+          ),
+        renderAndEncode: async (frame) => {
+          const renderStartedAt = this.now();
+          const time = frame / fullSettings.frameRate;
+          const rendered = await this.videoEngine!.renderFrame(
+            project,
+            time,
             fullSettings.width,
             fullSettings.height,
-            fullSettings.upscaling!,
           );
+          const shouldUpscale = this.shouldApplyUpscaling(project, fullSettings);
+          let frameImage = rendered.image;
+
+          if (shouldUpscale && this.upscalingEngine?.isInitialized()) {
+            const upscaled = await this.upscalingEngine.upscaleImageBitmap(
+              frameImage,
+              fullSettings.width,
+              fullSettings.height,
+              fullSettings.upscaling!,
+            );
+            frameImage.close();
+            frameImage = upscaled;
+          }
+          decodeRenderMs = this.now() - renderStartedAt;
+
+          const encodeStartedAt = this.now();
+          const videoSample = new VideoSample(frameImage, {
+            timestamp: time,
+            duration: 1 / fullSettings.frameRate,
+          });
+          await videoSource.add(videoSample);
+          videoSample.close();
           frameImage.close();
-          frameImage = upscaled;
-        }
-
-        const videoSample = new VideoSample(frameImage, {
-          timestamp: time,
-          duration: 1 / fullSettings.frameRate,
-        });
-
-        await videoSource.add(videoSample);
-        videoSample.close();
-        frameImage.close();
-
-        this.currentExport!.framesRendered = frame + 1;
-
-        if ((frame + 1) % 5 === 0) {
+          encodeWriteMs = this.now() - encodeStartedAt;
+        },
+        cleanup: async () => {
+          const cleanupStartedAt = this.now();
           this.videoEngine?.clearVideoElementCache();
           this.videoEngine?.clearCache();
           try {
             mediaEngine.clearFrameCache();
-          } catch {}
-          await new Promise((resolve) => setTimeout(resolve, 2));
-        }
+          } catch (error) {
+            this.diagnostics.error("cache-cleanup", error);
+          }
+          cleanupCount += 1;
+          cleanupMs = this.now() - cleanupStartedAt;
+        },
+        onFrameComplete: async (frame) => {
+          this.currentExport!.framesRendered = frame + 1;
+          performanceSnapshot = performanceTracker.recordCompletedFrame(
+            frame,
+            this.now(),
+            this.visibility(),
+          );
+          if (frame === 0 || (frame + 1) % 30 === 0) {
+            this.diagnostics.emit({
+              event: "export-performance",
+              frame,
+              decodeRenderMs,
+              encodeWriteMs,
+              cleanupCount,
+              cleanupMs,
+              framesPerSecond: performanceSnapshot.framesPerSecond,
+              visibility: performanceSnapshot.visibility,
+            });
+          }
+        },
+      });
 
+      for await (const frame of frameLoop) {
         yield this.createProgress(
           "rendering",
           (frame + 1) / totalFrames,
           totalFrames,
           frame + 1,
           bytesWritten,
+          performanceSnapshot,
         );
       }
 
@@ -500,6 +613,11 @@ export class ExportEngine {
 
       await output.finalize();
       await writableStream.close();
+      this.diagnostics.emit({
+        event: "export-finished",
+        phase: "finalized",
+        elapsedMs: this.now() - exportStartedAt,
+      });
 
       yield this.createProgress(
         "complete",
@@ -514,6 +632,14 @@ export class ExportEngine {
         stats: this.calculateStats(totalFrames, bytesWritten),
       };
     } catch (error) {
+      this.diagnostics.error("export", error);
+      if (error && typeof error === "object" && "code" in error && error.code === "CANCELLED") {
+        this.diagnostics.emit({
+          event: "export-finished",
+          phase: "cancelled",
+          elapsedMs: this.now() - exportStartedAt,
+        });
+      }
       try { await writableStream.abort(); } catch {}
       if (error && typeof error === "object" && "code" in error) {
         return { success: false, error: error as ExportError };
@@ -538,7 +664,9 @@ export class ExportEngine {
       try {
         getMediaEngine().disposeAllExportDecoders();
         getMediaEngine().clearFrameCache();
-      } catch {}
+      } catch (error) {
+        this.diagnostics.error("final-cleanup", error);
+      }
     }
   }
 
@@ -1306,6 +1434,7 @@ export class ExportEngine {
     totalFrames: number,
     currentFrame: number,
     bytesWritten: number,
+    performance?: ExportPerformanceSnapshot,
   ): ExportProgress {
     const elapsed = this.currentExport
       ? (Date.now() - this.currentExport.startTime) / 1000
@@ -1323,6 +1452,13 @@ export class ExportEngine {
       totalFrames,
       bytesWritten,
       currentBitrate: elapsed > 0 ? (bytesWritten * 8) / elapsed : 0,
+      framesPerSecond: performance?.framesPerSecond ?? framesPerSecond,
+      elapsedRenderingTime: performance?.elapsedRenderingTime ?? elapsed,
+      estimateConfidence: performance?.estimateConfidence ?? "warming-up",
+      visibility: performance?.visibility ?? "unknown",
+      backgroundThroughputRatio:
+        performance?.backgroundThroughputRatio ?? null,
+      backgroundDegraded: performance?.backgroundDegraded ?? false,
     };
   }
 

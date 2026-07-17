@@ -4,11 +4,11 @@ export interface ExportFrameLoopOptions {
   renderAndEncode(frame: number): Promise<void>;
   cleanup(frame: number): void | Promise<void>;
   onFrameComplete(frame: number): void | Promise<void>;
-  createCancelledError(): Error;
+  createCancelledError(): unknown;
   cleanupEvery?: number;
 }
 
-export async function runExportFrameLoop({
+export async function* runExportFrameLoop({
   totalFrames,
   signal,
   renderAndEncode,
@@ -16,15 +16,17 @@ export async function runExportFrameLoop({
   onFrameComplete,
   createCancelledError,
   cleanupEvery = 5,
-}: ExportFrameLoopOptions): Promise<void> {
+}: ExportFrameLoopOptions): AsyncGenerator<number, void, void> {
   for (let frame = 0; frame < totalFrames; frame += 1) {
     if (signal.aborted) throw createCancelledError();
 
     await renderAndEncode(frame);
-    await onFrameComplete(frame);
 
     if ((frame + 1) % cleanupEvery === 0) {
       await cleanup(frame);
     }
+
+    await onFrameComplete(frame);
+    yield frame;
   }
 }
