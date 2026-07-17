@@ -31,6 +31,8 @@ import type {
   EditingTemplateApplicationSource,
   EditingTemplatePrimitive,
   ResolvedEditingTemplateApplication,
+  GeneratedImageDefinition,
+  GeneratedImageDraft,
 } from "@openreel/core";
 import {
   ActionExecutor,
@@ -88,6 +90,12 @@ import {
   applySceneHistoryEntry,
   SCENE_HISTORY_ACTION,
 } from "./scene-history-bridge";
+import {
+  convertImportedImageToGeneratedImage as runConvertImportedImageToGeneratedImage,
+  createGeneratedImage as runCreateGeneratedImage,
+  deleteGeneratedImage as runDeleteGeneratedImage,
+  updateGeneratedImageDraft as runUpdateGeneratedImageDraft,
+} from "../features/generation/generated-images/commands";
 
 function getImportedFileName(item: MediaItem): string {
   return item.sourceFile?.name ?? item.name;
@@ -125,6 +133,130 @@ function preserveUserMediaMetadata(
     isCurrent: previous.isCurrent,
     generationMeta: previous.generationMeta,
   };
+}
+
+type GeneratedImageHistoryEntry = {
+  readonly type: "generated-image";
+  readonly timestamp: number;
+  readonly previousProject: Project;
+  readonly nextProject: Project;
+};
+
+type GeneratedImageCommandProjectAdapter = {
+  readonly id: string;
+  mediaItems: Array<{
+    readonly id: string;
+    readonly type?: string;
+    readonly name?: string;
+    readonly fileName?: string;
+    readonly title?: string;
+    readonly blob?: Blob;
+    readonly assetGroupId?: string;
+    readonly isCurrent?: boolean;
+    readonly generationMeta?: MediaItem["generationMeta"];
+  }>;
+  mediaGroups: Array<{ readonly id: string }>;
+  generatedImageDefinitions: GeneratedImageDefinition[];
+};
+
+function buildGeneratedImageCommandProject(project: Project): GeneratedImageCommandProjectAdapter {
+  const mediaGroupIds = new Set<string>();
+  for (const item of project.mediaLibrary.items) {
+    mediaGroupIds.add(item.assetGroupId ?? item.id);
+  }
+  for (const definition of project.generatedImageDefinitions) {
+    mediaGroupIds.add(definition.assetGroupId);
+  }
+
+  return {
+    id: project.id,
+    mediaItems: project.mediaLibrary.items.map((item) => ({
+      id: item.id,
+      type: item.type,
+      name: item.name,
+      fileName: item.name,
+      title: item.title,
+      blob: item.blob ?? undefined,
+      assetGroupId: item.assetGroupId,
+      isCurrent: item.isCurrent,
+      generationMeta: item.generationMeta,
+    })),
+    mediaGroups: [...mediaGroupIds].map((id) => ({ id })),
+    generatedImageDefinitions: [...project.generatedImageDefinitions],
+  };
+}
+
+function applyGeneratedImageCommandProject(
+  project: Project,
+  commandProject: GeneratedImageCommandProjectAdapter,
+): Project {
+  const previousItemsById = new Map(project.mediaLibrary.items.map((item) => [item.id, item]));
+  return {
+    ...project,
+    mediaLibrary: {
+      ...project.mediaLibrary,
+      items: commandProject.mediaItems.map((item) => {
+        const previous = previousItemsById.get(item.id);
+        const type =
+          item.type === "audio" ||
+          item.type === "video" ||
+          item.type === "image" ||
+          item.type === "srt"
+            ? item.type
+            : previous?.type ?? "image";
+        return {
+          ...previous,
+          id: item.id,
+          name: item.name ?? item.fileName ?? item.title ?? previous?.name ?? item.id,
+          title: item.title ?? previous?.title,
+          type,
+          fileHandle: previous?.fileHandle ?? null,
+          blob: item.blob ?? previous?.blob ?? null,
+          metadata: previous?.metadata ?? {
+            duration: 0,
+            width: 0,
+            height: 0,
+            frameRate: 0,
+            codec: "",
+            sampleRate: 0,
+            channels: 0,
+            fileSize: 0,
+          },
+          thumbnailUrl: previous?.thumbnailUrl ?? null,
+          assetGroupId: item.assetGroupId ?? previous?.assetGroupId ?? item.id,
+          isCurrent: item.isCurrent ?? previous?.isCurrent ?? true,
+          generationMeta: item.generationMeta ?? previous?.generationMeta,
+          sourceFile: previous?.sourceFile,
+          description: previous?.description,
+          tags: previous?.tags,
+          group: previous?.group,
+        };
+      }),
+    },
+    generatedImageDefinitions: commandProject.generatedImageDefinitions,
+    modifiedAt: Date.now(),
+  };
+}
+
+function createGeneratedImageDraft(title: string): GeneratedImageDraft {
+  return {
+    prompt: title,
+    roleByReferenceKey: {},
+    inputs: {},
+  };
+}
+
+function toGeneratedImageActionError(message: string): NonNullable<ActionResult["error"]> {
+  if (
+    message.startsWith("Media item not found:") ||
+    message.startsWith("Generated image definition not found:")
+  ) {
+    return { code: "MEDIA_NOT_FOUND", message };
+  }
+  if (message.startsWith("Media item is not an image:")) {
+    return { code: "INVALID_PARAMS", message };
+  }
+  return { code: "INTERNAL_ERROR", message };
 }
 
 let autoSaveBindingsInitialized = false;
@@ -202,6 +334,8 @@ export interface ProjectState {
   clipRedoStack: ClipHistoryEntry[];
   templateUndoStack: EditingTemplateHistoryEntry[];
   templateRedoStack: EditingTemplateHistoryEntry[];
+  generatedImageUndoStack: GeneratedImageHistoryEntry[];
+  generatedImageRedoStack: GeneratedImageHistoryEntry[];
 
   // Loading state
   isLoading: boolean;
@@ -243,6 +377,18 @@ export interface ProjectState {
   replacePlaceholderMedia: (mediaId: string, blob: Blob, name: string) => Promise<void>;
   /** Update generationMeta.status on a placeholder (e.g. "failed", "processing", "realized") */
   setGenerationStatus: (mediaId: string, status: string) => void;
+  createGeneratedImage: (
+    input: { title: string },
+  ) => Promise<ActionResult & { definitionId?: string; mediaId?: string }>;
+  convertImportedImage: (
+    input: { mediaId: string },
+  ) => Promise<ActionResult & { definitionId?: string }>;
+  updateGeneratedImageDraft: (
+    input: { definitionId: string; patch: Partial<Project["generatedImageDefinitions"][number]["draft"]> },
+  ) => Promise<ActionResult>;
+  deleteGeneratedImage: (
+    input: { definitionId: string; confirmed?: boolean },
+  ) => Promise<ActionResult>;
 
   // Track actions
   addTrack: (
@@ -1594,6 +1740,8 @@ export const useProjectStore = create<ProjectState>()(
       clipRedoStack: [] as ClipHistoryEntry[],
       templateUndoStack: [] as EditingTemplateHistoryEntry[],
       templateRedoStack: [] as EditingTemplateHistoryEntry[],
+      generatedImageUndoStack: [] as GeneratedImageHistoryEntry[],
+      generatedImageRedoStack: [] as GeneratedImageHistoryEntry[],
       isLoading: false,
       explicitlyCreated: false,
       error: null,
@@ -1631,6 +1779,8 @@ export const useProjectStore = create<ProjectState>()(
               clipRedoStack: [],
               templateUndoStack: [],
               templateRedoStack: [],
+              generatedImageUndoStack: [],
+              generatedImageRedoStack: [],
               isLoading: false,
               error: null,
               explicitlyCreated: true,
@@ -1695,6 +1845,8 @@ export const useProjectStore = create<ProjectState>()(
             clipRedoStack: [],
             templateUndoStack: [],
             templateRedoStack: [],
+            generatedImageUndoStack: [],
+            generatedImageRedoStack: [],
             error: null,
             explicitlyCreated: true,
           });
@@ -1809,6 +1961,8 @@ export const useProjectStore = create<ProjectState>()(
           clipRedoStack: [],
           templateUndoStack: [],
           templateRedoStack: [],
+          generatedImageUndoStack: [],
+          generatedImageRedoStack: [],
           error: null,
           explicitlyCreated: false,
         });
@@ -2785,6 +2939,127 @@ export const useProjectStore = create<ProjectState>()(
             modifiedAt: Date.now(),
           },
         });
+      },
+      createGeneratedImage: async (input: { title: string }) => {
+        const { project } = get();
+        const commandProject = buildGeneratedImageCommandProject(project);
+        const result = runCreateGeneratedImage(commandProject, {
+          title: input.title,
+          draft: createGeneratedImageDraft(input.title),
+          createId: () => uuidv4(),
+          now: () => new Date().toISOString(),
+        });
+
+        if (!result.success) {
+          return {
+            success: false,
+            error: toGeneratedImageActionError(result.error ?? "Failed to create generated image"),
+          };
+        }
+
+        set({
+          project: applyGeneratedImageCommandProject(project, commandProject),
+        });
+
+        return {
+          success: true,
+          definitionId: result.definitionId,
+          mediaId: result.mediaId,
+        };
+      },
+      convertImportedImage: async (input: { mediaId: string }) => {
+        const { project } = get();
+        const commandProject = buildGeneratedImageCommandProject(project);
+        const result = runConvertImportedImageToGeneratedImage(commandProject, input.mediaId, {
+          createId: () => uuidv4(),
+          now: () => new Date().toISOString(),
+        });
+
+        if (!result.success) {
+          return {
+            success: false,
+            error: toGeneratedImageActionError(result.error ?? "Failed to convert imported image"),
+          };
+        }
+
+        set({
+          project: applyGeneratedImageCommandProject(project, commandProject),
+        });
+
+        return {
+          success: true,
+          definitionId: result.definitionId,
+        };
+      },
+      updateGeneratedImageDraft: async (
+        input: { definitionId: string; patch: Partial<GeneratedImageDraft> },
+      ) => {
+        const { project, generatedImageUndoStack } = get();
+        const commandProject = buildGeneratedImageCommandProject(project);
+        const result = runUpdateGeneratedImageDraft(
+          commandProject,
+          input.definitionId,
+          input.patch,
+          { now: () => new Date().toISOString() },
+        );
+
+        if (!result.success) {
+          return {
+            success: false,
+            error: toGeneratedImageActionError(
+              result.error ?? `Failed to update generated image draft: ${input.definitionId}`,
+            ),
+          };
+        }
+
+        const nextProject = applyGeneratedImageCommandProject(project, commandProject);
+        set({
+          project: nextProject,
+          generatedImageUndoStack: [
+            ...generatedImageUndoStack,
+            {
+              type: "generated-image",
+              timestamp: Date.now(),
+              previousProject: project,
+              nextProject,
+            },
+          ],
+          generatedImageRedoStack: [],
+        });
+
+        return { success: true };
+      },
+      deleteGeneratedImage: async (input: { definitionId: string; confirmed?: boolean }) => {
+        const { project } = get();
+        const commandProject = buildGeneratedImageCommandProject(project);
+        const result = runDeleteGeneratedImage(commandProject, input.definitionId, {
+          confirmed: input.confirmed,
+        });
+
+        if (!result.success) {
+          if (result.requiresConfirmation) {
+            return {
+              success: false,
+              error: {
+                code: "INVALID_PARAMS",
+                message: `Generated image definition ${input.definitionId} is still referenced by: ${result.affectedDefinitionIds?.join(", ") ?? "unknown dependencies"}`,
+              },
+            };
+          }
+
+          return {
+            success: false,
+            error: toGeneratedImageActionError(
+              result.error ?? `Failed to delete generated image definition: ${input.definitionId}`,
+            ),
+          };
+        }
+
+        set({
+          project: applyGeneratedImageCommandProject(project, commandProject),
+        });
+
+        return { success: true };
       },
 
       replacePlaceholderMedia: async (mediaId: string, blob: Blob, name: string) => {
@@ -4491,6 +4766,8 @@ export const useProjectStore = create<ProjectState>()(
           clipRedoStack,
           templateUndoStack,
           templateRedoStack,
+          generatedImageUndoStack,
+          generatedImageRedoStack,
         } = get();
 
         const latestActionTimestamp = actionHistory.peekUndo()?.timestamp ?? -1;
@@ -4502,8 +4779,30 @@ export const useProjectStore = create<ProjectState>()(
           templateUndoStack.length > 0
             ? templateUndoStack[templateUndoStack.length - 1].timestamp
             : -1;
+        const latestGeneratedImageTimestamp =
+          generatedImageUndoStack.length > 0
+            ? generatedImageUndoStack[generatedImageUndoStack.length - 1].timestamp
+            : -1;
 
         const latestAction = actionHistory.peekUndo();
+        if (
+          latestGeneratedImageTimestamp >= 0 &&
+          latestGeneratedImageTimestamp >= latestClipTimestamp &&
+          latestGeneratedImageTimestamp >= latestTemplateTimestamp &&
+          latestGeneratedImageTimestamp > latestActionTimestamp
+        ) {
+          const entry = generatedImageUndoStack[generatedImageUndoStack.length - 1];
+          set({
+            project: entry.previousProject,
+            generatedImageUndoStack: generatedImageUndoStack.slice(0, -1),
+            generatedImageRedoStack: [
+              ...generatedImageRedoStack,
+              { ...entry, timestamp: Date.now() },
+            ],
+          });
+          return { success: true };
+        }
+
         if (
           latestAction?.action.type === SCENE_HISTORY_ACTION &&
           latestActionTimestamp >= latestClipTimestamp &&
@@ -4696,6 +4995,8 @@ export const useProjectStore = create<ProjectState>()(
           clipRedoStack,
           templateUndoStack,
           templateRedoStack,
+          generatedImageUndoStack,
+          generatedImageRedoStack,
         } = get();
 
         const latestSceneRedo = actionHistory.peekRedo();
@@ -4703,6 +5004,25 @@ export const useProjectStore = create<ProjectState>()(
           latestSceneRedo?.action.type === SCENE_HISTORY_ACTION ? latestSceneRedo.timestamp : -1;
         const latestClipRedoTimestamp = clipRedoStack.at(-1)?.timestamp ?? -1;
         const latestTemplateRedoTimestamp = templateRedoStack.at(-1)?.timestamp ?? -1;
+        const latestGeneratedImageRedoTimestamp =
+          generatedImageRedoStack.at(-1)?.timestamp ?? -1;
+        if (
+          latestGeneratedImageRedoTimestamp >= 0 &&
+          latestGeneratedImageRedoTimestamp >= latestClipRedoTimestamp &&
+          latestGeneratedImageRedoTimestamp >= latestTemplateRedoTimestamp &&
+          latestGeneratedImageRedoTimestamp >= latestSceneRedoTimestamp
+        ) {
+          const entry = generatedImageRedoStack[generatedImageRedoStack.length - 1];
+          set({
+            project: entry.nextProject,
+            generatedImageUndoStack: [
+              ...generatedImageUndoStack,
+              { ...entry, timestamp: Date.now() },
+            ],
+            generatedImageRedoStack: generatedImageRedoStack.slice(0, -1),
+          });
+          return { success: true };
+        }
         if (
           latestSceneRedoTimestamp >= 0 &&
           latestSceneRedoTimestamp >= latestClipRedoTimestamp &&
@@ -4873,8 +5193,14 @@ export const useProjectStore = create<ProjectState>()(
       },
 
       canUndo: () => {
-        const { actionHistory, clipUndoStack, templateUndoStack } = get();
+        const {
+          actionHistory,
+          clipUndoStack,
+          templateUndoStack,
+          generatedImageUndoStack,
+        } = get();
         return (
+          generatedImageUndoStack.length > 0 ||
           templateUndoStack.length > 0 ||
           clipUndoStack.length > 0 ||
           actionHistory.canUndo()
@@ -4882,8 +5208,14 @@ export const useProjectStore = create<ProjectState>()(
       },
 
       canRedo: () => {
-        const { actionHistory, clipRedoStack, templateRedoStack } = get();
+        const {
+          actionHistory,
+          clipRedoStack,
+          templateRedoStack,
+          generatedImageRedoStack,
+        } = get();
         return (
+          generatedImageRedoStack.length > 0 ||
           templateRedoStack.length > 0 ||
           clipRedoStack.length > 0 ||
           actionHistory.canRedo()

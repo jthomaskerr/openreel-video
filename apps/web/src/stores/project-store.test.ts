@@ -2216,4 +2216,233 @@ Ignored block`;
     expect(captionClips).toHaveLength(1);
     expect(captionClips[0]?.text).toBe("Hello world");
   });
+
+  describe("generated image lifecycle commands", () => {
+    const createDefinition = (
+      id: string,
+      overrides: Partial<Project["generatedImageDefinitions"][number]> = {},
+    ): Project["generatedImageDefinitions"][number] => ({
+      id,
+      projectId: "project-1",
+      assetGroupId: `${id}-group`,
+      currentMediaVersionId: `${id}-media`,
+      title: id,
+      draft: {
+        prompt: `${id} prompt`,
+        roleByReferenceKey: {},
+        inputs: {},
+      },
+      attemptIds: [],
+      createdAt: "2026-07-16T00:00:00.000Z",
+      updatedAt: "2026-07-16T00:00:00.000Z",
+      ...overrides,
+    });
+
+    it("creates a placeholder media item and generated image definition", async () => {
+      const result = await useProjectStore.getState().createGeneratedImage({
+        title: "Storm lighthouse",
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.definitionId).toBeDefined();
+      expect(result.mediaId).toBeDefined();
+
+      const project = useProjectStore.getState().project;
+      const definition = project.generatedImageDefinitions.find(
+        (entry) => entry.id === result.definitionId,
+      );
+      const media = project.mediaLibrary.items.find((entry) => entry.id === result.mediaId);
+
+      expect(definition).toMatchObject({
+        title: "Storm lighthouse",
+        currentMediaVersionId: result.mediaId,
+      });
+      expect(media).toMatchObject({
+        id: result.mediaId,
+        type: "image",
+        title: "Storm lighthouse",
+        isCurrent: true,
+        generationMeta: {
+          prompt: "Storm lighthouse",
+          status: "unrealized",
+        },
+      });
+      expect(media?.assetGroupId).toBe(definition?.assetGroupId);
+    });
+
+    it("converts an imported image idempotently without replacing blob identity", async () => {
+      const blob = new Blob(["pixels"], { type: "image/png" });
+      const imported: MediaItem = {
+        id: "imported-1",
+        name: "reference.png",
+        type: "image",
+        fileHandle: null,
+        blob,
+        metadata: {
+          duration: 0,
+          width: 1024,
+          height: 1024,
+          frameRate: 0,
+          codec: "png",
+          sampleRate: 0,
+          channels: 0,
+          fileSize: blob.size,
+        },
+        thumbnailUrl: null,
+        assetGroupId: "asset-imported-1",
+        isCurrent: true,
+      };
+      const baseProject = useProjectStore.getState().project;
+      useProjectStore.getState().loadProject({
+        ...baseProject,
+        mediaLibrary: {
+          ...baseProject.mediaLibrary,
+          items: [imported],
+        },
+        generatedImageDefinitions: [],
+      });
+
+      const first = await useProjectStore.getState().convertImportedImage({ mediaId: "imported-1" });
+      const second = await useProjectStore.getState().convertImportedImage({ mediaId: "imported-1" });
+
+      expect(first).toEqual({
+        success: true,
+        definitionId: first.definitionId,
+      });
+      expect(second).toEqual(first);
+
+      const project = useProjectStore.getState().project;
+      const media = project.mediaLibrary.items.find((entry) => entry.id === "imported-1");
+      const definition = project.generatedImageDefinitions.find(
+        (entry) => entry.id === first.definitionId,
+      );
+
+      expect(media?.blob).toBe(blob);
+      expect(media?.name).toBe("reference.png");
+      expect(media?.generationMeta).toBeUndefined();
+      expect(definition).toMatchObject({
+        sourceMediaVersionId: "imported-1",
+        currentMediaVersionId: "imported-1",
+        title: "reference.png",
+      });
+      expect(project.generatedImageDefinitions).toHaveLength(1);
+    });
+
+    it("updates generated image drafts through undo and redo", async () => {
+      const baseProject = useProjectStore.getState().project;
+      useProjectStore.getState().loadProject({
+        ...baseProject,
+        generatedImageDefinitions: [
+          createDefinition("definition-1", {
+            draft: {
+              prompt: "before",
+              roleByReferenceKey: {},
+              inputs: {},
+            },
+          }),
+        ],
+      });
+
+      const updated = await useProjectStore.getState().updateGeneratedImageDraft({
+        definitionId: "definition-1",
+        patch: { prompt: "after" },
+      });
+
+      expect(updated).toEqual({ success: true });
+      expect(useProjectStore.getState().project.generatedImageDefinitions[0]?.draft.prompt).toBe(
+        "after",
+      );
+      expect(useProjectStore.getState().canUndo()).toBe(true);
+
+      await useProjectStore.getState().undo();
+      expect(useProjectStore.getState().project.generatedImageDefinitions[0]?.draft.prompt).toBe(
+        "before",
+      );
+
+      await useProjectStore.getState().redo();
+      expect(useProjectStore.getState().project.generatedImageDefinitions[0]?.draft.prompt).toBe(
+        "after",
+      );
+    });
+
+    it("requires confirmation before deleting a referenced generated image", async () => {
+      const baseProject = useProjectStore.getState().project;
+      useProjectStore.getState().loadProject({
+        ...baseProject,
+        mediaLibrary: {
+          ...baseProject.mediaLibrary,
+          items: [
+            {
+              id: "definition-1-media",
+              name: "placeholder.png",
+              title: "placeholder",
+              type: "image",
+              fileHandle: null,
+              blob: null,
+              metadata: {
+                duration: 0,
+                width: 1024,
+                height: 1024,
+                frameRate: 0,
+                codec: "png",
+                sampleRate: 0,
+                channels: 0,
+                fileSize: 0,
+              },
+              thumbnailUrl: null,
+              assetGroupId: "definition-1-group",
+              isCurrent: true,
+              generationMeta: {
+                provider: "generated-image",
+                model: "draft",
+                status: "unrealized",
+              },
+            },
+          ],
+        },
+        generatedImageDefinitions: [
+          createDefinition("definition-1", {
+            assetGroupId: "definition-1-group",
+            currentMediaVersionId: "definition-1-media",
+          }),
+          createDefinition("definition-2", {
+            draft: {
+              prompt: "dependent",
+              roleByReferenceKey: {},
+              inputs: { generatedImageDefinitionIds: ["definition-1"] },
+            },
+          }),
+        ],
+      });
+
+      const pending = await useProjectStore.getState().deleteGeneratedImage({
+        definitionId: "definition-1",
+      });
+      expect(pending.success).toBe(false);
+      expect(pending.error?.code).toBe("INVALID_PARAMS");
+      expect(useProjectStore.getState().project.generatedImageDefinitions).toHaveLength(2);
+
+      const confirmed = await useProjectStore.getState().deleteGeneratedImage({
+        definitionId: "definition-1",
+        confirmed: true,
+      });
+      expect(confirmed).toEqual({ success: true });
+      expect(
+        useProjectStore.getState().project.generatedImageDefinitions.map((entry) => entry.id),
+      ).toEqual(["definition-2"]);
+      expect(useProjectStore.getState().project.mediaLibrary.items).toHaveLength(0);
+    });
+
+    it("leaves state unchanged on validation failure", async () => {
+      const before = useProjectStore.getState().project;
+
+      const result = await useProjectStore.getState().convertImportedImage({
+        mediaId: "missing-media",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error?.code).toBe("MEDIA_NOT_FOUND");
+      expect(useProjectStore.getState().project).toBe(before);
+    });
+  });
 });
