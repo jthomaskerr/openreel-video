@@ -60,6 +60,7 @@ type InternalReference =
 
 const missingPrimaryImageMessage = (token: string) => `Character reference "${token}" has no primary image.`;
 const inaccessiblePrimaryImageMessage = (token: string) => `Character reference "${token}" points to an inaccessible primary image.`;
+const ambiguousCharacterMessage = (token: string) => `Character reference "${token}" matches multiple characters.`;
 const unresolvedCharacterMessage = (token: string) => `No character matches "${token}".`;
 const unresolvedMediaMessage = (token: string) => `No media version matches "${token}".`;
 const malformedTokenMessage = (token: string) => `Typed reference token "${token}" is incomplete.`;
@@ -138,14 +139,22 @@ function resolveCharacterReference(
   diagnostics: PromptReferenceDiagnostic[],
 ): ReferenceCandidate | undefined {
   const byId = token.kind === 'character' ? input.characters.find(character => character.id === token.id) : undefined;
-  const bySlug = token.kind === 'legacy-character'
-    ? input.characters.find(character => character.slug.toLowerCase() === token.slug)
-    : undefined;
   const legacyBinding = token.kind === 'legacy-character'
     ? input.legacyBindings?.find(binding => binding.slug === token.slug)
     : undefined;
+  const boundCharacter = legacyBinding
+    ? input.characters.find(item => item.id === legacyBinding.characterId)
+    : undefined;
+  const slugMatches = token.kind === 'legacy-character' && !boundCharacter
+    ? input.characters.filter(character => character.slug.toLowerCase() === token.slug)
+    : [];
 
-  const character = byId ?? bySlug ?? (legacyBinding && input.characters.find(item => item.id === legacyBinding.characterId));
+  if (slugMatches.length > 1) {
+    diagnostics.push(makeDiagnostic('ambiguous', token.start, token.end, ambiguousCharacterMessage(token.source)));
+    return undefined;
+  }
+
+  const character = byId ?? boundCharacter ?? slugMatches[0];
 
   if (!character) {
     if (!legacyBinding) {

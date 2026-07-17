@@ -122,4 +122,42 @@ describe('resolveGenerationReferences', () => {
       blocking: true,
     });
   });
+
+  it('reports ambiguous legacy character slugs instead of selecting the first match', () => {
+    const result = resolveGenerationReferences({
+      prompt: '@alice',
+      characters: [
+        {
+          id: 'character-1',
+          slug: 'alice',
+          displayName: 'Alice Prime',
+          primaryImageMediaId: 'media-1',
+          primaryImageVersionId: 'version-1',
+        },
+        {
+          id: 'character-2',
+          slug: 'alice',
+          displayName: 'Alice Variant',
+          primaryImageMediaId: 'media-2',
+          primaryImageVersionId: 'version-2',
+        },
+      ],
+      mediaVersions: [
+        { mediaId: 'media-1', versionId: 'version-1', accessible: true },
+        { mediaId: 'media-2', versionId: 'version-2', accessible: true },
+      ],
+      shotReferences: [],
+      roleByReferenceKey: {},
+    });
+
+    expect(result.references).toEqual([]);
+    expect(result.diagnostics).toMatchObject([
+      {
+        code: 'ambiguous',
+        start: 0,
+        end: '@alice'.length,
+        blocking: true,
+      },
+    ]);
+  });
 });

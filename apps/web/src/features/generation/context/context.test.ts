@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { canonicalCharacterToken } from '../references/resolve';
 import {
   projectRangeToAudioSourceRange,
   resolveCharacterTokens,
@@ -54,6 +55,31 @@ describe('tokenizeCharacterMentions', () => {
 });
 
 describe('resolveCharacterTokens', () => {
+  it('resolves canonical character tokens through the compatibility wrapper', () => {
+    expect(
+      resolveCharacterTokens({
+        tokens: [canonicalCharacterToken('c1')],
+        characters: [
+          {
+            id: 'c1',
+            slug: 'renamed-slug',
+            displayName: 'Alice',
+            primaryImageMediaId: 'm1',
+            primaryImageVersionId: 'v1',
+          },
+        ],
+        mediaVersions: [{ mediaId: 'm1', versionId: 'v1', accessible: true }],
+      }).bindings,
+    ).toEqual([
+      {
+        slug: 'renamed-slug',
+        characterId: 'c1',
+        mediaId: 'm1',
+        versionId: 'v1',
+      },
+    ]);
+  });
+
   it('keeps legacy mention wrapper focused on prior bindings', () => {
     expect(
       resolveCharacterTokens({

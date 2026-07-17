@@ -1,3 +1,8 @@
+import {
+  resolveGenerationReferences as resolvePromptGenerationReferences,
+  tokenizePromptReferences,
+} from '../references/resolve';
+
 export type ContextDiagnosticCode =
   | 'timing-incomplete'
   | 'timing-invalid'
@@ -40,12 +45,11 @@ export function tokenizeCharacterMentions(prompt: string): { mentions: Character
   const mentions: CharacterMention[] = [];
   const slugs: string[] = [];
   const seen = new Set<string>();
-  const pattern = /(^|[^\p{L}\p{N}_])@([a-z0-9]+(?:-[a-z0-9]+)*)/giu;
-  for (const match of prompt.matchAll(pattern)) {
-    const prefixLength = match[1].length;
-    const start = (match.index ?? 0) + prefixLength;
-    const text = `@${match[2]}`;
-    const slug = match[2].toLowerCase();
+  for (const token of tokenizePromptReferences(prompt)) {
+    if (token.kind !== 'legacy-character') continue;
+    const text = token.source;
+    const slug = token.slug;
+    const start = token.start;
     mentions.push({ text, slug, start, end: start + text.length });
     if (!seen.has(slug)) { seen.add(slug); slugs.push(slug); }
   }
@@ -55,20 +59,99 @@ export function tokenizeCharacterMentions(prompt: string): { mentions: Character
 export interface ProjectCharacter { id: string; slug: string; displayName: string; primaryImageMediaId?: string; primaryImageVersionId?: string }
 export interface MediaVersionAccess { mediaId: string; versionId?: string; accessible: boolean }
 export interface CharacterBinding { slug: string; characterId: string; mediaId: string; versionId?: string }
+const normalizeCompatibilityToken = (token: string): string => token.startsWith('@') ? token : `@${token}`;
+const compatibilityTokenName = (token: string): string => token.replace(/^@/, '').toLowerCase();
+
+function mapReferenceDiagnosticToContextError(input: { code: string; message: string; token: string }): ContextDiagnostic {
+  switch (input.code) {
+    case 'ambiguous':
+      return { code: 'ambiguous-token', token: input.token };
+    case 'unavailable':
+      return {
+        code: input.message.includes('no primary image')
+          ? 'missing-primary-image'
+          : 'inaccessible-primary-image',
+        token: input.token,
+      };
+    case 'malformed-token':
+    case 'unresolved':
+    default:
+      return { code: 'unresolved-token', token: input.token };
+  }
+}
+
 export function resolveCharacterTokens(input: { tokens: readonly string[]; characters: readonly ProjectCharacter[]; mediaVersions: readonly MediaVersionAccess[]; priorBindings?: readonly CharacterBinding[] }): { bindings: CharacterBinding[]; errors: ContextDiagnostic[] } {
   const bindings: CharacterBinding[] = []; const errors: ContextDiagnostic[] = [];
   for (const rawToken of input.tokens) {
-    const slug = rawToken.replace(/^@/, '').toLowerCase();
-    const prior = input.priorBindings?.find(binding => binding.slug === slug);
-    const priorCharacter = prior && input.characters.find(character => character.id === prior.characterId);
-    const matches = priorCharacter ? [priorCharacter] : input.characters.filter(character => character.slug.toLowerCase() === slug);
-    if (matches.length === 0) { errors.push({ code: 'unresolved-token', token: slug }); continue; }
-    if (matches.length > 1) { errors.push({ code: 'ambiguous-token', token: slug }); continue; }
-    const character = matches[0];
-    if (!character.primaryImageMediaId) { errors.push({ code: 'missing-primary-image', token: slug }); continue; }
-    const access = input.mediaVersions.find(version => version.mediaId === character.primaryImageMediaId && version.versionId === character.primaryImageVersionId);
-    if (!access?.accessible) { errors.push({ code: 'inaccessible-primary-image', token: slug }); continue; }
-    bindings.push({ slug, characterId: character.id, mediaId: character.primaryImageMediaId, versionId: character.primaryImageVersionId });
+    const promptToken = normalizeCompatibilityToken(rawToken);
+    const token = tokenizePromptReferences(promptToken)[0];
+    const tokenName = token?.kind === 'legacy-character' ? token.slug : compatibilityTokenName(rawToken);
+    if (!token || token.kind === 'media') {
+      errors.push({ code: 'unresolved-token', token: tokenName });
+      continue;
+    }
+
+    const resolution = resolvePromptGenerationReferences({
+      prompt: promptToken,
+      characters: input.characters,
+      mediaVersions: input.mediaVersions,
+      shotReferences: [],
+      legacyBindings: input.priorBindings,
+      roleByReferenceKey: {},
+    });
+    if (resolution.diagnostics.length > 0) {
+      const diagnostic = resolution.diagnostics[0];
+      errors.push(mapReferenceDiagnosticToContextError({
+        code: diagnostic.code,
+        message: diagnostic.message,
+        token: tokenName,
+      }));
+      continue;
+    }
+
+    const reference = resolution.references[0];
+    if (!reference) {
+      errors.push({ code: 'unresolved-token', token: tokenName });
+      continue;
+    }
+
+    const prior = token.kind === 'legacy-character'
+      ? input.priorBindings?.find(binding => binding.slug === token.slug)
+      : undefined;
+    const character = token.kind === 'character'
+      ? input.characters.find(item => item.id === token.id)
+      : (prior && input.characters.find(item => item.id === prior.characterId)) ??
+        input.characters.find(item =>
+          item.primaryImageMediaId === reference.mediaId &&
+          item.primaryImageVersionId === reference.mediaVersionId &&
+          item.slug.toLowerCase() === token.slug,
+        ) ??
+        input.characters.find(item =>
+          item.primaryImageMediaId === reference.mediaId &&
+          item.primaryImageVersionId === reference.mediaVersionId,
+        );
+
+    if (character) {
+      bindings.push({
+        slug: token.kind === 'legacy-character' ? token.slug : character.slug.toLowerCase(),
+        characterId: character.id,
+        mediaId: reference.mediaId,
+        versionId: reference.mediaVersionId,
+      });
+      continue;
+    }
+
+    if (prior) {
+      bindings.push({
+        slug: prior.slug,
+        characterId: prior.characterId,
+        mediaId: reference.mediaId,
+        versionId: reference.mediaVersionId,
+      });
+      continue;
+    }
+
+    errors.push({ code: 'unresolved-token', token: tokenName });
   }
   return { bindings, errors };
 }
