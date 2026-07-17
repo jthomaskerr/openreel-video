@@ -17,6 +17,15 @@ const createProject = (): GeneratedImageCommandProject => ({
   generatedImageDefinitions: [],
 });
 
+const snapshotProject = (
+  project: GeneratedImageCommandProject,
+): GeneratedImageCommandProject => ({
+  id: project.id,
+  mediaItems: [...project.mediaItems],
+  mediaGroups: [...project.mediaGroups],
+  generatedImageDefinitions: [...project.generatedImageDefinitions],
+});
+
 const createIds = (...values: string[]): (() => string) => {
   let index = 0;
   return () => {
@@ -62,8 +71,9 @@ const createDefinition = (
 });
 
 describe("generated image commands", () => {
-  it("creates one group, one unrealized placeholder media item, and one definition", () => {
+  it("creates one group, one unrealized placeholder media item, and one definition without mutating input", () => {
     const project = createProject();
+    const before = snapshotProject(project);
 
     const result = createGeneratedImage(project, {
       title: "Storm lighthouse",
@@ -72,68 +82,89 @@ describe("generated image commands", () => {
       now: () => "2026-07-16T00:00:00.000Z",
     });
 
-    expect(result).toEqual({
+    expect(project).toEqual(before);
+    expect(result).toMatchObject({
       success: true,
       definitionId: "definition-1",
       mediaId: "media-1",
     });
-    expect(project.mediaGroups).toEqual([{ id: "group-1" }]);
-    expect(project.mediaItems).toHaveLength(1);
-    expect(project.mediaItems[0]).toMatchObject({
-      id: "media-1",
-      type: "image",
-      title: "Storm lighthouse",
-      assetGroupId: "group-1",
-      isCurrent: true,
-      generationMeta: {
-        status: "unrealized",
-        prompt: "A lighthouse in a storm",
-      },
+    expect(result.success && result.nextProject).toMatchObject({
+      mediaGroups: [{ id: "group-1" }],
+      mediaItems: [
+        {
+          id: "media-1",
+          type: "image",
+          title: "Storm lighthouse",
+          assetGroupId: "group-1",
+          isCurrent: true,
+          generationMeta: {
+            status: "unrealized",
+            prompt: "A lighthouse in a storm",
+          },
+        },
+      ],
+      generatedImageDefinitions: [
+        createDefinition("definition-1", [], {
+          assetGroupId: "group-1",
+          currentMediaVersionId: "media-1",
+          title: "Storm lighthouse",
+        }),
+      ],
     });
-    expect(project.generatedImageDefinitions).toEqual([
-      createDefinition("definition-1", [], {
-        assetGroupId: "group-1",
-        currentMediaVersionId: "media-1",
-        title: "Storm lighthouse",
-      }),
-    ]);
   });
 
   it("converts an imported image idempotently without replacing blob identity or filename", () => {
-    const project = createProject();
     const blob = new Blob(["pixels"], { type: "image/png" });
-    project.mediaItems.push({
-      id: "imported-1",
-      type: "image",
-      name: "reference.png",
-      fileName: "reference.png",
-      blob,
-    });
+    const project: GeneratedImageCommandProject = {
+      id: "project-1",
+      mediaItems: [
+        {
+          id: "imported-1",
+          type: "image",
+          name: "reference.png",
+          fileName: "reference.png",
+          blob,
+        },
+      ],
+      mediaGroups: [],
+      generatedImageDefinitions: [],
+    };
+    const before = snapshotProject(project);
 
     const first = convertImportedImageToGeneratedImage(project, "imported-1", {
       createId: createIds("definition-1"),
       now: () => "2026-07-16T00:00:00.000Z",
     });
-    const second = convertImportedImageToGeneratedImage(project, "imported-1", {
+
+    expect(project).toEqual(before);
+    expect(first).toMatchObject({
+      success: true,
+      definitionId: "definition-1",
+      mediaId: "imported-1",
+    });
+    if (!first.success) {
+      throw new Error("Expected conversion to succeed");
+    }
+
+    const second = convertImportedImageToGeneratedImage(first.nextProject, "imported-1", {
       createId: () => {
         throw new Error("Idempotent conversion must not allocate another id");
       },
       now: () => "2026-07-16T01:00:00.000Z",
     });
 
-    expect(first).toEqual({
+    expect(second).toMatchObject({
       success: true,
       definitionId: "definition-1",
       mediaId: "imported-1",
     });
-    expect(second).toEqual(first);
-    expect(project.mediaItems[0]).toMatchObject({
+    expect(first.nextProject.mediaItems[0]).toMatchObject({
       id: "imported-1",
       fileName: "reference.png",
       blob,
     });
-    expect(project.mediaItems[0]?.generationMeta).toBeUndefined();
-    expect(project.generatedImageDefinitions).toEqual([
+    expect(first.nextProject.mediaItems[0]?.generationMeta).toBeUndefined();
+    expect(first.nextProject.generatedImageDefinitions).toEqual([
       createDefinition("definition-1", [], {
         assetGroupId: "imported-1",
         currentMediaVersionId: "imported-1",
@@ -144,13 +175,18 @@ describe("generated image commands", () => {
     ]);
   });
 
-  it("updates the draft through an undoable command", () => {
-    const project = createProject();
-    project.generatedImageDefinitions.push(
-      createDefinition("definition-1", [], {
-        draft: createDraft({ prompt: "before" }),
-      }),
-    );
+  it("updates the draft through an undoable pure command", () => {
+    const project: GeneratedImageCommandProject = {
+      id: "project-1",
+      mediaItems: [],
+      mediaGroups: [],
+      generatedImageDefinitions: [
+        createDefinition("definition-1", [], {
+          draft: createDraft({ prompt: "before" }),
+        }),
+      ],
+    };
+    const before = snapshotProject(project);
 
     const result = updateGeneratedImageDraft(
       project,
@@ -159,47 +195,111 @@ describe("generated image commands", () => {
       { now: () => "2026-07-16T01:00:00.000Z" },
     );
 
+    expect(project).toEqual(before);
     expect(result.success).toBe(true);
-    expect(project.generatedImageDefinitions[0]?.draft.prompt).toBe("after");
-    result.undo?.();
-    expect(project.generatedImageDefinitions[0]?.draft.prompt).toBe("before");
+    if (!result.success) {
+      throw new Error("Expected draft update to succeed");
+    }
+    expect(result.nextProject.generatedImageDefinitions[0]?.draft.prompt).toBe("after");
+    expect(result.undo?.()).toEqual(project);
   });
 
   it("requires confirmation before deleting a definition with affected uses", () => {
-    const project = createProject();
-    project.mediaGroups.push({ id: "definition-1-group" });
-    project.mediaItems.push({
-      id: "definition-1-media",
-      type: "image",
-      assetGroupId: "definition-1-group",
-      generationMeta: {
-        provider: "generated-image",
-        model: "draft",
-        status: "unrealized",
-      },
-    });
-    project.generatedImageDefinitions.push(createDefinition("definition-1"));
-    project.generatedImageDefinitions.push(createDefinition("definition-2", ["definition-1"]));
+    const project: GeneratedImageCommandProject = {
+      id: "project-1",
+      mediaGroups: [{ id: "definition-1-group" }],
+      mediaItems: [
+        {
+          id: "definition-1-media",
+          type: "image",
+          assetGroupId: "definition-1-group",
+          generationMeta: {
+            provider: "generated-image",
+            model: "draft",
+            status: "unrealized",
+          },
+        },
+      ],
+      generatedImageDefinitions: [
+        createDefinition("definition-1"),
+        createDefinition("definition-2", ["definition-1"]),
+      ],
+    };
+    const before = snapshotProject(project);
 
     const pending = deleteGeneratedImage(project, "definition-1");
     expect(pending).toEqual({
       success: false,
       requiresConfirmation: true,
       affectedDefinitionIds: ["definition-2"],
+      error: {
+        code: "DEFINITION_IN_USE",
+        message: "Generated image definition definition-1 is still referenced",
+        details: {
+          projectId: "project-1",
+          definitionId: "definition-1",
+          affectedDefinitionIds: ["definition-2"],
+        },
+      },
     });
-    expect(project.generatedImageDefinitions).toHaveLength(2);
+    expect(project).toEqual(before);
 
     const confirmed = deleteGeneratedImage(project, "definition-1", { confirmed: true });
-    expect(confirmed).toEqual({
+    expect(confirmed).toMatchObject({
       success: true,
       definitionId: "definition-1",
       mediaId: "definition-1-media",
     });
-    expect(project.generatedImageDefinitions.map((definition) => definition.id)).toEqual([
+    if (!confirmed.success) {
+      throw new Error("Expected confirmed delete to succeed");
+    }
+    expect(confirmed.nextProject.generatedImageDefinitions.map((definition) => definition.id)).toEqual([
       "definition-2",
     ]);
-    expect(project.mediaItems).toHaveLength(0);
-    expect(project.mediaGroups).toHaveLength(0);
+    expect(confirmed.nextProject.mediaItems).toHaveLength(0);
+    expect(confirmed.nextProject.mediaGroups).toHaveLength(0);
+  });
+
+  it("returns structured validation errors without mutating input", () => {
+    const project = createProject();
+    const before = snapshotProject(project);
+
+    const missingMedia = convertImportedImageToGeneratedImage(project, "missing-media", {
+      createId: () => {
+        throw new Error("Missing media must fail before allocating ids");
+      },
+      now: () => "2026-07-16T00:00:00.000Z",
+    });
+    const missingDefinition = updateGeneratedImageDraft(
+      project,
+      "missing-definition",
+      { prompt: "after" },
+      { now: () => "2026-07-16T00:00:00.000Z" },
+    );
+
+    expect(missingMedia).toEqual({
+      success: false,
+      error: {
+        code: "MEDIA_NOT_FOUND",
+        message: "Media item not found: missing-media",
+        details: {
+          projectId: "project-1",
+          mediaId: "missing-media",
+        },
+      },
+    });
+    expect(missingDefinition).toEqual({
+      success: false,
+      error: {
+        code: "DEFINITION_NOT_FOUND",
+        message: "Generated image definition not found: missing-definition",
+        details: {
+          projectId: "project-1",
+          definitionId: "missing-definition",
+        },
+      },
+    });
+    expect(project).toEqual(before);
   });
 });
 

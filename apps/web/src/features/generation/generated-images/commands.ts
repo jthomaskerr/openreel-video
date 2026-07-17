@@ -31,15 +31,41 @@ export type GeneratedImageCommandProject = {
   generatedImageDefinitions: GeneratedImageDefinition[];
 };
 
-export type CommandResult = {
-  readonly success: boolean;
+type GeneratedImageCommandErrorDetails = {
+  readonly projectId: string;
+  readonly mediaId?: string;
+  readonly definitionId?: string;
+  readonly affectedDefinitionIds?: readonly string[];
+};
+
+export type GeneratedImageCommandErrorCode =
+  | "DEFINITION_IN_USE"
+  | "DEFINITION_NOT_FOUND"
+  | "INVALID_MEDIA_TYPE"
+  | "MEDIA_NOT_FOUND";
+
+export type GeneratedImageCommandError = {
+  readonly code: GeneratedImageCommandErrorCode;
+  readonly message: string;
+  readonly details: GeneratedImageCommandErrorDetails;
+};
+
+type CommandSuccessResult = {
+  readonly success: true;
+  readonly nextProject: GeneratedImageCommandProject;
   readonly definitionId?: string;
   readonly mediaId?: string;
+  readonly undo?: () => GeneratedImageCommandProject;
+};
+
+type CommandFailureResult = {
+  readonly success: false;
+  readonly error: GeneratedImageCommandError;
   readonly requiresConfirmation?: boolean;
   readonly affectedDefinitionIds?: readonly string[];
-  readonly error?: string;
-  readonly undo?: () => void;
 };
+
+export type CommandResult = CommandSuccessResult | CommandFailureResult;
 
 type CreateGeneratedImageInput = {
   readonly title: string;
@@ -56,6 +82,21 @@ type ConvertImportedImageInput = {
 type UpdateGeneratedImageDraftInput = {
   readonly now: () => string;
 };
+
+const cloneProject = (
+  project: GeneratedImageCommandProject,
+): GeneratedImageCommandProject => ({
+  id: project.id,
+  mediaItems: [...project.mediaItems],
+  mediaGroups: [...project.mediaGroups],
+  generatedImageDefinitions: [...project.generatedImageDefinitions],
+});
+
+const cloneDraft = (draft: GeneratedImageDraft): GeneratedImageDraft => ({
+  ...draft,
+  roleByReferenceKey: { ...draft.roleByReferenceKey },
+  inputs: { ...draft.inputs },
+});
 
 const findDefinitionIndex = (
   project: GeneratedImageCommandProject,
@@ -91,19 +132,78 @@ const findDependentDefinitionIds = (
     .filter((definition) => getDraftDependencyIds(definition).includes(targetDefinitionId))
     .map((definition) => definition.id);
 
-const removeMediaGroupIfUnused = (
+const createCommandError = (
+  code: GeneratedImageCommandErrorCode,
+  message: string,
+  details: GeneratedImageCommandErrorDetails,
+): GeneratedImageCommandError => ({
+  code,
+  message,
+  details,
+});
+
+const createMissingMediaError = (
+  projectId: string,
+  mediaId: string,
+): GeneratedImageCommandError =>
+  createCommandError("MEDIA_NOT_FOUND", `Media item not found: ${mediaId}`, {
+    projectId,
+    mediaId,
+  });
+
+const createMissingDefinitionError = (
+  projectId: string,
+  definitionId: string,
+): GeneratedImageCommandError =>
+  createCommandError(
+    "DEFINITION_NOT_FOUND",
+    `Generated image definition not found: ${definitionId}`,
+    {
+      projectId,
+      definitionId,
+    },
+  );
+
+const createInvalidMediaTypeError = (
+  projectId: string,
+  mediaId: string,
+): GeneratedImageCommandError =>
+  createCommandError("INVALID_MEDIA_TYPE", `Media item is not an image: ${mediaId}`, {
+    projectId,
+    mediaId,
+  });
+
+const createDefinitionInUseError = (
+  projectId: string,
+  definitionId: string,
+  affectedDefinitionIds: readonly string[],
+): GeneratedImageCommandError =>
+  createCommandError(
+    "DEFINITION_IN_USE",
+    `Generated image definition ${definitionId} is still referenced`,
+    {
+      projectId,
+      definitionId,
+      affectedDefinitionIds,
+    },
+  );
+
+const pruneUnusedMediaGroup = (
   project: GeneratedImageCommandProject,
   assetGroupId: string,
-): void => {
+): GeneratedImageCommandProject => {
   const mediaStillUsesGroup = project.mediaItems.some((mediaItem) => mediaItem.assetGroupId === assetGroupId);
   const definitionStillUsesGroup = project.generatedImageDefinitions.some(
     (definition) => definition.assetGroupId === assetGroupId,
   );
   if (mediaStillUsesGroup || definitionStillUsesGroup) {
-    return;
+    return project;
   }
 
-  project.mediaGroups = project.mediaGroups.filter((group) => group.id !== assetGroupId);
+  return {
+    ...project,
+    mediaGroups: project.mediaGroups.filter((group) => group.id !== assetGroupId),
+  };
 };
 
 export function createGeneratedImage(
@@ -137,17 +237,23 @@ export function createGeneratedImage(
     assetGroupId,
     currentMediaVersionId: mediaId,
     title: input.title,
-    draft: input.draft,
+    draft: cloneDraft(input.draft),
     attemptIds: [],
     createdAt: timestamp,
     updatedAt: timestamp,
   };
 
-  project.mediaGroups = [...project.mediaGroups, { id: assetGroupId }];
-  project.mediaItems = [...project.mediaItems, nextMediaItem];
-  project.generatedImageDefinitions = [...project.generatedImageDefinitions, nextDefinition];
-
-  return { success: true, definitionId, mediaId };
+  return {
+    success: true,
+    nextProject: {
+      ...cloneProject(project),
+      mediaGroups: [...project.mediaGroups, { id: assetGroupId }],
+      mediaItems: [...project.mediaItems, nextMediaItem],
+      generatedImageDefinitions: [...project.generatedImageDefinitions, nextDefinition],
+    },
+    definitionId,
+    mediaId,
+  };
 }
 
 export function convertImportedImageToGeneratedImage(
@@ -160,15 +266,20 @@ export function convertImportedImageToGeneratedImage(
       definition.currentMediaVersionId === mediaId || definition.sourceMediaVersionId === mediaId,
   );
   if (existingDefinition) {
-    return { success: true, definitionId: existingDefinition.id, mediaId };
+    return {
+      success: true,
+      nextProject: cloneProject(project),
+      definitionId: existingDefinition.id,
+      mediaId,
+    };
   }
 
   const mediaItem = findMediaItem(project, mediaId);
   if (!mediaItem) {
-    return { success: false, error: `Media item not found: ${mediaId}` };
+    return { success: false, error: createMissingMediaError(project.id, mediaId) };
   }
   if (mediaItem.type !== "image") {
-    return { success: false, error: `Media item is not an image: ${mediaId}` };
+    return { success: false, error: createInvalidMediaTypeError(project.id, mediaId) };
   }
 
   const definitionId = input.createId();
@@ -192,8 +303,15 @@ export function convertImportedImageToGeneratedImage(
     updatedAt: timestamp,
   };
 
-  project.generatedImageDefinitions = [...project.generatedImageDefinitions, nextDefinition];
-  return { success: true, definitionId, mediaId };
+  return {
+    success: true,
+    nextProject: {
+      ...cloneProject(project),
+      generatedImageDefinitions: [...project.generatedImageDefinitions, nextDefinition],
+    },
+    definitionId,
+    mediaId,
+  };
 }
 
 export function updateGeneratedImageDraft(
@@ -204,31 +322,34 @@ export function updateGeneratedImageDraft(
 ): CommandResult {
   const definitionIndex = findDefinitionIndex(project, definitionId);
   if (definitionIndex < 0) {
-    return { success: false, error: `Generated image definition not found: ${definitionId}` };
+    return { success: false, error: createMissingDefinitionError(project.id, definitionId) };
   }
 
-  const previousDefinition = project.generatedImageDefinitions[definitionIndex];
+  const previousProject = cloneProject(project);
+  const previousDefinition = previousProject.generatedImageDefinitions[definitionIndex];
   const nextDefinition: GeneratedImageDefinition = {
     ...previousDefinition,
     draft: {
-      ...previousDefinition.draft,
+      ...cloneDraft(previousDefinition.draft),
       ...patch,
+      roleByReferenceKey: patch.roleByReferenceKey
+        ? { ...patch.roleByReferenceKey }
+        : { ...previousDefinition.draft.roleByReferenceKey },
+      inputs: patch.inputs ? { ...patch.inputs } : { ...previousDefinition.draft.inputs },
     },
     updatedAt: input.now(),
   };
 
-  project.generatedImageDefinitions = project.generatedImageDefinitions.map((definition, index) =>
-    index === definitionIndex ? nextDefinition : definition,
-  );
-
   return {
     success: true,
-    definitionId,
-    undo: () => {
-      project.generatedImageDefinitions = project.generatedImageDefinitions.map((definition, index) =>
-        index === definitionIndex ? previousDefinition : definition,
-      );
+    nextProject: {
+      ...previousProject,
+      generatedImageDefinitions: previousProject.generatedImageDefinitions.map((definition, index) =>
+        index === definitionIndex ? nextDefinition : definition,
+      ),
     },
+    definitionId,
+    undo: () => previousProject,
   };
 }
 
@@ -239,7 +360,7 @@ export function deleteGeneratedImage(
 ): CommandResult {
   const definition = findDefinition(project, definitionId);
   if (!definition) {
-    return { success: false, error: `Generated image definition not found: ${definitionId}` };
+    return { success: false, error: createMissingDefinitionError(project.id, definitionId) };
   }
 
   const affectedDefinitionIds = findDependentDefinitionIds(project, definitionId);
@@ -248,21 +369,33 @@ export function deleteGeneratedImage(
       success: false,
       requiresConfirmation: true,
       affectedDefinitionIds,
+      error: createDefinitionInUseError(project.id, definitionId, affectedDefinitionIds),
     };
   }
 
-  project.generatedImageDefinitions = project.generatedImageDefinitions.filter(
-    (item) => item.id !== definitionId,
+  const previousProject = cloneProject(project);
+  const mediaId = definition.currentMediaVersionId;
+  const nextMediaItems =
+    mediaId &&
+    findMediaItem(previousProject, mediaId)?.generationMeta
+      ? previousProject.mediaItems.filter((item) => item.id !== mediaId)
+      : previousProject.mediaItems;
+
+  const nextProject = pruneUnusedMediaGroup(
+    {
+      ...previousProject,
+      mediaItems: nextMediaItems,
+      generatedImageDefinitions: previousProject.generatedImageDefinitions.filter(
+        (item) => item.id !== definitionId,
+      ),
+    },
+    definition.assetGroupId,
   );
 
-  const mediaId = definition.currentMediaVersionId;
-  if (mediaId) {
-    const mediaItem = findMediaItem(project, mediaId);
-    if (mediaItem?.generationMeta) {
-      project.mediaItems = project.mediaItems.filter((item) => item.id !== mediaId);
-    }
-  }
-
-  removeMediaGroupIfUnused(project, definition.assetGroupId);
-  return { success: true, definitionId, mediaId };
+  return {
+    success: true,
+    nextProject,
+    definitionId,
+    mediaId,
+  };
 }

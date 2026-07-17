@@ -31,7 +31,6 @@ import type {
   EditingTemplateApplicationSource,
   EditingTemplatePrimitive,
   ResolvedEditingTemplateApplication,
-  GeneratedImageDefinition,
   GeneratedImageDraft,
 } from "@openreel/core";
 import {
@@ -94,6 +93,8 @@ import {
   convertImportedImageToGeneratedImage as runConvertImportedImageToGeneratedImage,
   createGeneratedImage as runCreateGeneratedImage,
   deleteGeneratedImage as runDeleteGeneratedImage,
+  type GeneratedImageCommandError,
+  type GeneratedImageCommandProject,
   updateGeneratedImageDraft as runUpdateGeneratedImageDraft,
 } from "../features/generation/generated-images/commands";
 
@@ -142,24 +143,14 @@ type GeneratedImageHistoryEntry = {
   readonly nextProject: Project;
 };
 
-type GeneratedImageCommandProjectAdapter = {
-  readonly id: string;
-  mediaItems: Array<{
-    readonly id: string;
-    readonly type?: string;
-    readonly name?: string;
-    readonly fileName?: string;
-    readonly title?: string;
-    readonly blob?: Blob;
-    readonly assetGroupId?: string;
-    readonly isCurrent?: boolean;
-    readonly generationMeta?: MediaItem["generationMeta"];
-  }>;
-  mediaGroups: Array<{ readonly id: string }>;
-  generatedImageDefinitions: GeneratedImageDefinition[];
+type GeneratedImageStoreResult = ActionResult & {
+  readonly definitionId?: string;
+  readonly mediaId?: string;
+  readonly requiresConfirmation?: boolean;
+  readonly affectedDefinitionIds?: readonly string[];
 };
 
-function buildGeneratedImageCommandProject(project: Project): GeneratedImageCommandProjectAdapter {
+function buildGeneratedImageCommandProject(project: Project): GeneratedImageCommandProject {
   const mediaGroupIds = new Set<string>();
   for (const item of project.mediaLibrary.items) {
     mediaGroupIds.add(item.assetGroupId ?? item.id);
@@ -188,7 +179,7 @@ function buildGeneratedImageCommandProject(project: Project): GeneratedImageComm
 
 function applyGeneratedImageCommandProject(
   project: Project,
-  commandProject: GeneratedImageCommandProjectAdapter,
+  commandProject: GeneratedImageCommandProject,
 ): Project {
   const previousItemsById = new Map(project.mediaLibrary.items.map((item) => [item.id, item]));
   return {
@@ -246,17 +237,19 @@ function createGeneratedImageDraft(title: string): GeneratedImageDraft {
   };
 }
 
-function toGeneratedImageActionError(message: string): NonNullable<ActionResult["error"]> {
-  if (
-    message.startsWith("Media item not found:") ||
-    message.startsWith("Generated image definition not found:")
-  ) {
-    return { code: "MEDIA_NOT_FOUND", message };
+function toGeneratedImageActionError(
+  error: GeneratedImageCommandError,
+): NonNullable<ActionResult["error"]> {
+  switch (error.code) {
+    case "MEDIA_NOT_FOUND":
+    case "DEFINITION_NOT_FOUND":
+      return { code: "MEDIA_NOT_FOUND", message: error.message, details: error.details };
+    case "INVALID_MEDIA_TYPE":
+    case "DEFINITION_IN_USE":
+      return { code: "INVALID_PARAMS", message: error.message, details: error.details };
+    default:
+      return { code: "INTERNAL_ERROR", message: error.message, details: error.details };
   }
-  if (message.startsWith("Media item is not an image:")) {
-    return { code: "INVALID_PARAMS", message };
-  }
-  return { code: "INTERNAL_ERROR", message };
 }
 
 let autoSaveBindingsInitialized = false;
@@ -379,16 +372,16 @@ export interface ProjectState {
   setGenerationStatus: (mediaId: string, status: string) => void;
   createGeneratedImage: (
     input: { title: string },
-  ) => Promise<ActionResult & { definitionId?: string; mediaId?: string }>;
+  ) => Promise<GeneratedImageStoreResult>;
   convertImportedImage: (
     input: { mediaId: string },
-  ) => Promise<ActionResult & { definitionId?: string }>;
+  ) => Promise<GeneratedImageStoreResult>;
   updateGeneratedImageDraft: (
     input: { definitionId: string; patch: Partial<Project["generatedImageDefinitions"][number]["draft"]> },
-  ) => Promise<ActionResult>;
+  ) => Promise<GeneratedImageStoreResult>;
   deleteGeneratedImage: (
     input: { definitionId: string; confirmed?: boolean },
-  ) => Promise<ActionResult>;
+  ) => Promise<GeneratedImageStoreResult>;
 
   // Track actions
   addTrack: (
@@ -2953,12 +2946,12 @@ export const useProjectStore = create<ProjectState>()(
         if (!result.success) {
           return {
             success: false,
-            error: toGeneratedImageActionError(result.error ?? "Failed to create generated image"),
+            error: toGeneratedImageActionError(result.error),
           };
         }
 
         set({
-          project: applyGeneratedImageCommandProject(project, commandProject),
+          project: applyGeneratedImageCommandProject(project, result.nextProject),
         });
 
         return {
@@ -2978,12 +2971,12 @@ export const useProjectStore = create<ProjectState>()(
         if (!result.success) {
           return {
             success: false,
-            error: toGeneratedImageActionError(result.error ?? "Failed to convert imported image"),
+            error: toGeneratedImageActionError(result.error),
           };
         }
 
         set({
-          project: applyGeneratedImageCommandProject(project, commandProject),
+          project: applyGeneratedImageCommandProject(project, result.nextProject),
         });
 
         return {
@@ -3006,13 +2999,11 @@ export const useProjectStore = create<ProjectState>()(
         if (!result.success) {
           return {
             success: false,
-            error: toGeneratedImageActionError(
-              result.error ?? `Failed to update generated image draft: ${input.definitionId}`,
-            ),
+            error: toGeneratedImageActionError(result.error),
           };
         }
 
-        const nextProject = applyGeneratedImageCommandProject(project, commandProject);
+        const nextProject = applyGeneratedImageCommandProject(project, result.nextProject);
         set({
           project: nextProject,
           generatedImageUndoStack: [
@@ -3037,26 +3028,16 @@ export const useProjectStore = create<ProjectState>()(
         });
 
         if (!result.success) {
-          if (result.requiresConfirmation) {
-            return {
-              success: false,
-              error: {
-                code: "INVALID_PARAMS",
-                message: `Generated image definition ${input.definitionId} is still referenced by: ${result.affectedDefinitionIds?.join(", ") ?? "unknown dependencies"}`,
-              },
-            };
-          }
-
           return {
             success: false,
-            error: toGeneratedImageActionError(
-              result.error ?? `Failed to delete generated image definition: ${input.definitionId}`,
-            ),
+            requiresConfirmation: result.requiresConfirmation,
+            affectedDefinitionIds: result.affectedDefinitionIds,
+            error: toGeneratedImageActionError(result.error),
           };
         }
 
         set({
-          project: applyGeneratedImageCommandProject(project, commandProject),
+          project: applyGeneratedImageCommandProject(project, result.nextProject),
         });
 
         return { success: true };

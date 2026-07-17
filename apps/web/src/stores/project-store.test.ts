@@ -2365,7 +2365,7 @@ Ignored block`;
       );
     });
 
-    it("requires confirmation before deleting a referenced generated image", async () => {
+    it("passes through typed confirmation payloads when deleting a referenced generated image", async () => {
       const baseProject = useProjectStore.getState().project;
       useProjectStore.getState().loadProject({
         ...baseProject,
@@ -2415,12 +2415,25 @@ Ignored block`;
         ],
       });
 
+      const beforeDelete = useProjectStore.getState().project;
       const pending = await useProjectStore.getState().deleteGeneratedImage({
         definitionId: "definition-1",
       });
-      expect(pending.success).toBe(false);
-      expect(pending.error?.code).toBe("INVALID_PARAMS");
-      expect(useProjectStore.getState().project.generatedImageDefinitions).toHaveLength(2);
+      expect(pending).toEqual({
+        success: false,
+        requiresConfirmation: true,
+        affectedDefinitionIds: ["definition-2"],
+        error: {
+          code: "INVALID_PARAMS",
+          message: "Generated image definition definition-1 is still referenced",
+          details: {
+            projectId: beforeDelete.id,
+            definitionId: "definition-1",
+            affectedDefinitionIds: ["definition-2"],
+          },
+        },
+      });
+      expect(useProjectStore.getState().project).toBe(beforeDelete);
 
       const confirmed = await useProjectStore.getState().deleteGeneratedImage({
         definitionId: "definition-1",
@@ -2433,15 +2446,45 @@ Ignored block`;
       expect(useProjectStore.getState().project.mediaLibrary.items).toHaveLength(0);
     });
 
-    it("leaves state unchanged on validation failure", async () => {
+    it("returns structured media identifiers on missing imported media", async () => {
       const before = useProjectStore.getState().project;
 
       const result = await useProjectStore.getState().convertImportedImage({
         mediaId: "missing-media",
       });
 
-      expect(result.success).toBe(false);
-      expect(result.error?.code).toBe("MEDIA_NOT_FOUND");
+      expect(result).toEqual({
+        success: false,
+        error: {
+          code: "MEDIA_NOT_FOUND",
+          message: "Media item not found: missing-media",
+          details: {
+            projectId: before.id,
+            mediaId: "missing-media",
+          },
+        },
+      });
+      expect(useProjectStore.getState().project).toBe(before);
+    });
+
+    it("returns structured definition identifiers on missing generated image definitions", async () => {
+      const before = useProjectStore.getState().project;
+
+      const result = await useProjectStore.getState().deleteGeneratedImage({
+        definitionId: "missing-definition",
+      });
+
+      expect(result).toEqual({
+        success: false,
+        error: {
+          code: "MEDIA_NOT_FOUND",
+          message: "Generated image definition not found: missing-definition",
+          details: {
+            projectId: before.id,
+            definitionId: "missing-definition",
+          },
+        },
+      });
       expect(useProjectStore.getState().project).toBe(before);
     });
   });
