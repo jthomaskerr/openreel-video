@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Track } from "@openreel/core";
 import { subscribeWithSelector, persist } from "zustand/middleware";
+import type { ReferenceEditorRoute } from "../features/references/navigation";
 import { problemBus } from "./problem-store";
 import { logBus } from "./log-store";
 
@@ -118,6 +119,16 @@ export interface ImportError {
   trackName?: string;
 }
 
+export interface ExportUIState {
+  isExporting: boolean;
+  progress: number;
+  phase: string;
+  estimatedTimeRemaining: number | null;
+  framesPerSecond: number | null;
+  estimateConfidence: "warming-up" | "observed";
+  backgroundDegraded: boolean;
+}
+
 export interface UIState {
   selectedItems: SelectionItem[];
   lastSelectedItem: SelectionItem | null;
@@ -125,6 +136,7 @@ export interface UIState {
   effectApplicationLabel: string | null;
   inspectedAsset: import("@openreel/core").MediaItem | null;
   inspectorSelection: SceneInspectorSelection | null;
+  referenceEditorInspectorRoute: ReferenceEditorRoute | null;
   activeTrackId: string | null;
   snapSettings: SnapSettings;
   panels: Record<PanelId, PanelState>;
@@ -205,20 +217,13 @@ export interface UIState {
   setSidebarTab: (tab: "inspector" | "edit" | "problems" | "log") => void;
   addImportErrors: (errors: ImportError[]) => void;
   clearImportErrors: () => void;
-  exportState: {
-    isExporting: boolean;
-    progress: number;
-    phase: string;
-  };
-  setExportState: (state: {
-    isExporting: boolean;
-    progress: number;
-    phase: string;
-  }) => void;
+  exportState: ExportUIState;
+  setExportState: (state: ExportUIState) => void;
   startEffectApplication: (clipId: string, label?: string) => void;
   finishEffectApplication: () => void;
   setInspectedAsset: (asset: import("@openreel/core").MediaItem | null) => void;
   setInspectorSelection: (selection: SceneInspectorSelection | null) => void;
+  setReferenceEditorInspectorRoute: (route: ReferenceEditorRoute | null) => void;
   setActiveTrack: (trackId: string | null) => void;
 }
 
@@ -278,6 +283,7 @@ export const useUIStore = create<UIState>()(
         effectApplicationLabel: null,
         inspectedAsset: null,
         inspectorSelection: null,
+        referenceEditorInspectorRoute: null,
         activeTrackId: null,
 
         snapSettings: DEFAULT_SNAP_SETTINGS,
@@ -319,11 +325,15 @@ export const useUIStore = create<UIState>()(
         showWelcomeScreen: true,
         skipWelcomeScreen: false,
 
-        exportState: {
-          isExporting: false,
-          progress: 0,
-          phase: "",
-        },
+  exportState: {
+    isExporting: false,
+    progress: 0,
+    phase: "",
+    estimatedTimeRemaining: null,
+    framesPerSecond: null,
+    estimateConfidence: "warming-up",
+    backgroundDegraded: false,
+  },
 
         setExportState: (state) => set({ exportState: state }),
 
@@ -342,13 +352,29 @@ export const useUIStore = create<UIState>()(
         },
 
         setInspectedAsset: (asset) => {
-          set({ inspectedAsset: asset, ...(asset ? { sidebarTab: "inspector" as const } : {}) });
+          set({
+            inspectedAsset: asset,
+            inspectorSelection: null,
+            referenceEditorInspectorRoute: null,
+            ...(asset ? { sidebarTab: "inspector" as const } : {}),
+          });
         },
 
         setInspectorSelection: (selection) => {
           set({
+            inspectedAsset: null,
             inspectorSelection: selection,
+            referenceEditorInspectorRoute: null,
             ...(selection ? { sidebarTab: "inspector" as const } : {}),
+          });
+        },
+
+        setReferenceEditorInspectorRoute: (route) => {
+          set({
+            inspectedAsset: null,
+            inspectorSelection: null,
+            referenceEditorInspectorRoute: route,
+            ...(route ? { sidebarTab: "edit" as const } : {}),
           });
         },
 
@@ -364,12 +390,14 @@ export const useUIStore = create<UIState>()(
               set({
                 selectedItems: [...selectedItems, item],
                 lastSelectedItem: item,
+                referenceEditorInspectorRoute: null,
               });
             }
           } else {
             set({
               selectedItems: [item],
               lastSelectedItem: item,
+              referenceEditorInspectorRoute: null,
             });
           }
         },
@@ -378,6 +406,7 @@ export const useUIStore = create<UIState>()(
           set({
             selectedItems: items,
             lastSelectedItem: items.length > 0 ? items[items.length - 1] : null,
+            referenceEditorInspectorRoute: null,
           });
         },
 
@@ -401,6 +430,7 @@ export const useUIStore = create<UIState>()(
           set({
             selectedItems: [],
             lastSelectedItem: null,
+            referenceEditorInspectorRoute: null,
           });
         },
 

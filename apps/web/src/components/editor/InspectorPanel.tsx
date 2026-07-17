@@ -68,6 +68,8 @@ import { ImportErrorsPanel } from "./inspector/ImportErrorsPanel";
 import { LogPanel } from "./inspector/LogPanel";
 import { AssetInspectorWithTabs } from "./inspector/AssetInspectorWithTabs";
 import { ClipTimingSection } from "./inspector/ClipTimingSection";
+import { readReferenceEditorRouteFromModalData } from "../../features/references/navigation";
+import { ReferenceEditorContent, ReferenceEditorModal } from "./references/ReferenceEditorModal";
 
 // Initialize engines as singletons
 const chromaKeyEngine = new ChromaKeyEngine({ width: 1920, height: 1080 });
@@ -111,6 +113,12 @@ export const InspectorPanel: React.FC = () => {
   );
   const inspectedAsset = useUIStore((state) => state.inspectedAsset);
   const inspectorSelection = useUIStore((state) => state.inspectorSelection);
+  const referenceEditorInspectorRoute = useUIStore(
+    (state) => state.referenceEditorInspectorRoute,
+  );
+  const activeModal = useUIStore((state) => state.activeModal);
+  const modalData = useUIStore((state) => state.modalData);
+  const closeModal = useUIStore((state) => state.closeModal);
   const selectedClipIds = getSelectedClipIds();
   // When a clip is selected and no explicit asset is pinned, show the clip's media item.
   const selectedClipMediaItem = useMemo(() => {
@@ -881,6 +889,14 @@ export const InspectorPanel: React.FC = () => {
       ? (inspectorActiveTab as InspectorTabId)
       : clipTabIds[0]) ?? ("transform" as InspectorTabId);
 
+  const modalReferenceRoute = useMemo(
+    () =>
+      activeModal === "reference-editor"
+        ? readReferenceEditorRouteFromModalData(modalData)
+        : null,
+    [activeModal, modalData],
+  );
+
   useEffect(() => {
     if (clipTabIds.length > 0 && !clipTabIds.includes(inspectorActiveTab as InspectorTabId)) {
       setInspectorActiveTab(clipTabIds[0]);
@@ -967,7 +983,12 @@ export const InspectorPanel: React.FC = () => {
           <div className="overflow-y-auto flex-1 min-h-0 pb-3.5 custom-scrollbar">
             {selectedClip && metadataKind !== "scene" && <ClipTimingSection clip={selectedClip} />}
             <ImportErrorsPanel errors={importErrors} />
-            {isSelectedMetadataClip ? (
+            {referenceEditorInspectorRoute ? (
+              <ReferenceEditorContent
+                route={referenceEditorInspectorRoute}
+                placement="inspector"
+              />
+            ) : isSelectedMetadataClip ? (
               metadataKind === "note" ? (
                 <InspectorTabPanel tab="note" active={activeTab}>
                   <MetadataClipInspector clip={selectedTimelineClip!} kind="note" />
@@ -1282,6 +1303,11 @@ export const InspectorPanel: React.FC = () => {
           <LogPanel />
         </div>
       )}
+      <ReferenceEditorModal
+        open={modalReferenceRoute !== null}
+        route={modalReferenceRoute}
+        onClose={closeModal}
+      />
     </div>
   );
 };
