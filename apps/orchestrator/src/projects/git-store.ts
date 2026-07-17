@@ -11,6 +11,20 @@ import { assertValidProjectId } from "./storage-validation";
 
 const execFileAsync = promisify(execFile);
 
+const SYSTEM_GIT_CANDIDATES = process.platform === "win32"
+  ? []
+  : ["/usr/bin/git", "/opt/homebrew/bin/git", "/usr/local/bin/git"];
+
+export function resolveGitExecutable(
+  configured = process.env.OPENREEL_GIT_BINARY,
+  systemCandidates: readonly string[] = SYSTEM_GIT_CANDIDATES,
+  fileExists: (path: string) => boolean = existsSync,
+): string {
+  const override = configured?.trim();
+  if (override) return override;
+  return systemCandidates.find((candidate) => fileExists(candidate)) ?? "git";
+}
+
 const GITATTRIBUTES = `# git-lfs tracks all media files
 media/** filter=lfs diff=lfs merge=lfs -text
 `;
@@ -153,7 +167,10 @@ export class GitStore {
   /** Serialise git operations per project to prevent .git/index.lock races. */
   #locks = new Map<string, Promise<unknown>>();
 
-  constructor(private readonly repoDir: string) {}
+  constructor(
+    private readonly repoDir: string,
+    private readonly gitExecutable = resolveGitExecutable(),
+  ) {}
 
   /** Filesystem path to a project's git worktree (slug-based directory directly under repoDir). */
   worktreePath(projectId: string): string {
@@ -209,7 +226,7 @@ export class GitStore {
   // ── Git helpers ──────────────────────────────────────────────────────────
 
   private async git(args: string[], cwd: string): Promise<{ stdout: string; stderr: string }> {
-    return execFileAsync("git", args, { cwd });
+    return execFileAsync(this.gitExecutable, args, { cwd });
   }
 
   async #readHeadCommitSha(projectId: string): Promise<string | null> {
@@ -604,7 +621,7 @@ export class GitStore {
     try {
       const treeSha = (await this.git(["write-tree"], wtPath)).stdout.trim();
       const commitArgs = ["commit-tree", treeSha, "-m", message, ...(parentCommitSha ? ["-p", parentCommitSha] : [])];
-      const { stdout: commitShaRaw } = await execFileAsync("git", commitArgs, { cwd: wtPath });
+      const { stdout: commitShaRaw } = await execFileAsync(this.gitExecutable, commitArgs, { cwd: wtPath });
       const commitSha = commitShaRaw.trim();
       const actualMediaManifestDigest = await this.#resolveCommittedManifestDigest(projectId, commitSha);
       const receipt = await this.#resolveReceiptFromCommit(projectId, commitSha, actualMediaManifestDigest);

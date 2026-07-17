@@ -179,9 +179,10 @@ describe("project persistence contracts", () => {
       treeSha: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
       projectBlobSha: "ffffffffffffffffffffffffffffffffffffffff",
       mediaManifestDigest: "sha256:manifest-digest",
-      lfsPayloads: [],
-      committed: true,
-    } satisfies ProjectSaveReceipt;
+    lfsPayloads: [],
+    committed: true,
+    commitDueAt: null,
+  } satisfies ProjectSaveReceipt;
 
     expect(JSON.parse(JSON.stringify(receipt))).toEqual(receipt);
     expect(receipt.commitSha).toBe("dddddddddddddddddddddddddddddddddddddddd");
