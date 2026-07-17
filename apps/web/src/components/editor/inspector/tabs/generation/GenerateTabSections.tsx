@@ -667,6 +667,7 @@ export function GenerateJobSection(props: {
   onRecoveryAction?: (action: RecoveryAction) => void;
 }) {
   const recovery = props.job ? resolveGenerationRecoveryPresentation(props.job) : undefined;
+  const displayedError = recovery?.error ?? props.job?.error;
   const active =
     props.job && ["queued", "submitting", "running", "finalizing"].includes(props.job.status);
   const runRecovery = (action: GenerationRecoveryPresentationAction) => {
@@ -728,21 +729,25 @@ export function GenerateJobSection(props: {
           </p>
         ) : null}
       </div>
-      {props.job?.error ? (
+      {displayedError || recovery?.action ? (
         <div
           role="alert"
           aria-label="Generation error"
           className="mt-3 min-w-0 max-w-full rounded-lg border border-red-500/30 bg-red-500/5 p-3"
         >
-          <p className="break-words text-sm font-medium text-red-300 [overflow-wrap:anywhere]">
-            {props.job.error.code}
-          </p>
-          <p className="break-words text-sm text-red-300 [overflow-wrap:anywhere]">
-            {props.job.error.message}
-          </p>
-          {props.job.error.field ? (
+          {displayedError ? (
+            <>
+              <p className="break-words text-sm font-medium text-red-300 [overflow-wrap:anywhere]">
+                {displayedError.code}
+              </p>
+              <p className="break-words text-sm text-red-300 [overflow-wrap:anywhere]">
+                {displayedError.message}
+              </p>
+            </>
+          ) : null}
+          {displayedError?.field ? (
             <p className="break-words text-[11px] text-red-200 [overflow-wrap:anywhere]">
-              Field: {props.job.error.field}
+              Field: {displayedError.field}
             </p>
           ) : null}
           {explanation ? (

@@ -992,6 +992,32 @@ describe("GenerateTab", () => {
     expect(within(alert).queryByRole("button")).toBeNull();
   });
 
+  it("exposes replay-safe placement retry for a succeeded job without a top-level error", () => {
+    const onRecoveryAction = vi.fn<[RecoveryAction], void>();
+    const job = generationJob(undefined, {
+      status: "succeeded",
+      placementFailure: true,
+    });
+
+    expect(allowedRecoveryActionsForJob(job)).toContain("retry-placement");
+
+    render(
+      <GenerateTab
+        projectId="project-1"
+        models={[model]}
+        prompt="Generate this"
+        job={job}
+        onRecoveryAction={onRecoveryAction}
+      />,
+    );
+
+    const alert = screen.getByRole("alert", { name: "Generation error" });
+    expect(alert).toHaveTextContent("placement-retry-failed");
+    const action = within(alert).getByRole("button", { name: "Retry placement" });
+    fireEvent.click(action);
+    expect(onRecoveryAction).toHaveBeenCalledWith("retry-placement");
+  });
+
   it.each(["succeeded", "canceled"] as const)(
     "withholds stale recovery actions from a %s job",
     (status) => {

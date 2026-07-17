@@ -32,6 +32,7 @@ export type GenerationRecoveryPresentationAction =
 
 export interface GenerationRecoveryPresentation {
   category: CanonicalGenerationErrorCategory | "unknown";
+  error?: GenerationError;
   action?: GenerationRecoveryPresentationAction;
   actionLabel?: string;
   explanation: string;
@@ -272,10 +273,26 @@ const terminal = (
 export function resolveGenerationRecoveryPresentation(
   job: GenerationJob,
 ): GenerationRecoveryPresentation | undefined {
+  const allowedActions = new Set(allowedRecoveryActionsForJob(job));
+  if (
+    allowedActions.has("retry-placement") &&
+    isPlacementRetryCandidate(job)
+  ) {
+    const error =
+      job.placement?.error ?? job.checkpoints["placement-applied"]?.error;
+    return {
+      category: "placement",
+      error,
+      ...DEFAULT_RECOVERY_BY_CATEGORY.placement,
+      explanation: error
+        ? DEFAULT_RECOVERY_BY_CATEGORY.placement.explanation
+        : "The replay-safe placement checkpoint failed without a recorded error. Retry only placement; no provider work will run.",
+    };
+  }
+
   const error = job.error;
   if (!error) return undefined;
   const category = classifyGenerationError(error);
-  const allowedActions = new Set(allowedRecoveryActionsForJob(job));
 
   if (category === "unknown") {
     return terminal(
