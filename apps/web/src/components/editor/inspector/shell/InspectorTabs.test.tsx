@@ -42,11 +42,52 @@ describe("InspectorTabs", () => {
       expect(tab).toHaveAttribute("aria-controls", tab.id.replace("inspector-tab-", "inspector-panel-"));
       const panel = document.getElementById(tab.getAttribute("aria-controls")!);
       expect(panel).not.toBeNull();
-      expect(panel).toHaveAttribute("aria-labelledby", tab.id);
+      if (tab.getAttribute("aria-selected") === "true") {
+        expect(panel).toHaveAttribute("aria-labelledby", tab.id);
+      } else {
+        expect(panel).not.toHaveAttribute("aria-labelledby");
+      }
     });
     expect(renderedTabs.filter((tab) => tab.tabIndex === 0)).toEqual([
       screen.getByRole("tab", { name: /Color/ }),
     ]);
+  });
+
+  it("keeps every IDREF valid with configured tabs and surplus inactive panels", () => {
+    const configuredTabs = getTabsForClipType("image");
+    render(
+      <>
+        <InspectorTabs
+          tabs={configuredTabs}
+          activeId="transform"
+          onSelect={() => {}}
+        />
+        {configuredTabs.map((tab) => (
+          <InspectorTabPanel key={tab.id} tab={tab.id} active="transform">
+            {tab.label} panel
+          </InspectorTabPanel>
+        ))}
+        <InspectorTabPanel tab="audio" active="transform">
+          Surplus audio panel
+        </InspectorTabPanel>
+      </>,
+    );
+
+    const surplusPanel = document.getElementById("inspector-panel-audio");
+    expect(surplusPanel).toHaveAttribute("hidden");
+    expect(surplusPanel).not.toHaveAttribute("aria-labelledby");
+
+    document
+      .querySelectorAll<HTMLElement>("[aria-controls], [aria-labelledby]")
+      .forEach((element) => {
+        ["aria-controls", "aria-labelledby"].forEach((attribute) => {
+          element
+            .getAttribute(attribute)
+            ?.split(/\s+/)
+            .filter(Boolean)
+            .forEach((id) => expect(document.getElementById(id)).not.toBeNull());
+        });
+      });
   });
 
   it("calls onSelect with the tab id on click", () => {

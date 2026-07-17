@@ -18,7 +18,10 @@ import type {
   GenerationReferenceCommand,
   GenerationReferenceRecoveryState,
 } from "../../../../../features/generation/drafts/v2";
-import type { RecoveryAction } from "../../../../../features/generation/recovery/state-machine";
+import {
+  allowedRecoveryActionsForJob,
+  type RecoveryAction,
+} from "../../../../../features/generation/recovery/state-machine";
 import {
   resolveGenerationRecoveryPresentation,
   type GenerationRecoveryPresentationAction,
@@ -791,8 +794,9 @@ export function GenerateActionsSection(props: {
     : undefined;
   const cancelAllowed =
     props.job &&
+    Boolean(props.onRecoveryAction) &&
     errorRecovery?.category !== "cancellation" &&
-    ["queued", "submitting", "running", "needs-attention"].includes(props.job.status);
+    allowedRecoveryActionsForJob(props.job).includes("cancel");
   return (
     <div
       data-testid="generation-actions"

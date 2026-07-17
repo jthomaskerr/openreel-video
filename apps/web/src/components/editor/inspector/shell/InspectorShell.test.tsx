@@ -21,6 +21,7 @@ describe("InspectorTabPanel", () => {
     const hiddenPanel = screen.getByRole("tabpanel", { hidden: true });
     expect(hiddenPanel).toHaveAttribute("id", "inspector-panel-color");
     expect(hiddenPanel).toHaveAttribute("hidden");
+    expect(hiddenPanel).not.toHaveAttribute("aria-labelledby");
     rerender(<InspectorTabPanel tab="color" active="color">body</InspectorTabPanel>);
     const panel = screen.getByRole("tabpanel");
     expect(panel).toHaveTextContent("body");
