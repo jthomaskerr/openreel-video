@@ -6,7 +6,7 @@ import type {
   GenerationJob,
   GenerationOutput,
 } from "@openreel/music-video-domain/generation";
-import type { GenerationJobRepository, PlacementRecoveryOutcome } from "./repository.js";
+import type { GenerationJobRepository, PlacementOutcome } from "./repository.js";
 import { KeyedLock } from "./lock.js";
 
 export interface DownloadedGenerationOutput {
@@ -35,8 +35,15 @@ export interface ShotLinker {
 }
 
 export interface TimelinePlacer {
-  /** The production placement action must deduplicate completed mutations by this exact key. */
-  place(input: { job: GenerationJob; output: GenerationOutput; idempotencyKey: string }): Promise<void>;
+  /** The production action must classify the external request, never infer success from promise timing. */
+  place(input: { job: GenerationJob; output: GenerationOutput; idempotencyKey: string }): Promise<PlacementAttemptResult>;
+  /** Authoritative lookup keyed by the same stable idempotency key. */
+  reconcile(input: { job: GenerationJob; output: GenerationOutput; idempotencyKey: string }): Promise<PlacementAttemptResult>;
+}
+
+export interface PlacementAttemptResult {
+  outcome: PlacementOutcome;
+  error?: GenerationError;
 }
 
 export interface FinalizationPorts {
@@ -154,17 +161,10 @@ export class GenerationFinalizer {
           await this.mark(job.id, "shot-linked", { status: "completed", timestamp: this.now() });
         }
         if (job.context.placementPolicy !== "none" && this.ports.placement && !completed(job, "placement-applied")) {
-          try {
-            await this.ports.placement.place({ job, output: job.output!, idempotencyKey: idempotencyKey(job.id, "placement-applied") });
-            await this.mark(job.id, "placement-applied", { status: "completed", timestamp: this.now() });
-            await this.repository.update(job.id, (current) => ({ ...current, placement: { policy: current.context.placementPolicy, status: "applied", appliedAt: this.now() } }));
-          } catch (error) {
-            await this.mark(job.id, "placement-applied", { status: "failed", timestamp: this.now(), error: errorFrom(error, "generation-placement-failed") });
-            await this.repository.update(job.id, (current) => ({ ...current, placement: { policy: current.context.placementPolicy, status: "failed", error: errorFrom(error, "generation-placement-failed") }, status: "succeeded" }));
-          }
+          job = await this.executePlacement(job);
         }
         await this.repository.completeFinalization(job.id, completionKey, claimResult.claim.ownerToken);
-        return this.repository.update(job.id, (current) => ({ ...current, status: "succeeded", updatedAt: this.now() }));
+        return this.repository.update(job.id, (current) => current.status === "needs-attention" ? current : ({ ...current, status: "succeeded", updatedAt: this.now() }));
       } catch (error) {
         const latest = await this.requireJob(job.id);
         const checkpoint = CHECKPOINTS.find((name) => latest.checkpoints[name]?.status !== "completed") ?? "output-inspected";
@@ -183,49 +183,76 @@ export class GenerationFinalizer {
       throw new Error("generation-placement-retry-precondition");
     }
     const placementKey = idempotencyKey(jobId, "placement-applied");
+    const existing = await this.repository.getPlacementClaim(jobId);
+    if (existing?.outcome === "applied") return this.applyPlacementResult(jobId, { outcome: "applied" }, existing.ownerToken);
+    if (existing?.outcome === "unknown") return this.applyPlacementResult(jobId, { outcome: "unknown", error: { code: "generation-placement-outcome-unknown", message: "Placement outcome is unknown; explicit reconciliation is required before retry", retryable: false } }, existing.ownerToken);
+    if (existing?.outcome === "not-applied" && job.checkpoints["placement-applied"]?.status !== "failed") await this.applyPlacementResult(jobId, { outcome: "not-applied", error: { code: "generation-placement-recovery-failed", message: "Placement did not succeed before the external request", retryable: true } }, existing.ownerToken);
     const claim = await this.repository.claimPlacement(jobId, placementKey);
     if (!claim.acquired) {
-      if (claim.claim.state === "completed") return this.requireJob(jobId);
-      if (claim.claim.state === "claimed") return this.requireJob(jobId);
-      if (claim.claim.state === "needs-attention") throw new Error("generation-placement-outcome-unknown");
+      if (claim.claim.outcome === "applied") return this.applyPlacementResult(jobId, { outcome: "applied" }, claim.claim.ownerToken);
+      if (claim.claim.outcome === "unknown") return this.applyPlacementResult(jobId, { outcome: "unknown", error: { code: "generation-placement-outcome-unknown", message: "Placement outcome is unknown; explicit reconciliation is required before retry", retryable: false } }, claim.claim.ownerToken);
+      if (claim.claim.outcome === "pending") return this.requireJob(jobId);
       return this.requireJob(jobId);
     }
-    let placementSucceeded = false;
+    let placeInvoked = false;
     try {
       await this.repository.update(jobId, (current) => ({ ...current, checkpoints: { ...current.checkpoints, "placement-applied": { status: "pending" } }, placement: { policy: current.context.placementPolicy, status: "pending" } }));
       const current = await this.requireJob(jobId);
-      await this.ports.placement.place({ job: current, output: current.output!, idempotencyKey: placementKey });
-      placementSucceeded = true;
-      await this.mark(jobId, "placement-applied", { status: "completed", timestamp: this.now() });
-      await this.repository.completePlacement(jobId, placementKey, claim.claim.ownerToken);
-      return this.repository.update(jobId, (currentJob) => ({ ...currentJob, status: "succeeded", placement: { policy: currentJob.context.placementPolicy, status: "applied", appliedAt: this.now() }, updatedAt: this.now() }));
+      placeInvoked = true;
+      const result = await this.ports.placement.place({ job: current, output: current.output!, idempotencyKey: placementKey });
+      return this.applyPlacementResult(jobId, result, claim.claim.ownerToken);
     } catch (error) {
-      if (placementSucceeded) throw error;
-      const failure = errorFrom(error, "generation-placement-failed");
-      await this.repository.releasePlacement(jobId, claim.claim.ownerToken);
-      await this.mark(jobId, "placement-applied", { status: "failed", timestamp: this.now(), error: failure });
-      return this.repository.update(jobId, (current) => ({ ...current, status: "succeeded", placement: { policy: current.context.placementPolicy, status: "failed", error: failure }, updatedAt: this.now() }));
+      if (!placeInvoked) return this.applyPlacementResult(jobId, { outcome: "not-applied", error: { code: "generation-placement-failed", message: error instanceof Error ? error.message : "Placement did not start", retryable: true } }, claim.claim.ownerToken);
+      const unknown = { code: "generation-placement-outcome-unknown", message: error instanceof Error ? error.message : "Placement response was lost", retryable: false } satisfies GenerationError;
+      return this.applyPlacementResult(jobId, { outcome: "unknown", error: unknown }, claim.claim.ownerToken);
     }
   }
 
-  /** Explicit recovery requires an externally held owner token and a declared outcome. */
-  async repairPlacement(jobId: string, ownerToken: string, outcome: PlacementRecoveryOutcome): Promise<GenerationJob> {
-    if (!ownerToken?.trim()) throw new Error("generation-placement-recovery-owner-required");
-    if (!["succeeded", "failed", "unknown"].includes(outcome)) throw new Error("generation-placement-recovery-outcome-required");
+  /** Authoritative placement reconciliation. Repository claim tokens stay inside this service. */
+  async reconcilePlacement(jobId: string): Promise<GenerationJob> {
+    const job = await this.requireJob(jobId);
+    const claim = await this.repository.getPlacementClaim(jobId);
+    if (!claim) throw new Error("generation-placement-reconciliation-unavailable");
+    if (claim.outcome === "applied") return this.applyPlacementResult(jobId, { outcome: "applied" }, claim.ownerToken);
     const placementKey = idempotencyKey(jobId, "placement-applied");
-    await this.repository.reconcilePlacement(jobId, placementKey, ownerToken, outcome);
-    if (outcome === "succeeded") {
+    if (!this.ports.placement) throw new Error("generation-placement-reconciliation-unavailable");
+    let result: PlacementAttemptResult;
+    try { result = await this.ports.placement.reconcile({ job, output: job.output!, idempotencyKey: placementKey }); }
+    catch (error) { result = { outcome: "unknown", error: { code: "generation-placement-outcome-unknown", message: error instanceof Error ? error.message : "Placement reconciliation response was lost", retryable: false } }; }
+    return this.applyPlacementResult(jobId, result, claim.ownerToken);
+  }
+
+  private async applyPlacementResult(jobId: string, result: PlacementAttemptResult, ownerToken?: string): Promise<GenerationJob> {
+    const placementKey = idempotencyKey(jobId, "placement-applied");
+    if (ownerToken) await this.repository.reconcilePlacement(jobId, placementKey, ownerToken, result.outcome);
+    if (result.outcome === "applied") {
       await this.mark(jobId, "placement-applied", { status: "completed", timestamp: this.now() });
       return this.repository.update(jobId, (currentJob) => ({ ...currentJob, status: "succeeded", placement: { policy: currentJob.context.placementPolicy, status: "applied", appliedAt: this.now() }, updatedAt: this.now() }));
     }
-    if (outcome === "failed") {
-      const failure = { code: "generation-placement-recovery-failed", message: "Placement did not succeed before the external request", retryable: true } satisfies GenerationError;
+    if (result.outcome === "not-applied") {
+      const failure = result.error ?? { code: "generation-placement-failed", message: "Placement was not applied", retryable: true } satisfies GenerationError;
       await this.mark(jobId, "placement-applied", { status: "failed", timestamp: this.now(), error: failure });
       return this.repository.update(jobId, (currentJob) => ({ ...currentJob, status: "succeeded", placement: { policy: currentJob.context.placementPolicy, status: "failed", error: failure }, updatedAt: this.now() }));
     }
-    const unknown = { code: "generation-placement-outcome-unknown", message: "Placement outcome is unknown; explicit reconciliation is required before retry", retryable: false } satisfies GenerationError;
-    await this.mark(jobId, "placement-applied", { status: "failed", timestamp: this.now(), error: unknown });
-    return this.repository.update(jobId, (currentJob) => ({ ...currentJob, status: "needs-attention", placement: { policy: currentJob.context.placementPolicy, status: "failed", error: unknown }, error: unknown, updatedAt: this.now() }));
+    const error = result.error ?? { code: result.outcome === "pending" ? "generation-placement-pending" : "generation-placement-outcome-unknown", message: result.outcome === "pending" ? "Placement is still in flight" : "Placement outcome is unknown; explicit reconciliation is required before retry", retryable: false } satisfies GenerationError;
+    await this.mark(jobId, "placement-applied", { status: "failed", timestamp: this.now(), error });
+    return this.repository.update(jobId, (currentJob) => ({ ...currentJob, status: "needs-attention", placement: { policy: currentJob.context.placementPolicy, status: "failed", error }, error, updatedAt: this.now() }));
+  }
+
+  private async executePlacement(job: GenerationJob): Promise<GenerationJob> {
+    const placementKey = idempotencyKey(job.id, "placement-applied");
+    const claim = await this.repository.claimPlacement(job.id, placementKey);
+    if (!claim.acquired) {
+      if (claim.claim.outcome === "applied") return this.applyPlacementResult(job.id, { outcome: "applied" }, claim.claim.ownerToken);
+      if (claim.claim.outcome === "unknown") return this.applyPlacementResult(job.id, { outcome: "unknown", error: { code: "generation-placement-outcome-unknown", message: "Placement outcome is unknown; explicit reconciliation is required before retry", retryable: false } }, claim.claim.ownerToken);
+      return this.applyPlacementResult(job.id, { outcome: "pending", error: { code: "generation-placement-pending", message: "Placement is still in flight", retryable: false } }, claim.claim.ownerToken);
+    }
+    try {
+      const result = await this.ports.placement!.place({ job, output: job.output!, idempotencyKey: placementKey });
+      return this.applyPlacementResult(job.id, result, claim.claim.ownerToken);
+    } catch (error) {
+      return this.applyPlacementResult(job.id, { outcome: "unknown", error: { code: "generation-placement-outcome-unknown", message: error instanceof Error ? error.message : "Placement response was lost", retryable: false } }, claim.claim.ownerToken);
+    }
   }
 
   private async mark(id: string, checkpoint: GenerationCheckpointName, state: GenerationCheckpointState) {
