@@ -273,6 +273,14 @@ const terminal = (
 export function resolveGenerationRecoveryPresentation(
   job: GenerationJob,
 ): GenerationRecoveryPresentation | undefined {
+  const currentError = job.error;
+  if (currentError && isIntegrityError(currentError.code)) {
+    return terminal(
+      classifyGenerationError(currentError),
+      "Durable identity integrity failed, so automated recovery is unsafe. Contact an operator with the stable error code.",
+    );
+  }
+
   const allowedActions = new Set(allowedRecoveryActionsForJob(job));
   if (
     allowedActions.has("retry-placement") &&
@@ -290,7 +298,7 @@ export function resolveGenerationRecoveryPresentation(
     };
   }
 
-  const error = job.error;
+  const error = currentError;
   if (!error) return undefined;
   const category = classifyGenerationError(error);
 
@@ -433,15 +441,6 @@ export function resolveGenerationRecoveryPresentation(
         "Direct placement retry is unsafe until a failed, replay-safe checkpoint is proven.",
       );
     }
-  }
-
-  if (
-    category === "persistence" && isIntegrityError(error.code)
-  ) {
-    return terminal(
-      category,
-      "Durable identity integrity failed, so automated recovery is unsafe. Contact an operator with the stable error code.",
-    );
   }
 
   if (
