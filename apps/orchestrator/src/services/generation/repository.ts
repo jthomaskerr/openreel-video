@@ -19,6 +19,7 @@ export interface SubmissionClaim {
 
 export interface FinalizationClaim {
   jobId: string;
+  providerInstanceId: string;
   providerJobId: string;
   outputIdentity: string;
   idempotencyKey: string;
@@ -32,7 +33,7 @@ export interface GenerationJobRepository {
   get(id: string): Promise<GenerationJob | undefined>;
   update(id: string, mutate: (job: GenerationJob) => GenerationJob): Promise<GenerationJob>;
   compareAndSetCheckpoint(id: string, checkpoint: GenerationCheckpointName, state: GenerationCheckpointState): Promise<boolean>;
-  findByProviderCompletion(provider: string, providerJobId: string): Promise<GenerationJob | undefined>;
+  findByProviderCompletion(provider: string, providerJobId: string, providerInstanceId: string): Promise<GenerationJob | undefined>;
   listActive(projectId: string): Promise<GenerationJob[]>;
   beginSubmission(jobId: string, attemptNumber: number, idempotencyKey: string): Promise<{ claim: SubmissionClaim; acquired: boolean }>;
   getSubmissionClaim(jobId: string, attemptNumber: number): Promise<SubmissionClaim | undefined>;
@@ -41,21 +42,23 @@ export interface GenerationJobRepository {
   releaseSubmission(jobId: string, attemptNumber: number, failed: boolean): Promise<void>;
   getFinalizationClaim(jobId: string): Promise<FinalizationClaim | undefined>;
   repairFinalization(jobId: string, ownerToken: string): Promise<FinalizationClaim>;
-  claimFinalization(input: { jobId: string; providerJobId: string; outputIdentity: string; idempotencyKey: string }): Promise<{ claim: FinalizationClaim; acquired: boolean }>;
+  claimFinalization(input: { jobId: string; providerInstanceId: string; providerJobId: string; outputIdentity: string; idempotencyKey: string }): Promise<{ claim: FinalizationClaim; acquired: boolean }>;
   completeFinalization(jobId: string, idempotencyKey: string, ownerToken: string): Promise<void>;
   releaseFinalization(jobId: string, ownerToken: string): Promise<void>;
 }
 
 type FileClaim = SubmissionClaim;
+const CHECKPOINT_NAMES: GenerationCheckpointName[] = ["output-claimed", "output-downloaded", "output-verified", "output-inspected", "placeholder-finalized", "shot-linked", "placement-applied"];
 
-function canonicalOutputIdentity(value: string) {
+function canonicalOutputIdentity(value: string, providerInstanceId: string) {
   let parsed: unknown;
   try { parsed = JSON.parse(value); } catch { throw new GenerationRepositoryError("generation-output-identity-durable-invalid"); }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new GenerationRepositoryError("generation-output-identity-durable-invalid");
   const record = parsed as Record<string, unknown>;
   const keys = Object.keys(record);
-  if (keys.length !== 2 || !keys.includes("providerJobId") || !keys.includes("outputMediaIds") || typeof record.providerJobId !== "string" || !record.providerJobId.trim() || !Array.isArray(record.outputMediaIds) || record.outputMediaIds.length === 0 || record.outputMediaIds.some((id) => typeof id !== "string" || !id.trim() || /^(?:https?:|blob:|local:|file:)/i.test(id))) throw new GenerationRepositoryError("generation-output-identity-durable-invalid");
-  return JSON.stringify({ providerJobId: record.providerJobId, outputMediaIds: record.outputMediaIds });
+  if (Array.isArray(record.outputMediaIds) && record.outputMediaIds.some((id) => typeof id === "string" && /^(?:blob:|local:|file:)/i.test(id))) throw new GenerationRepositoryError("generation-local-url-forbidden");
+  if (![2, 3].includes(keys.length) || !keys.includes("providerJobId") || !keys.includes("outputMediaIds") || (keys.length === 3 && (!keys.includes("providerInstanceId") || record.providerInstanceId !== providerInstanceId)) || typeof record.providerJobId !== "string" || !record.providerJobId.trim() || !Array.isArray(record.outputMediaIds) || record.outputMediaIds.length === 0 || record.outputMediaIds.some((id) => typeof id !== "string" || !id.trim() || /^(?:https?:|blob:|local:|file:)/i.test(id))) throw new GenerationRepositoryError("generation-output-identity-durable-invalid");
+  return JSON.stringify({ providerInstanceId, providerJobId: record.providerJobId, outputMediaIds: record.outputMediaIds });
 }
 
 /** Filesystem repository with durable CAS claims and rebuildable provider index. */
@@ -116,7 +119,11 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
     for (const name of names) {
       const job = await this.readJob(name.slice(0, -5));
       if (!job) continue;
-      for (const attempt of job.attempts) if (attempt.providerJobId) index[`${job.provider}:${attempt.providerJobId}`] = job.id;
+      for (const attempt of job.attempts) if (attempt.providerJobId) {
+        const key = `${job.providerInstanceId}:${job.provider}:${attempt.providerJobId}`;
+        if (index[key] && index[key] !== job.id) throw new GenerationRepositoryError("generation-provider-id-conflict");
+        index[key] = job.id;
+      }
     }
     await this.atomic(this.indexFile(), index);
     void reason;
@@ -135,10 +142,17 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
   async create(job: GenerationJob) {
     parseGenerationJob(job); await this.init();
     return this.withFileLock(`job-${job.id}`, async () => {
-      try { const handle = await open(this.file(job.id), "wx", 0o600); try { await handle.writeFile(serializeGenerationJob(job)); await handle.sync(); } finally { await handle.close(); } }
-      catch (cause) { if (cause && typeof cause === "object" && "code" in cause && cause.code === "EEXIST") throw new GenerationRepositoryError("generation-id-conflict"); throw cause; }
-      await this.withFileLock("provider-index", async () => this.rebuildIndex());
-      return job;
+      return this.withFileLock("provider-index", async () => {
+        const index = await this.readIndex();
+        for (const attempt of job.attempts) if (attempt.providerJobId) {
+          const key = `${job.providerInstanceId}:${job.provider}:${attempt.providerJobId}`;
+          if (index[key] && index[key] !== job.id) throw new GenerationRepositoryError("generation-provider-id-conflict");
+        }
+        try { const handle = await open(this.file(job.id), "wx", 0o600); try { await handle.writeFile(serializeGenerationJob(job)); await handle.sync(); } finally { await handle.close(); } }
+        catch (cause) { if (cause && typeof cause === "object" && "code" in cause && cause.code === "EEXIST") throw new GenerationRepositoryError("generation-id-conflict"); throw cause; }
+        await this.rebuildIndex();
+        return job;
+      });
     });
   }
 
@@ -158,13 +172,17 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
     return this.withFileLock(`job-${id}`, async () => {
       const job = await this.readJob(id); if (!job) throw new GenerationRepositoryError("generation-not-found");
       if (job.checkpoints[checkpoint]?.status === "completed") return false;
-      const next = parseGenerationJob({ ...job, checkpoints: { ...job.checkpoints, [checkpoint]: state } });
+      const checkpoints = Object.fromEntries(CHECKPOINT_NAMES.map((name) => [name, job.checkpoints[name] ?? { status: "pending" }])) as GenerationJob["checkpoints"];
+      const next = parseGenerationJob({ ...job, checkpoints: { ...checkpoints, [checkpoint]: state } });
       await this.atomic(this.file(id), serializeGenerationJob(next)); return true;
     });
   }
 
-  async findByProviderCompletion(provider: string, providerJobId: string) {
-    const id = (await this.withFileLock("provider-index", async () => this.readIndex()))[`${provider}:${providerJobId}`];
+  async findByProviderCompletion(provider: string, providerJobId: string, providerInstanceId: string) {
+    if (!providerInstanceId?.trim()) throw new GenerationRepositoryError("generation-provider-instance-required");
+    const index = await this.withFileLock("provider-index", async () => this.readIndex());
+    const key = `${providerInstanceId}:${provider}:${providerJobId}`;
+    const id = key ? index[key] : undefined;
     return id ? this.get(id) : undefined;
   }
 
@@ -208,14 +226,16 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
     if (claim && failed) await this.atomic(path, { ...claim, state: "failed" });
   }
 
-  async claimFinalization(input: { jobId: string; providerJobId: string; outputIdentity: string; idempotencyKey: string }) {
+  async claimFinalization(input: { jobId: string; providerInstanceId: string; providerJobId: string; outputIdentity: string; idempotencyKey: string }) {
     return this.withFileLock(`finalization-${input.jobId}`, async () => {
-      const outputIdentity = canonicalOutputIdentity(input.outputIdentity);
+      const job = await this.readJob(input.jobId);
+      const providerInstanceId = job?.providerInstanceId ?? input.providerInstanceId;
+      const outputIdentity = canonicalOutputIdentity(input.outputIdentity, providerInstanceId);
       const path = this.finalizationFile(input.jobId); const existing = await this.readFinalization(path);
       if (existing && existing.outputIdentity !== outputIdentity) throw new GenerationRepositoryError("generation-output-identity-conflict");
       if (existing?.state === "completed") return { claim: existing, acquired: false };
       if (existing?.state === "claimed") return { claim: existing, acquired: false };
-      const claim: FinalizationClaim = { ...input, outputIdentity, state: "claimed", ownerToken: randomUUID(), claimedAt: this.now() };
+      const claim: FinalizationClaim = { ...input, providerInstanceId, outputIdentity, state: "claimed", ownerToken: randomUUID(), claimedAt: this.now() };
       await this.atomic(path, claim);
       return { claim, acquired: true };
     });

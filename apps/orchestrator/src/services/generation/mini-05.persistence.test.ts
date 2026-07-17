@@ -15,7 +15,7 @@ test("rebuilds a missing provider index from durable attempts and classifies cor
   await repository.create(job);
   await repository.update("job", (current) => ({ ...current, status: "submitting", providerJobId: "provider-1", attempts: [{ ...current.attempts[0], providerJobId: "provider-1" }] }));
   await rm(join(directory, "provider-index.json"));
-  assert.equal((await new FileGenerationJobRepository(directory).findByProviderCompletion("wavespeed", "provider-1"))?.id, "job");
+  assert.equal((await new FileGenerationJobRepository(directory).findByProviderCompletion("wavespeed", "provider-1", "instance"))?.id, "job");
   await writeFile(join(directory, "broken.json"), "not-json");
   await assert.rejects(new FileGenerationJobRepository(directory).get("broken"), /generation-corrupt/);
 });
@@ -46,7 +46,7 @@ test("finalization claim never auto-reclaims and requires explicit fenced repair
   const directory = await mkdtemp(join(tmpdir(), "generation-mini-05-finalization-"));
   let now = 100;
   const first = new FileGenerationJobRepository(directory, 10, () => now);
-  const input = { jobId: "job", providerJobId: "provider", outputIdentity: JSON.stringify({ providerJobId: "provider", outputMediaIds: ["provider-output:0"] }), idempotencyKey: "generation:job:finalization:provider" };
+  const input = { jobId: "job", providerInstanceId: "instance", providerJobId: "provider", outputIdentity: JSON.stringify({ providerJobId: "provider", outputMediaIds: ["provider-output:0"] }), idempotencyKey: "generation:job:finalization:provider" };
   assert.equal((await first.claimFinalization(input)).acquired, true);
   assert.equal((await new FileGenerationJobRepository(directory, 10, () => now).claimFinalization(input)).acquired, false);
   now = 111;
@@ -65,7 +65,7 @@ test("finalization recovery fences the crashed owner and preserves output identi
   const directory = await mkdtemp(join(tmpdir(), "generation-mini-05-finalization-recovery-"));
   let now = 100;
   const first = new FileGenerationJobRepository(directory, 10, () => now);
-  const input = { jobId: "job", providerJobId: "provider", outputIdentity: JSON.stringify({ providerJobId: "provider", outputMediaIds: ["provider-output:provider:0"] }), idempotencyKey: "generation:job:finalization:provider" };
+  const input = { jobId: "job", providerInstanceId: "instance", providerJobId: "provider", outputIdentity: JSON.stringify({ providerJobId: "provider", outputMediaIds: ["provider-output:provider:0"] }), idempotencyKey: "generation:job:finalization:provider" };
   const initial = await first.claimFinalization(input);
   assert.equal(initial.acquired, true);
   now = 111;
@@ -82,7 +82,7 @@ test("finalization recovery fences the crashed owner and preserves output identi
 test("finalization claim rejects changed durable output identity", async () => {
   const directory = await mkdtemp(join(tmpdir(), "generation-mini-05-output-conflict-"));
   const repository = new FileGenerationJobRepository(directory);
-  const input = { jobId: "job", providerJobId: "provider", outputIdentity: JSON.stringify({ providerJobId: "provider", outputMediaIds: ["output-one"] }), idempotencyKey: "generation:job:finalization:provider" };
+  const input = { jobId: "job", providerInstanceId: "instance", providerJobId: "provider", outputIdentity: JSON.stringify({ providerJobId: "provider", outputMediaIds: ["output-one"] }), idempotencyKey: "generation:job:finalization:provider" };
   await repository.claimFinalization(input);
   await assert.rejects(repository.claimFinalization({ ...input, outputIdentity: JSON.stringify({ providerJobId: "provider", outputMediaIds: ["output-two"] }) }), /generation-output-identity-conflict/);
 });
