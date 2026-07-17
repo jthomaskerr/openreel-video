@@ -378,7 +378,7 @@ test("public placement reconciliation requires no repository token", async () =>
   assert.equal(retryPorts.calls.placement, 1);
 });
 
-test("live placement owner plus service reconciliation remains pending without fencing or duplication", async () => {
+test("live placement owner plus service reconciliation remains pending without lookup, fencing, or duplication", async () => {
   const dir = await mkdtemp(join(tmpdir(), "generation-placement-live-owner-"));
   const repo = new FileGenerationJobRepository(dir);
   await repo.create(makeJob("job-placement-live-owner", "create-linked-clip"));
@@ -389,7 +389,12 @@ test("live placement owner plus service reconciliation remains pending without f
   let release!: () => void;
   const enteredPromise = new Promise<void>((resolve) => { entered = resolve; });
   const releasePromise = new Promise<void>((resolve) => { release = resolve; });
-  const live = createPorts({ jobId: "job-placement-live-owner", reconcile: "pending" });
+  const live = createPorts({ jobId: "job-placement-live-owner", reconcile: "not-applied" });
+  let reconciliationCalls = 0;
+  live.ports.placement!.reconcile = async () => {
+    reconciliationCalls += 1;
+    return { outcome: "not-applied" };
+  };
   live.ports.placement!.place = async () => {
     live.calls.placement += 1;
     entered();
@@ -399,13 +404,60 @@ test("live placement owner plus service reconciliation remains pending without f
   const liveFinalizer = new GenerationFinalizer(repo, live.ports);
   const liveRun = liveFinalizer.retryPlacement("job-placement-live-owner");
   await enteredPromise;
+  const beforeReconciliation = await repo.get("job-placement-live-owner");
+  assert.equal(beforeReconciliation?.placement?.status, "pending");
+  assert.equal(beforeReconciliation?.checkpoints["placement-applied"]?.status, "pending");
 
   const pending = await liveFinalizer.reconcilePlacement("job-placement-live-owner");
-  assert.equal(pending.status, "needs-attention");
+  assert.equal(pending.status, "succeeded");
+  assert.equal(pending.placement?.status, "pending");
+  assert.equal(pending.error, undefined);
+  assert.equal(pending.checkpoints["placement-applied"]?.status, "pending");
+  assert.equal(pending.checkpoints["placement-applied"]?.error, undefined);
+  assert.equal(reconciliationCalls, 0);
+  assert.equal((await repo.getPlacementClaim("job-placement-live-owner"))?.outcome, "pending");
   release();
   const result = await liveRun;
   assert.equal(result.placement?.status, "applied");
   assert.equal(live.calls.placement, 1);
+});
+
+test("main finalization projects pending before the placement port completes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-placement-pending-main-"));
+  const repo = new FileGenerationJobRepository(dir);
+  await repo.create(makeJob("job-placement-pending-main", "create-linked-clip"));
+  const live = createPorts({ jobId: "job-placement-pending-main" });
+  let entered!: () => void;
+  let release!: () => void;
+  const enteredPromise = new Promise<void>((resolve) => { entered = resolve; });
+  const releasePromise = new Promise<void>((resolve) => { release = resolve; });
+  let reconciliationCalls = 0;
+  live.ports.placement!.reconcile = async () => {
+    reconciliationCalls += 1;
+    return { outcome: "unknown" };
+  };
+  live.ports.placement!.place = async () => {
+    live.calls.placement += 1;
+    entered();
+    await releasePromise;
+    return { outcome: "applied" };
+  };
+
+  const finalizer = new GenerationFinalizer(repo, live.ports);
+  const finalizing = finalizer.finalize("job-placement-pending-main", { provider: "wavespeed", providerJobId: "provider-job-1" });
+  await enteredPromise;
+  const pending = await repo.get("job-placement-pending-main");
+  assert.equal(pending?.placement?.status, "pending");
+  assert.equal(pending?.checkpoints["placement-applied"]?.status, "pending");
+  release();
+  const result = await finalizing;
+
+  assert.equal(result.placement?.status, "applied");
+  assert.equal(live.calls.placement, 1);
+  assert.equal(reconciliationCalls, 0);
+  assert.equal((await repo.getPlacementClaim("job-placement-pending-main"))?.outcome, "applied");
+  const durable = await repo.get("job-placement-pending-main");
+  assert.equal(durable?.checkpoints["placement-applied"]?.status, "completed");
 });
 
 test("unknown placement outcome becomes needs-attention and blocks automatic replay", async () => {

@@ -214,6 +214,9 @@ export class GenerationFinalizer {
     const claim = await this.repository.getPlacementClaim(jobId);
     if (!claim) throw new Error("generation-placement-reconciliation-unavailable");
     if (claim.outcome === "applied") return this.applyPlacementResult(jobId, { outcome: "applied" }, claim.ownerToken);
+    if (claim.state === "claimed" && claim.outcome === "pending") {
+      return this.requireJob(jobId);
+    }
     const placementKey = idempotencyKey(jobId, "placement-applied");
     if (!this.ports.placement) throw new Error("generation-placement-reconciliation-unavailable");
     let result: PlacementAttemptResult;
@@ -234,7 +237,11 @@ export class GenerationFinalizer {
       await this.mark(jobId, "placement-applied", { status: "failed", timestamp: this.now(), error: failure });
       return this.repository.update(jobId, (currentJob) => ({ ...currentJob, status: "succeeded", placement: { policy: currentJob.context.placementPolicy, status: "failed", error: failure }, updatedAt: this.now() }));
     }
-    const error = result.error ?? { code: result.outcome === "pending" ? "generation-placement-pending" : "generation-placement-outcome-unknown", message: result.outcome === "pending" ? "Placement is still in flight" : "Placement outcome is unknown; explicit reconciliation is required before retry", retryable: false } satisfies GenerationError;
+    if (result.outcome === "pending") {
+      await this.mark(jobId, "placement-applied", { status: "pending", timestamp: this.now() });
+      return this.repository.update(jobId, (currentJob) => ({ ...currentJob, placement: { policy: currentJob.context.placementPolicy, status: "pending" }, updatedAt: this.now() }));
+    }
+    const error = result.error ?? { code: "generation-placement-outcome-unknown", message: "Placement outcome is unknown; explicit reconciliation is required before retry", retryable: false } satisfies GenerationError;
     await this.mark(jobId, "placement-applied", { status: "failed", timestamp: this.now(), error });
     return this.repository.update(jobId, (currentJob) => ({ ...currentJob, status: "needs-attention", placement: { policy: currentJob.context.placementPolicy, status: "failed", error }, error, updatedAt: this.now() }));
   }
@@ -245,12 +252,17 @@ export class GenerationFinalizer {
     if (!claim.acquired) {
       if (claim.claim.outcome === "applied") return this.applyPlacementResult(job.id, { outcome: "applied" }, claim.claim.ownerToken);
       if (claim.claim.outcome === "unknown") return this.applyPlacementResult(job.id, { outcome: "unknown", error: { code: "generation-placement-outcome-unknown", message: "Placement outcome is unknown; explicit reconciliation is required before retry", retryable: false } }, claim.claim.ownerToken);
-      return this.applyPlacementResult(job.id, { outcome: "pending", error: { code: "generation-placement-pending", message: "Placement is still in flight", retryable: false } }, claim.claim.ownerToken);
+      return this.requireJob(job.id);
     }
+    let placeInvoked = false;
     try {
-      const result = await this.ports.placement!.place({ job, output: job.output!, idempotencyKey: placementKey });
+      await this.repository.update(job.id, (current) => ({ ...current, checkpoints: { ...current.checkpoints, "placement-applied": { status: "pending" } }, placement: { policy: current.context.placementPolicy, status: "pending" } }));
+      const current = await this.requireJob(job.id);
+      placeInvoked = true;
+      const result = await this.ports.placement!.place({ job: current, output: current.output!, idempotencyKey: placementKey });
       return this.applyPlacementResult(job.id, result, claim.claim.ownerToken);
     } catch (error) {
+      if (!placeInvoked) return this.applyPlacementResult(job.id, { outcome: "not-applied", error: { code: "generation-placement-failed", message: error instanceof Error ? error.message : "Placement did not start", retryable: true } }, claim.claim.ownerToken);
       return this.applyPlacementResult(job.id, { outcome: "unknown", error: { code: "generation-placement-outcome-unknown", message: error instanceof Error ? error.message : "Placement response was lost", retryable: false } }, claim.claim.ownerToken);
     }
   }
