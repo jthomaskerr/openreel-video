@@ -13,6 +13,16 @@ function deferred() {
   const promise = new Promise<void>((done) => { resolve = done; });
   return { promise, resolve };
 }
+
+test("repository rejects path-shaped job identifiers before filesystem access", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-repo-identifiers-"));
+  const repository = new FileGenerationJobRepository(dir);
+  await assert.rejects(repository.get("../escape"), /generation-identifier-invalid/);
+  await assert.rejects(repository.get("nested/job"), /generation-identifier-invalid/);
+  await assert.rejects(repository.get("nested\\job"), /generation-identifier-invalid/);
+  await assert.rejects(repository.claimPlacement("../escape", "placement-key"), /generation-identifier-invalid/);
+});
+
 test("repository survives a second instance and writes valid JSON", async () => { const dir = await mkdtemp(join(tmpdir(), "generation-repo-")); const first = new FileGenerationJobRepository(dir); await first.create(job("j1")); const second = new FileGenerationJobRepository(dir); assert.equal((await second.get("j1"))?.id, "j1"); assert.deepEqual(JSON.parse(await readFile(join(dir, "j1.json"), "utf8")), job("j1")); });
 
 test("repository mutex never steals an expired timestamp from a still-live process", async () => {

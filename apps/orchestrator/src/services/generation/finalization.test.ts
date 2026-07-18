@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test } from "vitest";
 import type { GenerationJob } from "@openreel/music-video-domain/generation";
 import { GenerationFinalizer, type FinalizationPorts } from "./finalization.js";
 import { isPlacementReconciliationCandidate } from "./recovery.js";
@@ -28,6 +28,7 @@ const makeJob = (id = "job-1", placementPolicy: GenerationJob["context"]["placem
   providerJobId: "provider-job-1",
   status: "queued",
   attempt: 1,
+  target: { kind: "new-asset", placeholderMediaId: "placeholder-media" },
   createdAt: 1,
   updatedAt: 1,
   context: {
@@ -101,7 +102,17 @@ function createPorts(options?: {
         assert.equal(output.byteLength, bytes.byteLength);
         assert.equal(output.versionId, `pending:${jobId}`);
         assert.equal(idempotencyKey, `generation:${jobId}:placeholder-finalized`);
-        return { mediaId: "asset-1", versionId: "version-1" };
+        const baseRevision = { commitSha: "commit-1", treeSha: "tree-1", projectBlobSha: "blob-1", sourceModifiedAt: 1 };
+        return {
+          mediaId: "asset-1",
+          versionId: "version-1",
+          projectAction: {
+            schemaVersion: 1 as const,
+            projectId: "project",
+            receipt: { schemaVersion: 1 as const, actionId: `action-${jobId}`, jobId, idempotencyKey, kind: "finalize-placeholder" as const, semanticPayload: `{\"jobId\":\"${jobId}\"}`, baseRevision, appliedAt: 2 },
+            appliedRevision: { ...baseRevision, commitSha: "commit-2" },
+          },
+        };
       },
     },
     shot: {
@@ -178,6 +189,7 @@ test("concurrent finalize calls share one run and do not resubmit work", async (
   ]);
   assert.equal((await repo.get("job-1"))?.output?.mediaId, "asset-1");
   assert.equal((await repo.get("job-1"))?.output?.versionId, "version-1");
+  assert.equal((await repo.get("job-1"))?.projectAction?.receipt.actionId, "action-job-1");
 });
 
 test("separate finalizer instances claim one durable completion", async () => {
