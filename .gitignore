@@ -75,3 +75,4 @@ generated-assets/
 .tokensave
 output/
 apps/web/test-results
+node_modules
