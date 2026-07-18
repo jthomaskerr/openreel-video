@@ -4,6 +4,7 @@ import {
   GenerationSubmitRequestSchema, SanitizedGenerationProvenanceSchema, acceptGenerationProviderResponse, migratePersistedGenerationJob, parseGenerationJob,
 } from "./index.js";
 import { makeJob, route } from "./generation-job-dispositions.fixture.js";
+import * as generation from "./index.js";
 
 describe("generation contracts", () => {
   it.each([
@@ -34,6 +35,95 @@ describe("generation contracts", () => {
     expect(() => GenerationContextSchema.parse({ ...job.context, placementPolicy: "library-only" })).toThrow();
   });
 
+  it("round-trips the exact generation target and timing through submit and job schemas", () => {
+    const target = {
+      kind: "new-version" as const,
+      sourceMediaId: "source-media-1",
+      placeholderMediaId: "placeholder-media-2",
+    };
+    const timing = {
+      source: "timeline" as const,
+      startSeconds: 2,
+      endSeconds: 5,
+      durationSeconds: 3,
+    };
+    const job = {
+      ...makeJob("queued"),
+      target,
+      context: {
+        ...makeJob("queued").context,
+        entryContext: {
+          kind: "linked-projection" as const,
+          shotId: "shot-1",
+          clipId: "clip-1",
+          startTime: 2,
+          endTime: 5,
+        },
+        placementPolicy: "replace-selected-clip-media" as const,
+        timing,
+      },
+    };
+    const submit = {
+      projectId: job.projectId,
+      jobId: job.id,
+      routing: job.routing,
+      target,
+      context: job.context,
+      providerInputs: job.providerInputs,
+    };
+
+    expect(GenerationSubmitRequestSchema.parse(submit)).toMatchObject({ target, context: { timing } });
+    expect(parseGenerationJob(job)).toMatchObject({ target, context: { timing } });
+  });
+
+  it("keeps a legacy target-less job readable but fails closed for project mutation", () => {
+    const legacy = parseGenerationJob(makeJob("queued"));
+    expect(legacy.target).toBeUndefined();
+
+    const classify = (generation as unknown as {
+      classifyGenerationProjectTarget?: (job: typeof legacy) => unknown;
+    }).classifyGenerationProjectTarget;
+    expect(classify).toBeTypeOf("function");
+    if (!classify) return;
+    expect(classify(legacy)).toEqual({
+      status: "needs-attention",
+      error: {
+        code: "generation-target-missing",
+        message: "Generation target is missing; project mutation cannot be authorized.",
+        retryable: false,
+      },
+    });
+  });
+
+  it("exports strict durable project-action receipt, shot-attempt, and undo schemas", () => {
+    const exports = generation as unknown as Record<string, unknown>;
+    for (const name of [
+      "GenerationProjectMutationReceiptSchema",
+      "GenerationShotAttemptSchema",
+      "GenerationProjectActionCommandSchema",
+      "GenerationProjectActionResultSchema",
+    ]) {
+      expect(exports[name], `${name} must be exported`).toBeDefined();
+    }
+  });
+
+  it("round-trips the server project-action envelope on the authoritative job", () => {
+    const baseRevision = { commitSha: "commit-1", treeSha: "tree-1", projectBlobSha: "blob-1", sourceModifiedAt: 10 };
+    const receipt = {
+      schemaVersion: 1 as const,
+      actionId: "action-1",
+      jobId: "job-1",
+      idempotencyKey: "action-key-1",
+      kind: "finalize-placeholder" as const,
+      semanticPayload: "{\"jobId\":\"job-1\"}",
+      baseRevision,
+      appliedAt: 11,
+    };
+    const projectAction = { schemaVersion: 1 as const, projectId: "project-1", receipt, appliedRevision: { ...baseRevision, commitSha: "commit-2" } };
+
+    expect(parseGenerationJob({ ...makeJob("succeeded"), projectAction }).projectAction).toEqual(projectAction);
+  });
+
   it("rejects local/blob values before durable parsing", () => {
     expect(() => GenerationJobSchema.parse({ ...makeJob("queued"), providerInputs: { image: "blob:https://example.test/image" } })).toThrow();
     expect(() => SanitizedGenerationProvenanceSchema.parse({ provider: "wavespeed", modelId: "m", modelSchemaVersion: "v1", jobId: "j", routing: route, output: { mediaId: "local:media", versionId: "v", mimeType: "video/mp4", byteLength: 0, sha256: "sha" }, checkpoints: [], references: [] })).toThrow();
@@ -42,7 +132,7 @@ describe("generation contracts", () => {
   it("requires ready, active, contiguous references before submit", () => {
     const job = makeJob("queued");
     const context = { ...job.context, references: [{ id: "r", order: 1, mediaId: "m", origins: ["source" as const], state: "active" as const, preparationStatus: "preparing" as const, errorHistory: [] }] };
-    expect(() => GenerationSubmitRequestSchema.parse({ projectId: "project-1", jobId: job.id, routing: route, context, providerInputs: {} })).toThrow();
+    expect(() => GenerationSubmitRequestSchema.parse({ projectId: "project-1", jobId: job.id, routing: route, target: { kind: "new-asset", placeholderMediaId: "placeholder-1" }, context, providerInputs: {} })).toThrow();
   });
 
   it("keeps route errors and unknown keys strict", () => {
@@ -115,7 +205,7 @@ describe("generation contracts", () => {
 
   it("accepts falsy JSON values while rejecting unknown keys across strict request boundaries", () => {
     const job = makeJob("queued");
-    const submit = { projectId: "project-1", jobId: job.id, routing: route, context: job.context, providerInputs: { zero: 0, falseValue: false, empty: "" } };
+    const submit = { projectId: "project-1", jobId: job.id, routing: route, target: { kind: "new-asset" as const, placeholderMediaId: "placeholder-1" }, context: job.context, providerInputs: { zero: 0, falseValue: false, empty: "" } };
     expect(GenerationSubmitRequestSchema.parse(submit).providerInputs).toEqual(submit.providerInputs);
     const status = { projectId: "project-1", jobId: "job-1" };
     expect(GenerationStatusRequestSchema.parse(status)).toEqual(status);
