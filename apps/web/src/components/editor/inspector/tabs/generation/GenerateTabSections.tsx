@@ -22,6 +22,7 @@ import {
   allowedRecoveryActionsForJob,
   type RecoveryAction,
 } from "../../../../../features/generation/recovery/state-machine";
+import type { RecoveryAction } from "../../../../../features/generation/recovery/state-machine";
 import {
   resolveGenerationRecoveryPresentation,
   type GenerationRecoveryPresentationAction,
@@ -730,6 +731,7 @@ export function GenerateJobSection(props: {
         ) : null}
       </div>
       {displayedError || recovery?.action ? (
+      {props.job?.error ? (
         <div
           role="alert"
           aria-label="Generation error"
@@ -748,6 +750,16 @@ export function GenerateJobSection(props: {
           {displayedError?.field ? (
             <p className="break-words text-[11px] text-red-200 [overflow-wrap:anywhere]">
               Field: {displayedError.field}
+          <p className="break-words text-sm font-medium text-red-300 [overflow-wrap:anywhere]">
+            {props.job.error.code}
+          </p>
+          <p className="break-words text-sm text-red-300 [overflow-wrap:anywhere]">
+            {props.job.error.message}
+          </p>
+          {props.job.error.field ? (
+            <p className="break-words text-[11px] text-red-200 [overflow-wrap:anywhere]">
+              Field: {props.job.error.field}
+2674f (feat(inspector): update generation inspector tabs)
             </p>
           ) : null}
           {explanation ? (
@@ -799,9 +811,8 @@ export function GenerateActionsSection(props: {
     : undefined;
   const cancelAllowed =
     props.job &&
-    Boolean(props.onRecoveryAction) &&
     errorRecovery?.category !== "cancellation" &&
-    allowedRecoveryActionsForJob(props.job).includes("cancel");
+    ["queued", "submitting", "running", "needs-attention"].includes(props.job.status);
   return (
     <div
       data-testid="generation-actions"
