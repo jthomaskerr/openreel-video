@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "node:test";
+import { test } from "vitest";
 import type { GenerationJob, GenerationRouteIdentity } from "@openreel/music-video-domain/generation";
 import { FileGenerationJobRepository } from "./repository.js";
 import { GenerationOrchestrator, validateGenerationRequestBoundary, type GenerationFinalizerPort, type GenerationProviderPort } from "./index.js";
@@ -43,6 +43,7 @@ function job(id = "job-1"): GenerationJob {
     routing: route,
     status: "queued",
     attempt: 1,
+    target: { kind: "new-asset", placeholderMediaId: `placeholder-${id}` },
     context: {
       projectId: "project-1",
       entryContext: { kind: "new-asset" },
@@ -99,6 +100,41 @@ test("reserves durably before submit and a fresh service does not duplicate it",
   const replay = await second.submit({ ownerId: "owner-1", job: job(), request });
   assert.equal(replay.providerJobId, "provider-job-1-1");
   assert.deepEqual(log, ["submit:job-1"]);
+});
+
+test("logical job replay rejects cross-project and conflicting submission payloads", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "generation-mini-05-idempotency-"));
+  const repository = new FileGenerationJobRepository(directory);
+  const log: string[] = [];
+  const service = new GenerationOrchestrator({
+    repository,
+    provider: provider(log),
+    owner: () => true,
+    routes: [manifestRoute],
+    requestBoundary,
+    finalizer,
+    releaseEnabled: true,
+    clock: () => 1000,
+  });
+  await service.submit({ ownerId: "owner-1", job: job("collision"), request });
+
+  const crossProject = job("collision");
+  crossProject.projectId = "project-2";
+  crossProject.context = { ...crossProject.context, projectId: "project-2" };
+  await assert.rejects(
+    service.submit({ ownerId: "owner-1", job: crossProject, request }),
+    /generation-forbidden/,
+  );
+
+  const conflicting = job("collision");
+  conflicting.context = { ...conflicting.context, prompt: "different prompt" };
+  conflicting.providerInputs = { prompt: "different prompt" };
+  await assert.rejects(
+    service.submit({ ownerId: "owner-1", job: conflicting, request }),
+    /generation-idempotency-conflict/,
+  );
+  assert.deepEqual(log, ["submit:collision"]);
+  assert.equal((await repository.get("collision"))?.projectId, "project-1");
 });
 
 test("fails closed for rollback, ownership, and incomplete routing before writes or provider calls", async () => {
@@ -492,8 +528,8 @@ test("completion claims valid output and invokes the finalizer once", async () =
   assert.equal(first.status, "succeeded");
   assert.equal(second.status, "succeeded");
   assert.equal(finalizations, 1);
-  const durableClaim = await readFile(join(directory, "finalization-finalize.json"), "utf8");
-  assert.equal(durableClaim.includes("https://cdn.example/output.mp4"), false);
+  assert.deepEqual(first.outputMediaIds, ["provider-output:provider-finalize-1:0"]);
+  assert.equal(await repository.getFinalizationClaim("finalize"), undefined);
 });
 
 test("completion without a valid output becomes needs-attention", async () => {
