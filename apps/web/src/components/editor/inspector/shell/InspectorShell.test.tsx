@@ -18,7 +18,13 @@ describe("InspectorTabPanel", () => {
       <InspectorTabPanel tab="color" active="transform">body</InspectorTabPanel>,
     );
     expect(screen.queryByText("body")).toBeNull();
+    const hiddenPanel = screen.getByRole("tabpanel", { hidden: true });
+    expect(hiddenPanel).toHaveAttribute("id", "inspector-panel-color");
+    expect(hiddenPanel).toHaveAttribute("hidden");
     rerender(<InspectorTabPanel tab="color" active="color">body</InspectorTabPanel>);
-    expect(screen.getByText("body")).toBeInTheDocument();
+    const panel = screen.getByRole("tabpanel");
+    expect(panel).toHaveTextContent("body");
+    expect(panel).toHaveAttribute("id", "inspector-panel-color");
+    expect(panel).toHaveAttribute("aria-labelledby", "inspector-tab-color");
   });
 });
