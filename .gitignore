@@ -73,3 +73,4 @@ apps/web/vite.config.ts.timestamp-*.mjs
 mobile-mockup/
 generated-assets/
 .tokensave
+node_modules
