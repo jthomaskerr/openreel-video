@@ -7,4 +7,15 @@ export interface InspectorTabPanelProps {
 }
 
 export const InspectorTabPanel: React.FC<InspectorTabPanelProps> = ({ tab, active, children }) =>
-  active === tab ? <div role="tabpanel">{children}</div> : null;
+  active === tab ? (
+    <div id={`inspector-panel-${tab}`} role="tabpanel" aria-labelledby={`inspector-tab-${tab}`}>
+      {children}
+    </div>
+  ) : (
+    <div
+      id={`inspector-panel-${tab}`}
+      role="tabpanel"
+      aria-labelledby={`inspector-tab-${tab}`}
+      hidden
+    />
+  );
