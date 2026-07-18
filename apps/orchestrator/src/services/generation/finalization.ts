@@ -5,6 +5,7 @@ import type {
   GenerationError,
   GenerationJob,
   GenerationOutput,
+  GenerationProjectActionEnvelope,
 } from "@openreel/music-video-domain/generation";
 import { GenerationRepositoryError, type GenerationJobRepository, type PlacementClaim, type PlacementOutcome } from "./repository.js";
 import { KeyedLock } from "./lock.js";
@@ -27,7 +28,9 @@ export interface GenerationOutputInspector {
 }
 
 export interface PlaceholderFinalizer {
-  finalize(input: { job: GenerationJob; output: GenerationOutput; idempotencyKey: string }): Promise<Pick<GenerationOutput, "mediaId" | "versionId">>;
+  finalize(input: { job: GenerationJob; output: GenerationOutput; idempotencyKey: string }): Promise<Pick<GenerationOutput, "mediaId" | "versionId"> & {
+    projectAction?: GenerationProjectActionEnvelope;
+  }>;
 }
 
 export interface ShotLinker {
@@ -176,9 +179,13 @@ export class GenerationFinalizer {
         }
         if (!completed(job, "placeholder-finalized")) {
           const output = job.output!;
-          const ids = await this.ports.placeholder.finalize({ job, output, idempotencyKey: idempotencyKey(job.id, "placeholder-finalized") });
-          if (isLocalUrl(ids.mediaId) || isLocalUrl(ids.versionId)) throw new Error("generation-local-url-forbidden");
-          await this.repository.update(job.id, (current) => ({ ...current, output: { ...current.output!, ...ids } }));
+        const { projectAction, ...ids } = await this.ports.placeholder.finalize({ job, output, idempotencyKey: idempotencyKey(job.id, "placeholder-finalized") });
+        if (isLocalUrl(ids.mediaId) || isLocalUrl(ids.versionId)) throw new Error("generation-local-url-forbidden");
+        await this.repository.update(job.id, (current) => ({
+          ...current,
+          output: { ...current.output!, ...ids },
+          ...(projectAction ? { projectAction } : {}),
+        }));
           await this.mark(job.id, "placeholder-finalized", { status: "completed", timestamp: this.now() });
         }
         job = await this.requireJob(job.id);

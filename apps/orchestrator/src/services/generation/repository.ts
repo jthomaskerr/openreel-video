@@ -103,6 +103,12 @@ function canonicalOutputIdentity(value: string, providerInstanceId: string) {
   return JSON.stringify({ providerInstanceId, providerJobId: record.providerJobId, outputMediaIds: record.outputMediaIds });
 }
 
+function assertFilesystemKey(value: string): void {
+  if (!value || value === "." || value === ".." || /[\\/\0]/.test(value)) {
+    throw new GenerationRepositoryError("generation-identifier-invalid");
+  }
+}
+
 /** Filesystem repository with durable CAS claims and rebuildable provider index. */
 export class FileGenerationJobRepository implements GenerationJobRepository {
   private readonly processToken = randomUUID();
@@ -126,12 +132,12 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
     if (this.lockTtlMs <= 0 || this.placementLeaseTtlMs <= 0) throw new GenerationRepositoryError("generation-repository-invalid-ttl");
   }
 
-  private file(id: string) { return join(this.directory, `${id}.json`); }
+  private file(id: string) { assertFilesystemKey(id); return join(this.directory, `${id}.json`); }
   private indexFile() { return join(this.directory, "provider-index.json"); }
   private locksDir() { return join(this.directory, ".locks"); }
-  private submissionFile(id: string, attempt: number) { return join(this.directory, `submission-${id}-${attempt}.json`); }
-  private finalizationFile(id: string) { return join(this.directory, `finalization-${id}.json`); }
-  private placementFile(id: string) { return join(this.directory, `placement-${id}.json`); }
+  private submissionFile(id: string, attempt: number) { assertFilesystemKey(id); return join(this.directory, `submission-${id}-${attempt}.json`); }
+  private finalizationFile(id: string) { assertFilesystemKey(id); return join(this.directory, `finalization-${id}.json`); }
+  private placementFile(id: string) { assertFilesystemKey(id); return join(this.directory, `placement-${id}.json`); }
 
   private async init() { await mkdir(this.directory, { recursive: true }); await mkdir(this.locksDir(), { recursive: true }); }
 
@@ -260,6 +266,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
   }
 
   private async withFileLock<T>(key: string, task: () => Promise<T>): Promise<T> {
+    assertFilesystemKey(key);
     await this.init();
     const path = join(this.locksDir(), `${key}.lock`);
     for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -320,6 +327,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
   }
 
   private async readJob(id: string): Promise<GenerationJob | undefined> {
+    assertFilesystemKey(id);
     try { return parseGenerationJob(JSON.parse(await readFile(this.file(id), "utf8"))); }
     catch (cause) {
       if (cause && typeof cause === "object" && "code" in cause && cause.code === "ENOENT") return undefined;

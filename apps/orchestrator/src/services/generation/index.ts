@@ -3,14 +3,17 @@ export * from "./repository.js";
 export * from "./uploads.js";
 export * from "./finalization.js";
 export * from "./recovery.js";
+export * from "./project-action-adapter.js";
 
 import {
   assertGenerationV2SubmissionAllowed,
+  canonicalizeGenerationProjectActionPayload,
   isLegalGenerationTransition,
   parseGenerationJob,
   transitionGenerationDisposition,
   type GenerationJob,
   type GenerationRouteIdentity,
+  type JsonValue,
 } from "@openreel/music-video-domain/generation";
 import type { GenerationJobRepository, PlacementClaim } from "./repository.js";
 import { GenerationPollingController, isPlacementReconciliationCandidate, projectTerminalPlacementSuccess } from "./recovery.js";
@@ -95,8 +98,20 @@ function outputIdentity(value: GenerationProviderStatus): GenerationOutputIdenti
   if (mediaIds?.some((id) => /(?:blob:|local:|file:|signed:|temporary:)/i.test(id))) throw new Error("generation-output-identity-invalid");
   return { providerJobId: value.providerJobId, outputCount: Math.max(urls?.length ?? 0, mediaIds?.length ?? 0), outputUrls: urls, outputMediaIds: mediaIds ?? urls?.map((_url, index) => `provider-output:${value.providerJobId}:${index}`) };
 }
-function durableOutputIdentity(output: GenerationOutputIdentity) { return { providerJobId: output.providerJobId, outputMediaIds: output.outputMediaIds ?? [] }; }
-
+function submissionSemanticPayload(job: GenerationJob): string {
+  return canonicalizeGenerationProjectActionPayload({
+    contractVersion: job.contractVersion,
+    projectId: job.projectId,
+    provider: job.provider,
+    providerInstanceId: job.providerInstanceId,
+    modelId: job.modelId,
+    modelSchemaVersion: job.modelSchemaVersion,
+    routing: job.routing,
+    target: job.target ?? null,
+    context: job.context,
+    providerInputs: job.providerInputs,
+  } as unknown as JsonValue);
+}
 /** Durable provider boundary. Public submission has no rollback escape hatch. */
 export class GenerationOrchestrator {
   readonly polling = new GenerationPollingController();
@@ -112,11 +127,14 @@ export class GenerationOrchestrator {
     this.options.requestBoundary.validate(request ?? { contentType: "application/json", byteLength: 0, maxBytes: 0, timeoutMs: 1, maxTimeoutMs: 1 });
     await this.authorize(ownerId, job.projectId);
     if (!recovery) assertGenerationV2SubmissionAllowed(job.contractVersion, this.options.releaseEnabled);
+    if (!recovery && !job.target) throw new Error("generation-target-missing");
     this.validateRoute(job.routing, job);
 
     let current = await this.options.repository.get(job.id);
     if (current) {
+      if (current.projectId !== job.projectId || current.context.projectId !== job.context.projectId) throw new Error("generation-forbidden");
       await this.authorize(ownerId, current.projectId);
+      if (submissionSemanticPayload(current) !== submissionSemanticPayload(job)) throw new Error("generation-idempotency-conflict");
       if (current.providerJobId || ["submitting", "running", "completed", "finalizing", "succeeded", "canceled"].includes(current.status)) return current;
       if (current.status !== "queued") throw new Error("generation-submit-invalid-state");
       if (recovery && (current.contractVersion !== 2 || !current.attempts.some((attempt) => attempt.providerJobId))) throw new Error("generation-v2-recovery-not-authorized");
@@ -204,13 +222,15 @@ export class GenerationOrchestrator {
       }
     }
     const idempotencyKey = `generation:${job.id}:finalization:${job.providerJobId}`;
-    let claim: Awaited<ReturnType<GenerationJobRepository["claimFinalization"]>>;
-    try { claim = await this.options.repository.claimFinalization({ jobId: job.id, providerInstanceId: job.providerInstanceId, providerJobId: job.providerJobId, outputIdentity: JSON.stringify(durableOutputIdentity(output)), idempotencyKey }); }
-    catch (cause) { return this.options.repository.update(job.id, (current) => ({ ...current, status: "needs-attention", error: stableError(cause instanceof Error ? cause.message : "generation-finalization-claim-failed"), updatedAt: this.clock() })); }
-    if (!claim.acquired && claim.claim.state === "claimed") return job;
-    if (!claim.acquired && claim.claim.state === "completed") return this.options.repository.update(job.id, (current) => ({ ...current, status: "succeeded", updatedAt: this.clock() }));
-    try { await this.options.finalizer.finalize({ job, output, idempotencyKey }); await this.options.repository.completeFinalization(job.id, idempotencyKey, claim.claim.ownerToken); return this.options.repository.update(job.id, (current) => ({ ...current, status: "succeeded", updatedAt: this.clock() })); }
-    catch { await this.options.repository.releaseFinalization(job.id, claim.claim.ownerToken); return this.options.repository.update(job.id, (current) => ({ ...current, status: "needs-attention", error: stableError("generation-finalization-failed"), updatedAt: this.clock() })); }
+    try {
+      // The structural finalizer is the sole durable completion-claim owner.
+      // The orchestrator has already persisted normalized provider/output identity;
+      // taking a second claim here would deadlock or conflict on restart.
+      await this.options.finalizer.finalize({ job, output, idempotencyKey });
+      return this.options.repository.update(job.id, (current) => ({ ...current, status: "succeeded", updatedAt: this.clock() }));
+    } catch {
+      return this.options.repository.update(job.id, (current) => ({ ...current, status: "needs-attention", error: stableError("generation-finalization-failed"), updatedAt: this.clock() }));
+    }
   }
 
   async retryFinalization(input: GenerationJobCommand): Promise<GenerationJob> {
