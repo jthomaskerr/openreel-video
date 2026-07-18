@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import type { GenerationReferenceRecoveryState } from "./v2";
 
 export type GenerationDraftScope =
   | { kind: "shot"; shotId: string; projectId?: string }
@@ -46,8 +47,13 @@ export const generationDraftKey = (scope: GenerationDraftScope): string =>
 
 interface DraftStore {
   drafts: Record<string, GenerationDraftState>;
+  referenceRecoveries: Record<string, GenerationReferenceRecoveryState>;
   getDraft: (scope: GenerationDraftScope) => GenerationDraftState;
   saveDraft: (scope: GenerationDraftScope, patch: Partial<GenerationDraftState>, now?: number) => void;
+  saveReferenceRecovery: (
+    scope: GenerationDraftScope,
+    recovery: GenerationReferenceRecoveryState,
+  ) => void;
   resetDraft: (scope: GenerationDraftScope) => void;
   removeDraft: (scope: GenerationDraftScope) => void;
 }
@@ -56,6 +62,7 @@ export const useGenerationDraftStore = create<DraftStore>()(
   persist(
     (set, get) => ({
       drafts: {},
+      referenceRecoveries: {},
       getDraft: (scope) => get().drafts[generationDraftKey(scope)] ?? emptyDraft(generationDraftKey(scope)),
       saveDraft: (scope, patch, now = Date.now()) => {
         const key = generationDraftKey(scope);
@@ -66,23 +73,44 @@ export const useGenerationDraftStore = create<DraftStore>()(
           },
         }));
       },
+      saveReferenceRecovery: (scope, recovery) => {
+        const key = generationDraftKey(scope);
+        set((state) => ({
+          referenceRecoveries: {
+            ...state.referenceRecoveries,
+            [key]: recovery,
+          },
+        }));
+      },
       resetDraft: (scope) => {
         const key = generationDraftKey(scope);
-        set((state) => ({ drafts: { ...state.drafts, [key]: emptyDraft(key) } }));
+        set((state) => {
+          const referenceRecoveries = { ...state.referenceRecoveries };
+          delete referenceRecoveries[key];
+          return {
+            drafts: { ...state.drafts, [key]: emptyDraft(key) },
+            referenceRecoveries,
+          };
+        });
       },
       removeDraft: (scope) => {
         const key = generationDraftKey(scope);
         set((state) => {
           const drafts = { ...state.drafts };
+          const referenceRecoveries = { ...state.referenceRecoveries };
           delete drafts[key];
-          return { drafts };
+          delete referenceRecoveries[key];
+          return { drafts, referenceRecoveries };
         });
       },
     }),
     {
       name: "openreel-generation-drafts-v2",
       storage: createJSONStorage(draftStorage),
-      partialize: (state) => ({ drafts: state.drafts }),
+      partialize: (state) => ({
+        drafts: state.drafts,
+        referenceRecoveries: state.referenceRecoveries,
+      }),
     },
   ),
 );

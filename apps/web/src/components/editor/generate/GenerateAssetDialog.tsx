@@ -29,12 +29,8 @@ import { QwenForm } from "../kieai/forms/QwenForm";
 
 // ── WaveSpeed ────────────────────────────────────────────────────────────────
 import type { WavespeedModel } from "../../../services/wavespeed/index";
-import { fetchModelsCached, submitGenerationJob } from "../../../services/wavespeed/index";
-import type { GenerationContext } from "@openreel/music-video-domain/generation";
-import {
-  buildSceneGenerationRequest,
-  selectSceneGenerationContext,
-} from "../../../features/generation/context/scene-generation";
+import { selectSceneGenerationContext } from "../../../features/generation/context/scene-generation";
+import type { GenerationReferenceDraft } from "../../../features/generation/submit-generation";
 import { SchemaForm } from "./SchemaForm";
 
 import { uploadFileStream } from "../../../services/kieai/file-upload";
@@ -45,7 +41,13 @@ import { injectImageInputs, getRefImageUrls } from "./schema-injector";
 
 // ── Store ────────────────────────────────────────────────────────────────────
 import { useProjectStore } from "../../../stores/project-store";
-import { useGenerationJobStore } from "../../../stores/generation-job-store";
+import {
+  getProductionGenerationRuntime,
+  prepareWaveSpeedGenerationDraft,
+  prepareWaveSpeedProjectionAudio,
+  waveSpeedRouteKey,
+  type WaveSpeedRouteCapability,
+} from "../../../stores/generation-job-store";
 
 // ── Unified model type ───────────────────────────────────────────────────────
 
@@ -64,6 +66,8 @@ interface UnifiedModel {
   kieaiModel?: ImageModelId;
   /** WaveSpeed model object, for dynamic SchemaForm */
   wsModel?: WavespeedModel;
+  /** Exact immutable route identity. */
+  wsRoute?: WaveSpeedRouteCapability;
 }
 
 // ── Build KieAI unified models ───────────────────────────────────────────────
@@ -123,6 +127,35 @@ function makeWsDefaults(model: WavespeedModel, asset?: GeneratedAsset, shot?: St
   return defaults;
 }
 
+function wavespeedModelFromCapability(route: WaveSpeedRouteCapability): WavespeedModel {
+  return {
+    model_id: route.providerModelId,
+    name: route.providerModelId,
+    type: route.requestedMode,
+    description: `Server-configured ${route.requestedMode} route`,
+    base_price: 0,
+    formula: "server-configured",
+    sort_order: 0,
+    api_schema: {
+      api_schemas: [{
+        type: route.requestedMode,
+        method: "POST",
+        server: "same-origin",
+        api_path: route.providerEndpointId,
+        request_schema: {
+          type: "object",
+          properties: {
+            prompt: { type: "string", title: "Prompt" },
+            negative_prompt: { type: "string", title: "Negative prompt" },
+          },
+          required: ["prompt"],
+          "x-order-properties": ["prompt", "negative_prompt"],
+        },
+      }],
+    },
+  };
+}
+
 // ── Props ─────────────────────────────────────────────────────────────────────
 
 export interface GenerateAssetDialogProps {
@@ -146,11 +179,12 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
   const [model, setModel] = useState<UnifiedModel | null>(null);
   const [errorMsg, setError] = useState("");
   const [wsModels, setWsModels] = useState<WavespeedModel[]>([]);
+  const [wsRoutes, setWsRoutes] = useState<WaveSpeedRouteCapability[]>([]);
   const [wsModelsLoading, setWsModelsLoading] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
+  const [generationRuntime] = useState(getProductionGenerationRuntime);
   const { project, addPlaceholderMedia } = useProjectStore();
-  const enqueueJob = useGenerationJobStore((s) => s.enqueue);
 
   // If opened from a clip's ReferenceImages "Generate" button, pull the prompt
   // from that clip's metadata payload so the dialog pre-fills correctly.
@@ -246,7 +280,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
 
   const wsFetchRef = useRef(false);
 
-  // Fetch WaveSpeed models with cache-first + background refresh
+  // WaveSpeed model availability comes only from the non-secret server capability boundary.
   useEffect(() => {
     if (!open) {
       wsFetchRef.current = false;
@@ -255,20 +289,21 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
     if (wsFetchRef.current) return;
     wsFetchRef.current = true;
 
-    const { cached, refresh } = fetchModelsCached();
-
-    // Show cached models immediately
-    if (cached && cached.length > 0) {
-      setWsModels(cached);
-    }
-
-    // Always refresh in background (even if cached data was shown)
     setWsModelsLoading(true);
-    refresh()
-      .then(setWsModels)
-      .catch(() => {})
+    void generationRuntime.readCapabilities()
+      .then((capabilities) => {
+        if (!capabilities.configured) throw new Error("provider-not-configured");
+        setWsRoutes(capabilities.routes);
+        setWsModels(capabilities.routes.map(wavespeedModelFromCapability));
+      })
+      .catch((error: unknown) => {
+        console.error("wavespeed-capabilities-load-failed", { projectId: project.id, error });
+        setWsRoutes([]);
+        setWsModels([]);
+        setError(error instanceof Error ? error.message : "WaveSpeed capabilities could not be loaded.");
+      })
       .finally(() => setWsModelsLoading(false));
-  }, [open]);
+  }, [generationRuntime, open, project.id]);
 
   // Reset on open
   useEffect(() => {
@@ -304,25 +339,25 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
       requiresSourceImage: m.requiresSourceImage,
       kieaiModel: m.id,
     }));
-    const ws: UnifiedModel[] = wsModels.map((m) => {
-      const schemaType = m.api_schema?.api_schemas?.[0]?.type ?? "";
-      let genType: GenType = "text-to-image";
-      if (schemaType.includes("image-to-video") || m.type.includes("video")) genType = "image-to-video";
-      else if (schemaType.includes("text-to-video")) genType = "text-to-video";
-      else if (schemaType.includes("image-to-image")) genType = "image-to-image";
-      const isEdit = schemaType.includes("image-to") || m.type.includes("edit") || m.type.includes("upscale");
+    const ws: UnifiedModel[] = wsModels.map((m, index) => {
+      const route = wsRoutes[index];
+      const genType = (route?.requestedMode ?? m.type) as GenType;
+      const isEdit = genType.startsWith("image-to-");
       return {
-        id: `wavespeed:${m.model_id}`,
+        id: route
+          ? `wavespeed:${waveSpeedRouteKey(route)}`
+          : `wavespeed:${m.model_id}:${genType}`,
         provider: "wavespeed",
         name: m.name,
         description: m.description?.slice(0, 120) ?? "",
         genType,
         requiresSourceImage: isEdit,
         wsModel: m,
+        wsRoute: route,
       };
     });
     return [...kieai, ...ws].sort((a, b) => a.name.localeCompare(b.name));
-  }, [wsModels]);
+  }, [wsModels, wsRoutes]);
 
   const filteredModels = useMemo(() => {
     const q = search.toLowerCase();
@@ -395,7 +430,9 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
               const uploaded = await uploadFileStream(refItem.blob);
               const url = uploaded.fileUrl || uploaded.downloadUrl || "";
               if (url) refUrls.push(url);
-            } catch { /* skip failed uploads */ }
+            } catch (uploadError) {
+              console.warn("kieai-reference-upload-failed", { refId, uploadError });
+            }
           }
         }
 
@@ -432,79 +469,73 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
           thumbnailUrl: previewUrl ?? null, kieaiTaskId: taskId,
           generationMeta: { provider: "kieai", model: model.kieaiModel, prompt: String(kinputs.prompt ?? ""), inputs: kinputs, jobId: taskId, status: "pending" },
         });
-        enqueueJob({
-          provider: "kieai", providerJobId: taskId, model: model.kieaiModel, prompt: String(kinputs.prompt ?? ""),
-          inputs: kinputs, projectId: project.id, linkedMediaIds: refIds,
-        });
       } else if (model.provider === "wavespeed" && model.wsModel) {
         const schema = model.wsModel.api_schema?.api_schemas?.[0]?.request_schema;
         const resolvedReferenceItems = getRefImageUrls(project.mediaLibrary.items, refIds);
         const injected = schema ? injectImageInputs(schema, wsInputs, resolvedReferenceItems) : wsInputs;
-        const mediaId = uuidv4();
-        const isVideo = model.genType.includes("video");
-        const name = `wavespeed_${model.wsModel.model_id.split("/").pop()}.${isVideo ? "mp4" : "jpg"}`;
-        addPlaceholderMedia({
-          id: mediaId, name, type: isVideo ? "video" : "image", fileHandle: null, blob: null,
-          metadata: { duration: 0, width: 0, height: 0, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 0 },
-          thumbnailUrl: previewUrl ?? null,
-          generationMeta: { provider: "wavespeed", model: model.wsModel.model_id, prompt: String(wsInputs.prompt ?? ""), inputs: injected, status: "pending" },
-        });
-        const requestId = uuidv4();
-        const target = { kind: "new-asset" as const, placeholderMediaId: mediaId };
-        const request = effectiveSceneId && effectiveShot && sceneGenerationSelection?.status === "ready"
-          ? buildSceneGenerationRequest({
-              id: requestId,
-              projectId: project.id,
+        const route = model.wsRoute;
+        if (!route) {
+          throw new Error(`No immutable WaveSpeed route is configured for ${model.wsModel.model_id} (${model.genType}).`);
+        }
+        const projection = sceneGenerationSelection?.status === "ready"
+          ? sceneGenerationSelection.projection
+          : undefined;
+        const entryContext = projection && effectiveSceneId
+          ? {
+              kind: "linked-projection" as const,
               shotId: effectiveSceneId,
-              selection: sceneGenerationSelection,
-              target,
-              placementPolicy: "none",
-              modelId: model.wsModel.model_id,
-              modelSchemaVersion: "wavespeed-schema-v1",
-              providerInputs: injected,
-              references: {
-                shotReferences: resolvedReferenceItems
-                  .filter((item) => effectiveShot.referenceAssetIds.includes(item.id))
-                  .map((item) => ({
-                    mediaId: item.id,
-                    remoteInput: {
-                      kind: "upload-token" as const,
-                      value: item.originalUrl ?? item.thumbnailUrl!,
-                    },
-                  })),
-                userReferences: resolvedReferenceItems
-                  .filter((item) => !effectiveShot.referenceAssetIds.includes(item.id))
-                  .map((item) => ({
-                    mediaId: item.id,
-                    remoteInput: {
-                      kind: "upload-token" as const,
-                      value: item.originalUrl ?? item.thumbnailUrl!,
-                    },
-                  })),
-              },
-            })
-          : {
-              id: requestId,
+              clipId: projection.clipId,
+              startTime: projection.startTime,
+              endTime: projection.startTime + projection.duration,
+            }
+          : effectiveSceneId
+            ? { kind: "unplaced-shot" as const, shotId: effectiveSceneId }
+            : { kind: "new-asset" as const };
+      const references: GenerationReferenceDraft[] = refIds.map((referenceId) => {
+          const item = project.mediaLibrary.items.find((candidate) => candidate.id === referenceId);
+          if (!item) throw new Error(`Generation reference ${referenceId} is missing from the project.`);
+          const remoteUrl = item.originalUrl ?? item.thumbnailUrl ?? undefined;
+          if (!item.blob && !remoteUrl) {
+            throw new Error(`Generation reference ${referenceId} has no uploadable content.`);
+          }
+          return {
+            mediaId: item.id,
+            origins: effectiveShot?.referenceAssetIds.includes(item.id) ? ["shot"] : ["user"],
+            value: {
               projectId: project.id,
-              provider: "wavespeed" as const,
-              modelId: model.wsModel.model_id,
-              modelSchemaVersion: "wavespeed-schema-v1",
-              context: {
-                projectId: project.id,
-                target,
-                references: [],
-                placementPolicy: "none" as const,
-              } satisfies GenerationContext,
-              providerInputs: injected,
-            };
-        const submitted = await submitGenerationJob(request);
+              ...(item.blob
+                ? { body: item.blob, mimeType: item.blob.type || "application/octet-stream" }
+                : { url: remoteUrl }),
+            },
+        };
+      });
+      const preparedAudio = await prepareWaveSpeedProjectionAudio({
+        projectId: project.id,
+        supportsAudio: route.supportsAudio ?? false,
+        entryContext,
+        tracks: project.timeline.tracks,
+        media: project.mediaLibrary.items,
+      });
+      if (preparedAudio.kind === "error") {
+        throw new Error(preparedAudio.code);
+      }
+      const generationAudio = preparedAudio.kind === "ready"
+        ? preparedAudio.audio
+        : undefined;
+      const prepared = prepareWaveSpeedGenerationDraft({
+        projectId: project.id,
+        route,
+          entryContext,
+          prompt: String(wsInputs.prompt ?? ""),
+          negativePrompt: typeof wsInputs.negative_prompt === "string" ? wsInputs.negative_prompt : undefined,
+          placementPolicy: entryContext.kind === "linked-projection" ? "replace-selected-clip-media" : undefined,
+          target: { kind: "new-asset" },
+        providerInputs: injected,
+        references,
+        audio: generationAudio,
+      });
+        await generationRuntime.controller.submit(prepared.draft);
         if (ac.signal.aborted) return;
-        const jobId = submitted.jobId;
-        useProjectStore.getState().setGenerationStatus(mediaId, "pending");
-        enqueueJob({
-          provider: "wavespeed", providerJobId: jobId, model: model.wsModel.model_id,
-          prompt: String(wsInputs.prompt ?? ""), inputs: injected, projectId: project.id, linkedMediaIds: [mediaId, ...refIds],
-        });
         handleClose();
       }
     } catch (err) {
@@ -512,7 +543,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
       setError((err as Error).message);
       setStep("error");
     }
-  }, [model, project, sceneGenerationSelection, effectiveSceneId, effectiveShot, sourceFile, previewUrl, seedream, zimage, nanoBanana2, flux2, grok, qwen, wsInputs, refIds, addPlaceholderMedia, enqueueJob, handleClose]);
+  }, [model, project, sceneGenerationSelection, effectiveSceneId, effectiveShot, sourceFile, previewUrl, seedream, zimage, nanoBanana2, flux2, grok, qwen, wsInputs, refIds, addPlaceholderMedia, generationRuntime, handleClose]);
 
   // ── Gen type label ────────────────────────────────────────────────────────
   const genTypeLabel: Record<GenType, string> = {
@@ -536,7 +567,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
 
   return (
     <>
-    <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
+    <Dialog open={open} onOpenChange={(o: boolean) => { if (!o) handleClose(); }}>
       <DialogContent className="max-w-lg h-[85vh] flex flex-col">
         <DialogHeader className="shrink-0">
           <DialogTitle>{title}</DialogTitle>
