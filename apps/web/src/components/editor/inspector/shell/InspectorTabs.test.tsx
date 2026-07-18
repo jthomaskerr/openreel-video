@@ -47,6 +47,7 @@ describe("InspectorTabs", () => {
       } else {
         expect(panel).not.toHaveAttribute("aria-labelledby");
       }
+      expect(panel).toHaveAttribute("aria-labelledby", tab.id);
     });
     expect(renderedTabs.filter((tab) => tab.tabIndex === 0)).toEqual([
       screen.getByRole("tab", { name: /Color/ }),
