@@ -113,19 +113,28 @@ function validateSaveResponse(
 ): ProjectSaveReceipt {
   const nonEmpty = (value: unknown): value is string =>
     typeof value === "string" && value.trim().length > 0;
+  const nullableNonEmpty = (value: unknown): value is string | null =>
+    value === null || nonEmpty(value);
+  const committed = response.committed !== false;
   if (response.saved !== true
     || (response.committed !== true && response.committed !== false)
     || response.projectId !== expectedProjectId
     || response.project?.id !== expectedProjectId
     || response.project.modifiedAt !== expectedSourceModifiedAt
     || response.sourceModifiedAt !== expectedSourceModifiedAt
-    || typeof response.persistedAt !== "number"
-    || !Number.isFinite(response.persistedAt)
-    || response.persistedAt <= 0
-    || !nonEmpty(response.commitSha)
-    || !nonEmpty(response.treeSha)
-    || !nonEmpty(response.projectBlobSha)
-    || !nonEmpty(response.mediaManifestDigest)
+    || (committed
+      ? (typeof response.persistedAt !== "number"
+        || !Number.isFinite(response.persistedAt)
+        || response.persistedAt <= 0
+        || !nonEmpty(response.commitSha)
+        || !nonEmpty(response.treeSha)
+        || !nonEmpty(response.projectBlobSha)
+        || !nonEmpty(response.mediaManifestDigest))
+      : (response.persistedAt !== null
+        || !nullableNonEmpty(response.commitSha)
+        || !nullableNonEmpty(response.treeSha)
+        || !nullableNonEmpty(response.projectBlobSha)
+        || !nullableNonEmpty(response.mediaManifestDigest)))
     || !Array.isArray(response.lfsPayloads)
     || (response.commitDueAt !== null
       && (typeof response.commitDueAt !== "number" || !Number.isFinite(response.commitDueAt)))
