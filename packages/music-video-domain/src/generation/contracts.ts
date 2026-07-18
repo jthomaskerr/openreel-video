@@ -44,7 +44,7 @@ export interface ResolvedGenerationAudio {
 export interface GenerationContext {
   projectId: string; entryContext: GenerationEntryContext; mode: GenerationMode; placementPolicy: GenerationPlacementPolicy;
   prompt: string; negativePrompt?: string; references: ResolvedGenerationReference[]; audioAssetId?: string;
-  audioRange?: { startTime: number; endTime: number };
+  audioRange?: { startTime: number; endTime: number }; timing?: GenerationTiming;
 }
 export interface GenerationError { code: string; message: string; field?: string; retryable: boolean }
 export type GenerationRouteErrorCode = "generation-route-unsupported" | "generation-route-ambiguous" | "generation-route-stale" | "generation-schema-drift" | "generation-v2-rollback-active";
@@ -57,12 +57,12 @@ export interface GenerationOutput { mediaId: string; versionId: string; mimeType
 export interface GenerationJob {
   schemaVersion: typeof GENERATION_JOB_SCHEMA_VERSION; contractVersion: typeof GENERATION_JOB_CONTRACT_VERSION; id: string; projectId: string;
   provider: GenerationProvider; providerInstanceId: string; modelId: string; modelSchemaVersion: string; routing: GenerationRouteIdentity;
-  providerJobId?: string; status: GenerationDisposition; attempt: number; context: GenerationContext; providerInputs: Record<string, JsonValue>;
+  providerJobId?: string; status: GenerationDisposition; attempt: number; target?: GenerationTarget; context: GenerationContext; providerInputs: Record<string, JsonValue>;
   attempts: GenerationAttempt[]; checkpoints: Partial<Record<GenerationCheckpointName, GenerationCheckpointState>>; output?: GenerationOutput;
-  outputUrls?: string[]; outputMediaIds?: string[]; error?: GenerationError; createdAt: string | number; updatedAt: string | number; placement?: GenerationPlacementState;
+  outputUrls?: string[]; outputMediaIds?: string[]; error?: GenerationError; createdAt: string | number; updatedAt: string | number; placement?: GenerationPlacementState; projectAction?: GenerationProjectActionEnvelope;
 }
 export interface GenerationModelCapability { provider: GenerationProvider; modelId: string; schemaVersion: string; output: "image" | "video"; mode: GenerationMode; supportsAudio: boolean; sourceField?: string; referenceField?: string; audioField?: string; referenceMinimum?: number; referenceMaximum?: number }
-export interface GenerationSubmitRequest { projectId: string; jobId: string; routing: GenerationRouteIdentity; context: GenerationContext; providerInputs: Record<string, JsonValue> }
+export interface GenerationSubmitRequest { projectId: string; jobId: string; routing: GenerationRouteIdentity; target: GenerationTarget; context: GenerationContext; providerInputs: Record<string, JsonValue> }
 export interface GenerationStatusRequest { projectId: string; jobId: string }
 export interface GenerationCancelRequest { projectId: string; jobId: string; providerJobId: string }
 export interface GenerationProviderRetryRequest { projectId: string; jobId: string; attemptNumber: number; failedProviderJobId: string }
@@ -73,6 +73,95 @@ export interface GenerationReferenceRemoveCommand extends GenerationReferenceRet
 export interface GenerationReferenceDeactivateCommand extends GenerationReferenceRetryCommand {}
 export interface SanitizedGenerationProvenance { provider: GenerationProvider; modelId: string; modelSchemaVersion: string; jobId: string; routing: GenerationRouteIdentity; timing?: GenerationTiming; sha256?: string; width?: number; height?: number; durationSeconds?: number; audio?: Omit<ResolvedGenerationAudio, "uploadLeaseId">; output?: GenerationOutput; checkpoints: Array<{ name: GenerationCheckpointName; status: GenerationCheckpointState["status"]; timestamp: number; error?: GenerationError }>; references: Array<{ id: string; order: number; mediaId: string; versionId?: string; origins: GenerationReferenceOrigin[]; state: "active" | "failed"; preparationStatus: GenerationPreparationStatus }> }
 export interface ProjectCharacter { id: string; slug: string; displayName: string; primaryImageMediaId: string; primaryImageVersionId?: string }
+
+export type GenerationProjectMutationKind =
+  | "finalize-placeholder"
+  | "finalize-version"
+  | "append-shot-attempt"
+  | "create-linked-clip"
+  | "replace-clip-media";
+export interface GenerationProjectBaseRevision {
+  readonly commitSha: string;
+  readonly treeSha: string;
+  readonly projectBlobSha: string;
+  readonly sourceModifiedAt: number;
+}
+export interface GenerationProjectMutationReceipt {
+  readonly schemaVersion: 1;
+  readonly actionId: string;
+  readonly jobId: string;
+  readonly idempotencyKey: string;
+  readonly kind: GenerationProjectMutationKind;
+  readonly semanticPayload: string;
+  readonly baseRevision: GenerationProjectBaseRevision;
+  readonly appliedAt: number;
+}
+export interface GenerationShotAttempt {
+  readonly schemaVersion: 1;
+  readonly jobId: string;
+  readonly providerJobId: string;
+  readonly mediaId: string;
+  readonly versionId: string;
+  readonly outputSha256: string;
+  readonly createdAt: number;
+}
+export interface GenerationProjectActions {
+  readonly receipts: Record<string, GenerationProjectMutationReceipt>;
+  readonly shotAttempts?: Record<string, readonly GenerationShotAttempt[]>;
+}
+export interface GenerationProjectActionEnvelope {
+  readonly schemaVersion: 1;
+  readonly projectId: string;
+  readonly receipt: GenerationProjectMutationReceipt;
+  readonly appliedRevision: GenerationProjectBaseRevision;
+}
+export interface GenerationProjectActionCommand {
+  readonly projectId: string;
+  readonly actionId: string;
+  readonly operation: "undo" | "redo";
+  readonly expectedRevision: GenerationProjectBaseRevision;
+  readonly envelope: GenerationProjectActionEnvelope;
+}
+export interface GenerationProjectActionResult {
+  readonly projectId: string;
+  readonly actionId: string;
+  readonly operation: "undo" | "redo";
+  readonly status: "applied" | "replayed";
+  readonly revision: GenerationProjectBaseRevision;
+  readonly envelope: GenerationProjectActionEnvelope;
+}
+export type GenerationProjectTargetClassification =
+  | { readonly status: "authorized"; readonly target: GenerationTarget }
+  | { readonly status: "needs-attention"; readonly error: GenerationError };
+
+export function classifyGenerationProjectTarget(job: Pick<GenerationJob, "target">): GenerationProjectTargetClassification {
+  if (job.target) return { status: "authorized", target: job.target };
+  return {
+    status: "needs-attention",
+    error: {
+      code: "generation-target-missing",
+      message: "Generation target is missing; project mutation cannot be authorized.",
+      retryable: false,
+    },
+  };
+}
+
+function canonicalizeJsonValue(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) return value.map(canonicalizeJsonValue);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalizeJsonValue(value[key]!)]),
+    );
+  }
+  return value;
+}
+
+export function canonicalizeGenerationProjectActionPayload(value: JsonValue): string {
+  assertDurableGenerationValue(value);
+  return JSON.stringify(canonicalizeJsonValue(value));
+}
 
 export const GENERATION_DISPOSITION_TRANSITIONS: Readonly<Record<GenerationDisposition, readonly GenerationDisposition[]>> = {
   queued: ["submitting", "canceled", "needs-attention"], submitting: ["running", "failed", "canceled", "needs-attention"],
