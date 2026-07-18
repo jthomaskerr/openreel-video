@@ -60,6 +60,26 @@ import { StyleTab } from "./inspector/tabs/StyleTab";
 import { EffectsTab } from "./inspector/tabs/EffectsTab";
 import { AiTab } from "./inspector/tabs/AiTab";
 import { GenerateTab } from "./inspector/tabs/generation/GenerateTab";
+import type { GenerateAudioPresentation } from "./inspector/tabs/generation/GenerateTabSections";
+import { resolveGenerationEntryContext } from "../../features/generation/context/scene-generation";
+import {
+  applyGenerationReferenceCommand,
+  createGenerationReferenceRecoveryState,
+  type GenerationReferenceCommand,
+  type GenerationReferenceRecoveryState,
+} from "../../features/generation/drafts/v2";
+import {
+  isPlacementReconciliationCandidate,
+  type RecoveryAction,
+} from "../../features/generation/recovery/state-machine";
+import {
+  getProductionGenerationRuntime,
+  prepareWaveSpeedGenerationDraft,
+  prepareWaveSpeedProjectionAudio,
+  useGenerationJobStore,
+  waveSpeedRouteKey,
+  type WaveSpeedGenerationCapabilities,
+} from "../../stores/generation-job-store";
 import { MetadataClipInspector } from "./inspector/MetadataClipInspector";
 import { SceneMetadataInspector } from "./inspector/SceneMetadataInspector";
 import { SceneEditor } from "./inspector/SceneEditor";
@@ -157,6 +177,13 @@ export const InspectorPanel: React.FC = () => {
   const subtitleFontInputRef = useRef<HTMLInputElement>(null);
   const customFonts = useCustomFonts();
   const [generationModels, setGenerationModels] = useState<Array<{ id: string; label: string; provider: string; modes: Array<"image" | "video"> }>>([]);
+  const [generationRuntime] = useState(getProductionGenerationRuntime);
+  const [generationCapabilities, setGenerationCapabilities] =
+    useState<WaveSpeedGenerationCapabilities>();
+  const [generationModelId, setGenerationModelId] = useState("");
+  const [generationSubmitting, setGenerationSubmitting] = useState(false);
+  const [generationReferenceOverride, setGenerationReferenceOverride] =
+    useState<GenerationReferenceRecoveryState>();
 
   useEffect(() => {
     setExpandedRecipeApplicationId(null);
@@ -179,6 +206,311 @@ export const InspectorPanel: React.FC = () => {
     if (selectedClipIds.length !== 1) return null;
     return getClip(selectedClipIds[0]) || null;
   }, [getClip, project.modifiedAt, selectedClipIds]);
+
+  const generationJob = useGenerationJobStore((state) => {
+    const selectedClipId = selectedTimelineClip?.id;
+    if (!selectedClipId) return undefined;
+    for (let index = state.records.length - 1; index >= 0; index -= 1) {
+      const record = state.records[index];
+      if (record.kind !== "v2" || record.job.projectId !== project.id) continue;
+      const entryContext = record.job.context.entryContext;
+      if (
+        (entryContext.kind === "linked-projection" && entryContext.clipId === selectedClipId)
+        || (entryContext.kind === "unlinked-range" && entryContext.rangeId === selectedClipId)
+      ) {
+        return record.job;
+      }
+    }
+    return undefined;
+  });
+
+  useEffect(() => {
+    let active = true;
+    void generationRuntime.readCapabilities()
+      .then((capabilities) => {
+        if (!active) return;
+        setGenerationCapabilities(capabilities);
+        setGenerationModels(capabilities.routes.map((route) => ({
+            id: waveSpeedRouteKey(route),
+            label: `${route.providerModelId} · ${route.requestedMode}`,
+            provider: "wavespeed",
+            modes: [route.output],
+          })));
+        setGenerationModelId((current) =>
+          capabilities.routes.some((route) => waveSpeedRouteKey(route) === current)
+            ? current
+            : (capabilities.routes[0] ? waveSpeedRouteKey(capabilities.routes[0]) : ""),
+        );
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        console.error("generation-capabilities-load-failed", {
+          projectId: project.id,
+          error,
+        });
+        toast.error(
+          "Generation models unavailable",
+          error instanceof Error ? error.message : "Generation capabilities could not be loaded.",
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [generationRuntime, project.id]);
+
+  const generationRoute = useMemo(
+    () => generationCapabilities?.routes.find((route) =>
+      waveSpeedRouteKey(route) === generationModelId),
+    [generationCapabilities, generationModelId],
+  );
+
+  const generationEntryContext = useMemo(() => {
+    const shotId = selectedTimelineClip ? getSceneIdFromClip(selectedTimelineClip) : undefined;
+    if (selectedTimelineClip && shotId) {
+      return {
+        kind: "linked-projection" as const,
+        shotId,
+        clipId: selectedTimelineClip.id,
+        startTime: selectedTimelineClip.startTime,
+        endTime: selectedTimelineClip.startTime + selectedTimelineClip.duration,
+      };
+    }
+    if (selectedTimelineClip) {
+      return {
+        kind: "unlinked-range" as const,
+        rangeId: selectedTimelineClip.id,
+        startTime: selectedTimelineClip.startTime,
+        endTime: selectedTimelineClip.startTime + selectedTimelineClip.duration,
+        destinationTrackId: selectedTimelineClip.trackId,
+      };
+    }
+    return { kind: "new-asset" as const };
+  }, [selectedTimelineClip]);
+
+  const generationEntryContextResult = useMemo(
+    () => generationEntryContext.kind === "linked-projection"
+      ? resolveGenerationEntryContext({
+        ...generationEntryContext,
+        supportsAudio: generationRoute?.supportsAudio ?? false,
+      })
+      : resolveGenerationEntryContext(generationEntryContext),
+    [generationEntryContext, generationRoute?.supportsAudio],
+  );
+
+  const generationAudioPresentation = useMemo<GenerateAudioPresentation>(() => {
+    if (!generationRoute) return { kind: "pending" };
+    if (!generationRoute.supportsAudio) return { kind: "unsupported" };
+    if (!generationEntryContextResult.audioEligible) {
+      return {
+        kind: "zero-work",
+        reason: "Audio preparation only runs for a selected linked projection.",
+      };
+    }
+    return { kind: "pending" };
+  }, [generationEntryContextResult.audioEligible, generationRoute]);
+
+  const generationReferenceSeed = useMemo(
+    () => createGenerationReferenceRecoveryState({
+      projectId: project.id,
+      jobId: generationJob?.id ?? "draft",
+      references: (generationJob?.context.references ?? []).map((reference) => ({
+        ...reference,
+        active: true,
+      })),
+      drafts: (generationJob?.context.references ?? []).map((reference) => {
+        const referenceMedia = getMediaItem(reference.mediaId);
+        return {
+          id: reference.id,
+          mediaId: reference.mediaId,
+          versionId: reference.versionId,
+          origins: reference.origins,
+          value: referenceMedia?.blob
+            ? {
+              projectId: project.id,
+              body: referenceMedia.blob,
+              mimeType: referenceMedia.blob.type || referenceMedia.metadata.codec,
+            }
+            : referenceMedia?.remoteUrl
+              ? {
+                projectId: project.id,
+                url: referenceMedia.remoteUrl,
+                mimeType: referenceMedia.metadata.codec,
+              }
+              : undefined,
+        };
+      }),
+    }),
+    [generationJob, getMediaItem, project.id],
+  );
+  const generationReferenceRecovery =
+    generationReferenceOverride?.projectId === generationReferenceSeed.projectId
+      && generationReferenceOverride.jobId === generationReferenceSeed.jobId
+      ? generationReferenceOverride
+      : generationReferenceSeed;
+  const generationReferenceLabels = useMemo(
+    () => Object.fromEntries(generationReferenceRecovery.references.map((reference) => [
+      reference.id,
+      getMediaItem(reference.mediaId)?.name ?? reference.mediaId,
+    ])),
+    [generationReferenceRecovery.references, getMediaItem],
+  );
+
+  const handleGenerationReferenceCommand = useCallback(async (
+    command: GenerationReferenceCommand,
+  ) => {
+    try {
+      const next = await applyGenerationReferenceCommand(
+        generationReferenceRecovery,
+        command,
+        generationRuntime.referenceRecovery,
+      );
+      setGenerationReferenceOverride(next);
+    } catch (error) {
+      console.error("generation-reference-command-failed", {
+        projectId: project.id,
+        jobId: generationReferenceRecovery.jobId,
+        referenceId: command.referenceId,
+        action: command.action,
+        error,
+      });
+      toast.error(
+        "Reference action failed",
+        error instanceof Error ? error.message : "The reference could not be updated.",
+      );
+    }
+  }, [generationReferenceRecovery, generationRuntime, project.id]);
+
+  const handleGenerationSubmit = useCallback(async (draft: {
+    key: string;
+    modelId?: string;
+    prompt: string;
+    providerInputs: Record<string, unknown>;
+    referenceIds: string[];
+    placementPolicy: "none" | "create-linked-clip" | "replace-selected-clip-media";
+    updatedAt: number;
+  }) => {
+    const route = generationCapabilities?.routes.find((candidate) =>
+      waveSpeedRouteKey(candidate) === draft.modelId);
+    if (!route) {
+      toast.error("Generation route unavailable", "Choose an available WaveSpeed image model.");
+      return;
+    }
+    if (generationEntryContextResult.errors.length > 0) {
+      toast.error(
+        "Generation context unavailable",
+        generationEntryContextResult.errors[0]?.code ?? "The selected timeline context is invalid.",
+      );
+      return;
+    }
+
+    setGenerationSubmitting(true);
+    try {
+      const preparedAudio = await prepareWaveSpeedProjectionAudio({
+        projectId: project.id,
+        supportsAudio: route.supportsAudio ?? false,
+        entryContext: generationEntryContextResult.entryContext,
+        tracks: project.timeline.tracks,
+        media: project.mediaLibrary.items,
+      });
+      if (preparedAudio.kind === "error") {
+        throw new Error(preparedAudio.code);
+      }
+      const generationAudio = preparedAudio.kind === "ready"
+        ? preparedAudio.audio
+        : undefined;
+      const references = generationReferenceRecovery.providerReferences.map((reference) => {
+        const source = generationReferenceRecovery.drafts.find(
+          (candidate) => candidate.id === reference.id,
+        );
+        return {
+          mediaId: reference.mediaId,
+          versionId: reference.versionId,
+          origins: reference.origins,
+          value: source?.value,
+        };
+      });
+      const prepared = prepareWaveSpeedGenerationDraft({
+        projectId: project.id,
+        route,
+        entryContext: generationEntryContextResult.entryContext,
+        prompt: draft.prompt,
+        placementPolicy: draft.placementPolicy,
+        target: { kind: "new-asset" },
+        providerInputs: {
+          ...draft.providerInputs,
+          prompt: draft.prompt,
+        },
+        references,
+        audio: generationAudio,
+        idempotencyKey: draft.key,
+      });
+      await generationRuntime.controller.submit(prepared.draft);
+      setGenerationReferenceOverride(undefined);
+    } catch (error) {
+      console.error("inspector-generation-submit-failed", {
+        projectId: project.id,
+        clipId: selectedTimelineClip?.id,
+        error,
+      });
+      toast.error(
+        "Generation could not start",
+        error instanceof Error ? error.message : "The generation request could not be submitted.",
+      );
+    } finally {
+      setGenerationSubmitting(false);
+    }
+  }, [
+    generationCapabilities,
+    generationEntryContextResult,
+    generationReferenceRecovery,
+    generationRuntime,
+    project.id,
+    project.mediaLibrary.items,
+    project.timeline.tracks,
+    selectedTimelineClip?.id,
+  ]);
+
+  const handleGenerationRecoveryAction = useCallback(async (action: RecoveryAction) => {
+    if (!generationJob) {
+      toast.error("Generation job unavailable", "Refresh the project before retrying this action.");
+      return;
+    }
+    if (action === "regenerate" || action === "variation") {
+      toast.error(
+        "Start a new generation",
+        "Edit the generation settings, then submit a new draft.",
+      );
+      return;
+    }
+    if (
+      action === "reconcile-placement"
+      && !isPlacementReconciliationCandidate(generationJob)
+    ) {
+      toast.error(
+        "Placement reconciliation unavailable",
+        "This job is not eligible for placement reconciliation.",
+      );
+      return;
+    }
+    try {
+      await generationRuntime.command(action, generationJob);
+    } catch (error) {
+      console.error("inspector-generation-recovery-failed", {
+        projectId: project.id,
+        jobId: generationJob.id,
+        action,
+        error,
+      });
+      toast.error(
+        "Generation recovery failed",
+        error instanceof Error ? error.message : "The recovery action could not be completed.",
+      );
+    }
+  }, [generationJob, generationRuntime, project.id]);
+
+  const handleGenerationCancel = useCallback(() => {
+    void handleGenerationRecoveryAction("cancel");
+  }, [handleGenerationRecoveryAction]);
 
   const sceneEditorSelection = useMemo(() => {
     if (selectedTimelineClip) {
@@ -1059,10 +1391,24 @@ export const InspectorPanel: React.FC = () => {
                     projectId={project.id}
                     draftId={selectedClip?.id}
                     context="clip"
-                    mode="image"
+                    mode={generationRoute?.output ?? "image"}
                     models={generationModels}
+                    modelId={generationModelId}
+                    onModelChange={setGenerationModelId}
                     prompt={metadataKind === "scene" ? String(selectedTimelineClip?.metadata?.prompt ?? "") : ""}
                     timing={selectedClip ? { start: selectedClip.startTime, end: selectedClip.startTime + selectedClip.duration, source: "Timeline" } : undefined}
+                    entryContextResult={generationEntryContextResult}
+                    destination={generationEntryContextResult.placementPolicy}
+                    placementDefault={generationEntryContextResult.defaultPlacementPolicy}
+                    audioPresentation={generationAudioPresentation}
+                    referenceRecovery={generationReferenceRecovery}
+                    referenceLabels={generationReferenceLabels}
+                    onReferenceCommand={handleGenerationReferenceCommand}
+                    job={generationJob}
+                    submitting={generationSubmitting}
+                    onSubmit={handleGenerationSubmit}
+                    onRecoveryAction={handleGenerationRecoveryAction}
+                    onCancel={handleGenerationCancel}
                   />
                 </InspectorTabPanel>
                 <InspectorTabPanel tab="audio" active={activeTab}>
