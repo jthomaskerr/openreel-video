@@ -2,11 +2,12 @@ import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import assert from "node:assert/strict";
+import { afterEach, describe, it } from "node:test";
 import type { MediaItem, Project, ProjectBaseRevision } from "@openreel/core";
 import type { GenerationJob, GenerationOutput, GenerationTarget } from "@openreel/music-video-domain/generation";
-import { afterEach, describe, expect, it } from "vitest";
 import { config } from "../../env.js";
-import { GitStore } from "../../projects/git-store.js";
+import { GitStore, type GitCommitReceipt } from "../../projects/git-store.js";
 import { buildRequiredMediaManifest } from "../../projects/media-manifest.js";
 import { ProjectStore } from "../../projects/project-store.js";
 import { storePendingUpload } from "../../projects/pending-media.js";
@@ -81,6 +82,19 @@ function imageItem(id: string, name = `${id}.png`, assetGroupId = id): MediaItem
   };
 }
 
+function generationProjectActions(item: MediaItem | undefined): {
+  readonly receipts?: Readonly<Record<string, unknown>>;
+  readonly shotAttempts?: Readonly<Record<string, readonly unknown[]>>;
+} | undefined {
+  const actions = item?.generationMeta?.inputs?.["generationProjectActions"];
+  return actions && typeof actions === "object" && !Array.isArray(actions)
+    ? actions as {
+      readonly receipts?: Readonly<Record<string, unknown>>;
+      readonly shotAttempts?: Readonly<Record<string, readonly unknown[]>>;
+    }
+    : undefined;
+}
+
 interface AdapterFixture {
   root: string;
   store: ProjectStore;
@@ -116,8 +130,14 @@ async function adapterFixture(): Promise<AdapterFixture> {
   return { root, store, gitStore, project, cacheDir, adapter };
 }
 
-function revision(receipt: { commitSha: string; treeSha: string; projectBlobSha: string }, project: Project): ProjectBaseRevision {
-  return { ...receipt, sourceModifiedAt: project.modifiedAt };
+function revision(receipt: GitCommitReceipt, project: Project): ProjectBaseRevision {
+  assert.ok(receipt.commitSha && receipt.treeSha && receipt.projectBlobSha, "Expected a complete confirmed Git receipt");
+  return {
+    commitSha: receipt.commitSha,
+    treeSha: receipt.treeSha,
+    projectBlobSha: receipt.projectBlobSha,
+    sourceModifiedAt: project.modifiedAt,
+  };
 }
 
 async function seedMedia(fixture: AdapterFixture, item: MediaItem, bytes = new Uint8Array([1, 2, 3, 4])): Promise<Project> {
@@ -161,12 +181,12 @@ async function cacheOutput(fixture: AdapterFixture, providerJobId = "provider-1"
 
 describe("GenerationProjectActionAdapter", () => {
   it("exports the production project-action adapter", () => {
-    expect((generationServices as unknown as Record<string, unknown>).GenerationProjectActionAdapter).toBeTypeOf("function");
+    assert.equal(typeof (generationServices as unknown as Record<string, unknown>).GenerationProjectActionAdapter, "function");
   });
 
   it("stages a new asset once and replays from its semantic receipt after restart", async () => {
     const fixture = await adapterFixture();
-    expect((fixture.adapter as unknown as { finalize?: unknown }).finalize).toBeTypeOf("function");
+    assert.equal(typeof (fixture.adapter as unknown as { finalize?: unknown }).finalize, "function");
     if (!("finalize" in fixture.adapter)) return;
     const output = await cacheOutput(fixture);
     const job = generationJob(fixture.project.id, { kind: "new-asset", placeholderMediaId: "placeholder-1" });
@@ -177,12 +197,38 @@ describe("GenerationProjectActionAdapter", () => {
     const replay = await restarted.finalize({ job, output, idempotencyKey: "placement-key-1" });
 
     const project = await fixture.store.loadProject(fixture.project.id);
-    expect(first).toMatchObject({ mediaId: "placeholder-1", versionId: "placeholder-1" });
-    expect(replay).toEqual(first);
-    expect(project?.mediaLibrary.items).toHaveLength(1);
-    expect(project?.mediaLibrary.items[0]).toMatchObject({ id: "placeholder-1", assetGroupId: "placeholder-1", isCurrent: true });
-    expect(project?.mediaLibrary.items[0]?.generationMeta?.generationProjectActions?.receipts["placement-key-1"]).toMatchObject({ kind: "finalize-placeholder", jobId: "job-1" });
-    expect((await fixture.gitStore.getHistory(fixture.project.id)).length).toBe(before + 1);
+    assert.equal(first.mediaId, "placeholder-1");
+    assert.equal(first.versionId, "placeholder-1");
+    assert.deepEqual(replay, first);
+    assert.equal(project?.mediaLibrary.items.length, 1);
+    assert.equal(project?.mediaLibrary.items[0]?.id, "placeholder-1");
+    assert.equal(project?.mediaLibrary.items[0]?.assetGroupId, "placeholder-1");
+    assert.equal(project?.mediaLibrary.items[0]?.isCurrent, true);
+    const receipt = generationProjectActions(project?.mediaLibrary.items[0])?.receipts?.["placement-key-1"] as { kind?: unknown; jobId?: unknown } | undefined;
+    assert.equal(receipt?.kind, "finalize-placeholder");
+    assert.equal(receipt?.jobId, "job-1");
+    assert.equal((await fixture.gitStore.getHistory(fixture.project.id)).length, before + 1);
+  });
+
+  it("rejects an incomplete confirmed revision before mutating the project", async () => {
+    const fixture = await adapterFixture();
+    const job = generationJob(
+      fixture.project.id,
+      { kind: "new-asset", placeholderMediaId: "incomplete-revision-output" },
+      { id: "job-incomplete-revision" },
+    );
+    const output = await cacheOutput(fixture);
+    fixture.gitStore.readConfirmedReceipt = async () => ({
+      commitSha: null,
+      treeSha: null,
+      projectBlobSha: null,
+      mediaManifestDigest: null,
+    });
+
+    const error = await fixture.adapter.finalize({ job, output, idempotencyKey: "incomplete-revision-key" })
+      .catch((cause: unknown) => cause);
+    assert.equal((error as { code?: unknown }).code, "generation-project-revision-unavailable");
+    assert.equal((await fixture.store.loadProject(fixture.project.id))?.mediaLibrary.items.length, 0);
   });
 
   it("adds one current version to the explicit source group and replays without duplication", async () => {
@@ -197,10 +243,12 @@ describe("GenerationProjectActionAdapter", () => {
 
     const project = await fixture.store.loadProject(fixture.project.id);
     const group = project?.mediaLibrary.items.filter((item) => item.assetGroupId === "asset-group-1") ?? [];
-    expect(group).toHaveLength(2);
-    expect(group.filter((item) => item.isCurrent)).toHaveLength(1);
-    expect(group.find((item) => item.id === "source-v1")?.isCurrent).toBe(false);
-    expect(group.find((item) => item.id === "source-v2")).toMatchObject({ isCurrent: true, generationMeta: { generationProjectActions: { receipts: { "placement-key-version": { kind: "finalize-version" } } } } });
+    assert.equal(group.length, 2);
+    assert.equal(group.filter((item) => item.isCurrent).length, 1);
+    assert.equal(group.find((item) => item.id === "source-v1")?.isCurrent, false);
+    const current = group.find((item) => item.id === "source-v2");
+    assert.equal(current?.isCurrent, true);
+    assert.equal((generationProjectActions(current)?.receipts?.["placement-key-version"] as { kind?: unknown } | undefined)?.kind, "finalize-version");
   });
 
   it("rejects the same idempotency key with a different semantic payload before mutation", async () => {
@@ -211,14 +259,17 @@ describe("GenerationProjectActionAdapter", () => {
     await fixture.adapter.finalize({ job, output, idempotencyKey: "placement-key-conflict" });
     const before = await fixture.store.loadProject(fixture.project.id);
 
-    await expect(fixture.adapter.finalize({ job, output: { ...output, sha256: "different-sha" }, idempotencyKey: "placement-key-conflict" })).rejects.toMatchObject({ code: "generation-idempotency-conflict" });
-    expect(await fixture.store.loadProject(fixture.project.id)).toEqual(before);
+    await assert.rejects(
+      fixture.adapter.finalize({ job, output: { ...output, sha256: "different-sha" }, idempotencyKey: "placement-key-conflict" }),
+      (error: unknown) => (error as { code?: unknown }).code === "generation-idempotency-conflict",
+    );
+    assert.deepEqual(await fixture.store.loadProject(fixture.project.id), before);
   });
 
   it("exposes shot, placement, reconciliation, envelope, undo, and redo operations", () => {
     const prototype = GenerationProjectActionAdapter.prototype as unknown as Record<string, unknown>;
     for (const method of ["link", "place", "reconcile", "getActionEnvelope", "applyProjectAction"]) {
-      expect(prototype[method], method).toBeTypeOf("function");
+      assert.equal(typeof prototype[method], "function", method);
     }
   });
 
@@ -241,7 +292,7 @@ describe("GenerationProjectActionAdapter", () => {
     ]);
 
     const project = await fixture.store.loadProject(fixture.project.id);
-    expect(project?.mediaLibrary.items.map((item) => item.id).sort()).toEqual(["generated-1", "generated-2"]);
+    assert.deepEqual(project?.mediaLibrary.items.map((item) => item.id).sort(), ["generated-1", "generated-2"]);
   });
 
   it("appends one typed shot attempt and receipt on replay", async () => {
@@ -265,9 +316,13 @@ describe("GenerationProjectActionAdapter", () => {
     await fixture.adapter.link({ job, output, idempotencyKey: "shot-link-key" });
 
     const item = (await fixture.store.loadProject(fixture.project.id))?.mediaLibrary.items.find((candidate) => candidate.id === ids.versionId);
-    expect(item?.generationMeta?.generationProjectActions?.shotAttempts?.["shot-1"]).toHaveLength(1);
-    expect(item?.generationMeta?.generationProjectActions?.shotAttempts?.["shot-1"]?.[0]).toMatchObject({ jobId: job.id, providerJobId: "provider-1", mediaId: ids.mediaId, versionId: ids.versionId });
-    expect(item?.generationMeta?.generationProjectActions?.receipts["shot-link-key"]).toMatchObject({ kind: "append-shot-attempt" });
+    const actions = generationProjectActions(item);
+    assert.equal(actions?.shotAttempts?.["shot-1"]?.length, 1);
+    assert.deepEqual(
+      Object.fromEntries(Object.entries(actions?.shotAttempts?.["shot-1"]?.[0] as Record<string, unknown>).filter(([key]) => ["jobId", "providerJobId", "mediaId", "versionId"].includes(key))),
+      { jobId: job.id, providerJobId: "provider-1", mediaId: ids.mediaId, versionId: ids.versionId },
+    );
+    assert.equal((actions?.receipts?.["shot-link-key"] as { kind?: unknown } | undefined)?.kind, "append-shot-attempt");
   });
 
   it("creates one linked clip at the exact destination timing and reconciles its receipt", async () => {
@@ -287,11 +342,19 @@ describe("GenerationProjectActionAdapter", () => {
     const reconciled = await fixture.adapter.reconcile({ job, output, idempotencyKey: "placement-key" });
 
     const track = (await fixture.store.loadProject(fixture.project.id))?.timeline.tracks.find((candidate) => candidate.id === "image-track");
-    expect(first).toEqual({ outcome: "applied" });
-    expect(replay).toEqual({ outcome: "applied" });
-    expect(reconciled).toEqual({ outcome: "applied" });
-    expect(track?.clips).toHaveLength(1);
-    expect(track?.clips[0]).toMatchObject({ mediaId: ids.versionId, startTime: 2, duration: 3, metadata: { assetGroupId: ids.mediaId, idempotencyKey: "placement-key", generationProjectActions: { receipts: { "placement-key": { kind: "create-linked-clip" } } } } });
+    assert.deepEqual(first, { outcome: "applied" });
+    assert.deepEqual(replay, { outcome: "applied" });
+    assert.deepEqual(reconciled, { outcome: "applied" });
+    assert.equal(track?.clips.length, 1);
+    const clip = track?.clips[0];
+    const metadata = clip?.metadata as Record<string, unknown> | undefined;
+    const projectActions = metadata?.["generationProjectActions"] as { receipts?: Record<string, { kind?: unknown }> } | undefined;
+    assert.equal(clip?.mediaId, ids.versionId);
+    assert.equal(clip?.startTime, 2);
+    assert.equal(clip?.duration, 3);
+    assert.equal(metadata?.["assetGroupId"], ids.mediaId);
+    assert.equal(metadata?.["idempotencyKey"], "placement-key");
+    assert.equal(projectActions?.receipts?.["placement-key"]?.kind, "create-linked-clip");
   });
 
   it("replaces only clip media and receipt metadata for a linked projection", async () => {
@@ -300,7 +363,7 @@ describe("GenerationProjectActionAdapter", () => {
     await seedMedia(fixture, imageItem("source-v1", "source-v1.png", "asset-group-1"));
     const beforeClip = {
       id: "clip-1", type: "image" as const, mediaId: "source-v1", trackId: "image-track", startTime: 4, duration: 6, inPoint: 1, outPoint: 7,
-      effects: [{ id: "effect-1", type: "blur", enabled: true, parameters: {} }], audioEffects: [],
+      effects: [{ id: "effect-1", type: "blur", enabled: true, params: {} }], audioEffects: [],
       transform: { position: { x: 2, y: 3 }, scale: { x: 1.2, y: 0.8 }, rotation: 4, anchor: { x: 0.5, y: 0.5 }, opacity: 0.7, fitMode: "cover" as const },
       volume: 0.4, keyframes: [], speed: 1.5, muted: true, metadata: { shotId: "shot-1", keep: "exact" },
     };
@@ -313,10 +376,15 @@ describe("GenerationProjectActionAdapter", () => {
     const result = await fixture.adapter.place({ job, output: { ...rawOutput, ...ids }, idempotencyKey: "replace-key" });
 
     const after = (await fixture.store.loadProject(fixture.project.id))?.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === "clip-1");
-    expect(result).toEqual({ outcome: "applied" });
-    expect(after?.mediaId).toBe("source-v2");
-    expect({ ...after, mediaId: beforeClip.mediaId, metadata: beforeClip.metadata }).toEqual(beforeClip);
-    expect(after?.metadata).toMatchObject({ shotId: "shot-1", keep: "exact", idempotencyKey: "replace-key", generationProjectActions: { receipts: { "replace-key": { kind: "replace-clip-media" } } } });
+    assert.deepEqual(result, { outcome: "applied" });
+    assert.equal(after?.mediaId, "source-v2");
+    assert.deepEqual({ ...after, mediaId: beforeClip.mediaId, metadata: beforeClip.metadata }, beforeClip);
+    const metadata = after?.metadata as Record<string, unknown> | undefined;
+    const projectActions = metadata?.["generationProjectActions"] as { receipts?: Record<string, { kind?: unknown }> } | undefined;
+    assert.equal(metadata?.["shotId"], "shot-1");
+    assert.equal(metadata?.["keep"], "exact");
+    assert.equal(metadata?.["idempotencyKey"], "replace-key");
+    assert.equal(projectActions?.receipts?.["replace-key"]?.kind, "replace-clip-media");
   });
 
   it("classifies a known pre-commit failure and receipt-free reconciliation as replay-safe", async () => {
@@ -332,8 +400,10 @@ describe("GenerationProjectActionAdapter", () => {
     const placed = await fixture.adapter.place({ job, output, idempotencyKey: "missing-track-key" });
     const reconciled = await fixture.adapter.reconcile({ job, output, idempotencyKey: "missing-track-key" });
 
-    expect(placed).toMatchObject({ outcome: "not-applied", replaySafe: true, error: { code: "generation-placement-track-not-found" } });
-    expect(reconciled).toEqual({ outcome: "not-applied", replaySafe: true });
+    assert.equal(placed.outcome, "not-applied");
+    assert.equal(placed.replaySafe, true);
+    assert.equal(placed.error?.code, "generation-placement-track-not-found");
+    assert.deepEqual(reconciled, { outcome: "not-applied", replaySafe: true });
   });
 
   it("retries a project action after a browser save conflict and preserves both changes", async () => {
@@ -357,8 +427,8 @@ describe("GenerationProjectActionAdapter", () => {
     await adapter.finalize({ job, output: rawOutput, idempotencyKey: "browser-conflict-key" });
 
     const project = await fixture.store.loadProject(fixture.project.id);
-    expect(project?.name).toBe("Browser edit");
-    expect(project?.mediaLibrary.items.some((item) => item.id === "conflict-output")).toBe(true);
+    assert.equal(project?.name, "Browser edit");
+    assert.equal(project?.mediaLibrary.items.some((item) => item.id === "conflict-output"), true);
   });
 
   it("reconciles a committed placement as applied after its response is lost", async () => {
@@ -387,9 +457,10 @@ describe("GenerationProjectActionAdapter", () => {
     const placed = await adapter.place({ job, output, idempotencyKey: "lost-placement-key" });
     const reconciled = await adapter.reconcile({ job, output, idempotencyKey: "lost-placement-key" });
 
-    expect(placed).toMatchObject({ outcome: "unknown", error: { code: "generation-project-commit-response-lost" } });
-    expect(reconciled).toEqual({ outcome: "applied" });
-    expect((await fixture.gitStore.getHistory(fixture.project.id)).length).toBe(before + 1);
+    assert.equal(placed.outcome, "unknown");
+    assert.equal(placed.error?.code, "generation-project-commit-response-lost");
+    assert.deepEqual(reconciled, { outcome: "applied" });
+    assert.equal((await fixture.gitStore.getHistory(fixture.project.id)).length, before + 1);
   });
 
   it("converges delayed and recovery placement owners on one receipt and clip", async () => {
@@ -409,8 +480,8 @@ describe("GenerationProjectActionAdapter", () => {
 
     const project = await fixture.store.loadProject(fixture.project.id);
     const clips = project?.timeline.tracks.flatMap((track) => track.clips).filter((clip) => (clip.metadata as { idempotencyKey?: string } | undefined)?.idempotencyKey === "race-placement-key") ?? [];
-    expect(results).toEqual([{ outcome: "applied" }, { outcome: "applied" }]);
-    expect(clips).toHaveLength(1);
+    assert.deepEqual(results, [{ outcome: "applied" }, { outcome: "applied" }]);
+    assert.equal(clips.length, 1);
   });
 
   it("undoes and redoes the exact Git-backed server action through its durable envelope", async () => {
@@ -423,10 +494,12 @@ describe("GenerationProjectActionAdapter", () => {
     if (!envelope) throw new Error("action-envelope-missing");
 
     const undone = await fixture.adapter.applyProjectAction({ projectId: fixture.project.id, actionId: envelope.receipt.actionId, operation: "undo", expectedRevision: envelope.appliedRevision, envelope });
-    expect((await fixture.store.loadProject(fixture.project.id))?.mediaLibrary.items.some((item) => item.id === "undo-output")).toBe(false);
+    assert.equal((await fixture.store.loadProject(fixture.project.id))?.mediaLibrary.items.some((item) => item.id === "undo-output"), false);
     const redone = await fixture.adapter.applyProjectAction({ projectId: fixture.project.id, actionId: envelope.receipt.actionId, operation: "redo", expectedRevision: undone.revision, envelope });
-    expect((await fixture.store.loadProject(fixture.project.id))?.mediaLibrary.items.some((item) => item.id === "undo-output")).toBe(true);
-    expect(undone).toMatchObject({ operation: "undo", status: "applied" });
-    expect(redone).toMatchObject({ operation: "redo", status: "applied" });
+    assert.equal((await fixture.store.loadProject(fixture.project.id))?.mediaLibrary.items.some((item) => item.id === "undo-output"), true);
+    assert.equal(undone.operation, "undo");
+    assert.equal(undone.status, "applied");
+    assert.equal(redone.operation, "redo");
+    assert.equal(redone.status, "applied");
   });
 });

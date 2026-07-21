@@ -3,7 +3,6 @@ import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { MediaItem, Project, ProjectBaseRevision } from "@openreel/core";
-import { ActionExecutor } from "@openreel/core/actions/action-executor";
 import {
   canonicalizeGenerationProjectActionPayload,
   classifyGenerationProjectTarget,
@@ -17,6 +16,7 @@ import {
   type GenerationShotAttempt,
   type JsonValue,
 } from "@openreel/music-video-domain/generation";
+import { ActionExecutor } from "../../../../../packages/core/src/actions/index.js";
 import { GitStore, type GitCommitReceipt } from "../../projects/git-store.js";
 import { buildRequiredMediaManifest } from "../../projects/media-manifest.js";
 import { ProjectStore } from "../../projects/project-store.js";
@@ -51,13 +51,25 @@ interface MutationResult<T> {
   readonly replayed: boolean;
 }
 
+interface PersistedGenerationProjectActions {
+  readonly receipts?: Readonly<Record<string, unknown>>;
+  readonly shotAttempts?: Readonly<Record<string, readonly GenerationShotAttempt[]>>;
+}
+
+const GENERATION_PROJECT_ACTIONS_INPUT_KEY = "generationProjectActions";
+
 interface MutationInput<T> {
   readonly job: GenerationJob;
   readonly idempotencyKey: string;
   readonly kind: GenerationProjectMutationKind;
   readonly semanticPayload: string;
   readonly replayValue: (project: Project, receipt: GenerationProjectMutationReceipt) => T;
-  readonly mutate: (project: Project, receipt: GenerationProjectMutationReceipt) => Promise<T> | T;
+  readonly mutate: (project: Project, receipt: GenerationProjectMutationReceipt) => Promise<ProjectMutation<T>> | ProjectMutation<T>;
+}
+
+interface ProjectMutation<T> {
+  readonly project: Project;
+  readonly value: T;
 }
 
 export type FinalizedGenerationProjectOutput = Pick<GenerationOutput, "mediaId" | "versionId"> & {
@@ -74,6 +86,12 @@ function outputExtension(mimeType: string): string {
 }
 
 function asBaseRevision(receipt: GitCommitReceipt, project: Project): ProjectBaseRevision {
+  if (!receipt.commitSha || !receipt.treeSha || !receipt.projectBlobSha) {
+    throw new GenerationProjectActionError(
+      "generation-project-revision-unavailable",
+      `Project ${project.id} has no complete confirmed revision.`,
+    );
+  }
   return {
     commitSha: receipt.commitSha,
     treeSha: receipt.treeSha,
@@ -94,7 +112,7 @@ function receiptFromUnknown(value: unknown): GenerationProjectMutationReceipt | 
 export function findGenerationProjectReceipt(project: Project, idempotencyKey: string): GenerationProjectMutationReceipt | undefined {
   const candidates: GenerationProjectMutationReceipt[] = [];
   for (const item of project.mediaLibrary.items) {
-    const candidate = receiptFromUnknown(item.generationMeta?.generationProjectActions?.receipts[idempotencyKey]);
+    const candidate = receiptFromUnknown(generationProjectActionsFromItem(item)?.receipts?.[idempotencyKey]);
     if (candidate) candidates.push(candidate);
   }
   for (const track of project.timeline.tracks) {
@@ -112,8 +130,15 @@ export function findGenerationProjectReceipt(project: Project, idempotencyKey: s
   return candidates[0];
 }
 
+function generationProjectActionsFromItem(item: MediaItem | undefined): PersistedGenerationProjectActions | undefined {
+  const actions = item?.generationMeta?.inputs?.[GENERATION_PROJECT_ACTIONS_INPUT_KEY];
+  return actions && typeof actions === "object" && !Array.isArray(actions)
+    ? actions as PersistedGenerationProjectActions
+    : undefined;
+}
+
 function generationActionsWithReceipt(item: MediaItem | undefined, idempotencyKey: string, receipt: GenerationProjectMutationReceipt) {
-  const existing = item?.generationMeta?.generationProjectActions;
+  const existing = generationProjectActionsFromItem(item);
   return {
     receipts: { ...(existing?.receipts ?? {}), [idempotencyKey]: receipt },
     ...(existing?.shotAttempts ? { shotAttempts: existing.shotAttempts } : {}),
@@ -254,14 +279,18 @@ export class GenerationProjectActionAdapter {
               negativePrompt: input.job.context.negativePrompt,
               jobId: input.job.id,
               status: "succeeded",
-              generationProjectActions: generationActionsWithReceipt(undefined, input.idempotencyKey, receipt),
+              inputs: {
+                [GENERATION_PROJECT_ACTIONS_INPUT_KEY]: generationActionsWithReceipt(undefined, input.idempotencyKey, receipt),
+              },
             },
           };
           const items = project.mediaLibrary.items
             .filter((item) => item.id !== target.placeholderMediaId)
             .map((item) => target.kind === "new-version" && (item.assetGroupId ?? item.id) === groupId ? { ...item, isCurrent: false } : item);
-          project.mediaLibrary = { ...project.mediaLibrary, items: [...items, generated] };
-          return { mediaId: groupId, versionId: generated.id };
+          return {
+            project: { ...project, mediaLibrary: { ...project.mediaLibrary, items: [...items, generated] } },
+            value: { mediaId: groupId, versionId: generated.id },
+          };
         },
       });
       if (result.replayed) await removePendingMedia(this.options.projectStore.projectDir(input.job.projectId), target.placeholderMediaId);
@@ -307,18 +336,27 @@ export class GenerationProjectActionAdapter {
           ...item,
           generationMeta: {
             ...(item.generationMeta ?? { provider: input.job.provider, model: input.job.modelId }),
-            generationProjectActions: {
-              ...actions,
-              shotAttempts: {
-                ...(actions.shotAttempts ?? {}),
-                [shotId]: [...(actions.shotAttempts?.[shotId] ?? []), attempt],
+            inputs: {
+              ...(item.generationMeta?.inputs ?? {}),
+              [GENERATION_PROJECT_ACTIONS_INPUT_KEY]: {
+                ...actions,
+                shotAttempts: {
+                  ...(actions.shotAttempts ?? {}),
+                  [shotId]: [...(actions.shotAttempts?.[shotId] ?? []), attempt],
+                },
               },
             },
           },
         };
-        (project as Project & { mediaLibrary: { items: MediaItem[] } }).mediaLibrary = {
-          ...project.mediaLibrary,
-          items: project.mediaLibrary.items.map((candidate, index) => index === itemIndex ? nextItem : candidate),
+        return {
+          project: {
+            ...project,
+            mediaLibrary: {
+              ...project.mediaLibrary,
+              items: project.mediaLibrary.items.map((candidate, index) => index === itemIndex ? nextItem : candidate),
+            },
+          },
+          value: undefined,
         };
       },
     });
@@ -337,8 +375,10 @@ export class GenerationProjectActionAdapter {
         semanticPayload,
         replayValue: () => undefined,
         mutate: async (project, receipt) => {
-          if (kind === "create-linked-clip") await this.createLinkedClip(project, input, receipt);
-          else this.replaceClipMedia(project, input, receipt);
+          const mutatedProject = kind === "create-linked-clip"
+            ? await this.createLinkedClip(project, input, receipt)
+            : this.replaceClipMedia(project, input, receipt);
+          return { project: mutatedProject, value: undefined };
         },
       });
       return { outcome: "applied" };
@@ -429,12 +469,12 @@ export class GenerationProjectActionAdapter {
       actionId: command.actionId,
       operation: command.operation,
       status: "applied",
-      revision: { commitSha: saved.commitSha, treeSha: saved.treeSha, projectBlobSha: saved.projectBlobSha, sourceModifiedAt: saved.sourceModifiedAt },
+      revision: asBaseRevision(saved, saved.project),
       envelope: command.envelope,
     };
   }
 
-  private async createLinkedClip(project: Project, input: { job: GenerationJob; output: GenerationOutput; idempotencyKey: string }, receipt: GenerationProjectMutationReceipt): Promise<void> {
+  private async createLinkedClip(project: Project, input: { job: GenerationJob; output: GenerationOutput; idempotencyKey: string }, receipt: GenerationProjectMutationReceipt): Promise<Project> {
     const timing = input.job.context.timing;
     if (!timing) throw new GenerationProjectActionError("generation-placement-timing-required");
     const media = project.mediaLibrary.items.find((item) => item.id === input.output.versionId);
@@ -478,9 +518,10 @@ export class GenerationProjectActionAdapter {
       },
     }, project);
     if (!result.success) throw new GenerationProjectActionError("generation-placement-clip-add-failed", result.error?.message);
+    return project;
   }
 
-  private replaceClipMedia(project: Project, input: { job: GenerationJob; output: GenerationOutput; idempotencyKey: string }, receipt: GenerationProjectMutationReceipt): void {
+  private replaceClipMedia(project: Project, input: { job: GenerationJob; output: GenerationOutput; idempotencyKey: string }, receipt: GenerationProjectMutationReceipt): Project {
     const entry = input.job.context.entryContext;
     if (entry.kind !== "linked-projection") throw new GenerationProjectActionError("generation-placement-linked-projection-required");
     const media = project.mediaLibrary.items.find((item) => item.id === input.output.versionId);
@@ -503,11 +544,14 @@ export class GenerationProjectActionAdapter {
         generationProjectActions: { ...existingActions, receipts: { ...(existingActions.receipts ?? {}), [input.idempotencyKey]: receipt } },
       },
     };
-    (project as Project & { timeline: Project["timeline"] }).timeline = {
-      ...project.timeline,
-      tracks: project.timeline.tracks.map((track) => track.id === matches[0]!.track.id
-        ? { ...track, clips: track.clips.map((clip) => clip.id === existing.id ? replacement : clip) }
-        : track),
+    return {
+      ...project,
+      timeline: {
+        ...project.timeline,
+        tracks: project.timeline.tracks.map((track) => track.id === matches[0]!.track.id
+          ? { ...track, clips: track.clips.map((clip) => clip.id === existing.id ? replacement : clip) }
+          : track),
+      },
     };
   }
 
@@ -566,9 +610,12 @@ export class GenerationProjectActionAdapter {
         baseRevision,
         appliedAt: this.clock(),
       };
-      const project = structuredClone(current) as Project;
-      const value = await input.mutate(project, receipt);
-      project.modifiedAt = Math.max(current.modifiedAt + 1, this.clock());
+      const draft = structuredClone(current) as Project;
+      const mutation = await input.mutate(draft, receipt);
+      const project: Project = {
+        ...mutation.project,
+        modifiedAt: Math.max(current.modifiedAt + 1, this.clock()),
+      };
       try {
         await this.options.beforeTransaction?.({ attempt, jobId: input.job.id, kind: input.kind });
         const saved = await executeSaveTransaction(this.options.projectStore, this.options.gitStore, {
@@ -579,19 +626,14 @@ export class GenerationProjectActionAdapter {
           saveIntent: "recovery",
         });
         const result: MutationResult<T> = {
-          value,
+          value: mutation.value,
           project: saved.project,
           receipt,
           envelope: {
             schemaVersion: 1,
             projectId: project.id,
             receipt,
-            appliedRevision: {
-              commitSha: saved.commitSha,
-              treeSha: saved.treeSha,
-              projectBlobSha: saved.projectBlobSha,
-              sourceModifiedAt: saved.sourceModifiedAt,
-            },
+            appliedRevision: asBaseRevision(saved, saved.project),
           },
           replayed: false,
         };
