@@ -3,7 +3,6 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MediaItem } from "@openreel/core";
 import GenerateTab from "./GenerateTab";
-import { GenerateReferenceSection } from "./GenerateTabSections";
 import { useGenerationDraftStore } from "../../../../../features/generation/drafts";
 import { readReferenceEditorRouteFromModalData } from "../../../../../features/references/navigation";
 import type {
@@ -365,6 +364,7 @@ const referenceRecovery: GenerationReferenceRecoveryState = {
       state: "active",
       preparationStatus: "ready",
       errorHistory: [],
+      active: true,
     },
   ],
 };
@@ -1454,16 +1454,26 @@ describe("GenerateTab", () => {
   });
 
   it("routes a reference card click to the modal and Shift-click to the inspector", () => {
-    render(
-      <GenerateReferenceSection
-        references={[
-          {
-            id: "r1",
-            label: "Mood board",
-            origins: ["user"],
-            target: { kind: "imported-image", mediaId: "media-imported-1" },
+    useGenerationDraftStore.getState().saveDraft(
+      { kind: "new-asset", draftId: "draft-with-navigation-target" },
+      {
+        referenceIds: ["reference:media-version-1"],
+        referenceTargets: {
+          "reference:media-version-1": {
+            kind: "imported-image",
+            mediaId: "media-imported-1",
           },
-        ]}
+        },
+      },
+      10,
+    );
+
+    render(
+      <GenerateTab
+        projectId="project-1"
+        draftId="draft-with-navigation-target"
+        models={[{ id: "m", label: "Model" }]}
+        referenceLabels={{ "reference:media-version-1": "Mood board" }}
       />,
     );
 
@@ -1491,5 +1501,41 @@ describe("GenerateTab", () => {
       editor: "imported-image",
       mediaId: "media-imported-1",
     });
+  });
+
+  it("keeps an explicit missing selected-reference target in recovery state without navigation", () => {
+    useGenerationDraftStore.getState().saveDraft(
+      { kind: "new-asset", draftId: "draft-with-missing-target" },
+      {
+        referenceIds: ["reference:missing-character"],
+        referenceTargets: {
+          "reference:missing-character": {
+            kind: "missing",
+            token: "@{character:deleted-character}",
+          },
+        },
+      },
+      10,
+    );
+
+    render(
+      <GenerateTab
+        projectId="project-1"
+        draftId="draft-with-missing-target"
+        models={[{ id: "m", label: "Model" }]}
+        referenceLabels={{ "reference:missing-character": "Deleted character" }}
+      />,
+    );
+
+    const card = screen.getByText("Deleted character").closest("li");
+    expect(card).not.toBeNull();
+    expect(within(card!).queryByRole("button")).toBeNull();
+    expect(
+      within(card!).getByRole("status", {
+        name: "Deleted character reference unavailable",
+      }),
+    ).toHaveTextContent("Relink or remove this reference");
+    expect(mockedUIStore.state.activeModal).toBeNull();
+    expect(mockedUIStore.state.referenceEditorInspectorRoute).toBeNull();
   });
 });

@@ -274,6 +274,10 @@ export function GenerateReferenceSection(props: {
       {props.references?.length ? (
         <ul aria-label="Selected references" className="mt-2 grid gap-2">
           {props.references.map((reference) => {
+            const navigationTarget =
+              reference.target && reference.target.kind !== "missing"
+                ? reference.target
+                : undefined;
             const content = (
               <div className="space-y-2">
                 <div className="flex min-w-0 items-start justify-between gap-2">
@@ -296,23 +300,31 @@ export function GenerateReferenceSection(props: {
                 <p className="text-[11px] text-text-muted">
                   {reference.origins.join(" · ")}
                 </p>
-                {reference.target ? (
+                {navigationTarget ? (
                   <p className="text-[11px] text-text-secondary">
                     Click to edit. Hold Shift to open in the inspector.
                   </p>
-                ) : null}
+                ) : (
+                  <p
+                    role="status"
+                    aria-label={`${reference.label} reference unavailable`}
+                    className="text-[11px] text-amber-300"
+                  >
+                    Reference unavailable. Relink or remove this reference.
+                  </p>
+                )}
               </div>
             );
 
             return (
               <li key={reference.id} className="min-w-0">
-                {reference.target ? (
+                {navigationTarget ? (
                   <button
                     type="button"
                     data-testid={`generate-reference-trigger-${reference.id}`}
                     onClick={(event) =>
                       openReferenceTarget(
-                        reference.target!,
+                        navigationTarget,
                         referencePlacementFromEvent(event),
                         { invoker: event.currentTarget },
                       )

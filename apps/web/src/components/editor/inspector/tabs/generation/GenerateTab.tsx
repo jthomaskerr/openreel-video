@@ -136,9 +136,15 @@ export const GenerateTab: React.FC<GenerateTabProps> = (props) => {
             referenceId,
           origins: recoveryReference?.origins ?? ["draft"],
           excluded: recoveryReference ? !recoveryReference.active : undefined,
+          target: draft.referenceTargets?.[referenceId],
         };
       }),
-    [draft.referenceIds, props.referenceLabels, props.referenceRecovery?.references],
+    [
+      draft.referenceIds,
+      draft.referenceTargets,
+      props.referenceLabels,
+      props.referenceRecovery?.references,
+    ],
   );
   const models = useMemo(() => {
     const all = props.models ?? [];
