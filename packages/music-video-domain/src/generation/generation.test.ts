@@ -162,6 +162,37 @@ describe("generation contracts", () => {
     })).toThrow("references must be ready and active");
   });
 
+  it("rejects inactive canonical provider-input references without interpreting provider-specific references", () => {
+    const input = makeJob("queued");
+    const inactiveReference = {
+      id: "reference-1",
+      order: 1,
+      mediaId: "media-1",
+      origins: ["source"],
+      active: false,
+      state: "active",
+      preparationStatus: "ready",
+      errorHistory: [],
+      uploadLeaseId: "lease-1",
+    };
+
+    expect(() => parseGenerationJob({
+      ...input,
+      providerInputs: { references: [inactiveReference] },
+    })).toThrow("provider input references must be active");
+
+    expect(parseGenerationJob({
+      ...input,
+      providerInputs: {
+        references: ["provider-reference-token"],
+        referenceOptions: { active: false },
+      },
+    }).providerInputs).toEqual({
+      references: ["provider-reference-token"],
+      referenceOptions: { active: false },
+    });
+  });
+
   it("round-trips deactivated references and defaults legacy references to active", () => {
     const reference = {
       id: "reference-1",
