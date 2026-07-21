@@ -90,9 +90,8 @@ test("serialized web preparation acceptance matches the production orchestrator 
   const cases = [
     { id: "accepted", preparation: validPreparation, expected: true },
     {
-      id: "rejected-inactive-provider-input-reference",
-      preparation: validPreparation,
-      providerInputs: { references: [{ ...validPreparation[0], active: false }] },
+      id: "rejected-invalid-preparation",
+      preparation: [{ ...validPreparation[0], active: "false" }],
       expected: false,
     },
   ] as const;
@@ -112,15 +111,14 @@ test("serialized web preparation acceptance matches the production orchestrator 
       finalizer,
     });
     const inputJob = job(`reference-boundary-${boundaryCase.id}`);
+    const serializedPreparation = JSON.stringify(boundaryCase.preparation);
     const serialized = JSON.stringify({
       ...inputJob,
-      context: { ...inputJob.context, references: boundaryCase.preparation },
-      providerInputs: "providerInputs" in boundaryCase ? boundaryCase.providerInputs : inputJob.providerInputs,
+      context: { ...inputJob.context, references: JSON.parse(serializedPreparation) },
     });
     let clientAccepted = true;
     try {
-      parseGenerationReferencePreparation(JSON.parse(JSON.stringify(boundaryCase.preparation)));
-      parseGenerationJob(JSON.parse(serialized));
+      parseGenerationReferencePreparation(JSON.parse(serializedPreparation));
     } catch {
       clientAccepted = false;
     }
@@ -141,6 +139,48 @@ test("serialized web preparation acceptance matches the production orchestrator 
     assert.deepEqual(log, clientAccepted ? [`submit:reference-boundary-${boundaryCase.id}`] : []);
     assert.equal(Boolean(await repository.get(inputJob.id)), clientAccepted);
   }
+});
+
+test("production parser rejects inactive canonical provider-input references before work", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "generation-inactive-provider-input-"));
+  const log: string[] = [];
+  const repository = new FileGenerationJobRepository(directory);
+  const orchestrator = new GenerationOrchestrator({
+    repository,
+    provider: provider(log),
+    owner: ({ ownerId, projectId }) => ownerId === "owner-1" && projectId === "project-1",
+    routes: [manifestRoute],
+    releaseEnabled: true,
+    clock: () => 1000,
+    requestBoundary,
+    finalizer,
+  });
+  const inputJob = job("inactive-provider-input-reference");
+  const inactiveReference = {
+    id: "reference-1",
+    order: 1,
+    mediaId: "media-1",
+    versionId: "version-1",
+    origins: ["source"],
+    active: false,
+    state: "active",
+    preparationStatus: "ready",
+    errorHistory: [],
+    uploadLeaseId: "lease-1",
+  };
+  const serialized = JSON.stringify({
+    ...inputJob,
+    providerInputs: { references: [inactiveReference] },
+  });
+
+  assert.throws(() => parseGenerationJob(JSON.parse(serialized)));
+  await assert.rejects(orchestrator.submit({
+    ownerId: "owner-1",
+    job: JSON.parse(serialized) as GenerationJob,
+    request,
+  }));
+  assert.deepEqual(log, []);
+  assert.equal(await repository.get(inputJob.id), undefined);
 });
 
 test("reserves durably before submit and a fresh service does not duplicate it", async () => {
