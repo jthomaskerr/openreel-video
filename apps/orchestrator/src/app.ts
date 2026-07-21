@@ -13,10 +13,10 @@ import { FileGenerationJobRepository } from "./services/generation/repository";
 import { UploadRepository } from "./services/generation/uploads";
 import type { GenerationProviderPort } from "./services/generation/index";
 import { GenerationProjectActionAdapter } from "./services/generation/project-action-adapter";
+import { createReplaySafeGenerationOutputDownloader } from "./services/generation/output-downloader";
 import { WaveSpeedProvider } from "./services/wavespeed/client";
 import { mkdirSync } from "node:fs";
-import { mkdir, writeFile } from "node:fs/promises";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 
 function authenticate(request: unknown): { ownerId: string } | undefined {
@@ -73,32 +73,14 @@ export function createApp(): Express {
     configured: Boolean(config.wavespeedApiKey),
     authenticate,
     owner: async ({ ownerId, projectId }) => ownerId === config.authenticatedOwnerId && Boolean(await projectStore.loadProject(projectId)),
-    discoverModels: async () => routes.map(({ identity }) => ({ ...identity })),
+    discoverModels: async () => routes.map(({ identity, inputSchema, supportsAudio }) => ({
+      ...identity,
+      inputSchema,
+      supportsAudio,
+    })),
     applyProjectAction: (command) => projectActions.applyProjectAction(command),
     createFinalizer: (repository) => new GenerationFinalizer(repository, {
-      download: {
-        download: async ({ providerJobId }) => {
-          const routing = routes[0]?.identity;
-          if (!routing) throw new Error("generation-route-unsupported");
-          const state = await provider.status({ providerJobId, routing });
-          const outputUrls = state.outputUrls ?? [];
-          if (state.status !== "completed" || outputUrls.length !== 1) throw new Error("generation-output-identity-invalid");
-          const url = new URL(outputUrls[0]);
-          if (url.protocol !== "https:") throw new Error("generation-local-url-forbidden");
-          const response = await fetch(url, { signal: AbortSignal.timeout(30_000) });
-          if (!response.ok) throw new Error("generation-output-download-failed");
-          const mimeType = String(response.headers.get("content-type") ?? "").split(";")[0];
-          outputExtension(mimeType);
-          const bytes = new Uint8Array(await response.arrayBuffer());
-          const cacheKey = createHash("sha256").update(providerJobId).digest("hex");
-          await mkdir(downloadCacheDir, { recursive: true });
-          await Promise.all([
-            writeFile(join(downloadCacheDir, `${cacheKey}.bin`), bytes),
-            writeFile(join(downloadCacheDir, `${cacheKey}.json`), JSON.stringify({ mimeType }), "utf8"),
-          ]);
-          return { bytes, mimeType };
-        },
-      },
+      download: createReplaySafeGenerationOutputDownloader({ cacheDir: downloadCacheDir, provider }),
       verify: {
         verify: async ({ bytes, mimeType, maxBytes }) => {
           outputExtension(mimeType);
@@ -110,6 +92,7 @@ export function createApp(): Express {
       placeholder: projectActions,
       shot: projectActions,
       placement: projectActions,
+      projectAction: projectActions,
     }),
   });
   void projectStore.migrateUuidDirs().catch((err) => {

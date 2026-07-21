@@ -24,10 +24,126 @@ export interface WaveSpeedSchemaProperty {
 }
 
 export interface WaveSpeedRequestSchema {
-  type: string;
+  type: "object";
   properties: Record<string, WaveSpeedSchemaProperty>;
   required?: string[];
   "x-order-properties"?: string[];
+  additionalProperties?: false;
+}
+
+const REQUEST_SCHEMA_KEYS = new Set([
+  "type",
+  "properties",
+  "required",
+  "x-order-properties",
+  "additionalProperties",
+]);
+const PROPERTY_SCHEMA_KEYS = new Set([
+  "type",
+  "title",
+  "description",
+  "default",
+  "enum",
+  "minimum",
+  "maximum",
+  "minLength",
+  "maxLength",
+  "format",
+  "items",
+  "minItems",
+  "maxItems",
+  "multipleOf",
+  "x-ui-component",
+  "x-rows",
+  "x-accept",
+  "x-order-properties",
+  "x-media-role",
+  "x-openreel-media-role",
+]);
+const SCALAR_TYPES = new Set(["string", "integer", "number", "boolean"]);
+const MEDIA_ROLES = new Set(["source-image", "reference-images", "audio"]);
+
+function schemaRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function finiteOptional(value: unknown): boolean {
+  return value === undefined || typeof value === "number" && Number.isFinite(value);
+}
+
+function nonnegativeIntegerOptional(value: unknown): boolean {
+  return value === undefined || Number.isInteger(value) && Number(value) >= 0;
+}
+
+function validPropertySchema(value: unknown, nested = false): value is WaveSpeedSchemaProperty {
+  if (!schemaRecord(value) || Object.keys(value).some((key) => !PROPERTY_SCHEMA_KEYS.has(key))) return false;
+  if (typeof value.type !== "string") return false;
+  if (value.type === "array") {
+    if (nested || !validPropertySchema(value.items, true) || value.items.type === "array") return false;
+  } else if (!SCALAR_TYPES.has(value.type) || value.items !== undefined) {
+    return false;
+  }
+  for (const field of ["title", "description", "format", "x-ui-component", "x-accept"] as const) {
+    if (value[field] !== undefined && typeof value[field] !== "string") return false;
+  }
+  for (const field of ["minimum", "maximum", "multipleOf"] as const) {
+    if (!finiteOptional(value[field])) return false;
+  }
+  for (const field of ["minLength", "maxLength", "minItems", "maxItems", "x-rows"] as const) {
+    if (!nonnegativeIntegerOptional(value[field])) return false;
+  }
+  if (typeof value.minimum === "number" && typeof value.maximum === "number" && value.minimum > value.maximum) return false;
+  if (typeof value.minLength === "number" && typeof value.maxLength === "number" && value.minLength > value.maxLength) return false;
+  if (typeof value.minItems === "number" && typeof value.maxItems === "number" && value.minItems > value.maxItems) return false;
+  if (value.enum !== undefined && (!Array.isArray(value.enum) || value.enum.length === 0 || value.enum.some((item) => typeof item !== "string"))) return false;
+  for (const field of ["x-order-properties"] as const) {
+    if (value[field] !== undefined && (!Array.isArray(value[field]) || value[field].some((item) => typeof item !== "string"))) return false;
+  }
+  for (const field of ["x-media-role", "x-openreel-media-role"] as const) {
+    if (value[field] !== undefined && (typeof value[field] !== "string" || !MEDIA_ROLES.has(value[field]))) return false;
+  }
+  return true;
+}
+
+export function parseWaveSpeedRequestSchema(value: unknown): WaveSpeedRequestSchema {
+  const invalid = () => { throw new Error("generation-route-manifest-invalid"); };
+  if (!schemaRecord(value) || Object.keys(value).some((key) => !REQUEST_SCHEMA_KEYS.has(key))) return invalid();
+  if (value.type !== "object" || value.additionalProperties !== false || !schemaRecord(value.properties)) return invalid();
+  const properties = Object.entries(value.properties);
+  if (properties.length === 0) return invalid();
+  const parsedProperties: Record<string, WaveSpeedSchemaProperty> = {};
+  for (const [key, property] of properties) {
+    if (!key.trim() || !validPropertySchema(property)) return invalid();
+    parsedProperties[key] = structuredClone(property);
+  }
+  const propertyNames = new Set(Object.keys(parsedProperties));
+  const parseFieldNames = (field: "required" | "x-order-properties"): string[] | undefined => {
+    const names = value[field];
+    if (names === undefined) return undefined;
+    if (!Array.isArray(names)) return invalid();
+    const parsedNames: string[] = [];
+    for (const name of names) {
+      if (typeof name !== "string" || !propertyNames.has(name) || parsedNames.includes(name)) return invalid();
+      parsedNames.push(name);
+    }
+    return parsedNames;
+  };
+  const required = parseFieldNames("required");
+  const orderedProperties = parseFieldNames("x-order-properties");
+  const parsed: WaveSpeedRequestSchema = {
+    type: "object",
+    properties: parsedProperties,
+    additionalProperties: false,
+    ...(required ? { required } : {}),
+    ...(orderedProperties ? { "x-order-properties": orderedProperties } : {}),
+  };
+  for (const [field, property] of Object.entries(parsed.properties)) {
+    if (property.default === undefined) continue;
+    const errors: WaveSpeedProviderInputError[] = [];
+    validateValue(field, property.default, property, errors);
+    if (errors.length > 0) return invalid();
+  }
+  return parsed;
 }
 
 export interface WaveSpeedApiSchemaEntry {

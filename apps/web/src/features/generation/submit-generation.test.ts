@@ -711,7 +711,7 @@ describe("submitGeneration", () => {
 
     expect(job.context.references).toEqual([
       {
-        id: "ref-2:v2",
+        id: "reference-2",
         order: 1,
         mediaId: "ref-2",
         versionId: "v2",
@@ -723,7 +723,7 @@ describe("submitGeneration", () => {
         uploadLeaseId: "ref-token",
       },
       {
-        id: "ref-1:v1",
+        id: "reference-1",
         order: 2,
         mediaId: "ref-1",
         versionId: "v1",

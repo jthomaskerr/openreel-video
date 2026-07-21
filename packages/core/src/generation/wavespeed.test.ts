@@ -4,6 +4,7 @@ import {
   deriveWaveSpeedEvidence,
   deriveWaveSpeedFieldMap,
   getRecordedWaveSpeedModelById,
+  parseWaveSpeedRequestSchema,
   recordedWaveSpeedModels,
   validateWaveSpeedProviderInputs,
 } from "./wavespeed";
@@ -54,5 +55,31 @@ describe("wavespeed shared contract", () => {
       "prompt",
     ]);
     expect(getRecordedWaveSpeedModelById("fixture/itv")?.model_id).toBe("fixture/itv");
+  });
+
+  it("compiles only the supported strict request-schema subset", () => {
+    expect(parseWaveSpeedRequestSchema({
+      type: "object",
+      properties: {
+        prompt: { type: "string", minLength: 1 },
+        references: {
+          type: "array",
+          items: { type: "string", format: "uri" },
+          "x-openreel-media-role": "reference-images",
+        },
+      },
+      required: ["prompt"],
+      additionalProperties: false,
+    })).toMatchObject({ required: ["prompt"] });
+
+    for (const malformed of [
+      {},
+      { type: "object", properties: {} },
+      { type: "object", properties: { prompt: { type: "mystery" } }, additionalProperties: false },
+      { type: "object", properties: { references: { type: "array" } }, additionalProperties: false },
+      { type: "object", properties: { prompt: { type: "string" } }, required: ["missing"], additionalProperties: false },
+    ]) {
+      expect(() => parseWaveSpeedRequestSchema(malformed)).toThrow("generation-route-manifest-invalid");
+    }
   });
 });

@@ -79,7 +79,8 @@ export type GenerationProjectMutationKind =
   | "finalize-version"
   | "append-shot-attempt"
   | "create-linked-clip"
-  | "replace-clip-media";
+  | "replace-clip-media"
+  | "finalize-composite";
 export interface GenerationProjectBaseRevision {
   readonly commitSha: string;
   readonly treeSha: string;

@@ -142,15 +142,7 @@ function wavespeedModelFromCapability(route: WaveSpeedRouteCapability): Wavespee
         method: "POST",
         server: "same-origin",
         api_path: route.providerEndpointId,
-        request_schema: {
-          type: "object",
-          properties: {
-            prompt: { type: "string", title: "Prompt" },
-            negative_prompt: { type: "string", title: "Negative prompt" },
-          },
-          required: ["prompt"],
-          "x-order-properties": ["prompt", "negative_prompt"],
-        },
+        request_schema: route.inputSchema,
       }],
     },
   };
