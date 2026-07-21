@@ -5322,25 +5322,22 @@ export const useProjectStore = create<ProjectState>()(
       },
 
       forceSave: async () => {
-        const { project } = get();
-        const titleEngine = useEngineStore.getState().getTitleEngine();
-        const graphicsEngine = useEngineStore.getState().getGraphicsEngine();
-
-        const fullProject: Project = {
-          ...project,
-          textClips: titleEngine?.getAllTextClips() || [],
-          shapeClips: graphicsEngine?.getAllShapeClips() || [],
-          svgClips: graphicsEngine?.getAllSVGClips() || [],
-          stickerClips: graphicsEngine?.getAllStickerClips() || [],
-        };
-        await autoSaveManager.forceSave(fullProject);
-
-        // Also push to the backend orchestrator so the server-side project
-        // stays in sync (not just the IndexedDB local autosave).
-        backendSaveService.save(project).catch((err) => {
-          console.error("[BackendSave] forceSave push failed:", err);
-          reportRuntimeError("Backend force-save failed", err, "backend-save.force-save");
-        });
+        const fullProject = get().getFullProject();
+        try {
+          await autoSaveManager.forceSave(fullProject);
+          await backendSaveService.save(fullProject, "user");
+        } catch (error) {
+          console.error("[BackendSave] explicit save failed:", {
+            projectId: fullProject.id,
+            error,
+          });
+          reportRuntimeError(
+            `Explicit save failed for ${fullProject.id}`,
+            error,
+            "backend-save.force-save",
+          );
+          throw error;
+        }
       },
 
       getFullProject: (): Project => {
