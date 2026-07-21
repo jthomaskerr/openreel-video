@@ -5,7 +5,13 @@ import { join } from "node:path";
 import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import type { MediaItem, Project, ProjectBaseRevision } from "@openreel/core";
-import type { GenerationJob, GenerationOutput, GenerationTarget } from "@openreel/music-video-domain/generation";
+import {
+  canonicalizeGenerationProjectActionPayload,
+  type GenerationJob,
+  type GenerationOutput,
+  type GenerationTarget,
+  type JsonValue,
+} from "@openreel/music-video-domain/generation";
 import { config } from "../../env.js";
 import { GitStore, type GitCommitReceipt } from "../../projects/git-store.js";
 import { buildRequiredMediaManifest } from "../../projects/media-manifest.js";
@@ -14,7 +20,7 @@ import { storePendingUpload } from "../../projects/pending-media.js";
 import { executeSaveTransaction } from "../../projects/save-transaction.js";
 import { ensureSafeTestProjectRoot } from "../../projects/test-project-root.js";
 import * as generationServices from "./index.js";
-import { GenerationProjectActionAdapter } from "./project-action-adapter.js";
+import { GenerationProjectActionAdapter, GenerationProjectActionError } from "./project-action-adapter.js";
 
 process.env.GIT_AUTHOR_NAME ??= "OpenReel Tests";
 process.env.GIT_AUTHOR_EMAIL ??= "openreel-tests@example.com";
@@ -266,6 +272,55 @@ describe("GenerationProjectActionAdapter", () => {
     assert.deepEqual(await fixture.store.loadProject(fixture.project.id), before);
   });
 
+  it("ignores a malformed persisted receipt instead of suppressing the real mutation", async () => {
+    const fixture = await adapterFixture();
+    const rawOutput = await cacheOutput(fixture);
+    const job = generationJob(fixture.project.id, { kind: "new-asset", placeholderMediaId: "validated-output" });
+    const semanticPayload = canonicalizeGenerationProjectActionPayload({
+      jobId: job.id,
+      projectId: job.projectId,
+      target: job.target,
+      output: rawOutput,
+    } as unknown as JsonValue);
+    const forged = {
+      ...imageItem("malformed-receipt-holder"),
+      generationMeta: {
+        provider: "wavespeed",
+        model: "wavespeed/model",
+        jobId: "forged-job",
+        status: "succeeded" as const,
+        inputs: {
+          generationProjectActions: {
+            receipts: {
+              "malformed-receipt-key": {
+                schemaVersion: 1,
+                actionId: "forged-action",
+                jobId: job.id,
+                idempotencyKey: "malformed-receipt-key",
+                kind: "finalize-placeholder",
+                semanticPayload,
+                baseRevision: { commitSha: "incomplete" },
+                appliedAt: "not-a-timestamp",
+              },
+            },
+          },
+        },
+      },
+    } as MediaItem;
+    await seedMedia(fixture, forged);
+
+    const finalized = await fixture.adapter.finalize({ job, output: rawOutput, idempotencyKey: "malformed-receipt-key" });
+
+    const project = await fixture.store.loadProject(fixture.project.id);
+    assert.equal(finalized.versionId, "validated-output");
+    assert.equal(project?.mediaLibrary.items.some((item) => item.id === "validated-output"), true);
+    assert.equal(
+      (generationProjectActions(project?.mediaLibrary.items.find((item) => item.id === "validated-output"))
+        ?.receipts?.["malformed-receipt-key"] as { appliedAt?: unknown } | undefined)?.appliedAt,
+      1_000,
+    );
+  });
+
   it("exposes shot, placement, reconciliation, envelope, undo, and redo operations", () => {
     const prototype = GenerationProjectActionAdapter.prototype as unknown as Record<string, unknown>;
     for (const method of ["link", "place", "reconcile", "getActionEnvelope", "applyProjectAction"]) {
@@ -406,6 +461,54 @@ describe("GenerationProjectActionAdapter", () => {
     assert.deepEqual(reconciled, { outcome: "not-applied", replaySafe: true });
   });
 
+  it("does not reconcile forged flat clip metadata without a canonical durable receipt", async () => {
+    const fixture = await adapterFixture();
+    if (!("reconcile" in fixture.adapter)) return;
+    await seedMedia(fixture, imageItem("forged-placement-media"));
+    await saveProjectMutation(fixture, (project) => ({
+      ...project,
+      timeline: {
+        ...project.timeline,
+        tracks: [...project.timeline.tracks, {
+          id: "forged-track",
+          type: "image",
+          name: "Forged",
+          clips: [{
+            id: "forged-clip",
+            type: "image",
+            mediaId: "forged-placement-media",
+            trackId: "forged-track",
+            startTime: 0,
+            duration: 2,
+            inPoint: 0,
+            outPoint: 2,
+            effects: [],
+            audioEffects: [],
+            transform: { position: { x: 0, y: 0 }, scale: { x: 1, y: 1 }, rotation: 0, anchor: { x: 0.5, y: 0.5 }, opacity: 1, fitMode: "contain" },
+            volume: 1,
+            keyframes: [],
+            speed: 1,
+            muted: false,
+            metadata: { idempotencyKey: "forged-placement-key" },
+          }],
+          transitions: [],
+          locked: false,
+          hidden: false,
+          muted: false,
+          solo: false,
+        }],
+      },
+    }));
+    const output = await cacheOutput(fixture);
+    const job = generationJob(fixture.project.id, { kind: "new-asset", placeholderMediaId: "forged-placement-output" }, {
+      context: { projectId: fixture.project.id, entryContext: { kind: "unlinked-range", rangeId: "range", startTime: 0, endTime: 2, destinationTrackId: "forged-track" }, mode: route.requestedMode, placementPolicy: "create-linked-clip", prompt: "generate", references: [], timing: { source: "timeline", startSeconds: 0, endSeconds: 2, durationSeconds: 2 } },
+    });
+
+    const reconciled = await fixture.adapter.reconcile({ job, output, idempotencyKey: "forged-placement-key" });
+
+    assert.deepEqual(reconciled, { outcome: "not-applied", replaySafe: true });
+  });
+
   it("retries a project action after a browser save conflict and preserves both changes", async () => {
     const fixture = await adapterFixture();
     const rawOutput = await cacheOutput(fixture);
@@ -429,6 +532,41 @@ describe("GenerationProjectActionAdapter", () => {
     const project = await fixture.store.loadProject(fixture.project.id);
     assert.equal(project?.name, "Browser edit");
     assert.equal(project?.mediaLibrary.items.some((item) => item.id === "conflict-output"), true);
+  });
+
+  it("returns the canonical retryable conflict when optimistic save retries are exhausted", async () => {
+    const fixture = await adapterFixture();
+    const rawOutput = await cacheOutput(fixture);
+    const job = generationJob(fixture.project.id, { kind: "new-asset", placeholderMediaId: "retry-output" }, {
+      context: { projectId: fixture.project.id, entryContext: { kind: "unlinked-range", rangeId: "range", startTime: 0, endTime: 2 }, mode: route.requestedMode, placementPolicy: "create-linked-clip", prompt: "generate", references: [], timing: { source: "timeline", startSeconds: 0, endSeconds: 2, durationSeconds: 2 } },
+    });
+    const ids = await fixture.adapter.finalize({ job, output: rawOutput, idempotencyKey: "retry-finalize" });
+    let conflicts = 0;
+    const adapter = new GenerationProjectActionAdapter({
+      projectStore: fixture.store,
+      gitStore: fixture.gitStore,
+      downloadCacheDir: fixture.cacheDir,
+      maxConflictRetries: 2,
+      clock: () => 6_000,
+      actionId: ({ jobId, kind }) => `${jobId}-${kind}`,
+      beforeTransaction: async () => {
+        conflicts += 1;
+        await saveProjectMutation(fixture, (project) => ({ ...project, name: `Browser edit ${conflicts}` }));
+      },
+    });
+
+    const placed = await adapter.place({ job, output: { ...rawOutput, ...ids }, idempotencyKey: "retry-placement" });
+
+    assert.equal(conflicts, 2);
+    assert.deepEqual(placed, {
+      outcome: "not-applied",
+      replaySafe: true,
+      error: {
+        code: "generation-project-conflict-retry-exhausted",
+        message: "generation-project-conflict-retry-exhausted",
+        retryable: true,
+      },
+    });
   });
 
   it("reconciles a committed placement as applied after its response is lost", async () => {
@@ -501,5 +639,63 @@ describe("GenerationProjectActionAdapter", () => {
     assert.equal(undone.status, "applied");
     assert.equal(redone.operation, "redo");
     assert.equal(redone.status, "applied");
+  });
+
+  it("rejects undo and redo before they can overwrite unrelated intervening saves", async () => {
+    const undoFixture = await adapterFixture();
+    const undoOutput = await cacheOutput(undoFixture);
+    const undoJob = generationJob(undoFixture.project.id, { kind: "new-asset", placeholderMediaId: "unsafe-undo-output" });
+    const undoFinalized = await undoFixture.adapter.finalize({ job: undoJob, output: undoOutput, idempotencyKey: "unsafe-undo-key" });
+    const undoEnvelope = undoFinalized.projectAction;
+    if (!undoEnvelope) throw new Error("action-envelope-missing");
+    const afterBrowserUndoEdit = await saveProjectMutation(undoFixture, (project) => ({ ...project, name: "Preserve before undo" }));
+    const afterBrowserUndoReceipt = await undoFixture.gitStore.readConfirmedReceipt(undoFixture.project.id);
+    if (!afterBrowserUndoReceipt) throw new Error("fixture-revision-missing");
+
+    await assert.rejects(
+      undoFixture.adapter.applyProjectAction({
+        projectId: undoFixture.project.id,
+        actionId: undoEnvelope.receipt.actionId,
+        operation: "undo",
+        expectedRevision: revision(afterBrowserUndoReceipt, afterBrowserUndoEdit),
+        envelope: undoEnvelope,
+      }),
+      (cause: unknown) => cause instanceof GenerationProjectActionError && cause.code === "generation-project-action-conflict",
+    );
+    const afterRejectedUndo = await undoFixture.store.loadProject(undoFixture.project.id);
+    assert.equal(afterRejectedUndo?.name, "Preserve before undo");
+    assert.equal(afterRejectedUndo?.mediaLibrary.items.some((item) => item.id === "unsafe-undo-output"), true);
+
+    const redoFixture = await adapterFixture();
+    const redoOutput = await cacheOutput(redoFixture);
+    const redoJob = generationJob(redoFixture.project.id, { kind: "new-asset", placeholderMediaId: "unsafe-redo-output" });
+    const redoFinalized = await redoFixture.adapter.finalize({ job: redoJob, output: redoOutput, idempotencyKey: "unsafe-redo-key" });
+    const redoEnvelope = redoFinalized.projectAction;
+    if (!redoEnvelope) throw new Error("action-envelope-missing");
+    const undone = await redoFixture.adapter.applyProjectAction({
+      projectId: redoFixture.project.id,
+      actionId: redoEnvelope.receipt.actionId,
+      operation: "undo",
+      expectedRevision: redoEnvelope.appliedRevision,
+      envelope: redoEnvelope,
+    });
+    assert.equal(undone.status, "applied");
+    const afterBrowserRedoEdit = await saveProjectMutation(redoFixture, (project) => ({ ...project, name: "Preserve before redo" }));
+    const afterBrowserRedoReceipt = await redoFixture.gitStore.readConfirmedReceipt(redoFixture.project.id);
+    if (!afterBrowserRedoReceipt) throw new Error("fixture-revision-missing");
+
+    await assert.rejects(
+      redoFixture.adapter.applyProjectAction({
+        projectId: redoFixture.project.id,
+        actionId: redoEnvelope.receipt.actionId,
+        operation: "redo",
+        expectedRevision: revision(afterBrowserRedoReceipt, afterBrowserRedoEdit),
+        envelope: redoEnvelope,
+      }),
+      (cause: unknown) => cause instanceof GenerationProjectActionError && cause.code === "generation-project-action-conflict",
+    );
+    const afterRejectedRedo = await redoFixture.store.loadProject(redoFixture.project.id);
+    assert.equal(afterRejectedRedo?.name, "Preserve before redo");
+    assert.equal(afterRejectedRedo?.mediaLibrary.items.some((item) => item.id === "unsafe-redo-output"), false);
   });
 });
