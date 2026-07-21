@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { copyFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import type { MediaItem, Project, ProjectBaseRevision } from "@openreel/core";
 import {
   canonicalizeGenerationProjectActionPayload,
@@ -13,6 +14,7 @@ import {
   type GenerationProjectActionResult,
   type GenerationProjectMutationKind,
   type GenerationProjectMutationReceipt,
+  GenerationProjectMutationReceiptSchema,
   type GenerationShotAttempt,
   type JsonValue,
 } from "@openreel/music-video-domain/generation";
@@ -101,12 +103,8 @@ function asBaseRevision(receipt: GitCommitReceipt, project: Project): ProjectBas
 }
 
 function receiptFromUnknown(value: unknown): GenerationProjectMutationReceipt | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const receipt = value as Partial<GenerationProjectMutationReceipt>;
-  return receipt.schemaVersion === 1 && typeof receipt.actionId === "string" && typeof receipt.jobId === "string"
-    && typeof receipt.idempotencyKey === "string" && typeof receipt.kind === "string" && typeof receipt.semanticPayload === "string"
-    ? receipt as GenerationProjectMutationReceipt
-    : undefined;
+  const parsed = GenerationProjectMutationReceiptSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 }
 
 export function findGenerationProjectReceipt(project: Project, idempotencyKey: string): GenerationProjectMutationReceipt | undefined {
@@ -162,16 +160,15 @@ function placementSemanticPayload(job: GenerationJob, output: GenerationOutput):
   } as unknown as JsonValue);
 }
 
-function hasFlatPlacementReceipt(project: Project, idempotencyKey: string): boolean {
-  return project.timeline.tracks.some((track) => track.clips.some((clip) =>
-    (clip.metadata as { idempotencyKey?: unknown } | undefined)?.idempotencyKey === idempotencyKey));
-}
-
 function revisionsEqual(left: ProjectBaseRevision, right: ProjectBaseRevision): boolean {
   return left.commitSha === right.commitSha
     && left.treeSha === right.treeSha
     && left.projectBlobSha === right.projectBlobSha
     && left.sourceModifiedAt === right.sourceModifiedAt;
+}
+
+function projectsEqualIgnoringModifiedAt(left: Project, right: Project): boolean {
+  return isDeepStrictEqual({ ...left, modifiedAt: right.modifiedAt }, right);
 }
 
 function serverRemovalManifest(current: Project, target: Project): ServerRemovalManifest {
@@ -404,7 +401,6 @@ export class GenerationProjectActionAdapter {
         }
         return { outcome: "applied" };
       }
-      if (hasFlatPlacementReceipt(project, input.idempotencyKey)) return { outcome: "applied" };
       return { outcome: "not-applied", replaySafe: true };
     } catch (cause) {
       return { outcome: "unknown", error: { code: cause instanceof GenerationProjectActionError ? cause.code : "generation-placement-reconciliation-failed", message: cause instanceof Error ? cause.message : "Placement reconciliation failed", retryable: true } };
@@ -436,10 +432,23 @@ export class GenerationProjectActionAdapter {
     const currentRevision = asBaseRevision(gitReceipt, current);
     if (!revisionsEqual(command.expectedRevision, currentRevision)) throw new GenerationProjectActionError("generation-project-action-conflict");
     const currentReceipt = findGenerationProjectReceipt(current, command.envelope.receipt.idempotencyKey);
-    let targetCommitSha: string;
+    const [baseSnapshot, appliedSnapshot] = await Promise.all([
+      this.options.gitStore.getProjectAtCommit(command.projectId, command.envelope.receipt.baseRevision.commitSha),
+      this.options.gitStore.getProjectAtCommit(command.projectId, command.envelope.appliedRevision.commitSha),
+    ]);
+    if (!baseSnapshot || !appliedSnapshot) throw new GenerationProjectActionError("generation-project-action-snapshot-missing");
+    const baseReceipt = findGenerationProjectReceipt(baseSnapshot, command.envelope.receipt.idempotencyKey);
+    const appliedReceipt = findGenerationProjectReceipt(appliedSnapshot, command.envelope.receipt.idempotencyKey);
+    if (baseReceipt !== undefined || JSON.stringify(appliedReceipt) !== JSON.stringify(command.envelope.receipt)) {
+      throw new GenerationProjectActionError("generation-project-action-snapshot-invalid");
+    }
+    let target: Project;
     if (command.operation === "undo") {
+      if (!revisionsEqual(currentRevision, command.envelope.appliedRevision) || !isDeepStrictEqual(current, appliedSnapshot)) {
+        throw new GenerationProjectActionError("generation-project-action-conflict");
+      }
       if (!currentReceipt || JSON.stringify(currentReceipt) !== JSON.stringify(command.envelope.receipt)) throw new GenerationProjectActionError("generation-project-action-conflict");
-      targetCommitSha = command.envelope.receipt.baseRevision.commitSha;
+      target = baseSnapshot;
     } else {
       if (currentReceipt) {
         if (JSON.stringify(currentReceipt) === JSON.stringify(command.envelope.receipt)) {
@@ -447,13 +456,8 @@ export class GenerationProjectActionAdapter {
         }
         throw new GenerationProjectActionError("generation-project-action-conflict");
       }
-      targetCommitSha = command.envelope.appliedRevision.commitSha;
-    }
-    const target = await this.options.gitStore.getProjectAtCommit(command.projectId, targetCommitSha);
-    if (!target) throw new GenerationProjectActionError("generation-project-action-snapshot-missing");
-    const targetReceipt = findGenerationProjectReceipt(target, command.envelope.receipt.idempotencyKey);
-    if (command.operation === "undo" ? targetReceipt !== undefined : JSON.stringify(targetReceipt) !== JSON.stringify(command.envelope.receipt)) {
-      throw new GenerationProjectActionError("generation-project-action-snapshot-invalid");
+      if (!projectsEqualIgnoringModifiedAt(current, baseSnapshot)) throw new GenerationProjectActionError("generation-project-action-conflict");
+      target = appliedSnapshot;
     }
     const proposed = { ...target, modifiedAt: Math.max(current.modifiedAt + 1, this.clock()) };
     const saved = await executeSaveTransaction(this.options.projectStore, this.options.gitStore, {
@@ -644,7 +648,10 @@ export class GenerationProjectActionAdapter {
         }
         return result;
       } catch (cause) {
-        if (cause instanceof SaveTransactionError && cause.body.code === "PROJECT_CONFLICT" && attempt + 1 < this.maxConflictRetries) continue;
+        if (cause instanceof SaveTransactionError && cause.body.code === "PROJECT_CONFLICT") {
+          if (attempt + 1 < this.maxConflictRetries) continue;
+          throw new GenerationProjectActionError("generation-project-conflict-retry-exhausted", undefined, { cause });
+        }
         throw cause;
       }
     }
