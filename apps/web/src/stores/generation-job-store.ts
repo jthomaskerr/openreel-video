@@ -40,10 +40,6 @@ import {
 } from "../features/generation/recovery/state-machine";
 import { resolveMainAudioSource } from "../features/generation/context";
 
-const ORCHESTRATOR_BASE_URL =
-  ((import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_ORCHESTRATOR_URL)
-  ?? "";
-
 export type GenerationProvider = DurableGenerationJob["provider"];
 export type GenerationJobStatus = DurableGenerationJob["status"];
 export type GenerationJob = DurableGenerationJob;
@@ -118,6 +114,16 @@ export function migrateGenerationJobPersistence(input: unknown): { records: Gene
       } else if (candidate && typeof candidate === "object" && (candidate as any).kind === "legacy") {
         const record = candidate as any;
         records.push({ kind: "legacy", storeKey: String(record.storeKey), projectId: String(record.projectId), payload: legacyPayload(record.payload) });
+      } else {
+        const unsafe = candidate && typeof candidate === "object"
+          ? candidate as Record<string, unknown>
+          : {};
+        records.push({
+          kind: "legacy",
+          storeKey: String(unsafe.id ?? `invalid-record-${records.length}`),
+          projectId: String(unsafe.projectId ?? ""),
+          payload: legacyPayload(candidate),
+        });
       }
     }
     return {
@@ -378,7 +384,7 @@ export async function prepareWaveSpeedProjectionAudio(input: {
     accessible: Boolean(item.blob || item.remoteUrl || item.originalUrl),
     hasAudio: item.type === "audio" || Boolean(item.metadata.channels || item.metadata.sampleRate),
   }));
-  const resolved = resolveMainAudioSource({ clips, media, timing, supportsAudio: true });
+  const resolved = resolveMainAudioSource({ clips, media, timing });
   if (!resolved.source) return { kind: "error", code: resolved.errors[0]?.code ?? "audio-unavailable" };
   const sourceItem = input.media.find((item) =>
     item.id === resolved.source!.media.id
@@ -605,36 +611,34 @@ function parseCapabilities(input: unknown): WaveSpeedGenerationCapabilities {
 }
 
 async function responseJob(response: Response): Promise<DurableGenerationJob> {
-  const body = await response.json().catch(() => ({})) as { job?: unknown; error?: string };
-  if (!response.ok) throw new Error(body.error ?? `generation-request-failed:${response.status}`);
+  const body = await response.json().catch(() => ({})) as { job?: unknown };
+  if (!response.ok) throw new Error(`generation-request-failed:${response.status}`);
   return parseGenerationJob(body.job);
 }
 
 export function createProductionGenerationRuntime(
   options: ProductionGenerationRuntimeOptions = {},
 ): ProductionGenerationRuntime {
-  const baseUrl = (options.baseUrl ?? `${ORCHESTRATOR_BASE_URL}/api/generate/wavespeed`).replace(/\/$/, "");
+  const baseUrl = (options.baseUrl ?? "/api/generate/wavespeed").replace(/\/$/, "");
   const request = options.fetch ?? globalThis.fetch.bind(globalThis);
   const id = options.nextId ?? (() => globalThis.crypto?.randomUUID?.() ?? `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`);
   const now = options.now ?? Date.now;
   const authoritativeJobs = new Map<string, DurableGenerationJob>();
   const synchronizations = new Map<string, Promise<DurableGenerationJob>>();
-  let completedLogicalId: string | undefined;
-  let submissionTail: Promise<void> = Promise.resolve();
   let capabilityRequest: Promise<WaveSpeedGenerationCapabilities> | undefined;
 
   const readCapabilities = async (readOptions?: { refresh?: boolean }) => {
     if (!capabilityRequest || readOptions?.refresh) {
-      capabilityRequest = request(`${baseUrl}/config`, { credentials: "same-origin" })
+      const operation = request(`${baseUrl}/config`, { credentials: "same-origin" })
         .then(async (response) => {
           const body = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(`generation-capabilities-request-failed:${response.status}`);
           return parseCapabilities(body);
-        })
-        .catch((cause) => {
-          capabilityRequest = undefined;
-          throw cause;
         });
+      capabilityRequest = operation;
+      void operation.finally(() => {
+        if (capabilityRequest === operation) capabilityRequest = undefined;
+      }).catch(() => undefined);
     }
     return capabilityRequest;
   };
@@ -674,8 +678,8 @@ export function createProductionGenerationRuntime(
       },
       body: body instanceof Blob || body instanceof ArrayBuffer ? body : body.buffer as ArrayBuffer,
     });
-    const result = await response.json().catch(() => ({})) as { uploadId?: string; error?: string };
-    if (!response.ok || !result.uploadId) throw new Error(result.error ?? "generation-upload-failed");
+    const result = await response.json().catch(() => ({})) as { uploadId?: string };
+    if (!response.ok || !result.uploadId) throw new Error(`generation-upload-failed:${response.status}`);
     return { tokenId: result.uploadId };
   }
 
@@ -699,29 +703,26 @@ export function createProductionGenerationRuntime(
       audio: { uploadAudio: (audio) => upload(audio.value) },
       provider: {
         async submit(input) {
-          const logicalJobId = id("job");
           const response = await request(`${baseUrl}/`, {
             method: "POST",
             credentials: "same-origin",
             headers: { "Content-Type": "application/json", "X-Project-Id": input.context.projectId },
             body: JSON.stringify({
               projectId: input.context.projectId,
-              jobId: logicalJobId,
+              jobId: input.jobId,
               routing: input.routing,
               context: input.context,
               providerInputs: input.inputs,
             }),
           });
           const job = await responseJob(response);
-          if (job.id !== logicalJobId) throw new Error("generation-logical-job-id-mismatch");
+          if (job.id !== input.jobId) throw new Error("generation-logical-job-id-mismatch");
           if (job.projectId !== input.context.projectId || job.context.projectId !== input.context.projectId) {
             throw new Error("generation-status-ownership-mismatch");
           }
     if (waveSpeedRouteKey(job.routing) !== waveSpeedRouteKey(input.routing)) throw new Error("generation-route-identity-mismatch");
           if (!job.providerJobId) throw new Error("generation-provider-job-id-missing");
           authoritativeJobs.set(job.id, job);
-          if (completedLogicalId) throw new Error("generation-logical-job-id-uncoordinated");
-          completedLogicalId = job.id;
           return { providerJobId: job.providerJobId };
         },
       },
@@ -732,13 +733,7 @@ export function createProductionGenerationRuntime(
       },
       clock: { now },
       ids: {
-        next(kind) {
-          if (kind === "placeholder") return id("placeholder");
-          const logicalJobId = completedLogicalId;
-          if (!logicalJobId) throw new Error("generation-logical-job-id-uncoordinated");
-          completedLogicalId = undefined;
-          return logicalJobId;
-        },
+        next: id,
       },
     },
     leases: {
@@ -758,24 +753,15 @@ export function createProductionGenerationRuntime(
 
   const controller: GenerationController = {
     async submit(draft) {
-      const run = async () => {
-        const capabilities = await readCapabilities({ refresh: true });
-        if (!capabilities.configured) throw new Error("provider-not-configured");
-        assertGenerationV2SubmissionAllowed(2, capabilities.generationV2ReleaseEnabled);
+      const capabilities = await readCapabilities({ refresh: true });
+      if (!capabilities.configured) throw new Error("provider-not-configured");
+      assertGenerationV2SubmissionAllowed(2, capabilities.generationV2ReleaseEnabled);
       if (!capabilities.routes.some((candidate) => waveSpeedRouteKey(candidate) === waveSpeedRouteKey(draft.routing))) {
-          throw new Error("generation-route-stale");
-        }
-        try {
-          const submitted = await baseController.submit(draft);
-          const authoritative = authoritativeJobs.get(submitted.id) ?? submitted;
-          return hydrateGenerationJob(authoritative);
-        } finally {
-          completedLogicalId = undefined;
-        }
-      };
-      const operation = submissionTail.then(run, run);
-      submissionTail = operation.then(() => undefined, () => undefined);
-      return operation;
+        throw new Error("generation-route-stale");
+      }
+      const submitted = await baseController.submit(draft);
+      const authoritative = authoritativeJobs.get(submitted.id) ?? submitted;
+      return hydrateGenerationJob(authoritative);
     },
     reconcile: (projectId) => baseController.reconcile(projectId),
     invalidateReconciliation: (input) => baseController.invalidateReconciliation(input),

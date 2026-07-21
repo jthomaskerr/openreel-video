@@ -1,11 +1,4 @@
-/**
- * WaveSpeed browser client. Provider credentials remain in the orchestrator.
- */
-
-import { ORCHESTRATOR_URL } from "../../stores/music-video-store";
-import type { GenerationContext } from "@openreel/music-video-domain/generation";
-import { staleWhileRevalidate, CACHE_KEYS } from "../cache";
-import type { CacheResult } from "../cache";
+/** Shared WaveSpeed presentation types. Runtime traffic uses generation-job-store. */
 
 export interface WavespeedModel {
   model_id: string;
@@ -52,75 +45,4 @@ export interface SchemaProperty {
   "x-rows"?: number;
   "x-accept"?: string;
   "x-order-properties"?: string[];
-}
-
-export type JobStatus = "pending" | "processing" | "completed" | "failed";
-
-export interface JobResult {
-  status: JobStatus;
-  outputUrl?: string;
-  error?: string;
-}
-export async function fetchModels(): Promise<WavespeedModel[]> {
-  const res = await fetch(`${ORCHESTRATOR_URL}/api/generate/wavespeed/models`, {
-  });
-  if (!res.ok) throw new Error(`Failed to fetch WaveSpeed models: HTTP ${res.status}`);
-  const json = await res.json() as { models: WavespeedModel[] };
-  return json.models;
-}
-
-
-/**
- * Fetch WaveSpeed models with stale-while-revalidate caching.
- * Returns cached data immediately (if available) + a refresh function.
- * Caller should: render `cached` immediately, then call `refresh()` and
- * update UI when the promise resolves.
- */
-export function fetchModelsCached(): CacheResult<WavespeedModel[]> {
-  return staleWhileRevalidate(
-    CACHE_KEYS.WAVESPEED_MODELS,
-    fetchModels,
-    3_600_000, // 1 hour TTL
-  );
-}
-
-export async function submitGeneration(
-  model: string,
-  inputs: Record<string, unknown>,
-): Promise<string> {
-  const res = await fetch(`${ORCHESTRATOR_URL}/api/generate/wavespeed`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, inputs }),
-  });
-  if (!res.ok) throw new Error(`WaveSpeed submit failed: HTTP ${res.status}`);
-  const json = await res.json() as { jobId?: string; error?: string };
-  if (!json.jobId) throw new Error(json.error ?? "No jobId returned");
-  return json.jobId;
-}
-
-export async function submitGenerationJob(input: {
-  id: string;
-  projectId: string;
-  provider: "wavespeed";
-  modelId: string;
-  modelSchemaVersion: string;
-  context: GenerationContext;
-  providerInputs: Record<string, unknown>;
-}): Promise<{ jobId: string; providerJobId?: string }> {
-  const res = await fetch(`${ORCHESTRATOR_URL}/api/generate/wavespeed`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(input),
-  });
-  const json = await res.json() as { jobId?: string; providerJobId?: string; error?: string };
-  if (!res.ok || !json.jobId) throw new Error(json.error ?? `WaveSpeed submit failed: HTTP ${res.status}`);
-  return { jobId: json.jobId, providerJobId: json.providerJobId };
-}
-
-export async function pollJob(jobId: string): Promise<JobResult> {
-  const res = await fetch(`${ORCHESTRATOR_URL}/api/generate/wavespeed/${jobId}`, {
-  });
-  if (!res.ok) throw new Error(`WaveSpeed poll failed: HTTP ${res.status}`);
-  return res.json() as Promise<JobResult>;
 }

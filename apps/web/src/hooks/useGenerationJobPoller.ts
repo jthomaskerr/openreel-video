@@ -16,10 +16,6 @@ export interface ProcessGenerationJobDeps {
   current: (jobId: string) => GenerationJob | undefined;
 }
 
-export function resetGenerationPollerClaims(): void {
-  // Compatibility test hook. Claim ownership now lives in the singleton runtime.
-}
-
 /**
  * Synchronizes one full authoritative server job. Provider polling, output
  * download, finalization, source inference, and placement never run here.

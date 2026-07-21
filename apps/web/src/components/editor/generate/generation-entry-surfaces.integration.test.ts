@@ -17,6 +17,9 @@ test("dialog and inspector use the one shared production generation runtime", as
   assert.doesNotMatch(dialog, /supportsAudio:\s*Boolean\(schema/);
   assert.doesNotMatch(dialog, /enqueueJob/);
   assert.doesNotMatch(dialog, /linkedMediaIds/);
+  assert.doesNotMatch(dialog, /VITE_ORCHESTRATOR_URL/);
+  assert.match(dialog, /wsRoute:\s*route/);
+  assert.match(dialog, /prepareWaveSpeedGenerationDraft\(\{[\s\S]*route,[\s\S]*entryContext/);
 
   assert.match(inspector, /getProductionGenerationRuntime/);
   assert.match(inspector, /prepareWaveSpeedGenerationDraft/);
@@ -37,4 +40,9 @@ test("dialog and inspector use the one shared production generation runtime", as
     assert.ok(inspector.includes(prop), `Inspector is missing live GenerateTab prop ${prop}`);
   }
   assert.match(inspector, /projectId:\s*project\.id,[\s\S]*body:\s*referenceMedia\.blob/);
+  assert.match(inspector, /waveSpeedRouteKey\(candidate\)\s*===\s*draft\.modelId/);
+  assert.match(inspector, /prepareWaveSpeedGenerationDraft\(\{[\s\S]*route,[\s\S]*entryContext/);
+  assert.match(inspector, /saveReferenceRecovery/);
+  assert.match(inspector, /referenceRecoveries/);
+  assert.doesNotMatch(inspector, /\/api\/generate\/wavespeed\/models/);
 });

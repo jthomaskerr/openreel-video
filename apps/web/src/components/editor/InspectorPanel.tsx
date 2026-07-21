@@ -66,8 +66,12 @@ import {
   applyGenerationReferenceCommand,
   createGenerationReferenceRecoveryState,
   type GenerationReferenceCommand,
-  type GenerationReferenceRecoveryState,
 } from "../../features/generation/drafts/v2";
+import {
+  generationDraftKey,
+  useGenerationDraftStore,
+  type GenerationDraftScope,
+} from "../../features/generation/drafts/ui-store";
 import {
   isPlacementReconciliationCandidate,
   type RecoveryAction,
@@ -182,8 +186,6 @@ export const InspectorPanel: React.FC = () => {
     useState<WaveSpeedGenerationCapabilities>();
   const [generationModelId, setGenerationModelId] = useState("");
   const [generationSubmitting, setGenerationSubmitting] = useState(false);
-  const [generationReferenceOverride, setGenerationReferenceOverride] =
-    useState<GenerationReferenceRecoveryState>();
 
   useEffect(() => {
     setExpandedRecipeApplicationId(null);
@@ -342,11 +344,32 @@ export const InspectorPanel: React.FC = () => {
     }),
     [generationJob, getMediaItem, project.id],
   );
-  const generationReferenceRecovery =
-    generationReferenceOverride?.projectId === generationReferenceSeed.projectId
-      && generationReferenceOverride.jobId === generationReferenceSeed.jobId
-      ? generationReferenceOverride
-      : generationReferenceSeed;
+  const selectedGenerationDraftId = selectedClipIds.length === 1 ? selectedClipIds[0] : project.id;
+  const generationReferenceScope = useMemo<GenerationDraftScope>(() => ({
+    kind: "new-asset",
+    projectId: project.id,
+    draftId: selectedGenerationDraftId,
+  }), [project.id, selectedGenerationDraftId]);
+  const generationReferenceKey = generationDraftKey(generationReferenceScope);
+  const persistedGenerationReferenceRecovery = useGenerationDraftStore(
+    (state) => state.referenceRecoveries[generationReferenceKey],
+  );
+  const saveGenerationReferenceRecovery = useGenerationDraftStore(
+    (state) => state.saveReferenceRecovery,
+  );
+  const generationReferenceRecovery = useMemo(() => {
+    if (persistedGenerationReferenceRecovery?.projectId !== generationReferenceSeed.projectId
+      || persistedGenerationReferenceRecovery.jobId !== generationReferenceSeed.jobId) {
+      return generationReferenceSeed;
+    }
+    return {
+      ...persistedGenerationReferenceRecovery,
+      drafts: persistedGenerationReferenceRecovery.drafts.map((draft) => ({
+        ...draft,
+        value: generationReferenceSeed.drafts.find((candidate) => candidate.id === draft.id)?.value,
+      })),
+    };
+  }, [generationReferenceSeed, persistedGenerationReferenceRecovery]);
   const generationReferenceLabels = useMemo(
     () => Object.fromEntries(generationReferenceRecovery.references.map((reference) => [
       reference.id,
@@ -364,7 +387,7 @@ export const InspectorPanel: React.FC = () => {
         command,
         generationRuntime.referenceRecovery,
       );
-      setGenerationReferenceOverride(next);
+      saveGenerationReferenceRecovery(generationReferenceScope, next);
     } catch (error) {
       console.error("generation-reference-command-failed", {
         projectId: project.id,
@@ -378,7 +401,13 @@ export const InspectorPanel: React.FC = () => {
         error instanceof Error ? error.message : "The reference could not be updated.",
       );
     }
-  }, [generationReferenceRecovery, generationRuntime, project.id]);
+  }, [
+    generationReferenceRecovery,
+    generationReferenceScope,
+    generationRuntime,
+    project.id,
+    saveGenerationReferenceRecovery,
+  ]);
 
   const handleGenerationSubmit = useCallback(async (draft: {
     key: string;
@@ -445,7 +474,6 @@ export const InspectorPanel: React.FC = () => {
         idempotencyKey: draft.key,
       });
       await generationRuntime.controller.submit(prepared.draft);
-      setGenerationReferenceOverride(undefined);
     } catch (error) {
       console.error("inspector-generation-submit-failed", {
         projectId: project.id,
@@ -1197,24 +1225,6 @@ export const InspectorPanel: React.FC = () => {
   const setInspectorActiveTab = useUIStore((s) => s.setInspectorActiveTab);
   const sidebarTab = useUIStore((s) => s.sidebarTab);
   const setSidebarTab = useUIStore((s) => s.setSidebarTab);
-
-  useEffect(() => {
-    if (inspectorActiveTab !== "generate") return;
-    let cancelled = false;
-    fetch("/api/generate/wavespeed/models")
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("model discovery failed")))
-      .then((payload: { models?: Array<{ model_id: string; name?: string; type?: string }> }) => {
-        if (cancelled) return;
-        setGenerationModels((payload.models ?? []).map((model) => ({
-          id: model.model_id,
-          label: model.name ?? model.model_id,
-          provider: "WaveSpeed",
-          modes: model.type?.includes("video") ? ["video"] : ["image"],
-        })));
-      })
-      .catch(() => { if (!cancelled) setGenerationModels([]); });
-    return () => { cancelled = true; };
-  }, [inspectorActiveTab]);
 
   const activeTab: InspectorTabId =
     (clipTabIds.includes(inspectorActiveTab as InspectorTabId)

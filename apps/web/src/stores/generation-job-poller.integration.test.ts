@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { GenerationJob } from "@openreel/music-video-domain/generation";
-import { processGenerationJobOnce, resetGenerationPollerClaims } from "../hooks/useGenerationJobPoller.js";
+import * as generationPoller from "../hooks/useGenerationJobPoller.js";
+
+const { processGenerationJobOnce } = generationPoller;
 
 function job(status: GenerationJob["status"], overrides: Partial<GenerationJob> = {}): GenerationJob {
   const routing = { providerInstanceId: "wavespeed-production", providerModelId: "model", requestedMode: "text-to-image" as const, providerSchemaId: "schema", providerEndpointId: "submit", providerSchemaVersion: "v1" };
@@ -29,7 +31,6 @@ function job(status: GenerationJob["status"], overrides: Partial<GenerationJob> 
 }
 
 test("never polls needs-attention", async () => {
-  resetGenerationPollerClaims();
   let reads = 0;
   await processGenerationJobOnce({
     job: job("needs-attention"),
@@ -39,8 +40,11 @@ test("never polls needs-attention", async () => {
   assert.equal(reads, 0);
 });
 
+test("poller exposes no parallel claim-reset API", () => {
+  assert.equal("resetGenerationPollerClaims" in generationPoller, false);
+});
+
 test("poller consumes the singleton runtime authoritative completion", async () => {
-  resetGenerationPollerClaims();
   let reads = 0;
   const completed = job("succeeded", {
     output: { mediaId: "media", versionId: "version", mimeType: "image/png", byteLength: 3, sha256: "abc" },
@@ -55,7 +59,6 @@ test("poller consumes the singleton runtime authoritative completion", async () 
 });
 
 test("late authoritative reads cannot overwrite a canceled local attempt", async () => {
-  resetGenerationPollerClaims();
   let hydrations = 0;
   await processGenerationJobOnce({
     job: job("running"),

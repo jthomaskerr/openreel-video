@@ -61,6 +61,26 @@ interface DraftStore {
   removeDraft: (scope: GenerationDraftScope) => void;
 }
 
+function persistableReferenceRecovery(
+  recovery: GenerationReferenceRecoveryState,
+): GenerationReferenceRecoveryState {
+  const stripLease = <T extends { uploadLeaseId?: string }>(reference: T): T => {
+    const safe = { ...reference };
+    delete safe.uploadLeaseId;
+    return safe;
+  };
+  return {
+    ...recovery,
+    references: recovery.references.map(stripLease),
+    providerReferences: recovery.providerReferences.map(stripLease),
+    drafts: recovery.drafts.map((draft) => {
+      const safe = { ...draft };
+      delete safe.value;
+      return safe;
+    }),
+  };
+}
+
 export const useGenerationDraftStore = create<DraftStore>()(
   persist(
     (set, get) => ({
@@ -112,7 +132,12 @@ export const useGenerationDraftStore = create<DraftStore>()(
       storage: createJSONStorage(draftStorage),
       partialize: (state) => ({
         drafts: state.drafts,
-        referenceRecoveries: state.referenceRecoveries,
+        referenceRecoveries: Object.fromEntries(
+          Object.entries(state.referenceRecoveries).map(([key, recovery]) => [
+            key,
+            persistableReferenceRecovery(recovery),
+          ]),
+        ),
       }),
     },
   ),

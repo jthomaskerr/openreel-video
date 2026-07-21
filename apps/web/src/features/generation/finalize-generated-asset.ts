@@ -60,6 +60,21 @@ export async function finalizeGeneratedAsset(
   input: FinalizeGeneratedAssetInput,
 ): Promise<FinalizeGeneratedAssetResult> {
   const mediaId = input.target.placeholderMediaId;
+  const durableIdentities = [
+    mediaId,
+    input.item.id,
+    input.item.thumbnailUrl,
+    input.item.originalUrl,
+    input.item.remoteUrl,
+    input.target.kind === "new-version" ? input.target.sourceMediaId : undefined,
+  ];
+  if (durableIdentities.some((value) =>
+    typeof value === "string" && /^(?:blob|local|file|data|signed|temporary):/i.test(value))) {
+    return fail(mediaId, {
+      code: "ACTION_FAILED",
+      message: "generation-local-url-forbidden",
+    });
+  }
   const existing = store.project.mediaLibrary.items.find((item) => item.id === mediaId);
   if (!existing) {
     return fail(mediaId, {

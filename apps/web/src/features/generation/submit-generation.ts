@@ -107,6 +107,7 @@ export interface GenerationSanitizerPort {
 
 export interface ProviderSubmitPort {
   submit(input: {
+    jobId: string;
     provider: GenerationProvider;
     providerInstanceId: string;
     modelId: string;
@@ -401,17 +402,17 @@ async function failSubmission(
 
 function buildJob(
   draft: GenerationDraft,
+  jobId: string,
   providerJobId: string,
   context: GenerationContext,
   inputs: Record<string, unknown>,
-  ids: GenerationIdFactory,
   clock: GenerationClock,
 ): GenerationJob {
   const now = clock.now();
   return {
     schemaVersion: 2,
     contractVersion: 2,
-    id: ids.next("job"),
+    id: jobId,
     projectId: draft.projectId,
     provider: draft.provider,
     providerInstanceId: draft.providerInstanceId,
@@ -593,9 +594,11 @@ async function executeSubmission(
     remoteInput: { kind: "upload-token" as const, value: referenceTokens[index]?.tokenId ?? "" },
   }));
 
+  const logicalJobId = ports.ids.next("job");
   let providerSubmit: { providerJobId: string };
   try {
     providerSubmit = await ports.provider.submit({
+      jobId: logicalJobId,
       provider: snapshot.provider,
       providerInstanceId: snapshot.providerInstanceId,
       modelId: snapshot.modelId,
@@ -617,7 +620,7 @@ async function executeSubmission(
     });
   }
 
-  const job = buildJob(snapshot, providerSubmit.providerJobId, context, sanitizedInputs, ports.ids, ports.clock);
+  const job = buildJob(snapshot, logicalJobId, providerSubmit.providerJobId, context, sanitizedInputs, ports.clock);
 
   try {
     await ports.cache.put(job);

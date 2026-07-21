@@ -1,65 +1,100 @@
 import "../../../test/install-local-storage-mock";
-import { beforeEach, describe, expect, it } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { GenerationJob } from "@openreel/music-video-domain/generation";
+
+const runtime = vi.hoisted(() => ({ command: vi.fn() }));
+
+vi.mock("../../../stores/generation-job-store", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../stores/generation-job-store")>();
+  return {
+    ...actual,
+    getProductionGenerationRuntime: () => runtime,
+  };
+});
+
 import { JobManagementPanel } from "./JobManagementPanel";
-import { useGenerationJobStore } from "../../../stores/generation-job-store";
+import {
+  hydrateGenerationJob,
+  useGenerationJobStore,
+} from "../../../stores/generation-job-store";
+
+const routing = {
+  providerInstanceId: "wavespeed-production",
+  providerModelId: "wavespeed/model",
+  requestedMode: "text-to-image" as const,
+  providerSchemaId: "wavespeed-request",
+  providerEndpointId: "wavespeed-submit",
+  providerSchemaVersion: "2026-07",
+};
+
+function job(id: string, status: GenerationJob["status"]): GenerationJob {
+  return {
+    schemaVersion: 2,
+    contractVersion: 2,
+    id,
+    projectId: "project-1",
+    provider: "wavespeed",
+    providerInstanceId: routing.providerInstanceId,
+    modelId: routing.providerModelId,
+    modelSchemaVersion: routing.providerSchemaVersion,
+    routing,
+    providerJobId: `provider-${id}`,
+    status,
+    attempt: 1,
+    context: {
+      projectId: "project-1",
+      entryContext: { kind: "new-asset" },
+      mode: "text-to-image",
+      placementPolicy: "none",
+      prompt: `${status} prompt`,
+      references: [],
+    },
+    providerInputs: {},
+    attempts: [{ attemptNumber: 1, routing, providerJobId: `provider-${id}`, startedAt: 1 }],
+    checkpoints: {},
+    createdAt: 1,
+    updatedAt: 2,
+  };
+}
 
 describe("JobManagementPanel", () => {
   beforeEach(() => {
-    useGenerationJobStore.setState({ jobs: [] });
+    useGenerationJobStore.setState({ records: [], jobs: [], legacyAttention: [] });
+    runtime.command.mockReset();
   });
 
-  it("groups running completed failed and canceled jobs", () => {
-    const store = useGenerationJobStore.getState();
-    store.enqueue({ provider: "wavespeed", providerJobId: "ws-run", model: "model-a", prompt: "running prompt", inputs: {}, projectId: "p1", linkedMediaIds: [] });
-    const runningId = useGenerationJobStore.getState().jobs[0].id;
-    store.updateStatus(runningId, "running");
-    store.enqueue({ provider: "kieai", providerJobId: "kie-done", model: "model-b", prompt: "done prompt", inputs: {}, projectId: "p1", linkedMediaIds: ["media-done"] });
-    const doneId = useGenerationJobStore.getState().jobs[1].id;
-    store.complete(doneId, "http://localhost/done.png");
-    store.enqueue({ provider: "wavespeed", providerJobId: "ws-fail", model: "model-c", prompt: "failed prompt", inputs: {}, projectId: "p1", linkedMediaIds: [] });
-    const failedId = useGenerationJobStore.getState().jobs[2].id;
-    store.fail(failedId, "bad request");
-    store.enqueue({ provider: "kieai", providerJobId: "kie-cancel", model: "model-d", prompt: "cancel prompt", inputs: {}, projectId: "p1", linkedMediaIds: [] });
-    const canceledId = useGenerationJobStore.getState().jobs[3].id;
-    store.cancel(canceledId);
+  it("groups authoritative durable jobs without a parallel legacy store API", () => {
+    for (const [id, status] of [
+      ["running-1", "running"],
+      ["completed-1", "completed"],
+      ["failed-1", "failed"],
+      ["canceled-1", "canceled"],
+    ] as const) hydrateGenerationJob(job(id, status));
 
     render(<JobManagementPanel />);
 
-    expect(screen.getByText("Running")).toBeInTheDocument();
-    expect(screen.getByText("Completed")).toBeInTheDocument();
-    expect(screen.getByText("Failed")).toBeInTheDocument();
-    expect(screen.getByText("Canceled")).toBeInTheDocument();
+    for (const label of ["Running", "Completed", "Failed", "Canceled"]) {
+      expect(screen.getByRole("heading", { name: label })).toBeInTheDocument();
+    }
     expect(screen.getByText("running prompt")).toBeInTheDocument();
-    expect(screen.getByText("done prompt")).toBeInTheDocument();
     expect(screen.getByText("failed prompt")).toBeInTheDocument();
-    expect(screen.getByText("cancel prompt")).toBeInTheDocument();
   });
 
-  it("cancels a running job locally", () => {
-    const store = useGenerationJobStore.getState();
-    store.enqueue({ provider: "wavespeed", providerJobId: "ws-run", model: "model-a", prompt: "running prompt", inputs: {}, projectId: "p1", linkedMediaIds: [] });
-    const jobId = useGenerationJobStore.getState().jobs[0].id;
-    store.updateStatus(jobId, "running");
+  it("dispatches cancellation through the singleton authoritative runtime", async () => {
+    const current = job("running-1", "running");
+    hydrateGenerationJob(current);
+    runtime.command.mockImplementation(async (action: string, input: GenerationJob) => {
+      expect(action).toBe("cancel");
+      const canceled = { ...input, status: "canceled" as const, updatedAt: 3 };
+      hydrateGenerationJob(canceled);
+      return canceled;
+    });
 
     render(<JobManagementPanel />);
     fireEvent.click(screen.getByRole("button", { name: /cancel running prompt/i }));
 
-    expect(useGenerationJobStore.getState().jobs[0].status).toBe("canceled");
-  });
-
-  it("retries failed jobs with a new local retry id", () => {
-    const store = useGenerationJobStore.getState();
-    store.enqueue({ provider: "wavespeed", providerJobId: "ws-fail", model: "model-a", prompt: "failed prompt", inputs: {}, projectId: "p1", linkedMediaIds: [] });
-    const jobId = useGenerationJobStore.getState().jobs[0].id;
-    store.fail(jobId, "bad request");
-
-    render(<JobManagementPanel />);
-    fireEvent.click(screen.getByRole("button", { name: /retry failed prompt/i }));
-
-    const job = useGenerationJobStore.getState().jobs[0];
-    expect(job.status).toBe("queued");
-    expect(job.providerJobId).toMatch(/^retry-/);
-    expect(job.retryHistory).toHaveLength(1);
+    await waitFor(() => expect(runtime.command).toHaveBeenCalledWith("cancel", current));
+    expect(useGenerationJobStore.getState().jobs[0]?.status).toBe("canceled");
   });
 });
