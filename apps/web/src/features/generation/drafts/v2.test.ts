@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  GenerationReferenceCommandSchema,
+  ResolvedGenerationReferenceSchema,
+} from "@openreel/music-video-domain/generation";
+import {
   createGenerationSubmissionDraftCache,
   clearGenerationSubmissionDraftCache,
   createGenerationSubmissionRetryableDraft,
@@ -11,6 +15,9 @@ import {
   createGenerationReferenceRecoveryState,
   generationSubmissionDraftKey,
   isLocalSubmissionUrl,
+  normalizeProviderNeutralInputs,
+  parseGenerationReferenceCommand,
+  parseGenerationReferencePreparation,
   stableSubmissionStringify,
 } from "./v2";
 
@@ -235,6 +242,35 @@ describe("generation submission draft helpers", () => {
     ).toThrow(/payload\.nested\[0\]\.value/);
   });
 
+  it("rejects nested credential-shaped provider input keys without rejecting benign words", () => {
+    const credentialKeys = [
+      "apiKey",
+      "API_KEY",
+      "api-key",
+      "authorization",
+      "Authorization",
+      "client_secret",
+      "x-api-key",
+    ];
+
+    for (const key of credentialKeys) {
+      expect(() => normalizeProviderNeutralInputs({ nested: { [key]: "secret-value" } }))
+        .toThrow(`providerInputs.nested.${key}`);
+    }
+
+    expect(normalizeProviderNeutralInputs({
+      monkey: "capuchin",
+      authorizationMode: "none",
+      maxTokens: 128,
+      secretSauce: "tomato",
+    })).toEqual({
+      monkey: "capuchin",
+      authorizationMode: "none",
+      maxTokens: 128,
+      secretSauce: "tomato",
+    });
+  });
+
   it("creates and updates retryable draft cache entries", async () => {
     const cache = createGenerationSubmissionDraftCache();
     const entry = createGenerationSubmissionRetryableDraft({
@@ -355,6 +391,7 @@ describe("generation submission draft helpers", () => {
         mediaId: "ref-1",
         versionId: "version-1",
         origins: ["user"],
+        active: true,
         state: "active",
         preparationStatus: "preparing",
         errorHistory: [],
@@ -363,6 +400,37 @@ describe("generation submission draft helpers", () => {
     ]);
     expect("audio" in context).toBe(false);
     expect(() => assertNoLocalSubmissionUrls(context, "context")).not.toThrow();
+  });
+
+  it("keeps web and shared reference command/preparation parsers equivalent", () => {
+    const command = {
+      action: "deactivate",
+      projectId: "p1",
+      jobId: "j1",
+      referenceId: "reference-1",
+    };
+    const preparation = [{
+      id: "reference-1",
+      order: 1,
+      mediaId: "media-1",
+      origins: ["user"],
+      active: false,
+      state: "failed",
+      preparationStatus: "failed",
+      errorHistory: [{ code: "upload", message: "down", retryable: true }],
+    }];
+
+    expect(parseGenerationReferenceCommand(command))
+      .toEqual(GenerationReferenceCommandSchema.parse(command));
+    expect(parseGenerationReferencePreparation(preparation))
+      .toEqual(ResolvedGenerationReferenceSchema.array().parse(preparation));
+
+    const invalidCommand = { ...command, credential: "forbidden-extra-field" };
+    const invalidPreparation = [{ ...preparation[0], active: "no" }];
+    expect(() => parseGenerationReferenceCommand(invalidCommand)).toThrow();
+    expect(() => GenerationReferenceCommandSchema.parse(invalidCommand)).toThrow();
+    expect(() => parseGenerationReferencePreparation(invalidPreparation)).toThrow();
+    expect(() => ResolvedGenerationReferenceSchema.array().parse(invalidPreparation)).toThrow();
   });
 
   it.each([0, 1, 2])(
@@ -409,6 +477,247 @@ describe("generation submission draft helpers", () => {
       expect(releaseUploadLease).toHaveBeenCalledWith({ tokenId: `lease-${ids[failedIndex]}` });
     },
   );
+
+  it("keeps retry failure item-scoped and preserves successful uploads", async () => {
+    const state = createGenerationReferenceRecoveryState({
+      projectId: "p1",
+      jobId: "j1",
+      references: [
+        {
+          id: "ready",
+          order: 1,
+          mediaId: "ready-media",
+          origins: ["source"],
+          state: "active",
+          preparationStatus: "ready",
+          errorHistory: [],
+          uploadLeaseId: "lease-ready",
+        },
+        {
+          id: "failed",
+          order: 2,
+          mediaId: "failed-media",
+          origins: ["user"],
+          state: "failed",
+          preparationStatus: "failed",
+          errorHistory: [{ code: "upload", message: "down", retryable: true }],
+          uploadLeaseId: "lease-failed",
+        },
+      ],
+      drafts: [
+        { id: "ready", mediaId: "ready-media" },
+        { id: "failed", mediaId: "failed-media" },
+      ],
+    });
+    const releaseUploadLease = vi.fn(async () => {});
+
+    const retried = await applyGenerationReferenceCommand(
+      state,
+      { action: "retry", projectId: "p1", jobId: "j1", referenceId: "failed" },
+      {
+        retryReference: vi.fn(async () => { throw new Error("still down"); }),
+        releaseUploadLease,
+      },
+    );
+
+    expect(retried.references[0]).toBe(state.references[0]);
+    expect(retried.references[1]).toMatchObject({
+      id: "failed",
+      order: 2,
+      active: true,
+      state: "failed",
+      preparationStatus: "failed",
+      uploadLeaseId: "lease-failed",
+      errorHistory: expect.arrayContaining([
+        expect.objectContaining({
+          code: "generation-reference-retry-failed",
+          field: "references.failed.value",
+          retryable: true,
+        }),
+      ]),
+    });
+    expect(retried.providerReferences.map((reference) => reference.id)).toEqual(["ready"]);
+    expect(releaseUploadLease).not.toHaveBeenCalled();
+  });
+
+  it("retains the old lease when its release fails and compensation succeeds", async () => {
+    const state = createGenerationReferenceRecoveryState({
+      projectId: "p1",
+      jobId: "j1",
+      references: [{
+        id: "failed",
+        order: 1,
+        mediaId: "failed-media",
+        origins: ["user"],
+        state: "failed",
+        preparationStatus: "failed",
+        errorHistory: [{ code: "upload", message: "down", retryable: true }],
+        uploadLeaseId: "lease-old",
+      }],
+      drafts: [{ id: "failed", mediaId: "failed-media" }],
+    });
+    const releaseUploadLease = vi.fn(async ({ tokenId }: { tokenId: string }) => {
+      if (tokenId === "lease-old") throw new Error("old release unavailable");
+    });
+
+    await expect(applyGenerationReferenceCommand(
+      state,
+      { action: "retry", projectId: "p1", jobId: "j1", referenceId: "failed" },
+      {
+        retryReference: vi.fn(async () => ({ tokenId: "lease-new" })),
+        releaseUploadLease,
+      },
+    )).rejects.toMatchObject({
+      code: "generation-reference-release-failed",
+      oldLeaseId: "lease-old",
+      newLeaseId: "lease-new",
+      state: {
+        references: [expect.objectContaining({
+          id: "failed",
+          uploadLeaseId: "lease-old",
+          errorHistory: expect.arrayContaining([
+            expect.objectContaining({ code: "generation-reference-release-failed" }),
+          ]),
+        })],
+      },
+    });
+    expect(releaseUploadLease).toHaveBeenNthCalledWith(1, { tokenId: "lease-old" });
+    expect(releaseUploadLease).toHaveBeenNthCalledWith(2, { tokenId: "lease-new" });
+  });
+
+  it("preserves both unreleased lease identifiers when release and compensation fail", async () => {
+    const state = createGenerationReferenceRecoveryState({
+      projectId: "p1",
+      jobId: "j1",
+      references: [{
+        id: "failed",
+        order: 1,
+        mediaId: "failed-media",
+        origins: ["user"],
+        state: "failed",
+        preparationStatus: "failed",
+        errorHistory: [{ code: "upload", message: "down", retryable: true }],
+        uploadLeaseId: "lease-old",
+      }],
+      drafts: [{ id: "failed", mediaId: "failed-media" }],
+    });
+    const releaseUploadLease = vi.fn(async ({ tokenId }: { tokenId: string }) => {
+      throw new Error(`cannot release ${tokenId}`);
+    });
+
+    let failure: unknown;
+    try {
+      await applyGenerationReferenceCommand(
+        state,
+        { action: "retry", projectId: "p1", jobId: "j1", referenceId: "failed" },
+        {
+          retryReference: vi.fn(async () => ({ tokenId: "lease-new" })),
+          releaseUploadLease,
+        },
+      );
+    } catch (cause) {
+      failure = cause;
+    }
+
+    expect(failure).toMatchObject({
+      code: "generation-reference-release-cleanup-failed",
+      oldLeaseId: "lease-old",
+      newLeaseId: "lease-new",
+      state: {
+        references: [expect.objectContaining({
+          id: "failed",
+          uploadLeaseId: "lease-old",
+          preparationStatus: "failed",
+          errorHistory: expect.arrayContaining([
+            expect.objectContaining({ code: "generation-reference-release-failed" }),
+            expect.objectContaining({ code: "generation-reference-release-cleanup-failed" }),
+          ]),
+        })],
+      },
+    });
+    expect(releaseUploadLease).toHaveBeenNthCalledWith(1, { tokenId: "lease-old" });
+    expect(releaseUploadLease).toHaveBeenNthCalledWith(2, { tokenId: "lease-new" });
+  });
+
+  it("blocks deactivation of the only required source before releasing its lease", async () => {
+    const state = createGenerationReferenceRecoveryState({
+      projectId: "p1",
+      jobId: "j1",
+      references: [{
+        id: "source",
+        order: 1,
+        mediaId: "source-media",
+        origins: ["source"],
+        state: "active",
+        preparationStatus: "ready",
+        errorHistory: [],
+        uploadLeaseId: "source-lease",
+      }],
+      drafts: [{ id: "source", mediaId: "source-media" }],
+    });
+    const releaseUploadLease = vi.fn(async () => {});
+
+    await expect(applyGenerationReferenceCommand(
+      state,
+      { action: "deactivate", projectId: "p1", jobId: "j1", referenceId: "source" },
+      {
+        retryReference: vi.fn(async () => ({ tokenId: "unused" })),
+        releaseUploadLease,
+        referenceMinimum: 1,
+      },
+    )).rejects.toThrow("generation-reference-required");
+    expect(releaseUploadLease).not.toHaveBeenCalled();
+  });
+
+  it("removes an optional reference and releases only its unreferenced lease", async () => {
+    const state = createGenerationReferenceRecoveryState({
+      projectId: "p1",
+      jobId: "j1",
+      references: [
+        {
+          id: "source",
+          order: 1,
+          mediaId: "source-media",
+          origins: ["source"],
+          state: "active",
+          preparationStatus: "ready",
+          errorHistory: [],
+          uploadLeaseId: "source-lease",
+        },
+        {
+          id: "optional",
+          order: 2,
+          mediaId: "optional-media",
+          origins: ["user"],
+          state: "active",
+          preparationStatus: "ready",
+          errorHistory: [],
+          uploadLeaseId: "optional-lease",
+        },
+      ],
+      drafts: [
+        { id: "source", mediaId: "source-media" },
+        { id: "optional", mediaId: "optional-media" },
+      ],
+    });
+    const retryReference = vi.fn(async () => ({ tokenId: "unused" }));
+    const releaseUploadLease = vi.fn(async () => {});
+
+    const removed = await applyGenerationReferenceCommand(
+      state,
+      { action: "remove", projectId: "p1", jobId: "j1", referenceId: "optional" },
+      { retryReference, releaseUploadLease, referenceMinimum: 1 },
+    );
+
+    expect(removed.references.map((reference) => reference.id)).toEqual(["source"]);
+    expect(removed.drafts.map((reference) => reference.id)).toEqual(["source"]);
+    expect(removed.providerReferences.map((reference) => [reference.id, reference.order]))
+      .toEqual([["source", 1]]);
+    expect(removed.providerReferences[0]).toMatchObject({ active: true });
+    expect(releaseUploadLease).toHaveBeenCalledOnce();
+    expect(releaseUploadLease).toHaveBeenCalledWith({ tokenId: "optional-lease" });
+    expect(retryReference).not.toHaveBeenCalled();
+  });
 
   it("removes or deactivates one reference and revalidates the active minimum", async () => {
     const state = createGenerationReferenceRecoveryState({

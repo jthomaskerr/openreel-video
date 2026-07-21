@@ -2,12 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { GenerationContextSchema, GenerationJobSchema } from "@openreel/music-video-domain/generation";
 import {
   clearGenerationSubmissionInflight,
+  recoverGenerationReference,
   submitGeneration,
   type GenerationDraft,
   type SubmitGenerationPorts,
 } from "./submit-generation";
 import { createGenerationSubmissionDraftCache } from "./drafts/cache";
-import { generationSubmissionDraftKey } from "./drafts/v2";
+import { createGenerationReferenceRecoveryState, generationSubmissionDraftKey } from "./drafts/v2";
 
 function draft(overrides: Partial<GenerationDraft> = {}): GenerationDraft {
   return {
@@ -87,6 +88,57 @@ describe("submitGeneration", () => {
     expect(p.cache.put).not.toHaveBeenCalled();
   });
 
+  it("rejects nested credential fields before provider submission", async () => {
+    const p = ports();
+
+    await expect(submitGeneration(draft({
+      providerInputs: {
+        prompt: "hello",
+        nested: { Authorization: "Bearer browser-secret" },
+      },
+    }), p)).rejects.toMatchObject({
+      code: "invalid-draft",
+      field: "providerInputs.nested.Authorization",
+    });
+    expect(p.mutations.createPlaceholder).not.toHaveBeenCalled();
+    expect(p.provider.submit).not.toHaveBeenCalled();
+  });
+
+  it("rejects a requested-mode mismatch before placeholder, upload, or provider work", async () => {
+    const p = ports();
+    const input = draft();
+    input.routing = { ...input.routing, requestedMode: "image-to-image" };
+    input.references = [{
+      key: "reference-1",
+      mediaId: "reference-media-1",
+      mediaVersionId: "reference-version-1",
+      order: 1,
+      status: "active",
+    }];
+    input.audio = {
+      value: "audio-bytes",
+      sourceMediaId: "audio-media-1",
+      sourceVersionId: "audio-version-1",
+      sourceClipId: "audio-clip-1",
+      projectStartSeconds: 0,
+      projectEndSeconds: 1,
+      sourceStartSeconds: 0,
+      sourceEndSeconds: 1,
+      mimeType: "audio/wav",
+      sha256: "audio-sha-1",
+    };
+
+    await expect(submitGeneration(input, p)).rejects.toMatchObject({
+      code: "invalid-draft",
+      field: "routing.requestedMode",
+    });
+    expect(p.mutations.createPlaceholder).not.toHaveBeenCalled();
+    expect(p.references?.uploadReference).not.toHaveBeenCalled();
+    expect(p.audio?.uploadAudio).not.toHaveBeenCalled();
+    expect(p.sanitizer?.sanitize).not.toHaveBeenCalled();
+    expect(p.provider.submit).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["blob URL", "blob:provider-input-a"],
     ["file URL", "file:///tmp/provider-input-a.png"],
@@ -128,11 +180,48 @@ describe("submitGeneration", () => {
     );
   });
 
+  it("submits zero provider jobs during recovery and exactly one after explicit submit", async () => {
+    const p = ports();
+    const state = createGenerationReferenceRecoveryState({
+      projectId: "p1",
+      jobId: "j1",
+      references: [{
+        id: "failed",
+        order: 1,
+        mediaId: "failed-media",
+        origins: ["user"],
+        state: "failed",
+        preparationStatus: "failed",
+        errorHistory: [{ code: "upload", message: "down", retryable: true }],
+      }],
+      drafts: [{ id: "failed", mediaId: "failed-media" }],
+    });
+
+    const recovered = await recoverGenerationReference({
+      state,
+      command: { action: "retry", projectId: "p1", jobId: "j1", referenceId: "failed" },
+      ports: {
+        retryReference: vi.fn(async () => ({ tokenId: "recovered-lease" })),
+        releaseUploadLease: vi.fn(async () => {}),
+      },
+    });
+
+    expect(recovered.references[0]).toMatchObject({
+      preparationStatus: "ready",
+      uploadLeaseId: "recovered-lease",
+    });
+    expect(p.provider.submit).not.toHaveBeenCalled();
+
+    await submitGeneration(draft(), p);
+    expect(p.provider.submit).toHaveBeenCalledOnce();
+  });
+
   it("carries immutable V2 route, context, and current-attempt identity through submission", async () => {
     const p = ports();
     const job = await submitGeneration(draft(), p);
 
     expect(p.provider.submit).toHaveBeenCalledWith(expect.objectContaining({
+      providerInstanceId: "wavespeed-primary",
       routing: expect.objectContaining({
         providerInstanceId: "wavespeed-primary",
         providerModelId: "m1",
@@ -511,6 +600,7 @@ describe("submitGeneration", () => {
         mediaId: "ref-2",
         versionId: "v2",
         origins: ["user"],
+        active: true,
         state: "active",
         preparationStatus: "ready",
         errorHistory: [],
@@ -522,6 +612,7 @@ describe("submitGeneration", () => {
         mediaId: "ref-1",
         versionId: "v1",
         origins: ["user"],
+        active: true,
         state: "active",
         preparationStatus: "ready",
         errorHistory: [],

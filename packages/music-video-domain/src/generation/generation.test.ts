@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GenerationContextSchema, GenerationEntryContextSchema, GenerationJobSchema, GenerationRouteErrorSchema, GenerationStatusRequestSchema,
-  GenerationSubmitRequestSchema, SanitizedGenerationProvenanceSchema, acceptGenerationProviderResponse, migratePersistedGenerationJob, parseGenerationJob,
+  GenerationSubmitRequestSchema, ResolvedGenerationReferenceSchema, SanitizedGenerationProvenanceSchema, acceptGenerationProviderResponse, migratePersistedGenerationJob, parseGenerationJob,
 } from "./index.js";
 import { makeJob, route } from "./generation-job-dispositions.fixture.js";
 import * as generation from "./index.js";
@@ -133,6 +133,23 @@ describe("generation contracts", () => {
     const job = makeJob("queued");
     const context = { ...job.context, references: [{ id: "r", order: 1, mediaId: "m", origins: ["source" as const], state: "active" as const, preparationStatus: "preparing" as const, errorHistory: [] }] };
     expect(() => GenerationSubmitRequestSchema.parse({ projectId: "project-1", jobId: job.id, routing: route, target: { kind: "new-asset", placeholderMediaId: "placeholder-1" }, context, providerInputs: {} })).toThrow();
+  });
+
+  it("round-trips deactivated references and defaults legacy references to active", () => {
+    const reference = {
+      id: "reference-1",
+      order: 1,
+      mediaId: "media-1",
+      origins: ["user"],
+      state: "failed",
+      preparationStatus: "failed",
+      errorHistory: [{ code: "upload", message: "unavailable", retryable: true }],
+    };
+
+    expect(ResolvedGenerationReferenceSchema.parse({ ...reference, active: false }))
+      .toMatchObject({ active: false });
+    expect(ResolvedGenerationReferenceSchema.parse(reference))
+      .toMatchObject({ active: true });
   });
 
   it("keeps route errors and unknown keys strict", () => {

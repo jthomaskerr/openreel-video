@@ -6,9 +6,7 @@ import type {
 } from "@openreel/music-video-domain/generation";
 import {
   GenerationContextSchema,
-  GenerationReferenceDeactivateCommandSchema,
-  GenerationReferenceRemoveCommandSchema,
-  GenerationReferenceRetryCommandSchema,
+  GenerationReferenceCommandSchema,
   ResolvedGenerationReferenceSchema,
 } from "@openreel/music-video-domain/generation";
 import type { GenerationDraft } from "../submit-generation";
@@ -95,6 +93,31 @@ const TRANSIENT_TRANSPORT_FIELD_NAMES = new Set([
   "uploaduri",
 ]);
 
+const PROVIDER_SECRET_FIELD_NAMES = new Set([
+  "accesstoken",
+  "apikey",
+  "apisecret",
+  "apitoken",
+  "authorization",
+  "authorizationheader",
+  "authtoken",
+  "bearertoken",
+  "clientsecret",
+  "consumerkey",
+  "consumersecret",
+  "credential",
+  "credentials",
+  "passphrase",
+  "password",
+  "privatekey",
+  "proxyauthorization",
+  "refreshtoken",
+  "secret",
+  "secretkey",
+  "sessiontoken",
+  "xapikey",
+]);
+
 export class ProviderNeutralInputError extends TypeError {
   constructor(readonly path: string, reason: string) {
     super(`${reason} at ${path}`);
@@ -114,7 +137,11 @@ function isExpiringTransportUrl(value: string): boolean {
 }
 
 function isTransientTransportFieldName(key: string): boolean {
-  return TRANSIENT_TRANSPORT_FIELD_NAMES.has(key.replace(/[-_]/g, "").toLowerCase());
+  return TRANSIENT_TRANSPORT_FIELD_NAMES.has(key.replace(/[^a-z0-9]/gi, "").toLowerCase());
+}
+
+function isProviderSecretFieldName(key: string): boolean {
+  return PROVIDER_SECRET_FIELD_NAMES.has(key.replace(/[^a-z0-9]/gi, "").toLowerCase());
 }
 
 function normalizeProviderNeutralValue(
@@ -158,6 +185,9 @@ function normalizeProviderNeutralValue(
     const normalized: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
       const entryPath = `${path}.${key}`;
+      if (isProviderSecretFieldName(key)) {
+        throw new ProviderNeutralInputError(entryPath, "Provider-neutral inputs cannot include credential fields");
+      }
       if (entry !== undefined && entry !== null && isTransientTransportFieldName(key)) {
         throw new ProviderNeutralInputError(entryPath, "Provider-neutral inputs cannot include transport fields");
       }
@@ -305,27 +335,9 @@ export interface GenerationReferenceRecoveryDraft {
 
 export type GenerationReferenceOrigin = "source" | "character" | "shot" | "user";
 
-export interface GenerationReferenceCanonical {
-  id: string;
-  order: number;
-  mediaId: string;
-  versionId?: string;
-  origins: GenerationReferenceOrigin[];
-  state: "active" | "failed";
-  preparationStatus: "preparing" | "ready" | "failed";
-  errorHistory: GenerationError[];
-  uploadLeaseId?: string;
-}
+export type GenerationReferenceCanonical = z.output<typeof ResolvedGenerationReferenceSchema>;
 
-export type GenerationReferenceRecoveryReference = GenerationReferenceCanonical & {
-  active: boolean;
-};
-
-const GenerationReferenceCommandSchema = z.discriminatedUnion("action", [
-  GenerationReferenceRetryCommandSchema.extend({ action: z.literal("retry") }),
-  GenerationReferenceRemoveCommandSchema.extend({ action: z.literal("remove") }),
-  GenerationReferenceDeactivateCommandSchema.extend({ action: z.literal("deactivate") }),
-]);
+export type GenerationReferenceRecoveryReference = GenerationReferenceCanonical;
 
 export type GenerationReferenceCommand = z.infer<typeof GenerationReferenceCommandSchema>;
 
@@ -357,10 +369,12 @@ export class GenerationReferenceRecoveryError extends Error {
   readonly field: string;
   readonly referenceId: string;
   readonly state: GenerationReferenceRecoveryState;
+  readonly oldLeaseId: string;
   readonly newLeaseId: string;
 
   constructor(
     referenceId: string,
+    oldLeaseId: string,
     newLeaseId: string,
     state: GenerationReferenceRecoveryState,
     cause: unknown,
@@ -371,6 +385,7 @@ export class GenerationReferenceRecoveryError extends Error {
     this.field = `references.${referenceId}.uploadLeaseId`;
     this.referenceId = referenceId;
     this.state = state;
+    this.oldLeaseId = oldLeaseId;
     this.newLeaseId = newLeaseId;
     this.code = code;
   }
@@ -383,7 +398,7 @@ export function parseGenerationReferenceCommand(value: unknown): GenerationRefer
 }
 
 export function parseGenerationReferencePreparation(value: unknown): GenerationReferenceCanonical[] {
-  return generationReferenceCollectionSchema.parse(value) as GenerationReferenceCanonical[];
+  return generationReferenceCollectionSchema.parse(value);
 }
 
 export function validateGenerationReferenceMinimum<T extends { active: boolean }>(
@@ -401,7 +416,7 @@ function providerReferences(
   return references
     .filter((reference) =>
       reference.active && reference.state === "active" && reference.preparationStatus === "ready")
-    .map(({ active: _active, ...reference }, index) => ({ ...reference, order: index + 1 }));
+    .map((reference, index) => ({ ...reference, order: index + 1 }));
 }
 
 function withProviderReferences(
@@ -531,21 +546,28 @@ export async function applyGenerationReferenceCommand(
       try {
         await ports.releaseUploadLease({ tokenId: uploaded.tokenId });
       } catch (cleanupCause) {
-        const error = recoveryError(
+        const releaseError = recoveryError(
+          cause,
+          `references.${command.referenceId}.uploadLeaseId`,
+          "generation-reference-release-failed",
+        );
+        const cleanupError = recoveryError(
           cleanupCause,
           `references.${command.referenceId}.uploadLeaseId`,
           "generation-reference-release-cleanup-failed",
         );
-        const failedReferences = references.map((candidate) =>
+        const failedReferences = state.references.map((candidate) =>
           candidate.id === command.referenceId
             ? {
                 ...candidate,
+                state: "failed" as const,
                 preparationStatus: "failed" as const,
-                errorHistory: [...candidate.errorHistory, error],
+                errorHistory: [...candidate.errorHistory, releaseError, cleanupError],
               }
             : candidate);
         throw new GenerationReferenceRecoveryError(
           command.referenceId,
+          reference.uploadLeaseId,
           uploaded.tokenId,
           withProviderReferences(failedReferences, state.drafts, state),
           cleanupCause,
@@ -563,6 +585,7 @@ export async function applyGenerationReferenceCommand(
           : candidate);
       throw new GenerationReferenceRecoveryError(
         command.referenceId,
+        reference.uploadLeaseId,
         uploaded.tokenId,
         withProviderReferences(retainedReferences, state.drafts, state),
         cause,
