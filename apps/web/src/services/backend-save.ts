@@ -25,6 +25,14 @@ interface ProjectSummary {
   modifiedAt: number;
 }
 
+interface ScheduledSaveState {
+  project: Project;
+  baseRevision: ProjectSaveRequest["baseRevision"] | null;
+  startedAt: number;
+  saveTimer: ReturnType<typeof setTimeout> | null;
+  deadlineTimer: ReturnType<typeof setTimeout> | null;
+}
+
 const BASE_URL: string =
   (import.meta.env["VITE_ORCHESTRATOR_URL"] as string | undefined) ?? "http://localhost:4041";
 
@@ -155,28 +163,22 @@ function validateSaveResponse(
 class BackendSaveService {
   /** In-flight media uploads keyed by project/media id so saves can await them. */
   private uploadPromises = new Map<string, Promise<void>>();
-  private scheduledProject: Project | null = null;
-  private scheduledSaveTimer: ReturnType<typeof setTimeout> | null = null;
-  private queueDeadlineTimer: ReturnType<typeof setTimeout> | null = null;
+  private scheduledSaves = new Map<string, ScheduledSaveState>();
   private persistencePollTimer: ReturnType<typeof setTimeout> | null = null;
   private persistencePollGeneration = 0;
-  private scheduledSaveStartedAt: number | null = null;
   private saveChain: Promise<void> = Promise.resolve();
   private readonly maxScheduleWaitMs = 5_000;
   private readonly queueDeadlineMs = 7_000;
   private readonly requestDeadlineMs = 20_000;
 
   resetForProject(preserveReceiptForProjectId?: string): void {
-    this.uploadPromises.clear();
-    this.scheduledProject = null;
-    this.scheduledSaveStartedAt = null;
-    if (this.scheduledSaveTimer) {
-      clearTimeout(this.scheduledSaveTimer);
-      this.scheduledSaveTimer = null;
-    }
-    if (this.queueDeadlineTimer) {
-      clearTimeout(this.queueDeadlineTimer);
-      this.queueDeadlineTimer = null;
+    if (preserveReceiptForProjectId == null) {
+      this.uploadPromises.clear();
+      for (const scheduled of this.scheduledSaves.values()) {
+        if (scheduled.saveTimer) clearTimeout(scheduled.saveTimer);
+        if (scheduled.deadlineTimer) clearTimeout(scheduled.deadlineTimer);
+      }
+      this.scheduledSaves.clear();
     }
     this.persistencePollGeneration += 1;
     if (this.persistencePollTimer) {
@@ -254,19 +256,40 @@ class BackendSaveService {
    */
   scheduleSave(project: Project, delayMs: number = 2_000): void {
     console.debug("[Persistence] queued", { projectId: project.id, delayMs, modifiedAt: project.modifiedAt });
-    usePersistenceStatusStore.getState().markPending(project.id);
-    this.scheduledProject = project;
+    const status = usePersistenceStatusStore.getState();
+    if (status.projectId === project.id) status.markPending(project.id);
+
     const now = Date.now();
-    this.scheduledSaveStartedAt ??= now;
-    if (!this.queueDeadlineTimer) {
+    let scheduled = this.scheduledSaves.get(project.id);
+    if (!scheduled) {
+      scheduled = {
+        project,
+        baseRevision: status.projectId === project.id ? status.baseRevision : null,
+        startedAt: now,
+        saveTimer: null,
+        deadlineTimer: null,
+      };
+      this.scheduledSaves.set(project.id, scheduled);
+    } else {
+      scheduled.project = project;
+      if (!scheduled.baseRevision && status.projectId === project.id) {
+        scheduled.baseRevision = status.baseRevision;
+      }
+    }
+
+    if (!scheduled.deadlineTimer) {
       const queuedProjectId = project.id;
-      this.queueDeadlineTimer = setTimeout(() => {
-        this.queueDeadlineTimer = null;
-        if (!this.scheduledProject || this.scheduledProject.id !== queuedProjectId) return;
+      scheduled.deadlineTimer = setTimeout(() => {
+        const pending = this.scheduledSaves.get(queuedProjectId);
+        if (!pending) return;
+        pending.deadlineTimer = null;
         const error = new Error(
           `Persistence queue timed out after ${this.queueDeadlineMs}ms for project ${queuedProjectId}; no backend PUT began`,
         );
-        usePersistenceStatusStore.getState().markFailed(queuedProjectId, error.message);
+        const currentStatus = usePersistenceStatusStore.getState();
+        if (currentStatus.projectId === queuedProjectId) {
+          currentStatus.markFailed(queuedProjectId, error.message);
+        }
         console.error("[Persistence] queue deadline exceeded", {
           projectId: queuedProjectId,
           deadlineMs: this.queueDeadlineMs,
@@ -274,40 +297,43 @@ class BackendSaveService {
         reportRuntimeError("Backend persistence queue timed out", error, "backend-save.queue-timeout");
       }, this.queueDeadlineMs);
     }
-    if (this.scheduledSaveTimer) clearTimeout(this.scheduledSaveTimer);
-    const queueAge = now - this.scheduledSaveStartedAt;
+    if (scheduled.saveTimer) clearTimeout(scheduled.saveTimer);
+    const queueAge = now - scheduled.startedAt;
     const effectiveDelay = Math.max(
       0,
       Math.min(delayMs, this.maxScheduleWaitMs - queueAge),
     );
-    this.scheduledSaveTimer = setTimeout(() => {
-      this.scheduledSaveTimer = null;
-      this.scheduledSaveStartedAt = null;
-      if (this.queueDeadlineTimer) {
-        clearTimeout(this.queueDeadlineTimer);
-        this.queueDeadlineTimer = null;
-      }
-      const pending = this.scheduledProject;
-      this.scheduledProject = null;
+    scheduled.saveTimer = setTimeout(() => {
+      const pending = this.scheduledSaves.get(project.id);
       if (!pending) return;
+      pending.saveTimer = null;
+      if (pending.deadlineTimer) {
+        clearTimeout(pending.deadlineTimer);
+        pending.deadlineTimer = null;
+      }
+      this.scheduledSaves.delete(project.id);
 
       const run = this.saveChain
         .catch((previousError) => {
           console.debug("[Persistence] continuing after reported save failure", previousError);
         })
-        .then(() => this.save(pending));
+        .then(() => this.save(pending.project, "autosave", pending.baseRevision));
       this.saveChain = run;
       void run.catch((error) => {
         if (error instanceof TerminalPersistenceError) return;
         console.error("[BackendSave] scheduled save failed; retrying:", error);
-        if (!this.scheduledProject) this.scheduledProject = pending;
-        if (!this.scheduledSaveTimer) {
-          this.scheduledSaveTimer = setTimeout(() => {
-            this.scheduledSaveTimer = null;
-            const retry = this.scheduledProject;
-            if (retry) this.scheduleSave(retry, 0);
-          }, 5_000);
-        }
+        if (this.scheduledSaves.has(pending.project.id)) return;
+        const retry: ScheduledSaveState = {
+          ...pending,
+          startedAt: Date.now(),
+          saveTimer: null,
+          deadlineTimer: null,
+        };
+        this.scheduledSaves.set(pending.project.id, retry);
+        retry.saveTimer = setTimeout(() => {
+          retry.saveTimer = null;
+          this.scheduleSave(retry.project, 0);
+        }, 5_000);
       });
     }, effectiveDelay);
   }
@@ -507,15 +533,21 @@ class BackendSaveService {
    * PUT sanitised project JSON to backend. Blobs, fileHandles, and
    * engine-only fields are stripped before sending.
    */
-  async save(project: Project, saveIntent: SaveIntent = "autosave"): Promise<void> {
+  async save(
+    project: Project,
+    saveIntent: SaveIntent = "autosave",
+    scheduledBaseRevision?: ProjectSaveRequest["baseRevision"] | null,
+  ): Promise<void> {
     if (isClientOnlyProjectId(project.id)) {
       console.debug("[Persistence] skipped client-only project", { projectId: project.id });
       return;
     }
 
     const status = usePersistenceStatusStore.getState();
-    const baseRevision = status.projectId === project.id ? status.baseRevision : null;
-    status.markSaving(project.id);
+    const baseRevision = scheduledBaseRevision === undefined
+      ? status.projectId === project.id ? status.baseRevision : null
+      : scheduledBaseRevision;
+    if (status.projectId === project.id) status.markSaving(project.id);
     console.info("[Persistence] save started", {
       projectId: project.id,
       modifiedAt: project.modifiedAt,
@@ -589,7 +621,10 @@ class BackendSaveService {
           if (body?.code === "PROJECT_CONFLICT") {
             const serverProject = body.project ?? await this.loadProjectWithoutConfirming(project.id);
             const message = `Project conflict for ${project.id}; the newer server state was preserved`;
-            usePersistenceStatusStore.getState().markConflict(project.id, message, serverProject);
+            const currentStatus = usePersistenceStatusStore.getState();
+            if (currentStatus.projectId === project.id) {
+              currentStatus.markConflict(project.id, message, serverProject);
+            }
             throw new TerminalPersistenceError(message);
           }
 
@@ -602,8 +637,11 @@ class BackendSaveService {
         if (response.committed === false) {
           const receipt = validateSaveResponse(response, project.id, snapshot.modifiedAt);
           this.applyCanonicalFilenames(project, response.project);
-          usePersistenceStatusStore.getState().markDeferred(project.id, receipt);
-          this.schedulePersistenceConfirmation(project.id, receipt);
+          const currentStatus = usePersistenceStatusStore.getState();
+          if (currentStatus.projectId === project.id) {
+            currentStatus.markDeferred(project.id, receipt);
+            this.schedulePersistenceConfirmation(project.id, receipt);
+          }
           console.info(
             "[Persistence] worktree save durable; Git commit deferred",
             response,
@@ -613,18 +651,23 @@ class BackendSaveService {
 
         const receipt = validateSaveResponse(response, project.id, snapshot.modifiedAt);
         this.applyCanonicalFilenames(project, response.project);
-        usePersistenceStatusStore.getState().markPersisted(project.id, receipt);
+        const currentStatus = usePersistenceStatusStore.getState();
+        if (currentStatus.projectId === project.id) {
+          currentStatus.markPersisted(project.id, receipt);
+        }
         console.info("[Persistence] Git persistence confirmed", receipt);
         return;
       }
       throw new Error(`Backend media recovery retry exhausted for ${project.id}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const currentPhase = usePersistenceStatusStore.getState().phase;
-      if (error instanceof MediaOriginalUnavailableError) {
-        usePersistenceStatusStore.getState().markIncomplete(project.id, message);
-      } else if (currentPhase !== "conflict") {
-        usePersistenceStatusStore.getState().markFailed(project.id, message);
+      const currentStatus = usePersistenceStatusStore.getState();
+      if (currentStatus.projectId === project.id) {
+        if (error instanceof MediaOriginalUnavailableError) {
+          currentStatus.markIncomplete(project.id, message);
+        } else if (currentStatus.phase !== "conflict") {
+          currentStatus.markFailed(project.id, message);
+        }
       }
       console.error("[Persistence] save failed", { projectId: project.id, error: message });
       reportRuntimeError(
