@@ -283,6 +283,19 @@ describe("ProjectStore", () => {
     });
 
     describe("backend project creation", () => {
+      it("does not clear another project's queued save before activating the new project", async () => {
+        const resetForProject = vi
+          .spyOn(backendSaveService, "resetForProject")
+          .mockImplementation(() => undefined);
+
+        await expect(useProjectStore.getState().createNewProject("Next Project")).resolves.toBe(true);
+
+        expect(resetForProject).not.toHaveBeenCalledWith();
+        expect(resetForProject).toHaveBeenCalledWith(
+          useProjectStore.getState().project.id,
+        );
+      });
+
       it("activates only the backend slug after its receipt is confirmed", async () => {
         const now = Date.now();
         const backendProject: Project = {

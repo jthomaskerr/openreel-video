@@ -1756,7 +1756,6 @@ export const useProjectStore = create<ProjectState>()(
         const previousProject = get().project;
         const projectName = name?.trim() || generateProjectName();
         set({ isLoading: true, error: null, explicitlyCreated: false });
-        backendSaveService.resetForProject();
 
         try {
           const backendProject = await backendSaveService.create(projectName, settings);

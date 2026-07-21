@@ -589,6 +589,55 @@ describe("backendSaveService.save", () => {
     );
   });
 
+  it("preserves project A's queued save and base revision after project B becomes active", async () => {
+    vi.useFakeTimers();
+    const requests: Array<{ projectId: string; baseCommitSha: string }> = [];
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      requests.push({
+        projectId: body.projectId,
+        baseCommitSha: body.baseRevision.commitSha,
+      });
+      return {
+        ok: true,
+        json: async () => ({
+          project: body.project,
+          ...makeReceipt({
+            projectId: body.projectId,
+            sourceModifiedAt: body.project.modifiedAt,
+          }),
+        }),
+      };
+    }));
+
+    const projectA = makeSaveProject();
+    backendSaveService.scheduleSave(projectA, 100);
+
+    const projectB = { ...projectA, id: "project-b", modifiedAt: 3 };
+    usePersistenceStatusStore.getState().confirmReceipt(
+      projectB.id,
+      makeReceipt({
+        projectId: projectB.id,
+        sourceModifiedAt: 2,
+        commitSha: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      }),
+    );
+    backendSaveService.resetForProject(projectB.id);
+    backendSaveService.scheduleSave(projectB, 100);
+
+    await vi.runAllTimersAsync();
+
+    expect(requests.map((request) => request.projectId)).toEqual([
+      projectA.id,
+      projectB.id,
+    ]);
+    expect(requests.map((request) => request.baseCommitSha)).toEqual([
+      "0123456789abcdef0123456789abcdef01234567",
+      "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    ]);
+    expect(usePersistenceStatusStore.getState().projectId).toBe(projectB.id);
+  });
+
   it("cannot starve a backend PUT when project mutations keep resetting the debounce", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(0);
