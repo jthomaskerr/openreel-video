@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "vitest";
+import { test } from "node:test";
 import type { GenerationJob, GenerationRouteIdentity } from "@openreel/music-video-domain/generation";
 import { FileGenerationJobRepository } from "./repository.js";
 import { GenerationOrchestrator, validateGenerationRequestBoundary, type GenerationFinalizerPort, type GenerationProviderPort } from "./index.js";
+import { parseGenerationReferencePreparation } from "../../../../web/src/features/generation/drafts/v2.js";
 
 const route: GenerationRouteIdentity = {
   providerInstanceId: "wavespeed-prod",
@@ -72,6 +73,68 @@ function provider(log: string[]): GenerationProviderPort {
     cancel: async ({ providerJobId }) => { log.push(`cancel:${providerJobId}`); },
   };
 }
+
+test("serialized web preparation acceptance matches the production orchestrator parser", async () => {
+  const validPreparation = [{
+    id: "reference-1",
+    order: 1,
+    mediaId: "media-1",
+    versionId: "version-1",
+    origins: ["source"],
+    active: true,
+    state: "active",
+    preparationStatus: "ready",
+    errorHistory: [],
+    uploadLeaseId: "lease-1",
+  }];
+  const cases = [
+    { id: "accepted", preparation: validPreparation, expected: true },
+    { id: "rejected", preparation: [{ ...validPreparation[0], active: "no" }], expected: false },
+  ] as const;
+
+  for (const boundaryCase of cases) {
+    let clientAccepted = true;
+    try {
+      parseGenerationReferencePreparation(JSON.parse(JSON.stringify(boundaryCase.preparation)));
+    } catch {
+      clientAccepted = false;
+    }
+    assert.equal(clientAccepted, boundaryCase.expected);
+
+    const directory = await mkdtemp(join(tmpdir(), "generation-reference-boundary-"));
+    const log: string[] = [];
+    const repository = new FileGenerationJobRepository(directory);
+    const orchestrator = new GenerationOrchestrator({
+      repository,
+      provider: provider(log),
+      owner: ({ ownerId, projectId }) => ownerId === "owner-1" && projectId === "project-1",
+      routes: [manifestRoute],
+      releaseEnabled: true,
+      clock: () => 1000,
+      requestBoundary,
+      finalizer,
+    });
+    const inputJob = job(`reference-boundary-${boundaryCase.id}`);
+    const serialized = JSON.stringify({
+      ...inputJob,
+      context: { ...inputJob.context, references: boundaryCase.preparation },
+    });
+    let orchestratorAccepted = true;
+    try {
+      await orchestrator.submit({
+        ownerId: "owner-1",
+        job: JSON.parse(serialized) as GenerationJob,
+        request,
+      });
+    } catch {
+      orchestratorAccepted = false;
+    }
+
+    assert.equal(orchestratorAccepted, clientAccepted);
+    assert.deepEqual(log, clientAccepted ? [`submit:reference-boundary-${boundaryCase.id}`] : []);
+    assert.equal(Boolean(await repository.get(inputJob.id)), clientAccepted);
+  }
+});
 
 test("reserves durably before submit and a fresh service does not duplicate it", async () => {
   const directory = await mkdtemp(join(tmpdir(), "generation-mini-05-"));

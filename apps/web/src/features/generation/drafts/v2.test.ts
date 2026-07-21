@@ -1,9 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  GenerationReferenceCommandSchema,
-  ResolvedGenerationReferenceSchema,
-} from "@openreel/music-video-domain/generation";
-import {
   createGenerationSubmissionDraftCache,
   clearGenerationSubmissionDraftCache,
   createGenerationSubmissionRetryableDraft,
@@ -16,8 +12,6 @@ import {
   generationSubmissionDraftKey,
   isLocalSubmissionUrl,
   normalizeProviderNeutralInputs,
-  parseGenerationReferenceCommand,
-  parseGenerationReferencePreparation,
   stableSubmissionStringify,
 } from "./v2";
 
@@ -400,37 +394,6 @@ describe("generation submission draft helpers", () => {
     ]);
     expect("audio" in context).toBe(false);
     expect(() => assertNoLocalSubmissionUrls(context, "context")).not.toThrow();
-  });
-
-  it("keeps web and shared reference command/preparation parsers equivalent", () => {
-    const command = {
-      action: "deactivate",
-      projectId: "p1",
-      jobId: "j1",
-      referenceId: "reference-1",
-    };
-    const preparation = [{
-      id: "reference-1",
-      order: 1,
-      mediaId: "media-1",
-      origins: ["user"],
-      active: false,
-      state: "failed",
-      preparationStatus: "failed",
-      errorHistory: [{ code: "upload", message: "down", retryable: true }],
-    }];
-
-    expect(parseGenerationReferenceCommand(command))
-      .toEqual(GenerationReferenceCommandSchema.parse(command));
-    expect(parseGenerationReferencePreparation(preparation))
-      .toEqual(ResolvedGenerationReferenceSchema.array().parse(preparation));
-
-    const invalidCommand = { ...command, credential: "forbidden-extra-field" };
-    const invalidPreparation = [{ ...preparation[0], active: "no" }];
-    expect(() => parseGenerationReferenceCommand(invalidCommand)).toThrow();
-    expect(() => GenerationReferenceCommandSchema.parse(invalidCommand)).toThrow();
-    expect(() => parseGenerationReferencePreparation(invalidPreparation)).toThrow();
-    expect(() => ResolvedGenerationReferenceSchema.array().parse(invalidPreparation)).toThrow();
   });
 
   it.each([0, 1, 2])(

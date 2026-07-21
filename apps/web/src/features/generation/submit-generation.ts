@@ -57,6 +57,7 @@ export interface GenerationReferenceDraft {
   status?: "active" | "unresolved" | "ambiguous" | "unavailable" | "unsupported" | "overflow" | "cyclic";
   reason?: string;
   value?: unknown;
+  uploadLeaseId?: string;
 }
 
 export interface GenerationAudioDraft {
@@ -316,6 +317,7 @@ function normalizeReferenceDraft(
   status: NonNullable<GenerationReferenceDraft["status"]>;
   reason?: string;
   value?: unknown;
+  uploadLeaseId?: string;
 } {
   const mediaVersionId = reference.mediaVersionId ?? reference.versionId ?? reference.mediaId;
   const key = reference.key ?? `reference:${mediaVersionId}`;
@@ -330,6 +332,7 @@ function normalizeReferenceDraft(
     status: reference.status ?? "active",
     ...(reference.reason ? { reason: reference.reason } : {}),
     ...(reference.value === undefined ? {} : { value: reference.value }),
+    ...(reference.uploadLeaseId ? { uploadLeaseId: reference.uploadLeaseId } : {}),
   };
 }
 
@@ -496,11 +499,15 @@ async function executeSubmission(
   try {
     await stageRetryableDraft(ports, retryableDraft);
     if (orderedReferences.length) {
-      if (!ports.references) {
-        throw new GenerationSubmissionError("reference-upload-unavailable", "Reference upload is unavailable", "references");
-      }
       const uploaded: { tokenId: string }[] = [];
       for (const reference of orderedReferences) {
+        if (reference.uploadLeaseId?.trim()) {
+          uploaded.push({ tokenId: reference.uploadLeaseId });
+          continue;
+        }
+        if (!ports.references) {
+          throw new GenerationSubmissionError("reference-upload-unavailable", "Reference upload is unavailable", "references");
+        }
         uploaded.push(await ports.references.uploadReference(reference));
       }
       referenceTokens = uploaded;
@@ -547,6 +554,7 @@ async function executeSubmission(
       const [firstError] = sanitized!.errors!;
       throw new GenerationSubmissionError("invalid-input", "Provider inputs are invalid", firstError.field, false);
     }
+    sanitizedInputs = normalizeProviderNeutralInputs(sanitizedInputs);
     assertNoLocalSubmissionUrls(sanitizedInputs, "providerInputs");
   } catch (cause) {
     return failSubmission(ports, {

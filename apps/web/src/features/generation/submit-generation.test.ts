@@ -180,40 +180,94 @@ describe("submitGeneration", () => {
     );
   });
 
-  it("submits zero provider jobs during recovery and exactly one after explicit submit", async () => {
+  it("blocks a failed required source until recovery, then submits its preserved upload exactly once", async () => {
     const p = ports();
     const state = createGenerationReferenceRecoveryState({
       projectId: "p1",
       jobId: "j1",
-      references: [{
-        id: "failed",
-        order: 1,
-        mediaId: "failed-media",
-        origins: ["user"],
-        state: "failed",
-        preparationStatus: "failed",
-        errorHistory: [{ code: "upload", message: "down", retryable: true }],
-      }],
-      drafts: [{ id: "failed", mediaId: "failed-media" }],
+      references: [
+        {
+          id: "source-id",
+          order: 1,
+          mediaId: "source-media",
+          versionId: "source-version",
+          origins: ["source"],
+          state: "failed",
+          preparationStatus: "failed",
+          errorHistory: [{ code: "upload", message: "down", retryable: true }],
+        },
+        {
+          id: "user-id",
+          order: 2,
+          mediaId: "user-media",
+          versionId: "user-version",
+          origins: ["user"],
+          state: "active",
+          preparationStatus: "ready",
+          errorHistory: [],
+          uploadLeaseId: "preserved-user-lease",
+        },
+      ],
+      drafts: [
+        { id: "source-id", mediaId: "source-media", versionId: "source-version", value: { blobId: "source-blob" } },
+        { id: "user-id", mediaId: "user-media", versionId: "user-version", value: { blobId: "user-blob" } },
+      ],
     });
+
+    const failedPreparationReferences = state.references.map((reference) => ({
+      key: reference.id,
+      mediaId: reference.mediaId,
+      versionId: reference.versionId,
+      order: reference.order,
+      origins: reference.origins,
+      value: state.drafts.find((candidate) => candidate.id === reference.id)?.value,
+      uploadLeaseId: reference.uploadLeaseId,
+      status: reference.preparationStatus === "ready" ? "active" as const : "unavailable" as const,
+      ...(reference.preparationStatus === "ready" ? {} : { reason: "required source preparation failed" }),
+    }));
+
+    await expect(submitGeneration(draft({ references: failedPreparationReferences }), p))
+      .rejects.toMatchObject({ code: "invalid-draft", field: "references.0.status" });
+    expect(p.mutations.createPlaceholder).not.toHaveBeenCalled();
+    expect(p.provider.submit).not.toHaveBeenCalled();
 
     const recovered = await recoverGenerationReference({
       state,
-      command: { action: "retry", projectId: "p1", jobId: "j1", referenceId: "failed" },
+      command: { action: "retry", projectId: "p1", jobId: "j1", referenceId: "source-id" },
       ports: {
-        retryReference: vi.fn(async () => ({ tokenId: "recovered-lease" })),
+        retryReference: vi.fn(async () => ({ tokenId: "recovered-source-lease" })),
         releaseUploadLease: vi.fn(async () => {}),
       },
     });
 
-    expect(recovered.references[0]).toMatchObject({
-      preparationStatus: "ready",
-      uploadLeaseId: "recovered-lease",
-    });
+    const explicitReferences = recovered.references.map((reference) => ({
+      key: reference.id,
+      mediaId: reference.mediaId,
+      versionId: reference.versionId,
+      order: reference.order,
+      origins: reference.origins,
+      value: recovered.drafts.find((candidate) => candidate.id === reference.id)?.value,
+      uploadLeaseId: reference.uploadLeaseId,
+      status: "active" as const,
+    }));
     expect(p.provider.submit).not.toHaveBeenCalled();
 
-    await submitGeneration(draft(), p);
+    await submitGeneration(draft({ references: explicitReferences }), p);
+
+    expect(p.references?.uploadReference).not.toHaveBeenCalled();
     expect(p.provider.submit).toHaveBeenCalledOnce();
+    expect(p.provider.submit).toHaveBeenCalledWith(expect.objectContaining({
+      references: [
+        expect.objectContaining({ key: "source-id", remoteInput: { kind: "upload-token", value: "recovered-source-lease" } }),
+        expect.objectContaining({ key: "user-id", remoteInput: { kind: "upload-token", value: "preserved-user-lease" } }),
+      ],
+      context: expect.objectContaining({
+        references: [
+          expect.objectContaining({ mediaId: "source-media", uploadLeaseId: "recovered-source-lease" }),
+          expect.objectContaining({ mediaId: "user-media", uploadLeaseId: "preserved-user-lease" }),
+        ],
+      }),
+    }));
   });
 
   it("carries immutable V2 route, context, and current-attempt identity through submission", async () => {
@@ -549,6 +603,43 @@ describe("submitGeneration", () => {
     });
     expect(p.provider.submit).not.toHaveBeenCalled();
     expect(p.mutations.markPlaceholderFailed).toHaveBeenCalled();
+  });
+
+  it.each([
+    ["access_key_id", { nested: { access_key_id: "AKIA_TEST" } }],
+    ["secret-access-key", { credentials: [{ "secret-access-key": "secret" }] }],
+    ["X-Goog-API-Key", { headers: { "X-Goog-API-Key": "secret" } }],
+    ["awsAccessKeyId", { auth: { awsAccessKeyId: "AKIA_TEST" } }],
+    ["aws_secret_access_key", { auth: { aws_secret_access_key: "secret" } }],
+    ["google_api_key", { auth: { google_api_key: "secret" } }],
+    ["accessKeySecret", { auth: { accessKeySecret: "secret" } }],
+    ["AWS_SESSION_TOKEN", { auth: { AWS_SESSION_TOKEN: "secret" } }],
+  ])("rejects a sanitizer-introduced %s before provider submission", async (_name, inputs) => {
+    const p = ports({
+      sanitizer: { sanitize: vi.fn(() => ({ inputs })) },
+    });
+
+    await expect(submitGeneration(draft(), p)).rejects.toMatchObject({
+      code: "generation-sanitize-failed",
+      retryable: true,
+    });
+    expect(p.provider.submit).not.toHaveBeenCalled();
+  });
+
+  it("accepts benign sanitizer fields that merely contain credential words", async () => {
+    const inputs = {
+      accessKeyframeId: "frame-1",
+      authorizationStatus: "approved",
+      secretSceneDescription: "a hidden room",
+    };
+    const p = ports({
+      sanitizer: { sanitize: vi.fn(() => ({ inputs })) },
+    });
+
+    await submitGeneration(draft(), p);
+
+    expect(p.provider.submit).toHaveBeenCalledOnce();
+    expect(p.provider.submit).toHaveBeenCalledWith(expect.objectContaining({ inputs }));
   });
 
   it("keeps reference uploads opaque in the submitted context", async () => {

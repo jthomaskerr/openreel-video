@@ -94,6 +94,8 @@ const TRANSIENT_TRANSPORT_FIELD_NAMES = new Set([
 ]);
 
 const PROVIDER_SECRET_FIELD_NAMES = new Set([
+  "accesskeyid",
+  "accesskeysecret",
   "accesstoken",
   "apikey",
   "apisecret",
@@ -101,21 +103,27 @@ const PROVIDER_SECRET_FIELD_NAMES = new Set([
   "authorization",
   "authorizationheader",
   "authtoken",
+  "awsaccesskeyid",
+  "awssecretaccesskey",
+  "awssessiontoken",
   "bearertoken",
   "clientsecret",
   "consumerkey",
   "consumersecret",
   "credential",
   "credentials",
+  "googleapikey",
   "passphrase",
   "password",
   "privatekey",
   "proxyauthorization",
   "refreshtoken",
   "secret",
+  "secretaccesskey",
   "secretkey",
   "sessiontoken",
   "xapikey",
+  "xgoogapikey",
 ]);
 
 export class ProviderNeutralInputError extends TypeError {
@@ -255,6 +263,7 @@ function normalizeSubmissionReferences(
     ...(reference.canonicalTokens ? { canonicalTokens: reference.canonicalTokens } : {}),
     status: reference.status ?? "active",
     ...(reference.reason ? { reason: reference.reason } : {}),
+    ...(reference.uploadLeaseId ? { uploadLeaseId: reference.uploadLeaseId } : {}),
   }))
     .slice()
     .sort((left, right) => (left.order ?? 0) - (right.order ?? 0) || left.key.localeCompare(right.key));
