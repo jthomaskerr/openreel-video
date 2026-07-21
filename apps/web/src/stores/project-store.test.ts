@@ -117,6 +117,7 @@ vi.mock("../services/auto-save", () => ({
     on: vi.fn(),
     start: vi.fn(),
     markDirty: vi.fn(),
+    forceSave: vi.fn().mockResolvedValue(undefined),
     startAutoSave: vi.fn(),
     stopAutoSave: vi.fn(),
     triggerSave: vi.fn(),
@@ -410,6 +411,19 @@ describe("ProjectStore", () => {
         const project = useProjectStore.getState().project;
         project.generatedImageDefinitions.find((definition) => definition.assetGroupId === "any");
       }).not.toThrow();
+    });
+  });
+
+  describe("explicit save", () => {
+    it("awaits a durable user save of the complete project snapshot and propagates failure", async () => {
+      const expectedSnapshot = useProjectStore.getState().getFullProject();
+      const failure = new Error("backend rejected explicit save");
+      const backendSave = vi.spyOn(backendSaveService, "save").mockRejectedValue(failure);
+
+      await expect(useProjectStore.getState().forceSave()).rejects.toThrow(failure.message);
+
+      expect(autoSaveManager.forceSave).toHaveBeenCalledWith(expectedSnapshot);
+      expect(backendSave).toHaveBeenCalledWith(expectedSnapshot, "user");
     });
   });
 
