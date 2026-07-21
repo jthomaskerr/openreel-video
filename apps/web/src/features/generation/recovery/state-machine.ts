@@ -49,7 +49,7 @@ const recoveryTransitions: RecoveryTransition[] = [
   },
   {
     action: "retry-placement",
-    from: ["completed", "needs-attention"],
+    from: ["completed", "needs-attention", "succeeded"],
     to: "finalizing",
   },
   {
@@ -59,7 +59,7 @@ const recoveryTransitions: RecoveryTransition[] = [
   },
   {
     action: "cancel",
-    from: ["queued", "submitting", "running"],
+    from: ["queued", "running"],
     to: "canceled",
     stopsPolling: true,
     cancelsProvider: true,
@@ -80,7 +80,7 @@ export function isPlacementReconciliationCandidate(job: GenerationJob): boolean 
 }
 
 export function isPlacementRetryCandidate(job: GenerationJob): boolean {
-  return ["completed", "needs-attention"].includes(job.status)
+  return ["completed", "needs-attention", "succeeded"].includes(job.status)
     && job.context.placementPolicy !== "none"
     && job.checkpoints["placement-applied"]?.status === "failed"
     && job.placement?.status === "failed"
