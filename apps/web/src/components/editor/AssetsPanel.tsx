@@ -48,7 +48,7 @@ import {
 } from "@openreel/ui";
 import { GenerateAssetDialog } from "./generate/GenerateAssetDialog";
 import type { GenerateAssetDialogProps } from "./generate/GenerateAssetDialog";
-import { loadMediaBlob, saveFileHandle, saveDirectoryHandle, scanDirectoryRecursive } from "../../services/media-storage";
+import { saveFileHandle, saveDirectoryHandle, scanDirectoryRecursive } from "../../services/media-storage";
 import { useKieAIStore } from "../../stores/kieai-store";
 import { useMusicVideoStore } from "../../stores/music-video-store";
 import { createSceneFromMedia, SceneCard, SceneLibrary } from "./SceneLibrary";
@@ -980,6 +980,8 @@ export const AssetsPanel: React.FC = () => {
   const { retryTask } = useKieAIStore();
 
   const availabilityById = useMemo(() => {
+    // The runtime map is external to React; the version subscription invalidates this snapshot.
+    void availabilityVersion;
     const views = new Map<string, MediaAvailabilityView>();
     for (const item of mediaItems) {
       views.set(item.id, selectMediaAvailabilityView(
@@ -1300,40 +1302,21 @@ export const AssetsPanel: React.FC = () => {
     [backgroundCategory],
   );
   // Open unified generate dialog for an image asset
-  const handleOpenGenerate = useCallback(async (item: MediaItem) => {
-    try {
-      const blob = await loadMediaBlob(item.id);
-      if (!blob) {
-        toast.error("Asset not found", "Cannot load the image data for this asset.");
-        return;
+  const handleOpenGenerate = useCallback((item: MediaItem) => {
+    // Look up NF-imported asset and shot by matching thumbnailUrl → outputPath.
+    const mvProjects = useMusicVideoStore.getState().projects;
+    let asset = undefined;
+    let shot = undefined;
+    for (const mvProject of Object.values(mvProjects)) {
+      const found = mvProject.generatedAssets.find((candidate) => candidate.outputPath === item.thumbnailUrl);
+      if (found) {
+        asset = found;
+        shot = mvProject.shots.find((candidate) => candidate.generatedAssetIds.includes(found.id));
+        break;
       }
-      const mimeType = blob.type || (item.name.match(/\.png$/i) ? "image/png" : "image/jpeg");
-      const file = new File([blob], item.name, { type: mimeType });
-
-      // Look up NF-imported asset and shot by matching thumbnailUrl → outputPath
-      const mvProjects = useMusicVideoStore.getState().projects;
-      let asset = undefined;
-      let shot = undefined;
-      for (const mvProject of Object.values(mvProjects)) {
-        const found = mvProject.generatedAssets.find((a) => a.outputPath === item.thumbnailUrl);
-        if (found) {
-          asset = found;
-          shot = mvProject.shots.find((s) => s.generatedAssetIds.includes(found.id));
-          break;
-        }
-      }
-
-      setGenerateDialog({
-        sourceFile: file,
-        sourceMediaId: item.id,
-        previewUrl: item.thumbnailUrl,
-        asset,
-        shot,
-      });
-    } catch (err) {
-      console.error("[Generate] Failed to load media blob:", err);
-      toast.error("Failed to open generator", err instanceof Error ? err.message : "Unknown error");
     }
+
+    setGenerateDialog({ sourceMediaId: item.id, asset, shot });
   }, []);
 
   const handleRetryKieAI = useCallback((item: MediaItem) => {

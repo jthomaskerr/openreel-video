@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Loader2, RotateCcw, Sparkles, X } from "lucide-react";
+import { AlertCircle, Loader2, RotateCcw, Sparkles, X } from "lucide-react";
 import type { ReferenceTarget } from "@openreel/core";
 import {
   openReferenceTarget,

@@ -476,15 +476,20 @@ export const GenerateTab: React.FC<GenerateTabProps> = (props) => {
   }
 
   return (
-    <form
-      aria-label="Generate"
-      onSubmit={(event) => {
-        event.preventDefault();
-        void submit();
-      }}
-      className="min-w-0 max-w-full w-full text-sm text-text-primary"
-      data-testid="generate-tab"
+    <div
+      className="min-w-0 overflow-x-hidden"
+      data-placement="inspector"
+      data-testid="generated-image-editor"
     >
+      <form
+        aria-label="Generate"
+        onSubmit={(event) => {
+          event.preventDefault();
+          void submit();
+        }}
+        className="min-w-0 max-w-full w-full text-sm text-text-primary"
+        data-testid="generate-tab"
+      >
       <GenerateHeaderSection
         contextLabel={
           props.context === "shot" ? "shot-aware generation" : "new asset generation"
@@ -553,7 +558,8 @@ export const GenerateTab: React.FC<GenerateTabProps> = (props) => {
         job={props.job}
         onRecoveryAction={handleRecoveryAction}
       />
-    </form>
+      </form>
+    </div>
   );
 };
 
