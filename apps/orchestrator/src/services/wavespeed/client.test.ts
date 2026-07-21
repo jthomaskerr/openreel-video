@@ -8,13 +8,72 @@ const job = { routing: route, providerInputs: { prompt: "test" } } as unknown as
 function response(value: unknown, status = 200): WaveSpeedFetchResponse { return { ok: status >= 200 && status < 300, status, json: async () => value }; }
 
 test("uses the installed SDK's v3 submit and result endpoints", async () => {
-  const calls: Array<{ url: string; method: string; headers: Record<string, string>; body?: string }> = [];
+  const calls: Array<{ url: string; method: string; headers: Record<string, string>; body?: string | FormData }> = [];
   const provider = new WaveSpeedProvider({ baseUrl: "https://api.example", apiKey: "secret", fetch: async (url, init) => { calls.push({ url, ...init }); return calls.length === 1 ? response({ data: { id: "task-1" } }) : response({ data: { status: "completed", outputs: ["https://cdn.example/output.mp4"] } }); } });
   assert.deepEqual(await provider.submit({ job, attemptNumber: 1, idempotencyKey: "generation:job:attempt:1" }), { providerJobId: "task-1" });
   assert.deepEqual(await provider.status({ providerJobId: "task-1", routing: route }), { providerJobId: "task-1", status: "completed", outputUrls: ["https://cdn.example/output.mp4"] });
   assert.equal(calls[0].url, "https://api.example/api/v3/wavespeed-ai/wan");
   assert.equal(calls[1].url, "https://api.example/api/v3/predictions/task-1/result");
   assert.equal(calls[0].headers["idempotency-key"], undefined);
+});
+
+test("uploads media through the official multipart endpoint without exposing local upload IDs", async () => {
+  const calls: Array<{ url: string; method: string; headers: Record<string, string>; body?: string | FormData }> = [];
+  const provider = new WaveSpeedProvider({
+    baseUrl: "https://api.example",
+    apiKey: "secret",
+    fetch: async (url, init) => {
+      calls.push({ url, ...init });
+      return response({ data: { download_url: "https://cdn.example/materialized.png" } });
+    },
+  });
+
+  assert.equal(
+    await provider.uploadMedia({ bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" }),
+    "https://cdn.example/materialized.png",
+  );
+  assert.equal(calls[0]?.url, "https://api.example/api/v3/media/upload/binary");
+  assert.equal(calls[0]?.method, "POST");
+  assert.equal(calls[0]?.headers.authorization, "Bearer secret");
+  assert.equal(calls[0]?.headers["content-type"], undefined);
+  assert.ok(calls[0]?.body instanceof FormData);
+  const file = calls[0]?.body instanceof FormData ? calls[0].body.get("file") : undefined;
+  assert.ok(file instanceof Blob);
+  assert.equal(file.type, "image/png");
+  assert.deepEqual(new Uint8Array(await file.arrayBuffer()), new Uint8Array([1, 2, 3]));
+  assert.doesNotMatch((file as File).name, /upl_/);
+});
+
+test("rejects a media upload response that is not a provider-reachable HTTPS URL", async () => {
+  for (const downloadUrl of ["http://cdn.example/media.png", "https://localhost/media.png", "blob:local-media"]) {
+    const provider = new WaveSpeedProvider({
+      baseUrl: "https://api.example",
+      apiKey: "secret",
+      fetch: async () => response({ data: { download_url: downloadUrl } }),
+    });
+    await assert.rejects(
+      provider.uploadMedia({ bytes: new Uint8Array([1]), mimeType: "image/png" }),
+      /wavespeed-upload-url-invalid/,
+    );
+  }
+});
+
+test("fails closed before prediction submission when any provider input remains local", async () => {
+  for (const unsafe of ["upl_unresolved", "blob:media", "local:media", "file:///tmp/media", "/tmp/media", "http://localhost/media"]) {
+    let requests = 0;
+    const provider = new WaveSpeedProvider({
+      baseUrl: "https://api.example",
+      apiKey: "secret",
+      fetch: async () => { requests += 1; return response({ data: { id: "must-not-submit" } }); },
+    });
+    const unsafeJob = { ...job, providerInputs: { reference_images: [unsafe] } } as GenerationJob;
+
+    await assert.rejects(
+      provider.submit({ job: unsafeJob, attemptNumber: 1, idempotencyKey: "key" }),
+      /wavespeed-input-media-(?:unresolved|unreachable)/,
+    );
+    assert.equal(requests, 0, unsafe);
+  }
 });
 
 test("normalizes processing and failure, rejects unknown state, and reports unsupported cancellation", async () => {

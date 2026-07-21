@@ -27,6 +27,14 @@ export interface GenerationProviderPort {
   cancel?(input: { providerJobId: string; routing: GenerationRouteIdentity }): Promise<void>;
 }
 
+export interface GenerationProviderInputMaterializer {
+  materialize(input: {
+    ownerId: string;
+    job: GenerationJob;
+    attemptNumber: number;
+  }): Promise<Record<string, JsonValue>>;
+}
+
 export interface GenerationOutputIdentity { providerJobId: string; outputCount: number; outputUrls?: string[]; outputMediaIds?: string[] }
 export interface GenerationProviderStatus {
   providerJobId: string;
@@ -58,6 +66,7 @@ export interface GenerationRequestBoundaryPort { validate(input: GenerationReque
 export interface GenerationOrchestratorOptions {
   repository: GenerationJobRepository;
   provider: GenerationProviderPort;
+  inputMaterializer?: GenerationProviderInputMaterializer;
   routes: readonly GenerationRouteManifestEntry[];
   releaseEnabled: boolean;
   owner: (input: { ownerId: string; projectId: string }) => boolean | Promise<boolean>;
@@ -134,13 +143,24 @@ export class GenerationOrchestrator {
     return this.submitInternal(input.ownerId, input.job, false, input.request);
   }
 
-  private async submitInternal(ownerId: string, inputJob: GenerationJob, recovery: boolean, request?: GenerationRequestBoundary) {
+  private async submitInternal(
+    ownerId: string,
+    inputJob: GenerationJob,
+    recovery: boolean,
+    request?: GenerationRequestBoundary,
+    alreadyMaterializedInputs?: Record<string, JsonValue>,
+  ) {
     const job = parseGenerationJob(inputJob);
     this.options.requestBoundary.validate(request ?? { contentType: "application/json", byteLength: 0, maxBytes: 0, timeoutMs: 1, maxTimeoutMs: 1 });
     await this.authorize(ownerId, job.projectId);
     if (!recovery) assertGenerationV2SubmissionAllowed(job.contractVersion, this.options.releaseEnabled);
     if (!recovery && !job.target) throw new Error("generation-target-missing");
     this.validateRoute(job.routing, job);
+
+    const candidateAttemptNumber = Math.max(1, job.attempt || 1);
+    const materializedInputs = alreadyMaterializedInputs ?? (this.options.inputMaterializer
+      ? await this.options.inputMaterializer.materialize({ ownerId, job, attemptNumber: candidateAttemptNumber })
+      : job.providerInputs);
 
     let current = await this.options.repository.get(job.id);
     if (current) {
@@ -158,11 +178,12 @@ export class GenerationOrchestrator {
 
     const attemptNumber = current.attempt || Math.max(1, ...current.attempts.map((attempt) => attempt.attemptNumber));
     const idempotencyKey = `generation:${current.id}:attempt:${attemptNumber}`;
+    const providerJob = { ...current, providerInputs: materializedInputs };
     const reservation = await this.options.repository.beginSubmission(current.id, attemptNumber, idempotencyKey);
     if (!reservation.acquired) {
       if (reservation.claim.providerJobId) return this.persistProviderIdentity(current.id, attemptNumber, reservation.claim.providerJobId);
       if (this.options.provider.reconcileSubmission) {
-        const reconciliation = await this.options.provider.reconcileSubmission({ job: current, attemptNumber, idempotencyKey });
+        const reconciliation = await this.options.provider.reconcileSubmission({ job: providerJob, attemptNumber, idempotencyKey });
         if (reconciliation.status === "submitted" && reconciliation.providerJobId?.trim()) {
           await this.options.repository.recordProviderSubmission(current.id, attemptNumber, reconciliation.providerJobId);
           return this.persistProviderIdentity(current.id, attemptNumber, reconciliation.providerJobId);
@@ -172,7 +193,7 @@ export class GenerationOrchestrator {
       return this.options.repository.update(current.id, (latest) => ({ ...latest, status: "needs-attention", error: stableError("generation-submission-reconciliation-required"), updatedAt: this.clock() }));
     }
     try {
-      const result = await this.options.provider.submit({ job: current, attemptNumber, idempotencyKey });
+      const result = await this.options.provider.submit({ job: providerJob, attemptNumber, idempotencyKey });
       if (!result.providerJobId?.trim()) throw new Error("generation-provider-id-missing");
       await this.options.repository.recordProviderSubmission(current.id, attemptNumber, result.providerJobId);
       return await this.persistProviderIdentity(current.id, attemptNumber, result.providerJobId);
@@ -326,8 +347,11 @@ export class GenerationOrchestrator {
   async retryProvider(input: GenerationJobCommand): Promise<GenerationJob> {
     const job = await this.requireOwned(input); if (job.status !== "failed" || !job.providerJobId) throw new Error("generation-invalid-retry-state");
     const attemptNumber = Math.max(0, ...job.attempts.map((attempt) => attempt.attemptNumber)) + 1;
+    const materializedInputs = this.options.inputMaterializer
+      ? await this.options.inputMaterializer.materialize({ ownerId: input.ownerId, job, attemptNumber })
+      : job.providerInputs;
     const reserved = await this.options.repository.update(job.id, (current) => ({ ...current, status: "queued", attempt: attemptNumber, providerJobId: undefined, error: undefined, updatedAt: this.clock(), attempts: [...current.attempts, { attemptNumber, routing: current.routing, startedAt: this.clock() }] }));
-    return this.submitInternal(input.ownerId, reserved, true);
+    return this.submitInternal(input.ownerId, reserved, true, undefined, materializedInputs);
   }
 
   private validateRoute(route: GenerationRouteIdentity, job: GenerationJob) {
