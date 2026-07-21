@@ -101,8 +101,14 @@ export const usePersistenceStatusStore = create<PersistenceStatusState>((set) =>
     phaseStartedAt: null,
   }),
   confirmReceipt: (projectId, receipt) => set({
+    phase: "persisted",
     projectId,
+    persistedAt: receipt.persistedAt,
+    persistedModifiedAt: receipt.sourceModifiedAt,
+    error: null,
+    phaseStartedAt: null,
     confirmedReceipt: receipt,
+    conflictingProject: null,
     baseRevision: receipt.commitSha && receipt.treeSha && receipt.projectBlobSha
       ? {
           commitSha: receipt.commitSha,

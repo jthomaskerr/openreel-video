@@ -43,3 +43,21 @@ describe("isProjectDirty", () => {
     expect(isProjectDirty(active, usePersistenceStatusStore.getState())).toBe(true);
   });
 });
+
+describe("confirmReceipt", () => {
+  beforeEach(() => usePersistenceStatusStore.getState().reset());
+
+  it("projects a canonical load receipt into visible persisted status", () => {
+    const confirmed = receipt("project-a", 100);
+
+    usePersistenceStatusStore.getState().confirmReceipt("project-a", confirmed);
+
+    expect(usePersistenceStatusStore.getState()).toMatchObject({
+      phase: "persisted",
+      projectId: "project-a",
+      persistedAt: confirmed.persistedAt,
+      persistedModifiedAt: confirmed.sourceModifiedAt,
+      error: null,
+    });
+  });
+});
