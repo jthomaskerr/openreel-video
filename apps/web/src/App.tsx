@@ -10,6 +10,7 @@ import { useUIStore } from "./stores/ui-store";
 import { useProjectStore } from "./stores/project-store";
 import { useRouter } from "./hooks/use-router";
 import { useProjectRecovery } from "./hooks/useProjectRecovery";
+import { useProjectUnloadGuard } from "./hooks/useProjectUnloadGuard";
 import { reportRuntimeError } from "./stores/notification-store";
 import { useKieAIPoller } from "./hooks/useKieAIPoller";
 import { useGenerationJobPoller } from "./hooks/useGenerationJobPoller";
@@ -17,6 +18,7 @@ import { SOCIAL_MEDIA_PRESETS, type SocialMediaCategory } from "@openreel/core";
 import { TooltipProvider } from "@openreel/ui";
 import { isClientOnlyProjectId } from "./services/backend-save";
 import { shouldSyncProjectIdToUrl } from "./services/project-url-identity";
+import { usePersistenceStatusStore } from "./stores/persistence-status-store";
 
 const EditorInterface = lazy(() =>
   import("./components/editor/EditorInterface").then((m) => ({
@@ -43,6 +45,9 @@ function App() {
   const { activeModal, modalData, closeModal, skipWelcomeScreen } = useUIStore();
   const { openModal: openSearchModal } = useUIStore();
   const { project, explicitlyCreated } = useProjectStore();
+  const persistenceStatus = usePersistenceStatusStore();
+
+  useProjectUnloadGuard(project, persistenceStatus, explicitlyCreated);
 
   const { route, params, navigate, updateParams, parsedDimensions } = useRouter();
   const scriptViewInitialTab =
