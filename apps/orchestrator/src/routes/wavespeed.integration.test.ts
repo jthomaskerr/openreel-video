@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { test } from "node:test";
 import express from "express";
-import { test } from "vitest";
-import type { GenerationJob, GenerationRouteIdentity } from "@openreel/music-video-domain/generation";
+import type {
+  GenerationJob,
+  GenerationProjectActionCommand,
+  GenerationRouteIdentity,
+} from "@openreel/music-video-domain/generation";
 import { config } from "../env.js";
 import { GenerationFinalizer } from "../services/generation/finalization.js";
 import { FileGenerationJobRepository } from "../services/generation/repository.js";
@@ -28,6 +32,8 @@ const manifest = [{
   clientAcceptance: true,
   serverAcceptance: true,
   configurationVersion: "generation-v2",
+  inputSchema: { type: "object", additionalProperties: true },
+  supportsAudio: false,
 }] as const;
 
 function request(jobId: string, providerInputs: Record<string, unknown> = {}) {
@@ -112,7 +118,8 @@ async function fixture(options?: {
   status?: (providerJobId: string) => GenerationProviderStatus;
   authenticated?: boolean;
   authorized?: boolean;
-  routes?: readonly typeof manifest[number][];
+  routes?: readonly import("./wavespeed.js").ValidatedGenerationRouteManifestEntry[];
+  applyProjectAction?: (command: GenerationProjectActionCommand) => Promise<unknown>;
 }) {
   const repository = new FileGenerationJobRepository(await mkdtemp(join(tmpdir(), "wavespeed-route-integration-")));
   let providerSubmits = 0;
@@ -147,6 +154,7 @@ async function fixture(options?: {
     configured: true,
     authenticate: () => options?.authenticated === false ? undefined : { ownerId: "owner-1" },
     owner: () => options?.authorized !== false,
+    applyProjectAction: options?.applyProjectAction,
   });
   return {
     repository,
@@ -163,19 +171,24 @@ test("route persists the exact target and timing before provider reservation", a
     entryContext: { kind: "unlinked-range", rangeId: "range-1", startTime: 2, endTime: 5 },
     placementPolicy: "create-linked-clip",
     timing: { source: "timeline", startSeconds: 2, endSeconds: 5, durationSeconds: 3 },
-  } as typeof body.context;
+  } as unknown as typeof body.context;
 
   const response = await invoke(current.router, "POST", "/api/generate/wavespeed/", body);
 
   assert.equal(response.status, 202);
   assert.deepEqual((await current.repository.get("target-timing"))?.target, body.target);
-  assert.deepEqual((await current.repository.get("target-timing"))?.context.timing, body.context.timing);
+  assert.deepEqual((await current.repository.get("target-timing"))?.context.timing, {
+    source: "timeline",
+    startSeconds: 2,
+    endSeconds: 5,
+    durationSeconds: 3,
+  });
   assert.equal(current.counts().providerSubmits, 1);
 });
 
 test("missing target is rejected before provider reservation", async () => {
   const current = await fixture();
-  const body = request("missing-target") as ReturnType<typeof request> & { target?: ReturnType<typeof request>["target"] };
+  const body: Omit<ReturnType<typeof request>, "target"> & { target?: ReturnType<typeof request>["target"] } = request("missing-target");
   delete body.target;
 
   const response = await invoke(current.router, "POST", "/api/generate/wavespeed/", body);
@@ -213,6 +226,70 @@ test("missing authentication, project mismatch, and missing immutable manifest f
   assert.equal(deniedModels.body.error, "generation-forbidden");
 });
 
+test("duplicate submission re-authorizes ownership before disclosing an existing job", async () => {
+  const current = await fixture({ authorized: false });
+  await current.repository.create(persistedJob("owned-elsewhere", "running"));
+
+  const response = await invoke(
+    current.router,
+    "POST",
+    "/api/generate/wavespeed/",
+    request("owned-elsewhere"),
+  );
+
+  assert.equal(response.status, 403);
+  assert.equal(response.body.error, "generation-forbidden");
+  assert.equal(response.body.job, undefined);
+  assert.equal(current.counts().providerSubmits, 0);
+});
+
+test("manifest input schema and supportsAudio fail closed before reservation", async () => {
+  const strictManifest = [{
+    ...manifest[0],
+    inputSchema: {
+      type: "object",
+      properties: { prompt: { type: "string" } },
+      additionalProperties: false,
+    },
+  }] as const;
+  const invalidInput = await fixture({ routes: strictManifest });
+  const invalidInputResponse = await invoke(
+    invalidInput.router,
+    "POST",
+    "/api/generate/wavespeed/",
+    request("invalid-provider-input", { prompt: "ok", unsupported: true }),
+  );
+  assert.equal(invalidInputResponse.status, 400);
+  assert.equal(invalidInputResponse.body.error, "generation-provider-input-invalid");
+  assert.equal(await invalidInput.repository.get("invalid-provider-input"), undefined);
+  assert.equal(invalidInput.counts().providerSubmits, 0);
+
+  const unsupportedAudio = await fixture({ routes: strictManifest });
+  const audioRequest = request("unsupported-audio", { prompt: "ok" });
+  audioRequest.context = {
+    ...audioRequest.context,
+    entryContext: {
+      kind: "linked-projection",
+      shotId: "shot-1",
+      clipId: "clip-1",
+      startTime: 0,
+      endTime: 1,
+    },
+    audioAssetId: "audio-1",
+    audioRange: { startTime: 0, endTime: 1 },
+  } as unknown as typeof audioRequest.context;
+  const audioResponse = await invoke(
+    unsupportedAudio.router,
+    "POST",
+    "/api/generate/wavespeed/",
+    audioRequest,
+  );
+  assert.equal(audioResponse.status, 400);
+  assert.equal(audioResponse.body.error, "generation-audio-unsupported");
+  assert.equal(await unsupportedAudio.repository.get("unsupported-audio"), undefined);
+  assert.equal(unsupportedAudio.counts().providerSubmits, 0);
+});
+
 test("submission rejects conflicting durable identities and path-shaped job IDs before reservation", async () => {
   const projectMismatch = await fixture();
   const mismatchedProjectRequest = request("context-project-mismatch");
@@ -236,7 +313,7 @@ test("submission rejects conflicting durable identities and path-shaped job IDs 
   mismatchedModeRequest.context = {
     ...mismatchedModeRequest.context,
     mode: "image-to-video",
-  };
+  } as unknown as typeof mismatchedModeRequest.context;
   const mismatchedMode = await invoke(
     modeMismatch.router,
     "POST",
@@ -335,7 +412,7 @@ test("generation-finalization-new-asset-no-source.fixture.ts: production route c
 
   const completed = await invoke(f.router, "GET", "/api/generate/wavespeed/completed-job");
   assert.equal(completed.status, 200);
-  assert.equal(completed.body.job.status, "succeeded");
+  assert.equal(completed.body.job.status, "succeeded", JSON.stringify(completed.body.job));
   assert.equal(completed.body.job.output.mediaId, "media-completed-job");
   assert.equal(completed.body.job.output.versionId, "version-completed-job");
   assert.deepEqual(completed.body.job.outputMediaIds, ["provider-output:provider-completed-job:0"]);
@@ -381,6 +458,7 @@ test("config exposes non-secret capabilities only", async () => {
       providerEndpointId: "submit",
       providerSchemaVersion: "2026-07",
       output: "image",
+      supportsAudio: false,
     }],
   });
   assert.equal(JSON.stringify(response.body).toLowerCase().includes("key"), false);
@@ -407,8 +485,64 @@ test("production manifest configuration is validated and deeply immutable", () =
   assert.equal(Object.isFrozen(routes), true);
   assert.equal(Object.isFrozen(routes[0]), true);
   assert.equal(Object.isFrozen(routes[0].identity), true);
+  assert.equal(Object.isFrozen(routes[0].inputSchema), true);
   assert.throws(
     () => parseGenerationRouteManifest(JSON.stringify([{ ...manifest[0], serverAcceptance: "yes" }])),
     /generation-route-manifest-invalid/,
   );
+});
+
+test("authenticated project actions use the durable domain command unchanged", async () => {
+  let received: GenerationProjectActionCommand | undefined;
+  const current = await fixture({
+    applyProjectAction: async (command) => {
+      received = command;
+      return {
+        projectId: command.projectId,
+        actionId: command.actionId,
+        operation: command.operation,
+        status: "applied",
+        revision: command.expectedRevision,
+        envelope: command.envelope,
+      };
+    },
+  });
+  const revision = {
+    commitSha: "a".repeat(40),
+    treeSha: "b".repeat(40),
+    projectBlobSha: "c".repeat(40),
+    sourceModifiedAt: 1,
+  };
+  const command: GenerationProjectActionCommand = {
+    projectId: "project-1",
+    actionId: "action-1",
+    operation: "undo",
+    expectedRevision: revision,
+    envelope: {
+      schemaVersion: 1,
+      projectId: "project-1",
+      receipt: {
+        schemaVersion: 1,
+        actionId: "action-1",
+        jobId: "job-1",
+        idempotencyKey: `generation-stage-${"d".repeat(64)}`,
+        kind: "finalize-placeholder",
+        semanticPayload: "{}",
+        baseRevision: revision,
+        appliedAt: 2,
+      },
+      appliedRevision: revision,
+    },
+  };
+
+  const response = await invoke(
+    current.router,
+    "POST",
+    "/api/generate/wavespeed/actions/action-1",
+    command,
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(received, command);
+  assert.equal(response.body.result.status, "applied");
 });

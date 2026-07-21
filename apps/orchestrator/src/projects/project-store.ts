@@ -28,7 +28,7 @@ export interface ProjectMediaAuditOptions {
   /** Defaults to true; false is reserved for lower-level manifest-only checks. */
   readonly verifyLfs?: boolean;
   readonly checkRemoteObject?: LfsRemoteObjectCheck;
-  readonly pointerSource?: "HEAD" | "index" | "worktree";
+  readonly pointerSource?: "HEAD" | "index";
   readonly allowDanglingClips?: boolean;
 }
 

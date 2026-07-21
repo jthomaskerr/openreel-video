@@ -8,6 +8,7 @@ import type { MediaItem, Project, ProjectBaseRevision } from "@openreel/core";
 import {
   canonicalizeGenerationProjectActionPayload,
   classifyGenerationProjectTarget,
+  DurablePathIdentifierSchema,
   type GenerationJob,
   type GenerationOutput,
   type GenerationProjectActionEnvelope,
@@ -65,6 +66,7 @@ const execFileAsync = promisify(execFile);
 
 interface MutationInput<T> {
   readonly job: GenerationJob;
+  readonly actionId?: string;
   readonly idempotencyKey: string;
   readonly kind: GenerationProjectMutationKind;
   readonly semanticPayload: string;
@@ -135,9 +137,19 @@ async function readConfirmedProjectSnapshot(
   });
 }
 
-function receiptFromUnknown(value: unknown): GenerationProjectMutationReceipt | undefined {
+function parseGenerationProjectMutationReceipt(
+  value: unknown,
+): { readonly data: GenerationProjectMutationReceipt; readonly error?: undefined }
+  | { readonly data?: undefined; readonly error: unknown } {
   const parsed = GenerationProjectMutationReceiptSchema.safeParse(value);
-  return parsed.success ? parsed.data : undefined;
+  if (!parsed.success) return { error: parsed.error };
+  const idempotencyKey = DurablePathIdentifierSchema.safeParse(parsed.data.idempotencyKey);
+  if (!idempotencyKey.success) return { error: idempotencyKey.error };
+  return { data: parsed.data };
+}
+
+function receiptFromUnknown(value: unknown): GenerationProjectMutationReceipt | undefined {
+  return parseGenerationProjectMutationReceipt(value).data;
 }
 
 export function findGenerationProjectReceipt(project: Project, idempotencyKey: string): GenerationProjectMutationReceipt | undefined {
@@ -255,6 +267,23 @@ export class GenerationProjectActionAdapter {
     this.maxConflictRetries = options.maxConflictRetries ?? 3;
   }
 
+  private createValidatedActionId(
+    job: GenerationJob,
+    kind: GenerationProjectMutationKind,
+    idempotencyKey: string,
+  ): string {
+    const actionId = this.createActionId({ jobId: job.id, kind });
+    for (const value of [actionId, job.id, idempotencyKey]) {
+      const parsed = DurablePathIdentifierSchema.safeParse(value);
+      if (!parsed.success) {
+        throw new GenerationProjectActionError("generation-project-receipt-invalid", undefined, {
+          cause: parsed.error,
+        });
+      }
+    }
+    return actionId;
+  }
+
   async finalize(input: { job: GenerationJob; output: GenerationOutput; idempotencyKey: string }): Promise<FinalizedGenerationProjectOutput> {
     const classification = classifyGenerationProjectTarget(input.job);
     if (classification.status === "needs-attention") {
@@ -281,6 +310,7 @@ export class GenerationProjectActionAdapter {
       return { ...replayValue(existing.project), projectAction: envelope };
     }
 
+    const actionId = this.createValidatedActionId(input.job, kind, input.idempotencyKey);
     const cached = await this.readCachedOutput(input.job, input.output);
     const filename = `${target.placeholderMediaId}.${outputExtension(cached.mimeType)}`;
     const tempDirectory = await mkdtemp(join(tmpdir(), "openreel-generated-output-"));
@@ -297,6 +327,7 @@ export class GenerationProjectActionAdapter {
       );
       const result = await this.mutateProject({
         job: input.job,
+        actionId,
         idempotencyKey: input.idempotencyKey,
         kind,
         semanticPayload,
@@ -473,8 +504,22 @@ export class GenerationProjectActionAdapter {
   }
 
   async applyProjectAction(command: GenerationProjectActionCommand): Promise<GenerationProjectActionResult> {
+    const parsedReceipt = parseGenerationProjectMutationReceipt(command.envelope.receipt);
+    if (!parsedReceipt.data) {
+      throw new GenerationProjectActionError("generation-project-receipt-invalid", undefined, {
+        cause: parsedReceipt.error,
+      });
+    }
     if (command.projectId !== command.envelope.projectId || command.actionId !== command.envelope.receipt.actionId) {
       throw new GenerationProjectActionError("generation-project-action-identity-mismatch");
+    }
+    const canonicalAppliedRevision = await receiptAppliedRevision(
+      this.options.gitStore,
+      command.projectId,
+      parsedReceipt.data,
+    );
+    if (!revisionsEqual(canonicalAppliedRevision, command.envelope.appliedRevision)) {
+      throw new GenerationProjectActionError("generation-project-action-conflict");
     }
     const { project: current, revision: currentRevision } = await readConfirmedProjectSnapshot(
       this.options,
@@ -662,9 +707,9 @@ export class GenerationProjectActionAdapter {
           replayed: true,
         };
       }
-      const receipt: GenerationProjectMutationReceipt = {
+      const receiptCandidate: GenerationProjectMutationReceipt = {
         schemaVersion: 1,
-        actionId: this.createActionId({ jobId: input.job.id, kind: input.kind }),
+        actionId: input.actionId ?? this.createValidatedActionId(input.job, input.kind, input.idempotencyKey),
         jobId: input.job.id,
         idempotencyKey: input.idempotencyKey,
         kind: input.kind,
@@ -672,6 +717,13 @@ export class GenerationProjectActionAdapter {
         baseRevision,
         appliedAt: this.clock(),
       };
+      const parsedReceipt = parseGenerationProjectMutationReceipt(receiptCandidate);
+      if (!parsedReceipt.data) {
+        throw new GenerationProjectActionError("generation-project-receipt-invalid", undefined, {
+          cause: parsedReceipt.error,
+        });
+      }
+      const receipt = parsedReceipt.data;
       const draft = structuredClone(current) as Project;
       const mutation = await input.mutate(draft, receipt);
       const project: Project = {

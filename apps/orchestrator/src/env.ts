@@ -53,12 +53,21 @@ export function parseProjectCommitDebounceMs(value: string | undefined): number 
   return parsed;
 }
 
+export function parseBooleanFlag(value: string | undefined): boolean {
+  return value?.trim().toLowerCase() === "true";
+}
+
 export const config = {
   port: parseInt(env("ORCHESTRATOR_PORT", "4041"), 10),
   projectCommitDebounceMs: parseProjectCommitDebounceMs(
     env("MV_PROJECT_COMMIT_DEBOUNCE_MS", "120000"),
   ),
   wavespeedApiKey: env("WAVESPEED_API_KEY"),
+  wavespeedBaseUrl: env("WAVESPEED_BASE_URL", "https://api.wavespeed.ai/api/v3"),
+  orchestratorAuthToken: env("ORCHESTRATOR_AUTH_TOKEN"),
+  authenticatedOwnerId: env("ORCHESTRATOR_AUTH_OWNER_ID", "local-owner"),
+  generationRouteManifestJson: env("GENERATION_ROUTE_MANIFEST_JSON", "[]"),
+  generationV2ReleaseEnabled: parseBooleanFlag(env("GENERATION_V2_RELEASE_ENABLED")),
   kieAiApiKey: env("KIE_AI_API_KEY"),
   kieAiVideoModel: env("KIE_AI_VIDEO_MODEL", "veo3_fast"),
   kieAiImageModel: env("KIE_AI_IMAGE_MODEL", "flux-kontext-pro"),

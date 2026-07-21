@@ -7,6 +7,7 @@ import { afterEach, describe, it } from "node:test";
 import type { MediaItem, Project, ProjectBaseRevision } from "@openreel/core";
 import {
   canonicalizeGenerationProjectActionPayload,
+  DurablePathIdentifierSchema,
   type GenerationJob,
   type GenerationOutput,
   type GenerationProjectMutationReceipt,
@@ -18,11 +19,13 @@ import { config } from "../../env.js";
 import { GitStore, type GitCommitReceipt, type GitProjectTransaction } from "../../projects/git-store.js";
 import { buildRequiredMediaManifest } from "../../projects/media-manifest.js";
 import { ProjectStore } from "../../projects/project-store.js";
-import { storePendingUpload } from "../../projects/pending-media.js";
+import { readPendingMedia, storePendingUpload } from "../../projects/pending-media.js";
 import { executeSaveTransaction } from "../../projects/save-transaction.js";
 import { ensureSafeTestProjectRoot } from "../../projects/test-project-root.js";
+import { GenerationFinalizer, type FinalizationPorts } from "./finalization.js";
 import * as generationServices from "./index.js";
 import { findGenerationProjectReceipt, GenerationProjectActionAdapter, GenerationProjectActionError } from "./project-action-adapter.js";
+import { FileGenerationJobRepository } from "./repository.js";
 
 process.env.GIT_AUTHOR_NAME ??= "OpenReel Tests";
 process.env.GIT_AUTHOR_EMAIL ??= "openreel-tests@example.com";
@@ -272,6 +275,7 @@ describe("GenerationProjectActionAdapter", () => {
     const receipt = persisted ? findGenerationProjectReceipt(persisted, "default-action-key") : undefined;
     assert.ok(receipt);
     assert.equal(GenerationProjectMutationReceiptSchema.safeParse(receipt).success, true);
+    assert.equal(DurablePathIdentifierSchema.safeParse(receipt.idempotencyKey).success, true);
     assert.match(receipt.actionId, /^generation-action-[a-f0-9]{64}$/u);
 
     const restarted = new GenerationProjectActionAdapter({
@@ -288,6 +292,110 @@ describe("GenerationProjectActionAdapter", () => {
     assert.deepEqual(envelope, first.projectAction);
     assert.equal((await fixture.gitStore.getHistory(fixture.project.id)).length, afterFirstHistory);
     assert.equal(afterReplay?.mediaLibrary.items.filter((item) => item.id === "default-action-output").length, 1);
+  });
+
+  it("round-trips the production finalizer key through strict adapter replay and envelope lookup", async () => {
+    const fixture = await adapterFixture();
+    const output = await cacheOutput(fixture);
+    const job = generationJob(
+      fixture.project.id,
+      { kind: "new-asset", placeholderMediaId: "finalizer-default-key-output" },
+      { id: "job-finalizer-default-key" },
+    );
+    const repository = new FileGenerationJobRepository(join(fixture.root, "generation-jobs"));
+    await repository.create(job);
+    let capturedInput: Parameters<GenerationProjectActionAdapter["finalize"]>[0] | undefined;
+    let firstAdapterResult: Awaited<ReturnType<GenerationProjectActionAdapter["finalize"]>> | undefined;
+    const ports: FinalizationPorts = {
+      download: { download: async () => ({ bytes: new Uint8Array([137, 80, 78, 71]), mimeType: output.mimeType }) },
+      verify: { verify: async () => undefined },
+      inspect: { inspect: async () => ({ width: output.width, height: output.height, durationSeconds: output.durationSeconds }) },
+      placeholder: {
+        finalize: async (input) => {
+          capturedInput = input;
+          firstAdapterResult = await fixture.adapter.finalize(input);
+          return firstAdapterResult;
+        },
+      },
+      clock: () => 8_000,
+    };
+
+    const finalized = await new GenerationFinalizer(repository, ports).finalize(job.id, {
+      provider: job.provider,
+      providerJobId: job.providerJobId!,
+    });
+    assert.equal(finalized.status, "succeeded");
+    assert.ok(capturedInput);
+    assert.ok(firstAdapterResult);
+    assert.match(capturedInput.idempotencyKey, /^generation-stage-[a-f0-9]{64}$/u);
+    const persisted = await fixture.store.loadProject(fixture.project.id);
+    const receipt = persisted
+      ? findGenerationProjectReceipt(persisted, capturedInput.idempotencyKey)
+      : undefined;
+    assert.ok(receipt);
+    assert.equal(GenerationProjectMutationReceiptSchema.safeParse(receipt).success, true);
+    assert.equal(DurablePathIdentifierSchema.safeParse(receipt.idempotencyKey).success, true);
+    const historyAfterFirst = (await fixture.gitStore.getHistory(fixture.project.id)).length;
+
+    const restarted = new GenerationProjectActionAdapter({
+      projectStore: fixture.store,
+      gitStore: fixture.gitStore,
+      downloadCacheDir: fixture.cacheDir,
+      clock: () => 9_000,
+      actionId: ({ jobId, kind }) => `${jobId}-${kind}`,
+    });
+    const replayed = await restarted.finalize(capturedInput);
+    const envelope = await restarted.getActionEnvelope(fixture.project.id, capturedInput.idempotencyKey);
+
+    assert.deepEqual(replayed, firstAdapterResult);
+    assert.deepEqual(envelope, firstAdapterResult.projectAction);
+    assert.equal((await fixture.gitStore.getHistory(fixture.project.id)).length, historyAfterFirst);
+  });
+
+  it("rejects invalid custom receipt identifiers before mutation or save", async () => {
+    for (const invalid of [
+      { name: "actionId", actionId: () => "invalid:action", idempotencyKey: "valid-idempotency-key" },
+      { name: "idempotencyKey", actionId: ({ jobId, kind }: { jobId: string; kind: string }) => `${jobId}-${kind}`, idempotencyKey: "invalid:idempotency" },
+    ]) {
+      const fixture = await adapterFixture();
+      const output = await cacheOutput(fixture);
+      const placeholderMediaId = `invalid-receipt-output-${fixtureRoots.size}`;
+      const job = generationJob(
+        fixture.project.id,
+        { kind: "new-asset", placeholderMediaId },
+      );
+      const before = await fixture.store.loadProject(fixture.project.id);
+      const historyBefore = (await fixture.gitStore.getHistory(fixture.project.id)).length;
+      let transactionStarted = false;
+      const adapter = new GenerationProjectActionAdapter({
+        projectStore: fixture.store,
+        gitStore: fixture.gitStore,
+        downloadCacheDir: fixture.cacheDir,
+        actionId: invalid.actionId,
+        beforeTransaction: () => {
+          transactionStarted = true;
+        },
+      });
+
+      const outcome = await adapter.finalize({ job, output, idempotencyKey: invalid.idempotencyKey })
+        .catch((cause: unknown) => cause);
+      const returnedReceipt = outcome && typeof outcome === "object" && "projectAction" in outcome
+        ? (outcome.projectAction as { receipt?: unknown } | undefined)?.receipt
+        : undefined;
+      assert.ok(outcome instanceof GenerationProjectActionError, JSON.stringify({
+        field: invalid.name,
+        returnedReceipt,
+        parsedReceipt: returnedReceipt
+          ? GenerationProjectMutationReceiptSchema.safeParse(returnedReceipt).success
+          : undefined,
+      }));
+      assert.equal(outcome.code, "generation-project-receipt-invalid");
+
+      assert.equal(transactionStarted, false);
+      assert.equal(await readPendingMedia(fixture.store.projectDir(fixture.project.id), placeholderMediaId), null);
+      assert.deepEqual(await fixture.store.loadProject(fixture.project.id), before);
+      assert.equal((await fixture.gitStore.getHistory(fixture.project.id)).length, historyBefore);
+    }
   });
 
   it("rejects an incomplete confirmed revision before mutating the project", async () => {
@@ -916,6 +1024,62 @@ describe("GenerationProjectActionAdapter", () => {
     assert.equal(afterConflict?.mediaLibrary.items.some((item) => item.id === "concurrent-undo-output"), true);
   });
 
+  it("normalizes a concurrent redo writer to the canonical project-action conflict", async () => {
+    const fixture = await adapterFixture();
+    const rawOutput = await cacheOutput(fixture);
+    const job = generationJob(
+      fixture.project.id,
+      { kind: "new-asset", placeholderMediaId: "concurrent-redo-output" },
+    );
+    const finalized = await fixture.adapter.finalize({
+      job,
+      output: rawOutput,
+      idempotencyKey: "concurrent-redo-key",
+    });
+    const envelope = finalized.projectAction;
+    if (!envelope) throw new Error("action-envelope-missing");
+    const undone = await fixture.adapter.applyProjectAction({
+      projectId: fixture.project.id,
+      actionId: envelope.receipt.actionId,
+      operation: "undo",
+      expectedRevision: envelope.appliedRevision,
+      envelope,
+    });
+    const originalWithProjectTransaction = fixture.gitStore.withProjectTransaction.bind(fixture.gitStore) as <T>(
+      projectId: string,
+      operation: (transaction: GitProjectTransaction) => Promise<T>,
+    ) => Promise<T>;
+    let adapterTransactionCalls = 0;
+    let writerRunning = false;
+    fixture.gitStore.withProjectTransaction = async <T>(
+      projectId: string,
+      operation: (transaction: GitProjectTransaction) => Promise<T>,
+    ): Promise<T> => {
+      const isWriterTransaction = writerRunning;
+      if (!isWriterTransaction) adapterTransactionCalls += 1;
+      if (!isWriterTransaction && adapterTransactionCalls === 3) {
+        writerRunning = true;
+        await saveProjectMutation(fixture, (project) => ({ ...project, name: "Concurrent redo winner" }));
+        writerRunning = false;
+      }
+      return originalWithProjectTransaction(projectId, operation);
+    };
+
+    const error = await fixture.adapter.applyProjectAction({
+      projectId: fixture.project.id,
+      actionId: envelope.receipt.actionId,
+      operation: "redo",
+      expectedRevision: undone.revision,
+      envelope,
+    }).catch((cause: unknown) => cause);
+
+    assert.ok(error instanceof GenerationProjectActionError);
+    assert.equal(error.code, "generation-project-action-conflict");
+    const afterConflict = await fixture.store.loadProject(fixture.project.id);
+    assert.equal(afterConflict?.name, "Concurrent redo winner");
+    assert.equal(afterConflict?.mediaLibrary.items.some((item) => item.id === "concurrent-redo-output"), false);
+  });
+
   it("keeps a replay envelope bound to the receipt-introducing revision after unrelated saves", async () => {
     const fixture = await adapterFixture();
     const rawOutput = await cacheOutput(fixture);
@@ -945,6 +1109,46 @@ describe("GenerationProjectActionAdapter", () => {
     assert.deepEqual(replayEnvelope.appliedRevision, originalEnvelope.appliedRevision);
     assert.equal(afterRejectedUndo?.name, "Preserve after replay");
     assert.equal(afterRejectedUndo?.mediaLibrary.items.some((item) => item.id === "replay-envelope-output"), true);
+  });
+
+  it("rejects an envelope rebound to a later receipt-containing revision", async () => {
+    const fixture = await adapterFixture();
+    const rawOutput = await cacheOutput(fixture);
+    const job = generationJob(
+      fixture.project.id,
+      { kind: "new-asset", placeholderMediaId: "rebound-envelope-output" },
+    );
+    const finalized = await fixture.adapter.finalize({
+      job,
+      output: rawOutput,
+      idempotencyKey: "rebound-envelope-key",
+    });
+    const envelope = finalized.projectAction;
+    if (!envelope) throw new Error("action-envelope-missing");
+    const laterProject = await saveProjectMutation(fixture, (project) => ({
+      ...project,
+      name: "Preserve against rebound envelope",
+    }));
+    const laterReceipt = await fixture.gitStore.readConfirmedReceipt(fixture.project.id);
+    if (!laterReceipt) throw new Error("fixture-revision-missing");
+    const laterRevision = revision(laterReceipt, laterProject);
+    const reboundEnvelope = { ...envelope, appliedRevision: laterRevision };
+
+    await assert.rejects(
+      fixture.adapter.applyProjectAction({
+        projectId: fixture.project.id,
+        actionId: reboundEnvelope.receipt.actionId,
+        operation: "undo",
+        expectedRevision: laterRevision,
+        envelope: reboundEnvelope,
+      }),
+      (cause: unknown) => cause instanceof GenerationProjectActionError
+        && cause.code === "generation-project-action-conflict",
+    );
+
+    const after = await fixture.store.loadProject(fixture.project.id);
+    assert.equal(after?.name, "Preserve against rebound envelope");
+    assert.equal(after?.mediaLibrary.items.some((item) => item.id === "rebound-envelope-output"), true);
   });
 
   it("rejects undo and redo before they can overwrite unrelated intervening saves", async () => {

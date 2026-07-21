@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { test } from "vitest";
+import { test } from "node:test";
 import type { GenerationJob } from "@openreel/music-video-domain/generation";
-import { GenerationFinalizer, type FinalizationPorts } from "./finalization.js";
+import {
+  GenerationFinalizer,
+  generationFinalizationIdempotencyKey,
+  type FinalizationPorts,
+} from "./finalization.js";
 import { isPlacementReconciliationCandidate } from "./recovery.js";
 import { FileGenerationJobRepository, GenerationRepositoryError } from "./repository.js";
 
@@ -101,7 +105,7 @@ function createPorts(options?: {
         assert.equal(output.mimeType, verifyMime);
         assert.equal(output.byteLength, bytes.byteLength);
         assert.equal(output.versionId, `pending:${jobId}`);
-        assert.equal(idempotencyKey, `generation:${jobId}:placeholder-finalized`);
+        assert.equal(idempotencyKey, generationFinalizationIdempotencyKey(jobId, "placeholder-finalized"));
         const baseRevision = { commitSha: "commit-1", treeSha: "tree-1", projectBlobSha: "blob-1", sourceModifiedAt: 1 };
         return {
           mediaId: "asset-1",
@@ -109,7 +113,7 @@ function createPorts(options?: {
           projectAction: {
             schemaVersion: 1 as const,
             projectId: "project",
-            receipt: { schemaVersion: 1 as const, actionId: `action-${jobId}`, jobId, idempotencyKey, kind: "finalize-placeholder" as const, semanticPayload: `{\"jobId\":\"${jobId}\"}`, baseRevision, appliedAt: 2 },
+            receipt: { schemaVersion: 1 as const, actionId: `action-${jobId}`, jobId, idempotencyKey, kind: "finalize-placeholder" as const, semanticPayload: `{"jobId":"${jobId}"}`, baseRevision, appliedAt: 2 },
             appliedRevision: { ...baseRevision, commitSha: "commit-2" },
           },
         };
@@ -121,7 +125,7 @@ function createPorts(options?: {
         log.push(`shot:${idempotencyKey}`);
         assert.equal(output.mediaId, "asset-1");
         assert.equal(output.versionId, "version-1");
-        assert.equal(idempotencyKey, `generation:${jobId}:shot-linked`);
+        assert.equal(idempotencyKey, generationFinalizationIdempotencyKey(jobId, "shot-linked"));
       },
     },
     placement: {
@@ -130,7 +134,7 @@ function createPorts(options?: {
         log.push(`placement:${idempotencyKey}`);
         assert.equal(output.mediaId, "asset-1");
         assert.equal(output.versionId, "version-1");
-        assert.equal(idempotencyKey, `generation:${jobId}:placement-applied`);
+        assert.equal(idempotencyKey, generationFinalizationIdempotencyKey(jobId, "placement-applied"));
         if (placementOutcome === "fail") return { outcome: "not-applied", replaySafe: true, error: { code: "generation-placement-failed", message: "timeline offline", retryable: true } };
         if (placementOutcome === "throw") throw new Error("timeline response lost");
         return { outcome: "applied" };
@@ -184,8 +188,8 @@ test("concurrent finalize calls share one run and do not resubmit work", async (
     "download",
     "verify:image/png:1024",
     "inspect:image/png",
-    "placeholder:generation:job-1:placeholder-finalized",
-    "shot:generation:job-1:shot-linked",
+    `placeholder:${generationFinalizationIdempotencyKey("job-1", "placeholder-finalized")}`,
+    `shot:${generationFinalizationIdempotencyKey("job-1", "shot-linked")}`,
   ]);
   assert.equal((await repo.get("job-1"))?.output?.mediaId, "asset-1");
   assert.equal((await repo.get("job-1"))?.output?.versionId, "version-1");
@@ -242,9 +246,9 @@ test("placement failure is recorded separately from completed job", async () => 
     "download",
     "verify:image/png:1024",
     "inspect:image/png",
-    "placeholder:generation:job-3:placeholder-finalized",
-    "shot:generation:job-3:shot-linked",
-    "placement:generation:job-3:placement-applied",
+    `placeholder:${generationFinalizationIdempotencyKey("job-3", "placeholder-finalized")}`,
+    `shot:${generationFinalizationIdempotencyKey("job-3", "shot-linked")}`,
+    `placement:${generationFinalizationIdempotencyKey("job-3", "placement-applied")}`,
   ]);
 });
 
@@ -288,7 +292,7 @@ test("retryPlacement reruns only placement and does not call provider work again
 
   assert.equal(retried.status, "succeeded");
   assert.equal(retried.placement?.status, "applied");
-  assert.deepEqual(retry.log, ["placement:generation:job-4:placement-applied"]);
+  assert.deepEqual(retry.log, [`placement:${generationFinalizationIdempotencyKey("job-4", "placement-applied")}`]);
 });
 
 test("stage-only placement recovery executes only placement and preserves earlier artifacts", async () => {
@@ -308,7 +312,7 @@ test("stage-only placement recovery executes only placement and preserves earlie
   const retried = await new GenerationFinalizer(repo, retry.ports).retryPlacement("job-stage-only");
 
   assert.equal(retried.status, "succeeded");
-  assert.deepEqual(retry.log, ["placement:generation:job-stage-only:placement-applied"]);
+  assert.deepEqual(retry.log, [`placement:${generationFinalizationIdempotencyKey("job-stage-only", "placement-applied")}`]);
   assert.deepEqual(retry.calls, { download: 0, verify: 0, inspect: 0, placeholder: 0, shot: 0, placement: 1 });
   assert.deepEqual(persistence, ["placement-applied"]);
   assert.equal(retried.checkpoints["output-downloaded"]?.status, "completed");
@@ -528,13 +532,19 @@ test("placement heartbeat keeps a live external call owned beyond its original l
   now = originalLeaseExpiry + 1;
 
   const recoveryRepository = new FileGenerationJobRepository(dir, 30, () => now);
-  const firstRecovery = await recoveryRepository.recoverPlacement("job-placement-live-heartbeat", "generation:job-placement-live-heartbeat:placement-applied");
+  const firstRecovery = await recoveryRepository.recoverPlacement(
+    "job-placement-live-heartbeat",
+    generationFinalizationIdempotencyKey("job-placement-live-heartbeat", "placement-applied"),
+  );
   assert.equal(firstRecovery.kind, "owner-live");
   assert.equal(firstRecovery.claim.ownerToken, initialClaim?.ownerToken);
   now = originalLeaseExpiry + 20;
   await heartbeat.tick();
   now = originalLeaseExpiry + 31;
-  const secondRecovery = await recoveryRepository.recoverPlacement("job-placement-live-heartbeat", "generation:job-placement-live-heartbeat:placement-applied");
+  const secondRecovery = await recoveryRepository.recoverPlacement(
+    "job-placement-live-heartbeat",
+    generationFinalizationIdempotencyKey("job-placement-live-heartbeat", "placement-applied"),
+  );
   assert.equal(secondRecovery.kind, "owner-live");
   assert.equal(secondRecovery.claim.ownerToken, initialClaim?.ownerToken);
   let reconciliationCalls = 0;
@@ -570,7 +580,10 @@ test("fresh finalizer reconciliation safely retries a stale owner that crashed b
   const completedFinalization = await firstRepository.getFinalizationClaim("job-placement-restart-before-invoke");
   assert.ok(completedFinalization);
   await writeFile(join(dir, "finalization-job-placement-restart-before-invoke.json"), JSON.stringify({ ...completedFinalization, state: "claimed" }));
-  const abandoned = await firstRepository.claimPlacement("job-placement-restart-before-invoke", "generation:job-placement-restart-before-invoke:placement-applied");
+  const abandoned = await firstRepository.claimPlacement(
+    "job-placement-restart-before-invoke",
+    generationFinalizationIdempotencyKey("job-placement-restart-before-invoke", "placement-applied"),
+  );
   assert.equal(abandoned.claim.phase, "reserved");
 
   now = 111;
@@ -600,8 +613,9 @@ test("fresh finalizer reconciles a stale invoked placement by stable key and dur
     await firstRepository.create(makeJob(jobId, "create-linked-clip"));
     const failed = createPorts({ jobId, placement: "fail" });
     await new GenerationFinalizer(firstRepository, failed.ports).finalize(jobId, { provider: "wavespeed", providerJobId: "provider-job-1" });
-    const abandoned = await firstRepository.claimPlacement(jobId, `generation:${jobId}:placement-applied`);
-    await firstRepository.markPlacementInvocationStarted(jobId, `generation:${jobId}:placement-applied`, abandoned.claim.ownerToken);
+    const placementKey = generationFinalizationIdempotencyKey(jobId, "placement-applied");
+    const abandoned = await firstRepository.claimPlacement(jobId, placementKey);
+    await firstRepository.markPlacementInvocationStarted(jobId, placementKey, abandoned.claim.ownerToken);
     now = 111;
 
     const reconciliationKeys: string[] = [];
@@ -616,7 +630,7 @@ test("fresh finalizer reconciles a stale invoked placement by stable key and dur
     const result = await new GenerationFinalizer(restartedRepository, restartedPorts.ports).reconcilePlacement(jobId);
     assert.equal(restartedPorts.calls.placement, 0);
     assert.equal(reconciliationCalls, 1);
-    assert.deepEqual(reconciliationKeys, [`generation:${jobId}:placement-applied`]);
+    assert.deepEqual(reconciliationKeys, [generationFinalizationIdempotencyKey(jobId, "placement-applied")]);
     assert.equal(result.status, testCase.jobStatus);
     assert.equal(result.placement?.status, testCase.placementStatus);
 
@@ -647,7 +661,7 @@ test("legacy pending claims migrate conservatively to reconciliation and never b
   await new GenerationFinalizer(firstRepository, failed.ports).finalize(jobId, { provider: "wavespeed", providerJobId: "provider-job-1" });
   await writeFile(join(dir, `placement-${jobId}.json`), JSON.stringify({
     jobId,
-    idempotencyKey: `generation:${jobId}:placement-applied`,
+    idempotencyKey: generationFinalizationIdempotencyKey(jobId, "placement-applied"),
     state: "claimed",
     outcome: "pending",
     ownerToken: "legacy-owner",
@@ -659,7 +673,7 @@ test("legacy pending claims migrate conservatively to reconciliation and never b
   const ports = createPorts({ jobId });
   ports.ports.placement!.reconcile = async ({ idempotencyKey }) => {
     reconciliationCalls += 1;
-    assert.equal(idempotencyKey, `generation:${jobId}:placement-applied`);
+    assert.equal(idempotencyKey, generationFinalizationIdempotencyKey(jobId, "placement-applied"));
     return { outcome: "unknown" };
   };
   const restartedRepository = new FileGenerationJobRepository(dir, 10, () => now);

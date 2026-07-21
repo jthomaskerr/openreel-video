@@ -1,2 +1,2 @@
 export { neuralframesRouter } from "./neuralframes";
-export { wavespeedRouter } from "./wavespeed";
+export { createWaveSpeedRouter, parseGenerationRouteManifest } from "./wavespeed";
