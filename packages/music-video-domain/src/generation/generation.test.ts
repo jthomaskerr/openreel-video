@@ -135,6 +135,33 @@ describe("generation contracts", () => {
     expect(() => GenerationSubmitRequestSchema.parse({ projectId: "project-1", jobId: job.id, routing: route, target: { kind: "new-asset", placeholderMediaId: "placeholder-1" }, context, providerInputs: {} })).toThrow();
   });
 
+  it("rejects a deactivated reference even when its state and preparation status are ready", () => {
+    const job = makeJob("queued");
+    const context = {
+      ...job.context,
+      references: [{
+        id: "r",
+        order: 1,
+        mediaId: "m",
+        origins: ["source" as const],
+        active: false,
+        state: "active" as const,
+        preparationStatus: "ready" as const,
+        errorHistory: [],
+        uploadLeaseId: "lease-r",
+      }],
+    };
+
+    expect(() => GenerationSubmitRequestSchema.parse({
+      projectId: "project-1",
+      jobId: job.id,
+      routing: route,
+      target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
+      context,
+      providerInputs: {},
+    })).toThrow("references must be ready and active");
+  });
+
   it("round-trips deactivated references and defaults legacy references to active", () => {
     const reference = {
       id: "reference-1",
