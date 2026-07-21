@@ -12,9 +12,9 @@
 - Browser-local canonical state: rejected because it would weaken the proven revision and Git transaction guarantees.
 - New persistence framework: rejected because it duplicates established working behavior.
 
-## Decision 2: Reuse and tighten the existing core project serializer
+## Future Decision 2: Reuse and tighten the existing core project serializer
 
-**Decision**: Extract a pure versioned project-file decoder beside `ProjectSerializer`, then make portable import/export and recovery use it.
+**Decision**: Deferred. A future feature may extract a pure versioned project-file decoder beside `ProjectSerializer`, then make portable import/export and recovery use it.
 
 **Rationale**: `ProjectSerializer` already defines a `1.0.0` envelope, validation results, normalization, missing-media placeholders, and tests. The current unsafe paths bypass it. A pure decoder gives every path one deterministic shape/version/identity gate without requiring an IndexedDB storage engine.
 
@@ -24,9 +24,9 @@
 - Keep per-call-site `JSON.parse` casts: rejected because those casts caused the demonstrated import and recovery defects.
 - Reject all raw project JSON: rejected because raw `.oreel` files are the shipped legacy format and must migrate safely.
 
-## Decision 3: Treat raw project JSON as the single supported legacy format
+## Future Decision 3: Treat raw project JSON as the single supported legacy format
 
-**Decision**: Accept either the current `{ version: "1.0.0", project }` envelope or a legacy raw project object. Migrate the raw object in memory, reject malformed versions and all future major/minor/patch versions, and never rewrite the source file during import.
+**Decision**: Deferred. The installed serializer continues its current envelope and legacy normalization behavior; strict future-version rejection and non-mutating migration remain Future Scope.
 
 **Rationale**: This provides an ordered, deterministic migration for the actual installed format while failing closed for unknown future data. File APIs already leave original bytes unchanged unless the user later saves explicitly.
 
@@ -38,7 +38,7 @@
 
 ## Decision 4: Use confirmed persistence metadata as the authoritative dirty state
 
-**Decision**: A project is clean only when the persistence status belongs to the same project, its phase is confirmed durable, and `persistedModifiedAt` equals the active project's `modifiedAt`.
+**Decision**: A project is clean only when `confirmedReceipt.projectId` equals the active project ID and `confirmedReceipt.sourceModifiedAt` equals the active project's `modifiedAt`. The phase is not authoritative because canonical load confirms a receipt while leaving the phase `idle`.
 
 **Rationale**: `ProjectManager.hasUnsavedChanges` relies on an unused ad hoc `lastSavedAt`; the persistence store already owns the confirmed revision and timestamp used by the toolbar. One pure helper prevents dialog, unload, and save behavior from disagreeing.
 
@@ -60,26 +60,25 @@
 - Durable background worker and listener bus: rejected because it is explicitly Future Scope.
 - Continue using the active project at callback time: rejected because it is the demonstrated identity-rebinding bug.
 
-## Decision 6: Make user recovery choices explicit and accessible
+## Future Decision 6: Make user recovery choices explicit and accessible
 
-**Decision**: Use existing Radix-based dialogs and design tokens for Save / Discard / Cancel and conflict recovery. Disable actions while awaiting save/load, announce errors with `role="alert"`, keep Cancel/Escape available, and identify the affected project plus a corrective action.
+**Decision**: Deferred. Current scope retains automatic project-bound persistence and native dirty-unload protection. Dedicated Save / Discard / Cancel and conflict-recovery dialogs remain Future Scope.
 
-**Rationale**: UI guidance requires visible async feedback, keyboard-safe escape routes, and errors that state what happened and what to do. Native two-state confirmation cannot represent the required three outcomes.
+**Rationale**: These dialogs would add explicit user control and richer accessible feedback, but are not required for correctness once automatic work remains project-bound and dirty unload is protected.
 
 **Alternatives considered**:
 
-- Silent automatic save: rejected because failure and conflict require a user decision.
+- Project-bound automatic save: retained for current scope because it preserves existing product behavior.
 - Chained `window.confirm` prompts: rejected because the choices and consequences are ambiguous.
 - Semantic field-level difference resolver: rejected because it is explicitly Future Scope.
 
-## Decision 7: Restore recovery copies as unsaved active state
+## Future Decision 7: Restore recovery copies as unsaved active state
 
-**Decision**: Validate identity/version first, load the authoritative project only to establish its base revision, then install the recovered snapshot locally without an immediate backend save. Preserve the durable version and recovery media until a later explicit save succeeds.
+**Decision**: Deferred. A future recovery-hardening feature may validate identity/version first and install a recovered snapshot locally without an immediate backend save.
 
-**Rationale**: This directly satisfies FR-013 and avoids turning a recovery preview into an implicit canonical overwrite. The current immediate backend save is a genuine contract defect.
+**Rationale**: This would provide a safer preview-style recovery contract, but changes installed recovery semantics and is not required for minimal canonical create/open/save operation.
 
 **Alternatives considered**:
 
-- Treat clicking Restore as an immediate durable save: rejected because the approved specification explicitly requires an unsaved recovered state.
+- Treat clicking Restore as an immediate durable save: retained for current scope to match the installed behavior.
 - Create a separate backend project automatically: rejected because it changes identity without user intent.
-

@@ -1,5 +1,7 @@
 # Project Lifecycle and Persistence Design
 
+> Scope reconciliation (2026-07-21): implementation review proved the canonical persistence, recovery baseline, portable copies, conflict rejection, and version history are already installed. Current work is limited to complete awaited explicit save, confirmed-receipt dirty state, project-bound queues/completions/status, and dirty unload protection. Strict portable/recovery validation and new transition/conflict UI are Future Scope; `specs/001-project-lifecycle/tasks.md` is authoritative.
+
 ## Outcome
 
 Users can create, open, save, recover, and switch durable editing projects without cross-project writes, partial durable state, silent data loss, or ambiguous persistence status. The implementation preserves the existing browser-to-orchestrator architecture and closes only demonstrable lifecycle safety gaps.

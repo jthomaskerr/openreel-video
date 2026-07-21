@@ -1,6 +1,6 @@
 # Project Lifecycle Contracts
 
-## Versioned project-data file
+## Versioned project-data file (existing envelope; strict decoder Future Scope)
 
 Current export payload:
 
@@ -20,7 +20,7 @@ Current export payload:
 }
 ```
 
-Decoder result:
+Proposed Future Scope decoder result:
 
 ```ts
 type ProjectFileDecodeResult =
@@ -31,20 +31,20 @@ decodeProjectFile(json: string, options?: { expectedProjectId?: string }): Proje
 encodeProjectFile(project: Project): string;
 ```
 
-The decoder accepts the current envelope and the legacy raw-project shape. It rejects unknown future versions, incomplete shape, invalid timestamps/settings/collections, and identity mismatch. It never mutates input bytes.
+The installed serializer exports the current envelope and normalizes legacy data. Strict future-version, incomplete-shape, and identity rejection are deferred.
 
 ## Authoritative dirty-state contract
 
 ```ts
 isProjectDirty(
   project: Pick<Project, "id" | "modifiedAt">,
-  status: Pick<PersistenceStatusState, "projectId" | "phase" | "persistedModifiedAt">,
+  status: Pick<PersistenceStatusState, "projectId" | "confirmedReceipt">,
 ): boolean;
 ```
 
-Returns `false` only for the matching project at the matching confirmed durable modification time.
+Returns `false` only when the confirmed receipt belongs to the same project and its `sourceModifiedAt` matches the active project.
 
-## Project replacement contract
+## Project replacement contract (Future Scope)
 
 ```ts
 type ProjectTransitionChoice = "save" | "discard" | "cancel";
@@ -70,7 +70,7 @@ resetForProject(activeProjectId?: string): void;
 
 Each queued snapshot, retry timer, upload, and confirmation poll retains the project ID captured when created. Activating another project changes visible active status but does not rebind or silently discard another project's work.
 
-## Conflict recovery contract
+## Conflict recovery UI contract (Future Scope)
 
 On `PROJECT_CONFLICT`, the newer durable state remains canonical and the local state remains in memory. The UI offers:
 
@@ -80,6 +80,6 @@ On `PROJECT_CONFLICT`, the newer durable state remains canonical and the local s
 
 No action runs automatically. Errors use an announced message and keep both states available.
 
-## Recovery contract
+## Strict recovery contract (Future Scope)
 
 `checkForRecovery` rejects storage access failures rather than converting them to an empty list. `recover(saveId, expectedProjectId?)` returns a validated project only when the record exists, is supported, is complete, and matches both the record and requested identity. Restoration installs that project as unsaved state and does not write canonical state until explicit save.
