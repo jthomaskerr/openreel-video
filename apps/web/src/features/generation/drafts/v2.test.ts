@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createGenerationSubmissionDraftCache,
   clearGenerationSubmissionDraftCache,
@@ -6,7 +6,9 @@ import {
 } from "./cache";
 import {
   assertNoLocalSubmissionUrls,
+  applyGenerationReferenceCommand,
   buildGenerationSubmissionContext,
+  createGenerationReferenceRecoveryState,
   generationSubmissionDraftKey,
   isLocalSubmissionUrl,
   stableSubmissionStringify,
@@ -21,10 +23,26 @@ describe("generation submission draft helpers", () => {
     const key = generationSubmissionDraftKey({
       projectId: "p1",
       provider: "wavespeed",
+      providerInstanceId: "wavespeed-primary",
+      routing: {
+        providerInstanceId: "wavespeed-primary",
+        providerModelId: "m1",
+        requestedMode: "text-to-image",
+        providerSchemaId: "schema-m1",
+        providerEndpointId: "endpoint-generate",
+        providerSchemaVersion: "s1",
+      },
       modelId: "m1",
       modelSchemaVersion: "s1",
       target: { kind: "new-version", sourceMediaId: "source-1", placeholderMediaId: "placeholder-1" },
-      context: { projectId: "p1", shotId: "shot-1", clipId: "clip-1", references: [], placementPolicy: "none" },
+      context: {
+        projectId: "p1",
+        entryContext: { kind: "new-asset" },
+        mode: "text-to-image",
+        prompt: "hello",
+        references: [],
+        placementPolicy: "none",
+      },
       providerInputs: { prompt: "hello", keep: false, count: 0, values: [] },
     });
 
@@ -32,10 +50,26 @@ describe("generation submission draft helpers", () => {
       stableSubmissionStringify({
         projectId: "p1",
         provider: "wavespeed",
+        providerInstanceId: "wavespeed-primary",
+        routing: {
+          providerInstanceId: "wavespeed-primary",
+          providerModelId: "m1",
+          requestedMode: "text-to-image",
+          providerSchemaId: "schema-m1",
+          providerEndpointId: "endpoint-generate",
+          providerSchemaVersion: "s1",
+        },
         modelId: "m1",
         modelSchemaVersion: "s1",
         target: { kind: "new-version", sourceMediaId: "source-1", placeholderMediaId: "placeholder-1" },
-        context: { projectId: "p1", shotId: "shot-1", clipId: "clip-1", references: [], placementPolicy: "none" },
+        context: {
+          projectId: "p1",
+          entryContext: { kind: "new-asset" },
+          mode: "text-to-image",
+          prompt: "hello",
+          references: [],
+          placementPolicy: "none",
+        },
         providerInputs: { prompt: "hello", keep: false, count: 0, values: [] },
         canonicalPrompt: "hello",
         references: undefined,
@@ -50,10 +84,26 @@ describe("generation submission draft helpers", () => {
     const first = generationSubmissionDraftKey({
       projectId: "p1",
       provider: "wavespeed",
+      providerInstanceId: "wavespeed-primary",
+      routing: {
+        providerInstanceId: "wavespeed-primary",
+        providerModelId: "m1",
+        requestedMode: "text-to-image",
+        providerSchemaId: "schema-m1",
+        providerEndpointId: "endpoint-generate",
+        providerSchemaVersion: "s1",
+      },
       modelId: "m1",
       modelSchemaVersion: "s1",
       target: { kind: "new-version", sourceMediaId: "source-1", placeholderMediaId: "placeholder-1" },
-      context: { projectId: "p1", shotId: "shot-1", clipId: "clip-1", references: [], placementPolicy: "none" },
+      context: {
+        projectId: "p1",
+        entryContext: { kind: "new-asset" },
+        mode: "text-to-image",
+        prompt: "scene @{reference-1}",
+        references: [],
+        placementPolicy: "none",
+      },
       providerInputs: { prompt: "scene @{reference-1}", seed: 7 },
       canonicalPrompt: "scene @{reference-1}",
       references: [{
@@ -83,10 +133,26 @@ describe("generation submission draft helpers", () => {
     const second = generationSubmissionDraftKey({
       projectId: "p1",
       provider: "wavespeed",
+      providerInstanceId: "wavespeed-primary",
+      routing: {
+        providerInstanceId: "wavespeed-primary",
+        providerModelId: "m1",
+        requestedMode: "text-to-image",
+        providerSchemaId: "schema-m1",
+        providerEndpointId: "endpoint-generate",
+        providerSchemaVersion: "s1",
+      },
       modelId: "m1",
       modelSchemaVersion: "s1",
       target: { kind: "new-version", sourceMediaId: "source-1", placeholderMediaId: "placeholder-1" },
-      context: { projectId: "p1", shotId: "shot-1", clipId: "clip-1", references: [], placementPolicy: "none" },
+      context: {
+        projectId: "p1",
+        entryContext: { kind: "new-asset" },
+        mode: "text-to-image",
+        prompt: "scene @{reference-1}",
+        references: [],
+        placementPolicy: "none",
+      },
       providerInputs: { prompt: "scene @{reference-1}", seed: 7 },
       canonicalPrompt: "scene @{reference-1}",
       references: [{
@@ -129,10 +195,26 @@ describe("generation submission draft helpers", () => {
     expect(() => generationSubmissionDraftKey({
       projectId: "p1",
       provider: "wavespeed",
+      providerInstanceId: "wavespeed-primary",
+      routing: {
+        providerInstanceId: "wavespeed-primary",
+        providerModelId: "m1",
+        requestedMode: "text-to-image",
+        providerSchemaId: "schema-m1",
+        providerEndpointId: "endpoint-generate",
+        providerSchemaVersion: "s1",
+      },
       modelId: "m1",
       modelSchemaVersion: "s1",
       target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
-      context: { projectId: "p1", references: [], placementPolicy: "none" },
+      context: {
+        projectId: "p1",
+        entryContext: { kind: "new-asset" },
+        mode: "text-to-image",
+        prompt: "scene",
+        references: [],
+        placementPolicy: "none",
+      },
       providerInputs: {
         prompt: "scene",
         nested: { transport: transientValue },
@@ -160,10 +242,26 @@ describe("generation submission draft helpers", () => {
       draft: {
         projectId: "p1",
         provider: "wavespeed",
+        providerInstanceId: "wavespeed-primary",
+        routing: {
+          providerInstanceId: "wavespeed-primary",
+          providerModelId: "m1",
+          requestedMode: "text-to-image",
+          providerSchemaId: "schema-m1",
+          providerEndpointId: "endpoint-generate",
+          providerSchemaVersion: "s1",
+        },
         modelId: "m1",
         modelSchemaVersion: "s1",
         target: { kind: "new-asset" },
-        context: { projectId: "p1", references: [], placementPolicy: "none" },
+        context: {
+          projectId: "p1",
+          entryContext: { kind: "new-asset" },
+          mode: "text-to-image",
+          prompt: "hello",
+          references: [],
+          placementPolicy: "none",
+        },
         providerInputs: { prompt: "hello" },
       },
       placeholderMediaId: "placeholder-1",
@@ -175,7 +273,7 @@ describe("generation submission draft helpers", () => {
 
     await cache.markFailed({
       key: "draft-key",
-      error: { code: "generation-cache-failed", retryable: true },
+      error: { code: "generation-cache-failed", message: "cache down", retryable: true },
       updatedAt: 2000,
     });
     expect(cache.get("draft-key")).toMatchObject({
@@ -194,11 +292,27 @@ describe("generation submission draft helpers", () => {
       draft: {
         projectId: "p1",
         provider: "wavespeed",
+        providerInstanceId: "wavespeed-primary",
+        routing: {
+          providerInstanceId: "wavespeed-primary",
+          providerModelId: "m1",
+          requestedMode: "text-to-image",
+          providerSchemaId: "schema-m1",
+          providerEndpointId: "endpoint-generate",
+          providerSchemaVersion: "s1",
+        },
         modelId: "m1",
         modelSchemaVersion: "s1",
         canonicalPrompt: "hello @{reference-1}",
         target: { kind: "new-version", sourceMediaId: "source-1" },
-        context: { projectId: "p1", shotId: "shot-1", clipId: "clip-1", references: [], placementPolicy: "none" },
+        context: {
+          projectId: "p1",
+          entryContext: { kind: "new-asset" },
+          mode: "text-to-image",
+          prompt: "hello @{reference-1}",
+          references: [],
+          placementPolicy: "none",
+        },
         providerInputs: { prompt: "hello" },
         references: [{
           key: "reference-1",
@@ -223,30 +337,133 @@ describe("generation submission draft helpers", () => {
           sha256: "sha",
         },
       },
-      target: { kind: "new-version", sourceMediaId: "source-1", placeholderMediaId: "placeholder-1" },
       referenceTokens: [{ tokenId: "ref-token" }],
       audioToken: { tokenId: "audio-token" },
     });
 
-    expect(context.target).toEqual({
-      kind: "new-version",
-      sourceMediaId: "source-1",
-      placeholderMediaId: "placeholder-1",
+    expect(context).toMatchObject({
+      projectId: "p1",
+      entryContext: { kind: "new-asset" },
+      mode: "text-to-image",
+      prompt: "hello @{reference-1}",
+      placementPolicy: "none",
     });
     expect(context.references).toEqual([
       {
+        id: "ref-1:version-1",
+        order: 1,
         mediaId: "ref-1",
         versionId: "version-1",
         origins: ["user"],
-        remoteInput: { kind: "upload-token", value: "ref-token" },
+        state: "active",
+        preparationStatus: "preparing",
+        errorHistory: [],
+        uploadLeaseId: "ref-token",
       },
     ]);
-    expect(context.audio).toMatchObject({
-      sourceMediaId: "audio-media",
-      sourceVersionId: "audio-version",
-      sourceClipId: "audio-clip",
-      remoteInput: { kind: "upload-token", value: "audio-token" },
-    });
+    expect("audio" in context).toBe(false);
     expect(() => assertNoLocalSubmissionUrls(context, "context")).not.toThrow();
+  });
+
+  it.each([0, 1, 2])(
+    "retries only the failed reference at position %s without disturbing successful uploads",
+    async (failedIndex) => {
+      const ids = ["first", "middle", "last"];
+      const state = createGenerationReferenceRecoveryState({
+        projectId: "p1",
+        jobId: "j1",
+        references: ids.map((id, index) => ({
+          id,
+          order: index + 1,
+          mediaId: `${id}-media`,
+          origins: ["user" as const],
+          state: index === failedIndex ? "failed" as const : "active" as const,
+          preparationStatus: index === failedIndex ? "failed" as const : "ready" as const,
+          errorHistory: index === failedIndex
+            ? [{ code: "upload", message: "down", retryable: true }]
+            : [],
+          uploadLeaseId: `lease-${id}`,
+        })),
+        drafts: ids.map((id) => ({ id, mediaId: `${id}-media` })),
+      });
+      const retryReference = vi.fn(async () => ({ tokenId: `retry-${ids[failedIndex]}` }));
+      const releaseUploadLease = vi.fn(async () => {});
+
+      const recovered = await applyGenerationReferenceCommand(
+        state,
+        { action: "retry", projectId: "p1", jobId: "j1", referenceId: ids[failedIndex] },
+        { retryReference, releaseUploadLease },
+      );
+
+      expect(retryReference).toHaveBeenCalledTimes(1);
+      expect(recovered.references.map((reference) => [
+        reference.id,
+        reference.order,
+        reference.uploadLeaseId,
+      ])).toEqual(ids.map((id, index) => [
+        id,
+        index + 1,
+        index === failedIndex ? `retry-${id}` : `lease-${id}`,
+      ]));
+      expect(releaseUploadLease).toHaveBeenCalledOnce();
+      expect(releaseUploadLease).toHaveBeenCalledWith({ tokenId: `lease-${ids[failedIndex]}` });
+    },
+  );
+
+  it("removes or deactivates one reference and revalidates the active minimum", async () => {
+    const state = createGenerationReferenceRecoveryState({
+      projectId: "p1",
+      jobId: "j1",
+      references: [
+        {
+          id: "required",
+          order: 1,
+          mediaId: "required-media",
+          origins: ["source"],
+          state: "active",
+          preparationStatus: "ready",
+          errorHistory: [],
+          uploadLeaseId: "required-lease",
+        },
+        {
+          id: "optional",
+          order: 2,
+          mediaId: "optional-media",
+          origins: ["user"],
+          state: "failed",
+          preparationStatus: "failed",
+          errorHistory: [{ code: "upload", message: "down", retryable: true }],
+        },
+      ],
+      drafts: [
+        { id: "required", mediaId: "required-media" },
+        { id: "optional", mediaId: "optional-media" },
+      ],
+    });
+    const ports = {
+      retryReference: vi.fn(async () => ({ tokenId: "unused" })),
+      releaseUploadLease: vi.fn(async () => {}),
+      referenceMinimum: 1,
+    };
+
+    const deactivated = await applyGenerationReferenceCommand(
+      state,
+      { action: "deactivate", projectId: "p1", jobId: "j1", referenceId: "optional" },
+      ports,
+    );
+    expect(deactivated.references.find((reference) => reference.id === "optional")).toMatchObject({
+      active: false,
+      state: "failed",
+    });
+    expect(deactivated.providerReferences.map((reference) => [reference.id, reference.order])).toEqual([
+      ["required", 1],
+    ]);
+
+    await expect(applyGenerationReferenceCommand(
+      deactivated,
+      { action: "remove", projectId: "p1", jobId: "j1", referenceId: "required" },
+      ports,
+    )).rejects.toThrow("generation-reference-required");
+    expect(ports.releaseUploadLease).not.toHaveBeenCalled();
   });
 });

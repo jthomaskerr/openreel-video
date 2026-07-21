@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { GenerationContextSchema, GenerationJobSchema } from "@openreel/music-video-domain/generation";
 import {
   clearGenerationSubmissionInflight,
   submitGeneration,
@@ -12,14 +13,24 @@ function draft(overrides: Partial<GenerationDraft> = {}): GenerationDraft {
   return {
     projectId: "p1",
     provider: "wavespeed",
+    providerInstanceId: "wavespeed-primary",
+    routing: {
+      providerInstanceId: "wavespeed-primary",
+      providerModelId: "m1",
+      requestedMode: "text-to-image",
+      providerSchemaId: "schema-m1",
+      providerEndpointId: "endpoint-generate",
+      providerSchemaVersion: "s1",
+    },
     modelId: "m1",
     modelSchemaVersion: "s1",
     canonicalPrompt: "hello",
     target: { kind: "new-version", sourceMediaId: "source-1" },
     context: {
       projectId: "p1",
-      shotId: "shot-1",
-      clipId: "clip-1",
+      entryContext: { kind: "new-asset" },
+      mode: "text-to-image",
+      prompt: "hello",
       references: [],
       placementPolicy: "none",
     },
@@ -111,10 +122,44 @@ describe("submitGeneration", () => {
     expect(p.provider.submit).toHaveBeenCalledWith(
       expect.objectContaining({
         context: expect.objectContaining({
-          target: { kind: "new-version", sourceMediaId: "source-1", placeholderMediaId: "placeholder-1" },
+          entryContext: { kind: "new-asset" },
         }),
       }),
     );
+  });
+
+  it("carries immutable V2 route, context, and current-attempt identity through submission", async () => {
+    const p = ports();
+    const job = await submitGeneration(draft(), p);
+
+    expect(p.provider.submit).toHaveBeenCalledWith(expect.objectContaining({
+      routing: expect.objectContaining({
+        providerInstanceId: "wavespeed-primary",
+        providerModelId: "m1",
+        requestedMode: "text-to-image",
+      }),
+      context: expect.objectContaining({
+        projectId: "p1",
+        entryContext: { kind: "new-asset" },
+        mode: "text-to-image",
+        prompt: "hello",
+      }),
+    }));
+    expect(() => GenerationContextSchema.parse(job.context)).not.toThrow();
+    expect(() => GenerationJobSchema.parse(job)).not.toThrow();
+    expect(job).toMatchObject({
+      contractVersion: 2,
+      projectId: "p1",
+      providerInstanceId: "wavespeed-primary",
+      providerJobId: "provider-1",
+      attempt: 1,
+      routing: expect.objectContaining({ providerInstanceId: "wavespeed-primary" }),
+      attempts: [expect.objectContaining({
+        attemptNumber: 1,
+        providerJobId: "provider-1",
+        routing: expect.objectContaining({ providerInstanceId: "wavespeed-primary" }),
+      })],
+    });
   });
 
   it("submits the validated snapshot when the caller mutates the draft while placeholder creation is pending", async () => {
@@ -166,6 +211,8 @@ describe("submitGeneration", () => {
     const expectedKey = generationSubmissionDraftKey({
       projectId: original.projectId,
       provider: original.provider,
+      providerInstanceId: original.providerInstanceId,
+      routing: original.routing,
       modelId: original.modelId,
       modelSchemaVersion: original.modelSchemaVersion,
       target: original.target.kind === "new-version"
@@ -187,10 +234,12 @@ describe("submitGeneration", () => {
     const submission = submitGeneration(input, p);
     expect(p.mutations.createPlaceholder).toHaveBeenCalledTimes(1);
 
-    input.provider = "mutated-provider";
+    input.provider = "kieai";
+    input.providerInstanceId = "mutated-provider-instance";
+    input.routing.providerModelId = "mutated-route-model";
     input.modelId = "mutated-model";
     input.canonicalPrompt = "mutated prompt";
-    input.context.shotId = "mutated-shot";
+    input.context.prompt = "mutated prompt";
     input.providerInputs.prompt = "mutated prompt";
     (input.providerInputs.options as { guidance: number }).guidance = 99;
     input.references![0]!.mediaId = "mutated-reference";
@@ -215,17 +264,29 @@ describe("submitGeneration", () => {
     expect(providerSubmit).toHaveBeenCalledWith(expect.objectContaining({
       provider: "wavespeed",
       modelId: "m1",
+      routing: expect.objectContaining({
+        providerInstanceId: "wavespeed-primary",
+        providerModelId: "m1",
+      }),
       inputs: {
         prompt: "original @{reference-1}",
         options: { guidance: 7 },
       },
-      context: expect.objectContaining({ shotId: "shot-1" }),
+      context: expect.objectContaining({
+        entryContext: { kind: "new-asset" },
+        prompt: "hello",
+      }),
       idempotencyKey: expectedKey,
     }));
     expect(job).toMatchObject({
       provider: "wavespeed",
+      providerInstanceId: "wavespeed-primary",
       modelId: "m1",
-      context: { shotId: "shot-1" },
+      routing: expect.objectContaining({ providerModelId: "m1" }),
+      context: expect.objectContaining({
+        entryContext: { kind: "new-asset" },
+        prompt: "hello",
+      }),
     });
   });
 
@@ -242,10 +303,7 @@ describe("submitGeneration", () => {
     expect(p.provider.submit).toHaveBeenCalledWith(
       expect.objectContaining({
         context: expect.objectContaining({
-          target: expect.objectContaining({
-            kind: "new-version",
-            sourceMediaId: "explicit-source",
-          }),
+          entryContext: { kind: "new-asset" },
         }),
       }),
     );
@@ -448,16 +506,26 @@ describe("submitGeneration", () => {
 
     expect(job.context.references).toEqual([
       {
+        id: "ref-2:v2",
+        order: 1,
         mediaId: "ref-2",
         versionId: "v2",
         origins: ["user"],
-        remoteInput: { kind: "upload-token", value: "ref-token" },
+        state: "active",
+        preparationStatus: "ready",
+        errorHistory: [],
+        uploadLeaseId: "ref-token",
       },
       {
+        id: "ref-1:v1",
+        order: 2,
         mediaId: "ref-1",
         versionId: "v1",
         origins: ["user"],
-        remoteInput: { kind: "upload-token", value: "ref-token" },
+        state: "active",
+        preparationStatus: "ready",
+        errorHistory: [],
+        uploadLeaseId: "ref-token",
       },
     ]);
     expect(p.references?.uploadReference).toHaveBeenNthCalledWith(
@@ -567,11 +635,7 @@ describe("submitGeneration", () => {
       code: "generation-reference-upload-failed",
     });
     await expect(submitGeneration(input, p)).resolves.toMatchObject({
-      context: {
-        target: {
-          placeholderMediaId: "placeholder-1",
-        },
-      },
+      context: expect.objectContaining({ entryContext: { kind: "new-asset" } }),
     });
     expect(p.mutations.createPlaceholder).toHaveBeenCalledTimes(1);
   });
