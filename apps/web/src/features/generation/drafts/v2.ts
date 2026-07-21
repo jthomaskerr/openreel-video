@@ -327,7 +327,7 @@ export function buildGenerationSubmissionContext(input: {
     const token = required(input.referenceTokens[index]?.tokenId, `references[${index}]`);
     const versionId = reference.mediaVersionId ?? reference.versionId;
     return {
-      id: versionId ? `${reference.mediaId}:${versionId}` : reference.mediaId,
+      id: reference.key ?? (versionId ? `${reference.mediaId}:${versionId}` : reference.mediaId),
       order: index + 1,
       mediaId: reference.mediaId,
       ...(versionId ? { versionId } : {}),

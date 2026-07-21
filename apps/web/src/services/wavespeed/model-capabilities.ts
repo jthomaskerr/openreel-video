@@ -3,6 +3,7 @@ import {
   deriveWaveSpeedEvidence,
   deriveWaveSpeedFieldMap,
   type WaveSpeedCapabilityEvidenceBase,
+  type WaveSpeedRequestSchema,
 } from "@openreel/core/generation/wavespeed";
 import type { SchemaProperty, WavespeedModel } from "./index";
 
@@ -61,7 +62,20 @@ export type NormalizeWaveSpeedModelResult =
   | { ok: true; capability: GenerationModelCapability; evidence: CapabilityEvidence }
   | { ok: false; code: "unsupported-schema"; evidence: CapabilityEvidence };
 
-type RequestSchema = WavespeedModel["api_schema"]["api_schemas"][number]["request_schema"];
+type RequestSchema = WaveSpeedRequestSchema;
+type ProviderRequestSchema = WavespeedModel["api_schema"]["api_schemas"][number]["request_schema"];
+
+function parseProviderRequestSchema(value: ProviderRequestSchema): RequestSchema {
+  if (value.type !== "object") throw new Error("generation-route-manifest-invalid");
+  if ("additionalProperties" in value && value.additionalProperties !== false) {
+    throw new Error("generation-route-manifest-invalid");
+  }
+  return {
+    ...structuredClone(value),
+    type: "object",
+    additionalProperties: false,
+  };
+}
 
 const SCHEMA_TYPES: Record<
   string,
@@ -163,7 +177,23 @@ export function normalizeWaveSpeedModel(
     };
   }
 
-  const schema = entry.request_schema;
+  let schema: RequestSchema;
+  try {
+    schema = parseProviderRequestSchema(entry.request_schema);
+  } catch {
+    return {
+      ok: false,
+      code: "unsupported-schema",
+      evidence: {
+        classification,
+        value: override ? rawModel.model_id : entry.type,
+        ...(override ? { overrideVersion: override.version } : {}),
+        acceptedFields: [],
+        referenceLimits: false,
+        mediaFields: {},
+      },
+    };
+  }
   const inputFields = deriveWaveSpeedFieldMap(schema, override?.fields);
   const evidence: CapabilityEvidence = {
     classification,

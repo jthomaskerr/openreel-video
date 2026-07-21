@@ -6,6 +6,7 @@ import type {
   GenerationJob,
   GenerationOutput,
   GenerationProjectActionEnvelope,
+  GenerationRouteIdentity,
 } from "@openreel/music-video-domain/generation";
 import { GenerationRepositoryError, type GenerationJobRepository, type PlacementClaim, type PlacementOutcome } from "./repository.js";
 import { KeyedLock } from "./lock.js";
@@ -16,7 +17,14 @@ export interface DownloadedGenerationOutput {
 }
 
 export interface GenerationOutputDownloader {
-  download(input: { provider: string; providerJobId: string }): Promise<DownloadedGenerationOutput>;
+  download(input: {
+    provider: string;
+    providerInstanceId: string;
+    providerJobId: string;
+    outputIdentity: string;
+    routing: GenerationRouteIdentity;
+    transientOutputUrl?: string;
+  }): Promise<DownloadedGenerationOutput>;
 }
 
 export interface GenerationOutputVerifier {
@@ -35,6 +43,14 @@ export interface PlaceholderFinalizer {
 
 export interface ShotLinker {
   link(input: { job: GenerationJob; output: GenerationOutput; idempotencyKey: string }): Promise<void>;
+}
+
+export interface FinalizationActionPublisher {
+  publishFinalizationAction(input: {
+    job: GenerationJob;
+    output: GenerationOutput;
+    idempotencyKey: string;
+  }): Promise<GenerationProjectActionEnvelope>;
 }
 
 export interface TimelinePlacer {
@@ -63,12 +79,18 @@ export interface FinalizationPorts {
   placeholder: PlaceholderFinalizer;
   shot?: ShotLinker;
   placement?: TimelinePlacer;
+  projectAction?: FinalizationActionPublisher;
   maxOutputBytes?: number;
   clock?: () => number;
   placementLeaseScheduler?: PlacementLeaseScheduler;
 }
 
-export type CompletionSignal = { provider: string; providerJobId: string };
+export type CompletionSignal = {
+  provider: string;
+  providerJobId: string;
+  outputIdentity?: string;
+  transientOutputUrl?: string;
+};
 
 const CHECKPOINTS: GenerationCheckpointName[] = [
   "output-claimed",
@@ -140,17 +162,59 @@ export class GenerationFinalizer {
       if (job.status === "canceled" || (signal && (signal.provider !== job.provider || providerJobId !== job.providerJobId || providerJobId !== activeAttempt?.providerJobId))) {
         return this.rejectCompletion(job, "generation-completion-not-owned", "Provider completion is no longer owned by this generation job");
       }
+      const outputIdentities = job.outputMediaIds ?? [];
+      if (outputIdentities.length !== 1) {
+        return this.rejectCompletion(job, "generation-output-identity-missing", "Provider completion did not persist one opaque output identity");
+      }
+      const durableOutputIdentity = outputIdentities[0]!;
+      const durableClaimIdentity = JSON.stringify({ providerJobId, outputMediaIds: outputIdentities });
+      if (signal?.outputIdentity && signal.outputIdentity !== durableOutputIdentity) {
+        return this.rejectCompletion(job, "generation-output-identity-conflict", "Provider completion output identity does not match durable state");
+      }
+      const completionKey = generationFinalizationIdempotencyKey(job.id, "finalization");
+      let ownerToken: string | undefined;
       let downloaded: DownloadedGenerationOutput | undefined;
       try {
+        const claimResult = await this.repository.claimFinalization({
+          jobId: job.id,
+          providerInstanceId: job.providerInstanceId,
+          providerJobId,
+          outputIdentity: durableClaimIdentity,
+          idempotencyKey: completionKey,
+        });
+        if (!claimResult.acquired) {
+          if (claimResult.claim.state === "completed") return this.requireJob(job.id);
+          const projected = await this.requireJob(job.id);
+          if (await this.hasTerminalPlacementProjection(projected)) return this.completeRecoveredFinalization(projected);
+          return this.waitForFinalization(job.id);
+        }
+        ownerToken = claimResult.claim.ownerToken;
+        if (!completed(job, "output-claimed")) {
+          await this.mark(job.id, "output-claimed", { status: "completed", timestamp: this.now() });
+        }
+        job = await this.requireJob(job.id);
         const durableMediaId = outputMediaId(job);
-        if (isLocalUrl(durableMediaId)) return this.fail(job, "output-downloaded", { code: "generation-local-url-forbidden", message: "Local media identity cannot cross a durable generation boundary", retryable: false });
+        if (isLocalUrl(durableMediaId)) throw new Error("generation-local-url-forbidden");
         if (!completed(job, "output-inspected")) {
           if (!completed(job, "output-downloaded")) {
-            downloaded = await this.ports.download.download({ provider: job.provider, providerJobId });
+            downloaded = await this.ports.download.download({
+              provider: job.provider,
+              providerInstanceId: job.providerInstanceId,
+              providerJobId,
+              outputIdentity: durableOutputIdentity,
+              routing: job.routing,
+              ...(signal?.transientOutputUrl ? { transientOutputUrl: signal.transientOutputUrl } : {}),
+            });
             await this.mark(job.id, "output-downloaded", { status: "completed", timestamp: this.now() });
           }
           // A retry after restart has no in-memory bytes. The downloader is intentionally replay-safe.
-          if (!downloaded) downloaded = await this.ports.download.download({ provider: job.provider, providerJobId });
+          if (!downloaded) downloaded = await this.ports.download.download({
+            provider: job.provider,
+            providerInstanceId: job.providerInstanceId,
+            providerJobId,
+            outputIdentity: durableOutputIdentity,
+            routing: job.routing,
+          });
           if (!completed(job, "output-verified")) {
             await this.ports.verify.verify({ bytes: downloaded.bytes, mimeType: downloaded.mimeType, maxBytes: this.ports.maxOutputBytes ?? 200 * 1024 * 1024 });
             await this.mark(job.id, "output-verified", { status: "completed", timestamp: this.now() });
@@ -163,29 +227,15 @@ export class GenerationFinalizer {
           }
         }
         job = await this.requireJob(job.id);
-        const completionKey = generationFinalizationIdempotencyKey(job.id, "finalization");
-      const claimResult = await this.repository.claimFinalization({
-        jobId: job.id,
-        providerInstanceId: job.providerInstanceId,
-        providerJobId,
-          outputIdentity: JSON.stringify({ providerJobId, outputMediaIds: [outputMediaId(job)] }),
-          idempotencyKey: completionKey,
-        });
-        if (!claimResult.acquired) {
-          if (claimResult.claim.state === "completed") return this.requireJob(job.id);
-          const projected = await this.requireJob(job.id);
-          if (await this.hasTerminalPlacementProjection(projected)) return this.completeRecoveredFinalization(projected);
-          return this.waitForFinalization(job.id);
-        }
         if (!completed(job, "placeholder-finalized")) {
           const output = job.output!;
-        const { projectAction, ...ids } = await this.ports.placeholder.finalize({ job, output, idempotencyKey: generationFinalizationIdempotencyKey(job.id, "placeholder-finalized") });
-        if (isLocalUrl(ids.mediaId) || isLocalUrl(ids.versionId)) throw new Error("generation-local-url-forbidden");
-        await this.repository.update(job.id, (current) => ({
-          ...current,
-          output: { ...current.output!, ...ids },
-          ...(projectAction ? { projectAction } : {}),
-        }));
+          const { projectAction, ...ids } = await this.ports.placeholder.finalize({ job, output, idempotencyKey: generationFinalizationIdempotencyKey(job.id, "placeholder-finalized") });
+          if (isLocalUrl(ids.mediaId) || isLocalUrl(ids.versionId)) throw new Error("generation-local-url-forbidden");
+          await this.repository.update(job.id, (current) => ({
+            ...current,
+            output: { ...current.output!, ...ids },
+            ...(projectAction ? { projectAction } : {}),
+          }));
           await this.mark(job.id, "placeholder-finalized", { status: "completed", timestamp: this.now() });
         }
         job = await this.requireJob(job.id);
@@ -198,11 +248,14 @@ export class GenerationFinalizer {
           job = await this.executePlacement(job);
         }
         if (job.placement?.status === "pending") return job;
-        await this.repository.completeFinalization(job.id, completionKey, claimResult.claim.ownerToken);
+        job = await this.requireJob(job.id);
+        job = await this.publishCompletedProjectAction(job);
+        await this.repository.completeFinalization(job.id, completionKey, ownerToken);
         return this.repository.update(job.id, (current) => current.status === "needs-attention" ? current : ({ ...current, status: "succeeded", updatedAt: this.now() }));
       } catch (error) {
         const latest = await this.requireJob(job.id);
         if (await this.hasTerminalPlacementProjection(latest)) return this.completeRecoveredFinalization(latest);
+        if (ownerToken) await this.repository.releaseFinalization(job.id, ownerToken);
         const checkpoint = CHECKPOINTS.find((name) => latest.checkpoints[name]?.status !== "completed") ?? "output-inspected";
         return this.fail(latest, checkpoint, errorFrom(error));
       }
@@ -231,7 +284,7 @@ export class GenerationFinalizer {
       placeInvoked = true;
       const result = await this.withPlacementLease(jobId, placementKey, claim.ownerToken, () => this.ports.placement!.place({ job: current, output: current.output!, idempotencyKey: placementKey }));
       placementReturned = true;
-      return await this.applyPlacementResult(jobId, result, claim.ownerToken);
+      return this.publishCompletedProjectAction(await this.applyPlacementResult(jobId, result, claim.ownerToken));
     } catch (error) {
       if (this.isPlacementOwnerLost(error)) return this.requireJob(jobId);
       if (placementReturned) throw error;
@@ -255,7 +308,7 @@ export class GenerationFinalizer {
     if (!this.ports.placement) throw new Error("generation-placement-reconciliation-unavailable");
     if (job.context.placementPolicy === "none" || !job.output?.mediaId || !job.output.versionId) throw new Error("generation-placement-reconciliation-unavailable");
     if (job.status === "needs-attention") job = await this.repository.update(jobId, (current) => ({ ...current, status: "finalizing", updatedAt: this.now() }));
-    return this.reconcileOwnedPlacement(job, placementKey, recovery.claim);
+    return this.completeRecoveredFinalization(await this.reconcileOwnedPlacement(job, placementKey, recovery.claim));
   }
 
   private async applyPlacementResult(jobId: string, result: PlacementAttemptResult, ownerToken?: string): Promise<GenerationJob> {
@@ -362,9 +415,24 @@ export class GenerationFinalizer {
 
   private async completeRecoveredFinalization(job: GenerationJob) {
     if (job.placement?.status === "pending") return job;
+    job = await this.publishCompletedProjectAction(job);
     const finalization = await this.repository.getFinalizationClaim(job.id);
     if (finalization?.state === "claimed") await this.repository.completeFinalization(job.id, finalization.idempotencyKey, finalization.ownerToken);
     return job;
+  }
+
+  private async publishCompletedProjectAction(job: GenerationJob): Promise<GenerationJob> {
+    if (!this.ports.projectAction || job.projectAction?.receipt.kind === "finalize-composite") return job;
+    const placementComplete = job.context.placementPolicy === "none" || job.placement?.status === "applied";
+    const shotComplete = !shotId(job) || !this.ports.shot || completed(job, "shot-linked");
+    if (!placementComplete || !shotComplete || !completed(job, "placeholder-finalized")) return job;
+    if (!job.output || !job.projectAction) throw new Error("generation-project-action-envelope-missing");
+    const projectAction = await this.ports.projectAction.publishFinalizationAction({
+      job,
+      output: job.output,
+      idempotencyKey: generationFinalizationIdempotencyKey(job.id, "project-action-published"),
+    });
+    return this.repository.update(job.id, (current) => ({ ...current, projectAction }));
   }
 
   private async hasTerminalPlacementProjection(job: GenerationJob) {

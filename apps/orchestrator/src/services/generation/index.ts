@@ -15,6 +15,7 @@ import {
   type GenerationRouteIdentity,
   type JsonValue,
 } from "@openreel/music-video-domain/generation";
+import type { WaveSpeedRequestSchema } from "../../../../../packages/core/src/generation/wavespeed";
 import type { GenerationJobRepository, PlacementClaim } from "./repository.js";
 import { GenerationPollingController, isPlacementReconciliationCandidate, projectTerminalPlacementSuccess } from "./recovery.js";
 
@@ -36,7 +37,7 @@ export interface GenerationProviderStatus {
 }
 
 export interface GenerationFinalizerPort {
-  finalize(input: { job: GenerationJob; output: GenerationOutputIdentity; idempotencyKey: string }): Promise<void>;
+  finalize(input: { job: GenerationJob; output: GenerationOutputIdentity; idempotencyKey: string }): Promise<GenerationJob | void>;
   reconcilePlacement(jobId: string): Promise<GenerationJob>;
   retryPlacement?(jobId: string): Promise<GenerationJob>;
 }
@@ -49,7 +50,7 @@ export interface GenerationRouteManifestEntry {
   clientAcceptance: boolean;
   serverAcceptance: boolean;
   configurationVersion: string;
-  inputSchema?: Readonly<Record<string, unknown>>;
+  inputSchema?: Readonly<WaveSpeedRequestSchema>;
   supportsAudio?: boolean;
 }
 export interface GenerationRequestBoundary { contentType: string; byteLength: number; maxBytes: number; timeoutMs: number; maxTimeoutMs: number }
@@ -223,21 +224,36 @@ export class GenerationOrchestrator {
       return this.dispatchPlacementReconciliation(job.id);
     }
     if (!job.providerJobId || !job.outputMediaIds?.length) return this.options.repository.update(job.id, (current) => ({ ...current, status: "needs-attention", error: stableError("generation-output-identity-missing") }));
-    let output = transientOutput;
-    if (!output) {
-      try {
-        const refreshed = await this.options.provider.status({ providerJobId: job.providerJobId, routing: job.routing });
-        output = outputIdentity(refreshed);
-      } catch (cause) {
-        return this.options.repository.update(job.id, (current) => ({ ...current, status: "needs-attention", error: stableError(cause instanceof Error ? cause.message : "generation-output-identity-invalid") }));
-      }
-    }
+    const output = transientOutput ?? {
+      providerJobId: job.providerJobId,
+      outputCount: job.outputMediaIds.length,
+      outputMediaIds: job.outputMediaIds,
+    };
     const idempotencyKey = `generation:${job.id}:finalization:${job.providerJobId}`;
     try {
       // The structural finalizer is the sole durable completion-claim owner.
       // The orchestrator has already persisted normalized provider/output identity;
       // taking a second claim here would deadlock or conflict on restart.
-      await this.options.finalizer.finalize({ job, output, idempotencyKey });
+      const finalized = await this.options.finalizer.finalize({ job, output, idempotencyKey });
+      if (finalized) {
+        const identityMatches = finalized.id === job.id
+          && finalized.projectId === job.projectId
+          && finalized.provider === job.provider
+          && finalized.providerInstanceId === job.providerInstanceId
+          && finalized.providerJobId === job.providerJobId;
+        const statusIsAuthoritative = ["succeeded", "needs-attention", "finalizing", "canceled"].includes(finalized.status);
+        if (!identityMatches || !statusIsAuthoritative) {
+          return this.options.repository.update(job.id, (current) => current.status === "canceled"
+            ? current
+            : ({
+                ...current,
+                status: "needs-attention",
+                error: stableError("generation-finalization-result-invalid"),
+                updatedAt: this.clock(),
+              }));
+        }
+        return finalized;
+      }
       return this.options.repository.update(job.id, (current) => ({ ...current, status: "succeeded", updatedAt: this.clock() }));
     } catch {
       return this.options.repository.update(job.id, (current) => ({ ...current, status: "needs-attention", error: stableError("generation-finalization-failed"), updatedAt: this.clock() }));

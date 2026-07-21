@@ -380,7 +380,7 @@ describe("generation submission draft helpers", () => {
     });
     expect(context.references).toEqual([
       {
-        id: "ref-1:version-1",
+        id: "reference-1",
         order: 1,
         mediaId: "ref-1",
         versionId: "version-1",

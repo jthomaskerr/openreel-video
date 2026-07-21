@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
-import type { GenerationJob } from "@openreel/music-video-domain/generation";
+import {
+  GenerationSubmitRequestSchema,
+  type GenerationJob,
+} from "@openreel/music-video-domain/generation";
 import {
   applyGenerationReferenceCommand,
   createGenerationReferenceRecoveryState,
 } from "../features/generation/drafts/v2.js";
 import type { GenerationDraft } from "../features/generation/submit-generation.js";
+import { resolveProjectGenerationReferences } from "../features/generation/references/project-resolution.js";
+import { canonicalMediaToken } from "../features/generation/references/resolve.js";
 import {
   buildWaveSpeedGenerationDraft,
   createProductionGenerationRuntime,
@@ -14,9 +19,10 @@ import {
   prepareWaveSpeedGenerationDraft,
   useGenerationJobStore,
   type WaveSpeedGenerationCapabilities,
+  type WaveSpeedRouteCapability,
 } from "./generation-job-store.js";
 
-const route = {
+const route: WaveSpeedRouteCapability = {
   providerInstanceId: "wavespeed-production",
   providerModelId: "wavespeed/model",
   requestedMode: "text-to-image" as const,
@@ -25,6 +31,19 @@ const route = {
   providerSchemaVersion: "2026-07",
   output: "image" as const,
   supportsAudio: false,
+  inputSchema: {
+    type: "object" as const,
+    properties: {
+      seed: { type: "integer" as const },
+      reference_images: {
+        type: "array" as const,
+        items: { type: "string" as const },
+        "x-openreel-media-role": "reference-images" as const,
+      },
+    },
+    required: [],
+    additionalProperties: false,
+  },
 };
 
 function serverJob(overrides: Partial<GenerationJob> = {}): GenerationJob {
@@ -58,11 +77,16 @@ function serverJob(overrides: Partial<GenerationJob> = {}): GenerationJob {
       references: [],
     },
     providerInputs: { seed: 0 },
-    attempts: [{ attemptNumber: 1, routing: identity, providerJobId: "provider-job-9", startedAt: 10 }],
     checkpoints: {},
     createdAt: 10,
     updatedAt: 11,
     ...overrides,
+    attempts: overrides.attempts ?? [{
+      attemptNumber: 1,
+      routing: overrides.routing ?? identity,
+      providerJobId: overrides.providerJobId ?? "provider-job-9",
+      startedAt: 10,
+    }],
   };
 }
 
@@ -110,18 +134,23 @@ test("the dev same-origin API proxy injects application auth without a client-ex
   assert.doesNotMatch(config, /VITE_ORCHESTRATOR_AUTH_TOKEN/);
 });
 
-test("one production controller posts the predeclared logical job ID and preserves provider identity", async () => {
-  const calls: Array<{ url: string; init?: RequestInit; body?: any }> = [];
+test("one production controller posts a shared-schema new-asset request with the durable target", async () => {
+  const calls: Array<{ url: string; init?: RequestInit; body?: unknown }> = [];
   const authoritative = serverJob();
   const fakeFetch: typeof fetch = async (input, init) => {
     const url = String(input);
-    const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+    const body: unknown = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
     calls.push({ url, init, body });
     if (url.endsWith("/config")) return Response.json(capabilities());
     if (url.endsWith("/api/generate/wavespeed/")) {
-      assert.equal(body.jobId, "logical-job-1");
-      assert.equal(body.projectId, "project-1");
-      assert.deepEqual(body.routing, {
+      const parsed = GenerationSubmitRequestSchema.parse(body);
+      assert.equal(parsed.jobId, "logical-job-1");
+      assert.equal(parsed.projectId, "project-1");
+      assert.deepEqual(parsed.target, {
+        kind: "new-asset",
+        placeholderMediaId: "placeholder-1",
+      });
+      assert.deepEqual(parsed.routing, {
         providerInstanceId: route.providerInstanceId,
         providerModelId: route.providerModelId,
         requestedMode: route.requestedMode,
@@ -159,6 +188,257 @@ test("one production controller posts the predeclared logical job ID and preserv
   assert.equal(first.providerJobId, "provider-job-9");
   assert.equal(placeholderCalls, 1);
   assert.equal(calls.filter((call) => call.url.endsWith("/api/generate/wavespeed/")).length, 1);
+});
+
+test("production controller posts a shared-schema new-version request with source and reserved target identity", async () => {
+  let submittedBody: unknown;
+  const runtime = createProductionGenerationRuntime({
+    baseUrl: "http://orchestrator/api/generate/wavespeed",
+    nextId: (kind) => kind === "job" ? "logical-job-1" : "placeholder-version-1",
+    now: () => 10,
+    mutations: {
+      createPlaceholder: async ({ target }) => ({ placeholderMediaId: target.placeholderMediaId }),
+      markPlaceholderFailed: async () => {},
+    },
+    fetch: async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/config")) return Response.json(capabilities());
+      submittedBody = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+      const parsed = GenerationSubmitRequestSchema.parse(submittedBody);
+      return Response.json({ job: serverJob({ target: parsed.target }) }, { status: 202 });
+    },
+  });
+  const versionDraft = buildWaveSpeedGenerationDraft({
+    projectId: "project-1",
+    route,
+    entryContext: { kind: "new-asset" },
+    prompt: "typed prompt",
+    target: { kind: "new-version", sourceMediaId: "source-media-1" },
+    providerInputs: { seed: 0 },
+  });
+
+  await runtime.controller.submit(versionDraft);
+
+  assert.deepEqual(GenerationSubmitRequestSchema.parse(submittedBody).target, {
+    kind: "new-version",
+    sourceMediaId: "source-media-1",
+    placeholderMediaId: "placeholder-version-1",
+  });
+});
+
+test("production sanitizer maps ordered reference and audio leases into exact manifest fields with no local URL", async () => {
+  const mediaRoute = {
+    ...route,
+    requestedMode: "image-to-video" as const,
+    providerSchemaId: "media-schema",
+    providerSchemaVersion: "2026-08",
+    supportsAudio: true,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        prompt: { type: "string" as const },
+        reference_images: {
+          type: "array" as const,
+          items: { type: "string" as const },
+          "x-openreel-media-role": "reference-images",
+        },
+        soundtrack: {
+          type: "string" as const,
+          "x-openreel-media-role": "audio",
+        },
+      },
+      required: ["prompt", "reference_images", "soundtrack"],
+      additionalProperties: false as const,
+    },
+  };
+  const mediaCapabilities: WaveSpeedGenerationCapabilities = {
+    configured: true,
+    generationV2ReleaseEnabled: true,
+    providerInstanceId: mediaRoute.providerInstanceId,
+    routes: [mediaRoute],
+  };
+  let submitBody: unknown;
+  let uploadCalls = 0;
+  const runtime = createProductionGenerationRuntime({
+    baseUrl: "http://orchestrator/api/generate/wavespeed",
+    nextId: (kind) => kind === "job" ? "logical-job-1" : "placeholder-media-route",
+    now: () => 10,
+    mutations: {
+      createPlaceholder: async ({ target }) => ({ placeholderMediaId: target.placeholderMediaId }),
+      markPlaceholderFailed: async () => {},
+    },
+    fetch: async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/config")) return Response.json(mediaCapabilities);
+      if (url.endsWith("/upload")) {
+        uploadCalls += 1;
+        return Response.json({ uploadId: "upl_audio_1" }, { status: 201 });
+      }
+      submitBody = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
+      const parsed = GenerationSubmitRequestSchema.parse(submitBody);
+      return Response.json({
+        job: serverJob({
+          routing: parsed.routing,
+          providerInstanceId: parsed.routing.providerInstanceId,
+          modelId: parsed.routing.providerModelId,
+          modelSchemaVersion: parsed.routing.providerSchemaVersion,
+          context: parsed.context,
+          target: parsed.target,
+          providerInputs: parsed.providerInputs,
+        }),
+      }, { status: 202 });
+    },
+  });
+  const mediaDraft = buildWaveSpeedGenerationDraft({
+    projectId: "project-1",
+    route: mediaRoute,
+    entryContext: {
+      kind: "linked-projection",
+      shotId: "shot-1",
+      clipId: "clip-1",
+      startTime: 2,
+      endTime: 4,
+    },
+    prompt: "typed prompt",
+    target: { kind: "new-asset" },
+    providerInputs: {
+      prompt: "typed prompt",
+      reference_images: ["blob:browser-ref", "http://localhost/ref"],
+      soundtrack: "file:///browser-audio.wav",
+    },
+    references: [
+      {
+        key: "ref-1",
+        mediaId: "asset-1",
+        mediaVersionId: "version-1",
+        origins: ["user"],
+        role: "style",
+        canonicalTokens: ["@{media:version-1}"],
+        order: 1,
+        status: "active",
+        uploadLeaseId: "upl_ref_1",
+      },
+      {
+        key: "ref-2",
+        mediaId: "asset-2",
+        mediaVersionId: "version-2",
+        origins: ["shot"],
+        role: "composition",
+        canonicalTokens: ["@{media:version-2}"],
+        order: 2,
+        status: "active",
+        uploadLeaseId: "upl_ref_2",
+      },
+    ],
+    audio: {
+      value: { projectId: "project-1", body: new Blob(["audio"], { type: "audio/wav" }), mimeType: "audio/wav" },
+      sourceMediaId: "audio-asset-1",
+      sourceVersionId: "audio-version-1",
+      sourceClipId: "audio-clip-1",
+      projectStartSeconds: 2,
+      projectEndSeconds: 4,
+      sourceStartSeconds: 0,
+      sourceEndSeconds: 2,
+      mimeType: "audio/wav",
+      sha256: "audio-sha-1",
+    },
+  });
+
+  await runtime.controller.submit(mediaDraft);
+
+  const parsed = GenerationSubmitRequestSchema.parse(submitBody);
+  assert.deepEqual(parsed.providerInputs, {
+    prompt: "typed prompt",
+    reference_images: ["upl_ref_1", "upl_ref_2"],
+    soundtrack: "upl_audio_1",
+  });
+  assert.equal(uploadCalls, 1);
+  assert.doesNotMatch(JSON.stringify(parsed), /blob:|local:|file:|localhost/i);
+});
+
+test("default reference cleanup emits only a redacted server-expiry event", async () => {
+  const events: unknown[][] = [];
+  const originalWarn = console.warn;
+  console.warn = (...args: unknown[]) => { events.push(args); };
+  try {
+    const runtime = createProductionGenerationRuntime();
+    await runtime.referenceRecovery.releaseUploadLease({ tokenId: "secret-upload-token" });
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(JSON.stringify(events).includes("secret-upload-token"), false);
+  assert.deepEqual(events, [["generation-upload-lease-expiry-managed-by-server", { redacted: true }]]);
+});
+
+test("resolved prompt reference identity reaches the canonical GenerationContext", async () => {
+  const mediaVersionId = "version-reference-1";
+  const resolution = resolveProjectGenerationReferences({
+    prompt: `Use ${canonicalMediaToken(mediaVersionId)} as the composition.`,
+    mediaItems: [{
+      id: mediaVersionId,
+      assetGroupId: "asset-reference-1",
+      name: "reference.png",
+      type: "image",
+      fileHandle: null,
+      blob: new Blob(["reference"], { type: "image/png" }),
+      metadata: {
+        duration: 0,
+        width: 1,
+        height: 1,
+        frameRate: 0,
+        codec: "image/png",
+        sampleRate: 0,
+        channels: 0,
+        fileSize: 9,
+      },
+      thumbnailUrl: null,
+    }],
+    generatedImageDefinitions: [],
+    tracks: [],
+  });
+  const resolvedDraft = buildWaveSpeedGenerationDraft({
+    projectId: "project-1",
+    route,
+    entryContext: { kind: "new-asset" },
+    prompt: `Use ${canonicalMediaToken(mediaVersionId)} as the composition.`,
+    target: { kind: "new-asset" },
+    providerInputs: { seed: 0 },
+    references: resolution.submissionReferences.map((reference) => ({
+      ...reference,
+      uploadLeaseId: "upload-reference-1",
+    })),
+  });
+  const runtime = createProductionGenerationRuntime({
+    baseUrl: "http://orchestrator/api/generate/wavespeed",
+    nextId: (kind) => kind === "job" ? "logical-job-1" : "placeholder-1",
+    now: () => 10,
+    mutations: {
+      createPlaceholder: async ({ target }) => ({ placeholderMediaId: target.placeholderMediaId }),
+      markPlaceholderFailed: async () => {},
+    },
+    fetch: async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/config")) return Response.json(capabilities());
+      if (!url.endsWith("/api/generate/wavespeed/")) throw new Error(`unexpected request ${url}`);
+      const body = JSON.parse(String(init?.body));
+      assert.deepEqual(body.context.references, [{
+        id: resolution.referenceIds[0],
+        order: 1,
+        mediaId: "asset-reference-1",
+        versionId: mediaVersionId,
+        origins: ["user"],
+        state: "active",
+        active: true,
+        preparationStatus: "ready",
+        errorHistory: [],
+        uploadLeaseId: "upload-reference-1",
+      }]);
+      return Response.json({ job: serverJob({ context: body.context, target: body.target }) }, { status: 202 });
+    },
+  });
+
+  const submitted = await runtime.controller.submit(resolvedDraft);
+  assert.equal(submitted.context.references[0]?.id, resolution.referenceIds[0]);
 });
 
 test("rollback fails closed before placeholder creation and provider reservation", async () => {

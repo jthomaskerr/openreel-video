@@ -2,12 +2,18 @@
 import { create, type StateCreator } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import {
+  deriveWaveSpeedFieldMap,
+  parseWaveSpeedRequestSchema,
+  validateWaveSpeedProviderInputs,
+  type WaveSpeedRequestSchema,
+} from "@openreel/core/generation/wavespeed";
+import {
   assertGenerationV2SubmissionAllowed,
+  GenerationRouteIdentitySchema,
   parseGenerationJob,
   type GenerationEntryContext,
   type GenerationError,
   type GenerationJob as DurableGenerationJob,
-  type GenerationMode,
   type GenerationPlacementPolicy,
   type GenerationRouteIdentity,
   type JsonValue,
@@ -275,7 +281,8 @@ export const generationControllerJobCache: GenerationControllerJobCache = {
 
 export interface WaveSpeedRouteCapability extends GenerationRouteIdentity {
   output: "image" | "video";
-  supportsAudio?: boolean;
+  supportsAudio: boolean;
+  inputSchema: Readonly<WaveSpeedRequestSchema>;
 }
 
 export function waveSpeedRouteKey(route: GenerationRouteIdentity): string {
@@ -584,22 +591,48 @@ export interface ProductionGenerationRuntimeOptions {
 function parseCapabilities(input: unknown): WaveSpeedGenerationCapabilities {
   if (!input || typeof input !== "object") throw new Error("generation-capabilities-invalid");
   const value = input as Record<string, unknown>;
+  const topLevelKeys = new Set(["configured", "generationV2ReleaseEnabled", "providerInstanceId", "routes"]);
+  if (Object.keys(value).some((key) => !topLevelKeys.has(key))
+    || typeof value.configured !== "boolean"
+    || typeof value.generationV2ReleaseEnabled !== "boolean"
+    || typeof value.providerInstanceId !== "string"
+    || !Array.isArray(value.routes)) {
+    throw new Error("generation-capabilities-invalid");
+  }
   const routes = Array.isArray(value.routes) ? value.routes.map((candidate) => {
     if (!candidate || typeof candidate !== "object") throw new Error("generation-route-capability-invalid");
     const route = candidate as Record<string, unknown>;
-    const parsed: WaveSpeedRouteCapability = {
-      providerInstanceId: String(route.providerInstanceId ?? ""),
-      providerModelId: String(route.providerModelId ?? ""),
-      requestedMode: String(route.requestedMode ?? "") as GenerationMode,
-      providerSchemaId: String(route.providerSchemaId ?? ""),
-      providerEndpointId: String(route.providerEndpointId ?? ""),
-      providerSchemaVersion: String(route.providerSchemaVersion ?? ""),
-      output: route.output === "video" ? "video" : "image",
-      ...(typeof route.supportsAudio === "boolean" ? { supportsAudio: route.supportsAudio } : {}),
-    };
-    if (Object.entries(routeIdentity(parsed)).some(([, field]) => !field)) {
+    const routeKeys = new Set([
+      "providerInstanceId",
+      "providerModelId",
+      "requestedMode",
+      "providerSchemaId",
+      "providerEndpointId",
+      "providerSchemaVersion",
+      "output",
+      "supportsAudio",
+      "inputSchema",
+    ]);
+    if (Object.keys(route).some((key) => !routeKeys.has(key))
+      || (route.output !== "image" && route.output !== "video")
+      || typeof route.supportsAudio !== "boolean") {
       throw new Error("generation-route-capability-invalid");
     }
+    const identity = GenerationRouteIdentitySchema.safeParse({
+      providerInstanceId: route.providerInstanceId,
+      providerModelId: route.providerModelId,
+      requestedMode: route.requestedMode,
+      providerSchemaId: route.providerSchemaId,
+      providerEndpointId: route.providerEndpointId,
+      providerSchemaVersion: route.providerSchemaVersion,
+    });
+    if (!identity.success) throw new Error("generation-route-capability-invalid");
+    const parsed: WaveSpeedRouteCapability = {
+      ...identity.data,
+      output: route.output,
+      supportsAudio: route.supportsAudio,
+      inputSchema: parseWaveSpeedRequestSchema(route.inputSchema),
+    };
     return parsed;
   }) : [];
   return {
@@ -608,6 +641,65 @@ function parseCapabilities(input: unknown): WaveSpeedGenerationCapabilities {
     providerInstanceId: String(value.providerInstanceId ?? ""),
     routes,
   };
+}
+
+function mapWaveSpeedUploadInputs(input: {
+  route: WaveSpeedRouteCapability;
+  providerInputs: Readonly<Record<string, unknown>>;
+  references: readonly {
+    tokenId: string;
+    role: string;
+    origins: readonly string[];
+  }[];
+  audioToken?: string;
+}): { inputs: Record<string, unknown>; errors?: readonly { field: string; code: string }[] } {
+  const fields = deriveWaveSpeedFieldMap(input.route.inputSchema);
+  const inputs = stripWaveSpeedMediaInputs(input.route, input.providerInputs);
+  const errors: Array<{ field: string; code: string }> = [];
+  const sourceReferences = input.references.filter((reference) =>
+    reference.role === "source" || reference.origins.includes("source"));
+  const remainingReferences = fields.sourceImage
+    ? input.references.filter((reference) => !sourceReferences.includes(reference))
+    : input.references;
+  if (sourceReferences.length > 0) {
+    if (!fields.sourceImage || sourceReferences.length !== 1) {
+      errors.push({ field: fields.sourceImage ?? "references", code: "unsupported-source-mapping" });
+    } else {
+      inputs[fields.sourceImage] = sourceReferences[0]!.tokenId;
+    }
+  }
+  if (remainingReferences.length > 0) {
+    if (!fields.referenceImages) {
+      errors.push({ field: "references", code: "unsupported-reference-mapping" });
+    } else if (input.route.inputSchema.properties[fields.referenceImages]?.type === "array") {
+      inputs[fields.referenceImages] = remainingReferences.map((reference) => reference.tokenId);
+    } else if (remainingReferences.length === 1) {
+      inputs[fields.referenceImages] = remainingReferences[0]!.tokenId;
+    } else {
+      errors.push({ field: fields.referenceImages, code: "reference-cardinality" });
+    }
+  }
+  if (input.audioToken) {
+    if (!input.route.supportsAudio || !fields.audio) {
+      errors.push({ field: fields.audio ?? "audio", code: "unsupported-audio-mapping" });
+    } else {
+      inputs[fields.audio] = input.audioToken;
+    }
+  }
+  errors.push(...validateWaveSpeedProviderInputs({ schema: input.route.inputSchema, inputs }));
+  return errors.length > 0 ? { inputs, errors } : { inputs };
+}
+
+function stripWaveSpeedMediaInputs(
+  route: WaveSpeedRouteCapability,
+  providerInputs: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  const fields = deriveWaveSpeedFieldMap(route.inputSchema);
+  const inputs: Record<string, unknown> = { ...providerInputs };
+  for (const mediaField of [fields.sourceImage, fields.referenceImages, fields.audio]) {
+    if (mediaField) delete inputs[mediaField];
+  }
+  return inputs;
 }
 
 async function responseJob(response: Response): Promise<DurableGenerationJob> {
@@ -626,6 +718,7 @@ export function createProductionGenerationRuntime(
   const authoritativeJobs = new Map<string, DurableGenerationJob>();
   const synchronizations = new Map<string, Promise<DurableGenerationJob>>();
   let capabilityRequest: Promise<WaveSpeedGenerationCapabilities> | undefined;
+  const routeCapabilities = new Map<string, WaveSpeedRouteCapability>();
 
   const readCapabilities = async (readOptions?: { refresh?: boolean }) => {
     if (!capabilityRequest || readOptions?.refresh) {
@@ -633,7 +726,10 @@ export function createProductionGenerationRuntime(
         .then(async (response) => {
           const body = await response.json().catch(() => ({}));
           if (!response.ok) throw new Error(`generation-capabilities-request-failed:${response.status}`);
-          return parseCapabilities(body);
+          const parsed = parseCapabilities(body);
+          routeCapabilities.clear();
+          for (const route of parsed.routes) routeCapabilities.set(waveSpeedRouteKey(route), route);
+          return parsed;
         });
       capabilityRequest = operation;
       void operation.finally(() => {
@@ -685,8 +781,8 @@ export function createProductionGenerationRuntime(
 
   const releaseUploadLease: GenerationReferenceRecoveryPorts["releaseUploadLease"] =
     options.referenceRecovery?.releaseUploadLease
-    ?? (async ({ tokenId }) => {
-      console.warn("generation-upload-lease-expiry-managed-by-server", { tokenId });
+    ?? (async () => {
+      console.warn("generation-upload-lease-expiry-managed-by-server", { redacted: true });
     });
   const referenceRecovery: GenerationReferenceRecoveryPorts = {
     retryReference: options.referenceRecovery?.retryReference ?? ((reference) => upload(reference.value)),
@@ -701,6 +797,32 @@ export function createProductionGenerationRuntime(
       mutations,
       references: { uploadReference: (reference) => upload(reference.value) },
       audio: { uploadAudio: (audio) => upload(audio.value) },
+      sanitizer: {
+        prepareDraftInputs(draft) {
+          const route = routeCapabilities.get(waveSpeedRouteKey(draft.routing));
+          return route ? stripWaveSpeedMediaInputs(route, draft.providerInputs) : { ...draft.providerInputs };
+        },
+        sanitize({ draft, references, audio }) {
+          const route = routeCapabilities.get(waveSpeedRouteKey(draft.routing));
+          if (!route) return { inputs: {}, errors: [{ field: "routing", code: "generation-route-stale" }] };
+          const orderedReferences = (draft.references ?? [])
+            .filter((reference) => reference.status !== "unavailable")
+            .slice()
+            .sort((left, right) =>
+              (left.order ?? 0) - (right.order ?? 0)
+              || (left.key ?? left.mediaId).localeCompare(right.key ?? right.mediaId));
+          return mapWaveSpeedUploadInputs({
+            route,
+            providerInputs: draft.providerInputs,
+            references: orderedReferences.map((reference, index) => ({
+              tokenId: references[index]?.tokenId ?? "",
+              role: reference.role ?? "reference",
+              origins: reference.origins ?? [],
+            })),
+            ...(audio?.tokenId ? { audioToken: audio.tokenId } : {}),
+          });
+        },
+      },
       provider: {
         async submit(input) {
           const response = await request(`${baseUrl}/`, {
@@ -711,6 +833,7 @@ export function createProductionGenerationRuntime(
               projectId: input.context.projectId,
               jobId: input.jobId,
               routing: input.routing,
+              target: input.target,
               context: input.context,
               providerInputs: input.inputs,
             }),

@@ -13,7 +13,11 @@ import { config } from "../env.js";
 import { GenerationFinalizer } from "../services/generation/finalization.js";
 import { FileGenerationJobRepository } from "../services/generation/repository.js";
 import type { GenerationProviderPort, GenerationProviderStatus } from "../services/generation/index.js";
-import { createWaveSpeedRouter, parseGenerationRouteManifest } from "./wavespeed.js";
+import {
+  createWaveSpeedRouter,
+  parseGenerationRouteManifest,
+  type ValidatedGenerationRouteManifestEntry,
+} from "./wavespeed.js";
 
 const route: GenerationRouteIdentity = {
   providerInstanceId: "wavespeed-production",
@@ -24,7 +28,7 @@ const route: GenerationRouteIdentity = {
   providerSchemaVersion: "2026-07",
 };
 
-const manifest = [{
+const manifest: readonly ValidatedGenerationRouteManifestEntry[] = [{
   identity: route,
   schemaFingerprint: "schema-fingerprint",
   clientSchemaFingerprint: "schema-fingerprint",
@@ -32,9 +36,14 @@ const manifest = [{
   clientAcceptance: true,
   serverAcceptance: true,
   configurationVersion: "generation-v2",
-  inputSchema: { type: "object", additionalProperties: true },
+  inputSchema: {
+    type: "object",
+    properties: { prompt: { type: "string" } },
+    required: [],
+    additionalProperties: false,
+  },
   supportsAudio: false,
-}] as const;
+}];
 
 function request(jobId: string, providerInputs: Record<string, unknown> = {}) {
   return {
@@ -120,6 +129,7 @@ async function fixture(options?: {
   authorized?: boolean;
   routes?: readonly import("./wavespeed.js").ValidatedGenerationRouteManifestEntry[];
   applyProjectAction?: (command: GenerationProjectActionCommand) => Promise<unknown>;
+  finalizationFailure?: Error;
 }) {
   const repository = new FileGenerationJobRepository(await mkdtemp(join(tmpdir(), "wavespeed-route-integration-")));
   let providerSubmits = 0;
@@ -144,6 +154,7 @@ async function fixture(options?: {
       placeholder: {
         finalize: async ({ job }) => {
           placeholderFinalizations += 1;
+          if (options?.finalizationFailure) throw options.finalizationFailure;
           return { mediaId: `media-${job.id}`, versionId: `version-${job.id}` };
         },
       },
@@ -422,6 +433,24 @@ test("generation-finalization-new-asset-no-source.fixture.ts: production route c
   assert.equal(f.counts().placeholderFinalizations, 1);
 });
 
+test("production route preserves a durable needs-attention finalization failure", async () => {
+  const f = await fixture({
+    status: (providerJobId) => ({
+      providerJobId,
+      status: "completed",
+      outputUrls: ["https://cdn.example.test/generated.png"],
+    }),
+    finalizationFailure: new Error("project-mutation-failed"),
+  });
+  const submitted = await invoke(f.router, "POST", "/api/generate/wavespeed/", request("failed-finalization-job"));
+  assert.equal(submitted.status, 202);
+
+  const completed = await invoke(f.router, "GET", "/api/generate/wavespeed/failed-finalization-job");
+  assert.equal(completed.status, 200);
+  assert.equal(completed.body.job.status, "needs-attention", JSON.stringify(completed.body.job));
+  assert.equal(f.counts().placeholderFinalizations, 1);
+});
+
 test("generation-local-url-boundaries.fixture.ts: production route never polls needs-attention and rejects local identities before persistence", async () => {
   const f = await fixture();
   await f.repository.create({
@@ -458,6 +487,12 @@ test("config exposes non-secret capabilities only", async () => {
       providerEndpointId: "submit",
       providerSchemaVersion: "2026-07",
       output: "image",
+      inputSchema: {
+        type: "object",
+        properties: { prompt: { type: "string" } },
+        required: [],
+        additionalProperties: false,
+      },
       supportsAudio: false,
     }],
   });
@@ -490,6 +525,17 @@ test("production manifest configuration is validated and deeply immutable", () =
     () => parseGenerationRouteManifest(JSON.stringify([{ ...manifest[0], serverAcceptance: "yes" }])),
     /generation-route-manifest-invalid/,
   );
+  for (const inputSchema of [
+    {},
+    { type: "object", properties: {} },
+    { type: "object", properties: { prompt: { type: "unsupported" } }, additionalProperties: false },
+    { type: "object", properties: { prompt: { type: "string" } }, required: ["missing"], additionalProperties: false },
+  ]) {
+    assert.throws(
+      () => parseGenerationRouteManifest(JSON.stringify([{ ...manifest[0], inputSchema }])),
+      /generation-route-manifest-invalid/,
+    );
+  }
 });
 
 test("authenticated project actions use the durable domain command unchanged", async () => {

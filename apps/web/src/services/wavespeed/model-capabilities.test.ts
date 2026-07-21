@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { WaveSpeedRequestSchema } from "@openreel/core/generation/wavespeed";
 import { getModelDefaults, normalizeWaveSpeedModel } from "./model-capabilities";
 import { sanitizeWaveSpeedInputs } from "./adapters";
 import {
@@ -12,8 +13,12 @@ function normalized(model = textToImage) {
   return result.capability;
 }
 
-function schema(model = textToImage) {
-  return model.api_schema.api_schemas[0].request_schema;
+function schema(model = textToImage): WaveSpeedRequestSchema {
+  return {
+    ...model.api_schema.api_schemas[0].request_schema,
+    type: "object",
+    additionalProperties: false,
+  };
 }
 
 describe("normalizeWaveSpeedModel", () => {
@@ -30,6 +35,17 @@ describe("normalizeWaveSpeedModel", () => {
   it("does not classify from a misleading general model type", () => {
     expect(normalizeWaveSpeedModel(misleadingType)).toMatchObject({
       ok: false, code: "unsupported-schema", evidence: { value: "unknown-task" },
+    });
+  });
+
+  it("fails closed when a provider catalog schema permits undeclared inputs", () => {
+    const openSchema = structuredClone(textToImage);
+    Object.assign(openSchema.api_schema.api_schemas[0].request_schema, {
+      additionalProperties: true,
+    });
+    expect(normalizeWaveSpeedModel(openSchema)).toMatchObject({
+      ok: false,
+      code: "unsupported-schema",
     });
   });
 

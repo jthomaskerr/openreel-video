@@ -18,7 +18,7 @@ import {
   type GenerationProjectMutationReceipt,
   GenerationProjectMutationReceiptSchema,
   type GenerationShotAttempt,
-  type JsonValue,
+  JsonValueSchema,
 } from "@openreel/music-video-domain/generation";
 import { ActionExecutor } from "../../../../../packages/core/src/actions/index.js";
 import { GitStore, type GitCommitReceipt, resolveGitExecutable } from "../../projects/git-store.js";
@@ -28,6 +28,7 @@ import { removePendingMedia, storePendingUpload } from "../../projects/pending-m
 import { executeSaveTransaction, recoverInterruptedSave, SaveTransactionError } from "../../projects/save-transaction.js";
 import type { ServerRemovalManifest } from "../../projects/destructive-change.js";
 import type { PlacementAttemptResult } from "./finalization.js";
+import { generationOutputCacheKey } from "./output-downloader.js";
 
 export interface GenerationProjectActionAdapterOptions {
   readonly projectStore: ProjectStore;
@@ -69,6 +70,7 @@ interface MutationInput<T> {
   readonly actionId?: string;
   readonly idempotencyKey: string;
   readonly kind: GenerationProjectMutationKind;
+  readonly receiptBaseRevision?: ProjectBaseRevision;
   readonly semanticPayload: string;
   readonly replayValue: (project: Project, receipt: GenerationProjectMutationReceipt) => T;
   readonly mutate: (project: Project, receipt: GenerationProjectMutationReceipt) => Promise<ProjectMutation<T>> | ProjectMutation<T>;
@@ -180,14 +182,25 @@ async function receiptAppliedRevision(
 ): Promise<ProjectBaseRevision> {
   const history = (await gitStore.getHistory(projectId)).map((entry) => entry.split(" ", 1)[0] ?? "");
   const baseIndex = history.indexOf(receipt.baseRevision.commitSha);
-  const appliedCommitSha = baseIndex > 0 ? history[baseIndex - 1] : undefined;
-  if (!appliedCommitSha) throw new GenerationProjectActionError("generation-project-action-envelope-missing");
-  const appliedProject = await gitStore.getProjectAtCommit(projectId, appliedCommitSha);
-  const appliedReceipt = appliedProject
-    ? findGenerationProjectReceipt(appliedProject, receipt.idempotencyKey)
-    : undefined;
-  if (!appliedProject || JSON.stringify(appliedReceipt) !== JSON.stringify(receipt)) {
-    throw new GenerationProjectActionError("generation-project-action-snapshot-invalid");
+  if (baseIndex <= 0) throw new GenerationProjectActionError("generation-project-action-envelope-missing");
+  let appliedCommitSha: string | undefined;
+  let appliedProject: Project | undefined;
+  for (let index = baseIndex - 1; index >= 0; index -= 1) {
+    const candidateCommit = history[index];
+    if (!candidateCommit) continue;
+    const candidateProject = await gitStore.getProjectAtCommit(projectId, candidateCommit);
+    if (!candidateProject) continue;
+    const candidateReceipt = findGenerationProjectReceipt(candidateProject, receipt.idempotencyKey);
+    if (candidateReceipt === undefined) continue;
+    if (JSON.stringify(candidateReceipt) !== JSON.stringify(receipt)) {
+      throw new GenerationProjectActionError("generation-project-action-snapshot-invalid");
+    }
+    appliedCommitSha = candidateCommit;
+    appliedProject = candidateProject;
+    break;
+  }
+  if (!appliedCommitSha || !appliedProject) {
+    throw new GenerationProjectActionError("generation-project-action-envelope-missing");
   }
   const { stdout } = await execFileAsync(
     resolveGitExecutable(),
@@ -220,14 +233,14 @@ function placementKind(job: GenerationJob): GenerationProjectMutationKind {
 }
 
 function placementSemanticPayload(job: GenerationJob, output: GenerationOutput): string {
-  return canonicalizeGenerationProjectActionPayload({
+  return canonicalizeGenerationProjectActionPayload(JsonValueSchema.parse({
     jobId: job.id,
     projectId: job.projectId,
     policy: job.context.placementPolicy,
     entryContext: job.context.entryContext,
     timing: job.context.timing ?? null,
     output,
-  } as unknown as JsonValue);
+  }));
 }
 
 function revisionsEqual(left: ProjectBaseRevision, right: ProjectBaseRevision): boolean {
@@ -291,12 +304,12 @@ export class GenerationProjectActionAdapter {
     }
     const target = classification.target;
     const kind: GenerationProjectMutationKind = target.kind === "new-version" ? "finalize-version" : "finalize-placeholder";
-    const semanticPayload = canonicalizeGenerationProjectActionPayload({
+    const semanticPayload = canonicalizeGenerationProjectActionPayload(JsonValueSchema.parse({
       jobId: input.job.id,
       projectId: input.job.projectId,
       target,
       output: input.output,
-    } as unknown as JsonValue);
+    }));
     const replayValue = (project: Project) => {
       const item = project.mediaLibrary.items.find((candidate) => candidate.id === target.placeholderMediaId);
       if (!item) throw new GenerationProjectActionError("generation-project-receipt-output-missing");
@@ -387,18 +400,85 @@ export class GenerationProjectActionAdapter {
     }
   }
 
+  async publishFinalizationAction(input: {
+    job: GenerationJob;
+    output: GenerationOutput;
+    idempotencyKey: string;
+  }): Promise<GenerationProjectActionEnvelope> {
+    const baseAction = input.job.projectAction;
+    if (!baseAction
+      || baseAction.projectId !== input.job.projectId
+      || baseAction.receipt.jobId !== input.job.id) {
+      throw new GenerationProjectActionError("generation-project-action-envelope-missing");
+    }
+    const semanticPayload = canonicalizeGenerationProjectActionPayload(JsonValueSchema.parse({
+      jobId: input.job.id,
+      projectId: input.job.projectId,
+      output: input.output,
+      baseActionId: baseAction.receipt.actionId,
+      baseIdempotencyKey: baseAction.receipt.idempotencyKey,
+      completedCheckpoints: Object.entries(input.job.checkpoints)
+        .filter(([, checkpoint]) => checkpoint?.status === "completed")
+        .map(([name]) => name)
+        .sort(),
+    }));
+    const result = await this.mutateProject({
+      job: input.job,
+      idempotencyKey: input.idempotencyKey,
+      kind: "finalize-composite",
+      receiptBaseRevision: baseAction.receipt.baseRevision,
+      semanticPayload,
+      replayValue: () => undefined,
+      mutate: (project, receipt) => {
+        const persistedBase = findGenerationProjectReceipt(project, baseAction.receipt.idempotencyKey);
+        if (JSON.stringify(persistedBase) !== JSON.stringify(baseAction.receipt)) {
+          throw new GenerationProjectActionError("generation-project-action-snapshot-invalid");
+        }
+        const itemIndex = project.mediaLibrary.items.findIndex((item) => item.id === input.output.versionId);
+        if (itemIndex < 0) throw new GenerationProjectActionError("generation-project-output-version-missing");
+        const item = project.mediaLibrary.items[itemIndex]!;
+        const nextItem: MediaItem = {
+          ...item,
+          generationMeta: {
+            ...(item.generationMeta ?? { provider: input.job.provider, model: input.job.modelId }),
+            inputs: {
+              ...(item.generationMeta?.inputs ?? {}),
+              [GENERATION_PROJECT_ACTIONS_INPUT_KEY]: generationActionsWithReceipt(
+                item,
+                input.idempotencyKey,
+                receipt,
+              ),
+            },
+          },
+        };
+        return {
+          project: {
+            ...project,
+            mediaLibrary: {
+              ...project.mediaLibrary,
+              items: project.mediaLibrary.items.map((candidate, index) =>
+                index === itemIndex ? nextItem : candidate),
+            },
+          },
+          value: undefined,
+        };
+      },
+    });
+    return result.envelope;
+  }
+
   async link(input: { job: GenerationJob; output: GenerationOutput; idempotencyKey: string }): Promise<void> {
     if (input.job.context.entryContext.kind !== "unplaced-shot") {
       throw new GenerationProjectActionError("generation-project-shot-context-invalid");
     }
     if (!input.job.providerJobId) throw new GenerationProjectActionError("generation-provider-id-missing");
     const shotId = input.job.context.entryContext.shotId;
-    const semanticPayload = canonicalizeGenerationProjectActionPayload({
+    const semanticPayload = canonicalizeGenerationProjectActionPayload(JsonValueSchema.parse({
       jobId: input.job.id,
       projectId: input.job.projectId,
       shotId,
       output: input.output,
-    } as unknown as JsonValue);
+    }));
     await this.mutateProject({
       job: input.job,
       idempotencyKey: input.idempotencyKey,
@@ -664,7 +744,12 @@ export class GenerationProjectActionAdapter {
 
   private async readCachedOutput(job: GenerationJob, output: GenerationOutput) {
     if (!job.providerJobId) throw new GenerationProjectActionError("generation-provider-id-missing");
-    const cacheKey = createHash("sha256").update(job.providerJobId).digest("hex");
+    if (job.outputMediaIds?.length !== 1) throw new GenerationProjectActionError("generation-output-identity-missing");
+    const cacheKey = generationOutputCacheKey({
+      providerInstanceId: job.providerInstanceId,
+      providerJobId: job.providerJobId,
+      outputIdentity: job.outputMediaIds[0]!,
+    });
     const path = join(this.options.downloadCacheDir, `${cacheKey}.bin`);
     const [bytes, metadataText] = await Promise.all([
       readFile(path),
@@ -714,7 +799,7 @@ export class GenerationProjectActionAdapter {
         idempotencyKey: input.idempotencyKey,
         kind: input.kind,
         semanticPayload: input.semanticPayload,
-        baseRevision,
+        baseRevision: input.receiptBaseRevision ?? baseRevision,
         appliedAt: this.clock(),
       };
       const parsedReceipt = parseGenerationProjectMutationReceipt(receiptCandidate);

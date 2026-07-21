@@ -14,7 +14,11 @@ import {
 } from "@openreel/music-video-domain/generation";
 import { Router } from "express";
 import type { Request, Response, Router as ExpressRouter } from "express";
-import { validateWaveSpeedProviderInputs } from "../../../../packages/core/src/generation/wavespeed";
+import {
+  parseWaveSpeedRequestSchema,
+  validateWaveSpeedProviderInputs,
+  type WaveSpeedRequestSchema,
+} from "../../../../packages/core/src/generation/wavespeed";
 import {
   GenerationOrchestrator,
   type GenerationFinalizerPort,
@@ -40,7 +44,12 @@ export interface WaveSpeedRouterOptions {
   readonly owner: (input: { ownerId: string; projectId: string }) => boolean | Promise<boolean>;
   readonly discoverModels?: (input: { ownerId: string; projectId: string }) => Promise<unknown>;
   readonly createFinalizer: (repository: GenerationJobRepository) => {
-    finalize(jobId: string, signal: { provider: string; providerJobId: string }): Promise<GenerationJob>;
+    finalize(jobId: string, signal: {
+      provider: string;
+      providerJobId: string;
+      outputIdentity?: string;
+      transientOutputUrl?: string;
+    }): Promise<GenerationJob>;
     reconcilePlacement(jobId: string): Promise<GenerationJob>;
     retryPlacement(jobId: string): Promise<GenerationJob>;
   };
@@ -49,7 +58,7 @@ export interface WaveSpeedRouterOptions {
 }
 
 export type ValidatedGenerationRouteManifestEntry = GenerationRouteManifestEntry & {
-  readonly inputSchema: Readonly<Record<string, unknown>>;
+  readonly inputSchema: Readonly<WaveSpeedRequestSchema>;
   readonly supportsAudio: boolean;
 };
 
@@ -81,6 +90,11 @@ function validManifestEntry(value: unknown): value is ValidatedGenerationRouteMa
   if (Object.keys(value).some((key) => !allowed.has(key))) return false;
   if (!GenerationRouteIdentitySchema.safeParse(value.identity).success) return false;
   if (!record(value.inputSchema) || typeof value.supportsAudio !== "boolean") return false;
+  try {
+    parseWaveSpeedRequestSchema(value.inputSchema);
+  } catch {
+    return false;
+  }
   for (const field of [
     "schemaFingerprint",
     "clientSchemaFingerprint",
@@ -105,7 +119,7 @@ export function parseGenerationRouteManifest(json: string): readonly ValidatedGe
   return deepFreeze(parsed.map((entry) => ({
     ...entry,
     identity: { ...entry.identity },
-    inputSchema: structuredClone(entry.inputSchema),
+    inputSchema: parseWaveSpeedRequestSchema(entry.inputSchema),
   })));
 }
 
@@ -175,19 +189,21 @@ function validateProviderInputs(
   route: ValidatedGenerationRouteManifestEntry,
   inputs: Record<string, JsonValue>,
 ): void {
-  const schema = route.inputSchema as unknown as Parameters<typeof validateWaveSpeedProviderInputs>[0]["schema"];
-  const errors = validateWaveSpeedProviderInputs({ schema, inputs });
+  const errors = validateWaveSpeedProviderInputs({ schema: route.inputSchema, inputs });
   if (errors.length > 0) throw new Error("generation-provider-input-invalid");
 }
 
 export function createWaveSpeedRouter(options: WaveSpeedRouterOptions): ExpressRouter {
+  const routes = parseGenerationRouteManifest(JSON.stringify(options.routes));
   const router = Router();
   const structuralFinalizer = options.createFinalizer(options.repository);
   const finalizer: GenerationFinalizerPort = {
     async finalize({ job, output }) {
-      await structuralFinalizer.finalize(job.id, {
+      return structuralFinalizer.finalize(job.id, {
         provider: job.provider,
         providerJobId: output.providerJobId,
+        ...(job.outputMediaIds?.[0] ? { outputIdentity: job.outputMediaIds[0] } : {}),
+        ...(output.outputUrls?.[0] ? { transientOutputUrl: output.outputUrls[0] } : {}),
       });
     },
     reconcilePlacement: (jobId) => structuralFinalizer.reconcilePlacement(jobId),
@@ -196,7 +212,7 @@ export function createWaveSpeedRouter(options: WaveSpeedRouterOptions): ExpressR
   const orchestrator = new GenerationOrchestrator({
     repository: options.repository,
     provider: options.provider,
-    routes: options.routes,
+    routes,
     releaseEnabled: options.releaseEnabled,
     owner: options.owner,
     finalizer,
@@ -237,15 +253,16 @@ export function createWaveSpeedRouter(options: WaveSpeedRouterOptions): ExpressR
 
   router.get("/config", (request, response) => {
     if (!guard(request, response)) return;
-    const first = options.routes[0];
+    const first = routes[0];
     return response.json({
       configured: options.configured,
       generationV2ReleaseEnabled: options.releaseEnabled,
       providerInstanceId: first?.identity.providerInstanceId,
-      routes: options.routes.map(({ identity, supportsAudio }) => ({
+      routes: routes.map(({ identity, supportsAudio, inputSchema }) => ({
         ...identity,
         output: outputKind(identity),
         supportsAudio,
+        inputSchema,
       })),
     });
   });
@@ -258,7 +275,7 @@ export function createWaveSpeedRouter(options: WaveSpeedRouterOptions): ExpressR
       if (!options.configured) throw new Error("provider-not-configured");
       const models = options.discoverModels
         ? await options.discoverModels({ ownerId: principal.ownerId, projectId })
-        : options.routes.map(({ identity, supportsAudio, inputSchema }) => ({ ...identity, supportsAudio, inputSchema }));
+        : routes.map(({ identity, supportsAudio, inputSchema }) => ({ ...identity, supportsAudio, inputSchema }));
       return response.json({ models });
     } catch (error) {
       return sendError(response, error);
@@ -288,7 +305,7 @@ export function createWaveSpeedRouter(options: WaveSpeedRouterOptions): ExpressR
       const parsed = GenerationSubmitRequestSchema.safeParse(request.body);
       if (!parsed.success) throw schemaError(parsed);
       if (projectHeader(request) && projectHeader(request) !== parsed.data.projectId) throw new Error("generation-forbidden");
-      const selected = options.routes.find(({ identity }) => routeKey(identity) === routeKey(parsed.data.routing));
+      const selected = routes.find(({ identity }) => routeKey(identity) === routeKey(parsed.data.routing));
       if (!selected) throw new Error("generation-route-unsupported");
       if (!selected.supportsAudio && (parsed.data.context.audioAssetId || parsed.data.context.audioRange)) {
         throw new Error("generation-audio-unsupported");

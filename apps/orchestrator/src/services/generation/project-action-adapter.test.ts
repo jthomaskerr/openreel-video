@@ -26,6 +26,7 @@ import { GenerationFinalizer, type FinalizationPorts } from "./finalization.js";
 import * as generationServices from "./index.js";
 import { findGenerationProjectReceipt, GenerationProjectActionAdapter, GenerationProjectActionError } from "./project-action-adapter.js";
 import { FileGenerationJobRepository } from "./repository.js";
+import { generationOutputCacheKey } from "./output-downloader.js";
 
 process.env.GIT_AUTHOR_NAME ??= "OpenReel Tests";
 process.env.GIT_AUTHOR_EMAIL ??= "openreel-tests@example.com";
@@ -59,6 +60,7 @@ function generationJob(projectId: string, target: GenerationTarget, overrides: P
     modelSchemaVersion: route.providerSchemaVersion,
     routing: route,
     providerJobId: "provider-1",
+    outputMediaIds: ["provider-output"],
     status: "finalizing",
     attempt: 1,
     target,
@@ -219,7 +221,11 @@ async function saveProjectMutation(fixture: AdapterFixture, mutate: (project: Pr
 }
 
 async function cacheOutput(fixture: AdapterFixture, providerJobId = "provider-1", bytes = new Uint8Array([137, 80, 78, 71])): Promise<GenerationOutput> {
-  const key = createHash("sha256").update(providerJobId).digest("hex");
+  const key = generationOutputCacheKey({
+    providerInstanceId: route.providerInstanceId,
+    providerJobId,
+    outputIdentity: "provider-output",
+  });
   await Promise.all([
     writeFile(join(fixture.cacheDir, `${key}.bin`), bytes),
     writeFile(join(fixture.cacheDir, `${key}.json`), JSON.stringify({ mimeType: "image/png" }), "utf8"),
@@ -980,6 +986,71 @@ describe("GenerationProjectActionAdapter", () => {
     assert.equal(undone.status, "applied");
     assert.equal(redone.operation, "redo");
     assert.equal(redone.status, "applied");
+  });
+
+  it("publishes one composite envelope that exactly undoes and redoes media, shot, and placement", async () => {
+    const fixture = await adapterFixture();
+    const rawOutput = await cacheOutput(fixture);
+    const job = generationJob(
+      fixture.project.id,
+      { kind: "new-asset", placeholderMediaId: "composite-output" },
+      {
+        context: {
+          projectId: fixture.project.id,
+          entryContext: { kind: "unplaced-shot", shotId: "shot-composite" },
+          mode: route.requestedMode,
+          placementPolicy: "create-linked-clip",
+          prompt: "generate composite",
+          references: [],
+          timing: { source: "shot", startSeconds: 1, endSeconds: 3, durationSeconds: 2 },
+        },
+      },
+    );
+    const finalized = await fixture.adapter.finalize({
+      job,
+      output: rawOutput,
+      idempotencyKey: "composite-placeholder-key",
+    });
+    const output = { ...rawOutput, mediaId: finalized.mediaId, versionId: finalized.versionId };
+    await fixture.adapter.link({ job, output, idempotencyKey: "composite-shot-key" });
+    assert.deepEqual(
+      await fixture.adapter.place({ job, output, idempotencyKey: "composite-placement-key" }),
+      { outcome: "applied" },
+    );
+    if (!finalized.projectAction) throw new Error("action-envelope-missing");
+    const envelope = await fixture.adapter.publishFinalizationAction({
+      job: { ...job, output, projectAction: finalized.projectAction },
+      output,
+      idempotencyKey: "composite-action-key",
+    });
+    const applied = await fixture.store.loadProject(fixture.project.id);
+    assert.ok(applied?.mediaLibrary.items.some((item) => item.id === "composite-output"));
+    assert.ok(applied?.timeline.tracks.some((track) => track.clips.some((clip) => clip.mediaId === "composite-output")));
+    const generated = applied?.mediaLibrary.items.find((item) => item.id === "composite-output");
+    assert.equal(generationProjectActions(generated)?.shotAttempts?.["shot-composite"]?.length, 1);
+
+    const undone = await fixture.adapter.applyProjectAction({
+      projectId: fixture.project.id,
+      actionId: envelope.receipt.actionId,
+      operation: "undo",
+      expectedRevision: envelope.appliedRevision,
+      envelope,
+    });
+    const afterUndo = await fixture.store.loadProject(fixture.project.id);
+    assert.equal(afterUndo?.mediaLibrary.items.some((item) => item.id === "composite-output"), false);
+    assert.equal(afterUndo?.timeline.tracks.some((track) => track.clips.some((clip) => clip.mediaId === "composite-output")), false);
+
+    await fixture.adapter.applyProjectAction({
+      projectId: fixture.project.id,
+      actionId: envelope.receipt.actionId,
+      operation: "redo",
+      expectedRevision: undone.revision,
+      envelope,
+    });
+    const afterRedo = await fixture.store.loadProject(fixture.project.id);
+    const redoneGenerated = afterRedo?.mediaLibrary.items.find((item) => item.id === "composite-output");
+    assert.equal(generationProjectActions(redoneGenerated)?.shotAttempts?.["shot-composite"]?.length, 1);
+    assert.ok(afterRedo?.timeline.tracks.some((track) => track.clips.some((clip) => clip.mediaId === "composite-output")));
   });
 
   it("normalizes a concurrent undo writer to the canonical project-action conflict", async () => {

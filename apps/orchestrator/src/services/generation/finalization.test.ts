@@ -30,6 +30,7 @@ const makeJob = (id = "job-1", placementPolicy: GenerationJob["context"]["placem
     providerSchemaVersion: "2026-01",
   },
   providerJobId: "provider-job-1",
+  outputMediaIds: ["provider-output:provider-job-1:0"],
   status: "queued",
   attempt: 1,
   target: { kind: "new-asset", placeholderMediaId: "placeholder-media" },
@@ -213,6 +214,35 @@ test("separate finalizer instances claim one durable completion", async () => {
   assert.equal((await repo.getFinalizationClaim("job-durable-claim"))?.providerInstanceId, "wavespeed-prod");
   assert.equal(first.log.filter((entry) => entry.startsWith("placeholder:")).length + second.log.filter((entry) => entry.startsWith("placeholder:")).length, 1);
   assert.equal(first.log.filter((entry) => entry.startsWith("shot:")).length + second.log.filter((entry) => entry.startsWith("shot:")).length, 1);
+});
+
+test("finalization claims the persisted opaque output identity before download and passes the six-field route", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "generation-finalize-claim-first-"));
+  const repo = new FileGenerationJobRepository(dir);
+  await repo.create(makeJob("job-claim-first"));
+  const current = createPorts({ jobId: "job-claim-first" });
+  const order: string[] = [];
+  const claim = repo.claimFinalization.bind(repo);
+  repo.claimFinalization = async (input) => {
+    order.push(`claim:${input.outputIdentity}`);
+    return claim(input);
+  };
+  const download = current.ports.download.download;
+  current.ports.download.download = async (input) => {
+    order.push(`download:${String(Reflect.get(input, "outputIdentity"))}`);
+    assert.deepEqual(Reflect.get(input, "routing"), makeJob().routing);
+    return download(input);
+  };
+
+  await new GenerationFinalizer(repo, current.ports).finalize("job-claim-first", {
+    provider: "wavespeed",
+    providerJobId: "provider-job-1",
+  });
+
+  assert.deepEqual(order.slice(0, 2), [
+    'claim:{"providerJobId":"provider-job-1","outputMediaIds":["provider-output:provider-job-1:0"]}',
+    "download:provider-output:provider-job-1:0",
+  ]);
 });
 
 test("finalize checkpoints survive restart and do not rerun completed steps", async () => {
