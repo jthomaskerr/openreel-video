@@ -15,6 +15,7 @@ import type { GenerationProviderPort } from "./services/generation/index";
 import { GenerationProjectActionAdapter } from "./services/generation/project-action-adapter";
 import { createReplaySafeGenerationOutputDownloader } from "./services/generation/output-downloader";
 import { WaveSpeedProvider } from "./services/wavespeed/client";
+import { WaveSpeedInputMaterializer } from "./services/wavespeed/input-materializer";
 import { mkdirSync } from "node:fs";
 import { timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
@@ -52,12 +53,16 @@ export function createApp(): Express {
   const generationRepository = new FileGenerationJobRepository(config.generationDataDir);
   const uploadRepository = new UploadRepository(`${config.generationDataDir}/uploads`);
   const routes = parseGenerationRouteManifest(config.generationRouteManifestJson);
-  const provider: GenerationProviderPort = config.wavespeedApiKey
+  const wavespeedProvider = config.wavespeedApiKey
     ? new WaveSpeedProvider({ baseUrl: config.wavespeedBaseUrl, apiKey: config.wavespeedApiKey })
-    : {
+    : undefined;
+  const provider: GenerationProviderPort = wavespeedProvider ?? {
       submit: async () => { throw new Error("provider-not-configured"); },
       status: async () => { throw new Error("provider-not-configured"); },
     };
+  const inputMaterializer = wavespeedProvider
+    ? new WaveSpeedInputMaterializer({ uploads: uploadRepository, routes, mediaUpload: wavespeedProvider })
+    : undefined;
   const downloadCacheDir = join(config.generationDataDir, "download-cache");
   const projectActions = new GenerationProjectActionAdapter({
     projectStore,
@@ -68,6 +73,7 @@ export function createApp(): Express {
     repository: generationRepository,
     uploads: uploadRepository,
     provider,
+    inputMaterializer,
     routes,
     releaseEnabled: config.generationV2ReleaseEnabled,
     configured: Boolean(config.wavespeedApiKey),

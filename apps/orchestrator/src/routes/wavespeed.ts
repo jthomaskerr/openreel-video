@@ -23,6 +23,7 @@ import {
   GenerationOrchestrator,
   type GenerationFinalizerPort,
   type GenerationJobRepository,
+  type GenerationProviderInputMaterializer,
   type GenerationProviderPort,
   type GenerationRouteManifestEntry,
   validateGenerationRequestBoundary,
@@ -37,6 +38,7 @@ export interface WaveSpeedRouterOptions {
   readonly repository: GenerationJobRepository;
   readonly uploads?: UploadRepository;
   readonly provider: GenerationProviderPort;
+  readonly inputMaterializer?: GenerationProviderInputMaterializer;
   readonly routes: readonly ValidatedGenerationRouteManifestEntry[];
   readonly releaseEnabled: boolean;
   readonly configured: boolean;
@@ -212,6 +214,7 @@ export function createWaveSpeedRouter(options: WaveSpeedRouterOptions): ExpressR
   const orchestrator = new GenerationOrchestrator({
     repository: options.repository,
     provider: options.provider,
+    inputMaterializer: options.inputMaterializer,
     routes,
     releaseEnabled: options.releaseEnabled,
     owner: options.owner,
