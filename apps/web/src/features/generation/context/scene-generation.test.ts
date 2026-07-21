@@ -231,13 +231,13 @@ describe("generation entry context resolver", () => {
 
   it("requires explicit model audio capability", () => {
     expect(
+      // @ts-expect-error linked projection capability is required by the input contract
       resolveGenerationEntryContext({
         kind: "linked-projection",
         shotId: "shot-1",
         clipId: "clip-1",
         startTime: 0,
         endTime: 2,
-        // @ts-expect-error linked projection capability is required by the input contract
       }),
     ).toMatchObject({ errors: [{ code: "audio-capability-required" }] });
   });
@@ -370,7 +370,11 @@ describe("scene generation request fixture", () => {
     });
     if (selection.status !== "ready") throw new Error(selection.reason);
 
-    const ref = (mediaId: string, token: string): Omit<ResolvedGenerationReference, "origins"> => ({
+    const ref = (
+      mediaId: string,
+      token: string,
+    ): Omit<ResolvedGenerationReference, "origins" | "uploadLeaseId"> &
+      Required<Pick<ResolvedGenerationReference, "uploadLeaseId">> => ({
       id: `${mediaId}-ref`,
       order: 0,
       mediaId,

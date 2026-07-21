@@ -4,6 +4,8 @@ import {
 } from '../references/resolve';
 
 export type ContextDiagnosticCode =
+  | 'entry-context-invalid'
+  | 'audio-capability-required'
   | 'timing-incomplete'
   | 'timing-invalid'
   | 'unresolved-token'

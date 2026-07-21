@@ -3,18 +3,40 @@ import type { GenerationJob } from "@openreel/music-video-domain/generation";
 import { createRecoveryCommandModule } from "./commands";
 import { GenerationRecoveryController } from "./state-machine";
 
+const routing = {
+  providerInstanceId: "wavespeed-prod",
+  providerModelId: "m",
+  requestedMode: "text-to-image",
+  providerSchemaId: "provider-schema",
+  providerEndpointId: "generate-image",
+  providerSchemaVersion: "s",
+} as const;
+
 const job = (status: GenerationJob["status"] = "failed"): GenerationJob => ({
   schemaVersion: 2,
+  contractVersion: 2,
   id: "job-1",
+  projectId: "p",
   provider: "wavespeed",
+  providerInstanceId: routing.providerInstanceId,
   modelId: "m",
   modelSchemaVersion: "s",
+  routing,
   status,
+  attempt: 1,
+  target: { kind: "new-asset", placeholderMediaId: "pm" },
   createdAt: 1,
   updatedAt: 1,
-  context: { projectId: "p", target: { kind: "new-asset", placeholderMediaId: "pm" }, references: [], placementPolicy: "none" },
+  context: {
+    projectId: "p",
+    entryContext: { kind: "new-asset" },
+    mode: "text-to-image",
+    prompt: "x",
+    references: [],
+    placementPolicy: "none",
+  },
   providerInputs: { prompt: "x" },
-  attempts: [{ attemptNumber: 1, startedAt: 1 }],
+  attempts: [{ attemptNumber: 1, routing, startedAt: 1 }],
   checkpoints: {},
 });
 
@@ -42,7 +64,7 @@ describe("recovery command module", () => {
     });
     const module = createRecoveryCommandModule(controller);
 
-    await expect(module.execute("regenerate", { job: job("failed") })).resolves.toMatchObject({ status: "preparing" });
+    await expect(module.execute("regenerate", { job: job("failed") })).resolves.toMatchObject({ status: "queued" });
     await expect(module.execute("variation", { job: job("completed") })).resolves.toMatchObject({ status: "draft" });
     await expect(module.execute("reconcile-placement", { job: placementCandidate() })).resolves.toMatchObject({ status: "succeeded" });
     expect(reconcilePlacement).toHaveBeenCalledWith({ jobId: "job-1" });
