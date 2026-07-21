@@ -272,7 +272,7 @@ export function GenerateReferenceSection(props: {
     <section className="min-w-0 border-b border-border/60 px-3 py-3">
       <h3 className="text-sm font-medium text-text-primary">References</h3>
       {props.references?.length ? (
-        <ul className="mt-2 grid gap-2">
+        <ul aria-label="Selected references" className="mt-2 grid gap-2">
           {props.references.map((reference) => {
             const content = (
               <div className="space-y-2">
@@ -332,12 +332,14 @@ export function GenerateReferenceSection(props: {
         </ul>
       ) : null}
       {references.length ? (
-        <ol className="mt-2 min-w-0 max-w-full space-y-2">
+        <ol
+          aria-label="Reference recovery"
+          className="mt-2 min-w-0 max-w-full space-y-2"
+        >
           {references.map((reference) => {
             const label = props.labels?.[reference.id] ?? reference.mediaId;
             const failed =
               reference.state === "failed" || reference.preparationStatus === "failed";
-            const latestError = reference.errorHistory[reference.errorHistory.length - 1];
             const dispatch = (action: GenerationReferenceCommand["action"]) => {
               if (!props.recovery || !props.onCommand) return;
               props.onCommand(
@@ -369,14 +371,23 @@ export function GenerateReferenceSection(props: {
                 <p className="mt-1 break-words text-[11px] text-text-muted [overflow-wrap:anywhere]">
                   Origins: {reference.origins.join(", ")}
                 </p>
-                {latestError ? (
-                  <p
+                {reference.errorHistory.length ? (
+                  <div
                     role={failed ? "alert" : undefined}
                     aria-label={failed ? `${label} reference error` : undefined}
                     className="mt-2 break-words text-sm text-red-300 [overflow-wrap:anywhere]"
                   >
-                    <span className="font-medium">{latestError.code}</span>: {latestError.message}
-                  </p>
+                    <ol
+                      aria-label={`${label} reference error history`}
+                      className="space-y-1"
+                    >
+                      {reference.errorHistory.map((error, index) => (
+                        <li key={`${error.code}-${error.field ?? ""}-${index}`}>
+                          <span className="font-medium">{error.code}</span>: {error.message}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
                 ) : null}
                 {failed ? (
                   <div

@@ -394,20 +394,20 @@ describe("GenerateTab", () => {
 
   it("renders selected and recovery references together in one accessible section", () => {
     const onCommand = vi.fn();
+    useGenerationDraftStore.getState().saveDraft(
+      { kind: "new-asset", draftId: "draft-with-reference" },
+      { referenceIds: ["selected-reference"] },
+      10,
+    );
 
     render(
-      <GenerateReferenceSection
-        references={[
-          {
-            id: "selected-reference",
-            label: "Selected Maya image",
-            origins: ["prompt"],
-            target: { kind: "imported-image", mediaId: "maya-media" },
-          },
-        ]}
-        recovery={referenceRecovery}
-        labels={{ "ref-1": "Maya" }}
-        onCommand={onCommand}
+      <GenerateTab
+        projectId="project-1"
+        draftId="draft-with-reference"
+        models={[{ id: "m", label: "Model" }]}
+        referenceRecovery={referenceRecovery}
+        referenceLabels={{ "selected-reference": "Selected Maya image", "ref-1": "Maya" }}
+        onReferenceCommand={onCommand}
       />,
     );
 
@@ -415,10 +415,14 @@ describe("GenerateTab", () => {
     const section = heading.closest("section");
     expect(section).not.toBeNull();
     const references = within(section!);
-    expect(references.getAllByRole("list")).toHaveLength(2);
-    expect(references.getByTestId("generate-reference-trigger-selected-reference")).toHaveTextContent(
-      "Selected Maya image",
-    );
+    expect(
+      within(references.getByRole("list", { name: "Selected references" })).getByText(
+        "Selected Maya image",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      references.getByRole("list", { name: "Reference recovery" }),
+    ).toBeInTheDocument();
 
     const failedCard = references.getByTestId("generation-reference-card-ref-1");
     expect(within(failedCard).getByRole("alert", { name: "Maya reference error" })).toHaveTextContent(
@@ -427,9 +431,45 @@ describe("GenerateTab", () => {
     fireEvent.click(within(failedCard).getByRole("button", { name: "Retry Maya" }));
     expect(onCommand).toHaveBeenCalledWith(
       { action: "retry", projectId: "project-1", jobId: "job-1", referenceId: "ref-1" },
-      "Maya",
     );
     expect(references.queryByText("No references selected.")).toBeNull();
+  });
+
+  it("renders every durable per-reference error in an accessible history", () => {
+    const recoveryWithHistory: GenerationReferenceRecoveryState = {
+      ...referenceRecovery,
+      references: referenceRecovery.references.map((reference) =>
+        reference.id === "ref-1"
+          ? {
+              ...reference,
+              errorHistory: [
+                generationError("reference-download-failed"),
+                referenceFailure,
+              ],
+            }
+          : reference,
+      ),
+    };
+
+    render(
+      <GenerateTab
+        projectId="project-1"
+        models={[{ id: "m", label: "Model" }]}
+        referenceRecovery={recoveryWithHistory}
+        referenceLabels={{ "ref-1": "Maya" }}
+      />,
+    );
+
+    const card = screen.getByTestId("generation-reference-card-ref-1");
+    const history = within(card).getByRole("list", {
+      name: "Maya reference error history",
+    });
+    expect(within(history).getAllByRole("listitem")).toHaveLength(2);
+    expect(history).toHaveTextContent("reference-download-failed message");
+    expect(history).toHaveTextContent("reference-upload-failed message");
+    expect(
+      within(card).getByRole("alert", { name: "Maya reference error" }),
+    ).toContainElement(history);
   });
 
   it("renders failed references individually and keeps a deactivated card with exact commands", () => {
