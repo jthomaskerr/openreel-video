@@ -8,6 +8,7 @@ import {
 const project = (id: string, modifiedAt: number) => ({ id, modifiedAt }) as Project;
 
 const receipt = (projectId: string, sourceModifiedAt: number): ProjectSaveReceipt => ({
+  saved: true,
   projectId,
   sourceModifiedAt,
   persistedAt: sourceModifiedAt + 1,
@@ -15,8 +16,9 @@ const receipt = (projectId: string, sourceModifiedAt: number): ProjectSaveReceip
   commitSha: "commit",
   treeSha: "tree",
   projectBlobSha: "blob",
-  mediaManifest: [],
+  mediaManifestDigest: "sha256:test",
   lfsPayloads: [],
+  commitDueAt: null,
 });
 
 describe("isProjectDirty", () => {
