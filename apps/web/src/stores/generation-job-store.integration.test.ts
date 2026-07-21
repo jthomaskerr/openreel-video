@@ -79,9 +79,9 @@ test("hydrates and persists the complete authoritative V2 job without the releas
   const state = useGenerationJobStore.getState();
   assert.equal(state.records.length, 1);
   assert.deepEqual(state.records[0], { kind: "v2", job: authoritative });
-  assert.equal(state.jobs[0].logicalJobId, "logical-job-1");
+  assert.equal(state.jobs[0].id, "logical-job-1");
   assert.equal(state.jobs[0].providerJobId, "provider-job-9");
-  assert.deepEqual(state.jobs[0].durable.output, authoritative.output);
+  assert.deepEqual(state.jobs[0].output, authoritative.output);
   assert.equal(JSON.stringify(state.records).includes("generationV2ReleaseEnabled"), false);
 });
 
@@ -133,6 +133,22 @@ test("quarantines invalid persisted V2 rows instead of silently dropping them", 
   assert.equal(migrated.records[0].storeKey, "logical-job-1");
   assert.equal(migrated.records[0].projectId, "project-1");
   assert.deepEqual(migrated.records[0].payload.linkedMediaIds, ["must-not-be-inferred"]);
+});
+
+test("quarantines every unrecognized persisted row instead of silently dropping it", () => {
+  const migrated = migrateGenerationJobPersistence({
+    state: {
+      records: [null, "corrupt", { kind: "future-v3", projectId: "project-1", id: "future-1" }],
+    },
+    version: 2,
+  });
+
+  assert.equal(migrated.records.length, 3);
+  assert.ok(migrated.records.every((record) => record.kind === "legacy"));
+  assert.deepEqual(
+    migrated.records.map((record) => record.kind === "legacy" ? record.storeKey : ""),
+    ["invalid-record-0", "invalid-record-1", "future-1"],
+  );
 });
 
 test("shares one reconciliation claim across two pollers and hydrates the returned durable job", async () => {

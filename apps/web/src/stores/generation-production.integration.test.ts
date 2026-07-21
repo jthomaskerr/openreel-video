@@ -12,6 +12,7 @@ import {
   createProductionGenerationRuntime,
   prepareWaveSpeedProjectionAudio,
   prepareWaveSpeedGenerationDraft,
+  useGenerationJobStore,
   type WaveSpeedGenerationCapabilities,
 } from "./generation-job-store.js";
 
@@ -102,9 +103,10 @@ test("the dev same-origin API proxy injects application auth without a client-ex
   const config = await readFile(new URL("../../vite.config.ts", import.meta.url), "utf8");
   assert.match(config, /loadEnv/);
   assert.match(config, /ORCHESTRATOR_AUTH_TOKEN/);
-  assert.match(config, /proxy:\s*\{/);
+  assert.match(config, /const apiProxy\s*=\s*\{/);
   assert.match(config, /Authorization/);
-  assert.match(config, /preview:\s*\{[\s\S]*proxy:/);
+  assert.match(config, /server:\s*\{[\s\S]*proxy:\s*apiProxy/);
+  assert.match(config, /preview:\s*\{[\s\S]*proxy:\s*apiProxy/);
   assert.doesNotMatch(config, /VITE_ORCHESTRATOR_AUTH_TOKEN/);
 });
 
@@ -217,7 +219,88 @@ test("submission refreshes rollback capabilities before every browser mutation",
   assert.equal(submitCalls, 0);
 });
 
+test("capability reads never retain a stale rollback decision", async () => {
+  let releaseEnabled = true;
+  let reads = 0;
+  const runtime = createProductionGenerationRuntime({
+    baseUrl: "http://orchestrator/api/generate/wavespeed",
+    fetch: async (input) => {
+      assert.match(String(input), /\/config$/);
+      reads += 1;
+      return Response.json(capabilities(releaseEnabled));
+    },
+  });
+
+  assert.equal((await runtime.readCapabilities()).generationV2ReleaseEnabled, true);
+  releaseEnabled = false;
+  assert.equal((await runtime.readCapabilities()).generationV2ReleaseEnabled, false);
+  assert.equal(reads, 2);
+});
+
+test("independent submissions carry their own predeclared logical IDs without FIFO serialization", async () => {
+  useGenerationJobStore.setState({ records: [], jobs: [], legacyAttention: [] });
+  let activeSubmissions = 0;
+  let maxActiveSubmissions = 0;
+  const receivedIds: string[] = [];
+  let nextJob = 0;
+  const runtime = createProductionGenerationRuntime({
+    baseUrl: "http://orchestrator/api/generate/wavespeed",
+    nextId: (kind) => kind === "job" ? `logical-job-${++nextJob}` : `placeholder-${nextJob + 1}`,
+    fetch: async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/config")) return Response.json(capabilities());
+      const body = JSON.parse(String(init?.body ?? "{}")) as { jobId: string };
+      receivedIds.push(body.jobId);
+      activeSubmissions += 1;
+      maxActiveSubmissions = Math.max(maxActiveSubmissions, activeSubmissions);
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      activeSubmissions -= 1;
+      return Response.json({
+        job: serverJob({
+          id: body.jobId,
+          providerJobId: `provider-${body.jobId}`,
+          attempts: [{
+            attemptNumber: 1,
+            routing: serverJob().routing,
+            providerJobId: `provider-${body.jobId}`,
+            startedAt: 10,
+          }],
+        }),
+      }, { status: 202 });
+    },
+  });
+
+  const [first, second] = await Promise.all([
+    runtime.controller.submit({ ...draft(), providerInputs: { seed: 1 } }),
+    runtime.controller.submit({ ...draft(), providerInputs: { seed: 2 } }),
+  ]);
+
+  assert.equal(maxActiveSubmissions, 2);
+  assert.deepEqual(new Set(receivedIds), new Set(["logical-job-1", "logical-job-2"]));
+  assert.deepEqual(new Set([first.id, second.id]), new Set(receivedIds));
+});
+
+test("server response text cannot escape the authenticated boundary", async () => {
+  const current = serverJob();
+  const runtime = createProductionGenerationRuntime({
+    baseUrl: "http://orchestrator/api/generate/wavespeed",
+    fetch: async () => Response.json({
+      error: "failed at /Users/operator/secrets.json?token=signed-secret",
+    }, { status: 500 }),
+  });
+
+  await assert.rejects(
+    runtime.command("cancel", current),
+    (error: unknown) => {
+      assert.equal((error as Error).message, "generation-request-failed:500");
+      assert.doesNotMatch((error as Error).message, /operator|secret|token/i);
+      return true;
+    },
+  );
+});
+
 test("authoritative recovery commands hydrate the full returned job and use the logical ID", async () => {
+  useGenerationJobStore.setState({ records: [], jobs: [], legacyAttention: [] });
   const recovered = serverJob({ status: "succeeded", output: { mediaId: "media-1", versionId: "version-1", mimeType: "image/png", byteLength: 3, sha256: "abc" } });
   const urls: string[] = [];
   const runtime = createProductionGenerationRuntime({
