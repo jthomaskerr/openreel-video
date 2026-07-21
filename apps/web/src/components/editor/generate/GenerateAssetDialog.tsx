@@ -30,7 +30,13 @@ import { QwenForm } from "../kieai/forms/QwenForm";
 // ── WaveSpeed ────────────────────────────────────────────────────────────────
 import type { WavespeedModel } from "../../../services/wavespeed/index";
 import { selectSceneGenerationContext } from "../../../features/generation/context/scene-generation";
-import type { GenerationReferenceDraft } from "../../../features/generation/submit-generation";
+import { resolveProjectGenerationReferences } from "../../../features/generation/references/project-resolution";
+import { canonicalMediaToken } from "../../../features/generation/references/resolve";
+import {
+  useGenerationDraftStore,
+  type GenerationDraftScope,
+} from "../../../features/generation/drafts";
+import { GenerateReferenceSection } from "../inspector/tabs/generation/GenerateTabSections";
 import { SchemaForm } from "./SchemaForm";
 
 import { uploadFileStream } from "../../../services/kieai/file-upload";
@@ -155,6 +161,7 @@ export interface GenerateAssetDialogProps {
   onClose: () => void;
   sourceFile?: File;
   previewUrl?: string | null;
+  sourceMediaId?: string;
   asset?: GeneratedAsset;
   shot?: StoryboardShot;
   /** Clip ID passed from ReferenceImages "Generate" button — used to seed prompt from clip metadata */
@@ -165,7 +172,7 @@ export interface GenerateAssetDialogProps {
 
 type Step = "pick" | "form" | "submitting" | "error";
 
-export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, asset, shot, clipId }: GenerateAssetDialogProps) {
+export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, sourceMediaId, asset, shot, clipId }: GenerateAssetDialogProps) {
   const [step, setStep] = useState<Step>("pick");
   const [search, setSearch] = useState("");
   const [model, setModel] = useState<UnifiedModel | null>(null);
@@ -199,10 +206,15 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
           ? clip.metadata.payload
           : undefined,
       );
+    const referenceAssetIds = Array.isArray(payload.referenceAssetIds)
+      ? payload.referenceAssetIds.filter(
+          (referenceId): referenceId is string => typeof referenceId === "string",
+        )
+      : [];
     return {
       id: metadata?.shotId ?? clipId, index: 0, label: "",
       prompt, model: "", resolution: "", aspectRatio: "16:9",
-      includeMainAudio: false, referenceAssetIds: [], generatedAssetIds: [],
+      includeMainAudio: false, referenceAssetIds, generatedAssetIds: [],
       validation: { valid: true, warnings: [], errors: [] }, outputs: [], selected: false,
     };
   }, [clipId, project.timeline.tracks, shot]);
@@ -269,6 +281,101 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
 // ── Reference images ──────────────────────────────────────────────────────
   const [refIds, setRefIds] = useState<string[]>([]);
   const [generateRefOpen, setGenerateRefOpen] = useState(false);
+  const [dialogDraftId] = useState(() => sourceMediaId ?? asset?.id ?? clipId ?? uuidv4());
+  const saveDraft = useGenerationDraftStore((state) => state.saveDraft);
+  const draftScope = useMemo<GenerationDraftScope>(() => effectiveShot
+    ? { kind: "shot", shotId: effectiveShot.id, projectId: project.id }
+    : { kind: "new-asset", draftId: dialogDraftId, projectId: project.id }, [
+    dialogDraftId,
+    effectiveShot,
+    project.id,
+  ]);
+  const resolutionPrompt = typeof wsInputs.prompt === "string"
+    ? wsInputs.prompt
+    : asset?.prompt ?? effectiveShot?.videoPrompt ?? effectiveShot?.prompt ?? "";
+  const referenceResolutionInput = useMemo(() => {
+    const sourceItem = sourceMediaId
+      ? project.mediaLibrary.items.find((item) => item.id === sourceMediaId)
+      : undefined;
+    const sourceDefinition = sourceItem
+      ? project.generatedImageDefinitions.find((definition) =>
+          definition.currentMediaVersionId === sourceItem.id
+          || definition.assetGroupId === (sourceItem.assetGroupId ?? sourceItem.id))
+      : undefined;
+    return {
+      mediaItems: project.mediaLibrary.items,
+      generatedImageDefinitions: project.generatedImageDefinitions,
+      tracks: project.timeline.tracks,
+      ...(sourceMediaId
+        ? { source: { mediaVersionId: sourceMediaId, defaultRole: "source" } }
+        : {}),
+      shotReferences: (effectiveShot?.referenceAssetIds ?? []).map((mediaVersionId) => ({
+        mediaVersionId,
+        defaultRole: "reference-image",
+      })),
+      roleByReferenceKey: sourceDefinition?.draft.roleByReferenceKey ?? {},
+    };
+  }, [
+    effectiveShot?.referenceAssetIds,
+    project.generatedImageDefinitions,
+    project.mediaLibrary.items,
+    project.timeline.tracks,
+    sourceMediaId,
+  ]);
+  const referenceResolution = useMemo(
+    () => resolveProjectGenerationReferences({
+      ...referenceResolutionInput,
+      prompt: resolutionPrompt,
+    }),
+    [referenceResolutionInput, resolutionPrompt],
+  );
+  const promptReferenceIds = useMemo(
+    () => referenceResolution.submissionReferences
+      .filter((reference) => reference.origins?.includes("user"))
+      .map((reference) => reference.mediaVersionId)
+      .filter((mediaVersionId): mediaVersionId is string => Boolean(mediaVersionId)),
+    [referenceResolution.submissionReferences],
+  );
+  const referenceCards = useMemo(
+    () => referenceResolution.referenceIds.map((referenceId) => {
+      const reference = referenceResolution.submissionReferences.find(
+        (candidate) => candidate.key === referenceId,
+      );
+      const item = project.mediaLibrary.items.find(
+        (candidate) => candidate.id === reference?.mediaVersionId,
+      );
+      const target = referenceResolution.referenceTargets[referenceId];
+      return {
+        id: referenceId,
+        label: item?.name ?? (target?.kind === "missing" ? target.token : referenceId),
+        origins: [...(reference?.origins ?? ["prompt"])],
+        target,
+      };
+    }),
+    [project.mediaLibrary.items, referenceResolution],
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const current = useGenerationDraftStore.getState().getDraft(draftScope);
+    const sameIds = current.referenceIds.length === referenceResolution.referenceIds.length
+      && current.referenceIds.every((id, index) => id === referenceResolution.referenceIds[index]);
+    const sameTargets = JSON.stringify(current.referenceTargets)
+      === JSON.stringify(referenceResolution.referenceTargets);
+    if (current.prompt === resolutionPrompt && sameIds && sameTargets) return;
+    saveDraft(draftScope, {
+      prompt: resolutionPrompt,
+      referenceIds: [...referenceResolution.referenceIds],
+      referenceTargets: { ...referenceResolution.referenceTargets },
+    });
+  }, [draftScope, open, referenceResolution, resolutionPrompt, saveDraft]);
+
+  useEffect(() => {
+    if (model?.provider !== "wavespeed") return;
+    if (refIds.length === promptReferenceIds.length
+      && refIds.every((id, index) => id === promptReferenceIds[index])) return;
+    setRefIds(promptReferenceIds);
+  }, [model?.provider, promptReferenceIds, refIds]);
 
   const wsFetchRef = useRef(false);
 
@@ -393,6 +500,27 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
     }
   }, [project]);
 
+  const handleReferenceSelection = useCallback((nextIds: string[]) => {
+    if (model?.provider !== "wavespeed") {
+      setRefIds(nextIds);
+      return;
+    }
+    let nextPrompt = resolutionPrompt;
+    for (const mediaVersionId of promptReferenceIds) {
+      if (nextIds.includes(mediaVersionId)) continue;
+      nextPrompt = nextPrompt.split(canonicalMediaToken(mediaVersionId)).join("");
+    }
+    for (const mediaVersionId of nextIds) {
+      if (promptReferenceIds.includes(mediaVersionId)) continue;
+      const token = canonicalMediaToken(mediaVersionId);
+      nextPrompt = nextPrompt.trim() ? `${nextPrompt.trim()} ${token}` : token;
+    }
+    setWsInputs((current) => ({
+      ...current,
+      prompt: nextPrompt.replace(/\s{2,}/g, " ").trim(),
+    }));
+  }, [model?.provider, promptReferenceIds, resolutionPrompt]);
+
   const handleRequestGenerateRef = useCallback(() => {
     setGenerateRefOpen(true);
   }, []);
@@ -463,7 +591,21 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
         });
       } else if (model.provider === "wavespeed" && model.wsModel) {
         const schema = model.wsModel.api_schema?.api_schemas?.[0]?.request_schema;
-        const resolvedReferenceItems = getRefImageUrls(project.mediaLibrary.items, refIds);
+        if (Object.values(referenceResolution.referenceTargets).some(
+          (target) => target.kind === "missing",
+        )) {
+          throw new Error("generation-reference-target-missing");
+        }
+        const resolvedReferenceIds = referenceResolution.submissionReferences.map((reference) => {
+          if (!reference.mediaVersionId) {
+            throw new Error(`Generation reference ${reference.key ?? reference.mediaId} has no version identity.`);
+          }
+          return reference.mediaVersionId;
+        });
+        const resolvedReferenceItems = getRefImageUrls(
+          project.mediaLibrary.items,
+          resolvedReferenceIds,
+        );
         const injected = schema ? injectImageInputs(schema, wsInputs, resolvedReferenceItems) : wsInputs;
         const route = model.wsRoute;
         if (!route) {
@@ -483,21 +625,30 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
           : effectiveSceneId
             ? { kind: "unplaced-shot" as const, shotId: effectiveSceneId }
             : { kind: "new-asset" as const };
-      const references: GenerationReferenceDraft[] = refIds.map((referenceId) => {
-          const item = project.mediaLibrary.items.find((candidate) => candidate.id === referenceId);
-          if (!item) throw new Error(`Generation reference ${referenceId} is missing from the project.`);
-          const remoteUrl = item.originalUrl ?? item.thumbnailUrl ?? undefined;
+      const references = referenceResolution.submissionReferences.map((reference) => {
+          const item = project.mediaLibrary.items.find(
+            (candidate) => candidate.id === reference.mediaVersionId,
+          );
+          if (!item) {
+            throw new Error(`Generation reference ${reference.mediaVersionId} is missing from the project.`);
+          }
+          const remoteUrl = item.remoteUrl ?? item.originalUrl ?? undefined;
           if (!item.blob && !remoteUrl) {
-            throw new Error(`Generation reference ${referenceId} has no uploadable content.`);
+            throw new Error(`Generation reference ${reference.mediaVersionId} has no uploadable content.`);
           }
           return {
-            mediaId: item.id,
-            origins: effectiveShot?.referenceAssetIds.includes(item.id) ? ["shot"] : ["user"],
+            ...reference,
             value: {
               projectId: project.id,
               ...(item.blob
-                ? { body: item.blob, mimeType: item.blob.type || "application/octet-stream" }
-                : { url: remoteUrl }),
+                ? {
+                    body: item.blob,
+                    mimeType: item.blob.type || item.metadata.codec || "application/octet-stream",
+                  }
+                : {
+                    url: remoteUrl,
+                    mimeType: item.metadata.codec || undefined,
+                  }),
             },
         };
       });
@@ -518,7 +669,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
         projectId: project.id,
         route,
           entryContext,
-          prompt: String(wsInputs.prompt ?? ""),
+          prompt: resolutionPrompt,
           negativePrompt: typeof wsInputs.negative_prompt === "string" ? wsInputs.negative_prompt : undefined,
           placementPolicy: entryContext.kind === "linked-projection" ? "replace-selected-clip-media" : undefined,
           target: { kind: "new-asset" },
@@ -535,7 +686,7 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
       setError((err as Error).message);
       setStep("error");
     }
-  }, [model, project, sceneGenerationSelection, effectiveSceneId, effectiveShot, sourceFile, previewUrl, seedream, zimage, nanoBanana2, flux2, grok, qwen, wsInputs, refIds, addPlaceholderMedia, generationRuntime, handleClose]);
+  }, [model, project, sceneGenerationSelection, effectiveSceneId, sourceFile, previewUrl, seedream, zimage, nanoBanana2, flux2, grok, qwen, wsInputs, refIds, addPlaceholderMedia, generationRuntime, handleClose, referenceResolution, resolutionPrompt]);
 
   // ── Gen type label ────────────────────────────────────────────────────────
   const genTypeLabel: Record<GenType, string> = {
@@ -669,10 +820,11 @@ export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, ass
               <ReferenceImagePicker
                 mediaItems={imageMedia}
                 selectedIds={refIds}
-                onChange={setRefIds}
+                onChange={handleReferenceSelection}
                 onUpload={handleRefUpload}
                 onRequestGenerate={handleRequestGenerateRef}
               />
+              <GenerateReferenceSection references={referenceCards} />
 
               {/* KieAI per-model form */}
               {model.provider === "kieai" && model.kieaiModel && (

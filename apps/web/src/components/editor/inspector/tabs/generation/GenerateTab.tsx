@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReferenceTarget } from "@openreel/core";
 import type {
   GenerationJob,
@@ -16,6 +16,11 @@ import type {
   GenerationReferenceRecoveryState,
 } from "../../../../../features/generation/drafts/v2";
 import type { RecoveryAction } from "../../../../../features/generation/recovery/state-machine";
+import {
+  resolveProjectGenerationReferences,
+  type ProjectGenerationReferenceResolution,
+  type ResolveProjectGenerationReferencesInput,
+} from "../../../../../features/generation/references/project-resolution";
 import {
   GenerateActionsSection,
   type GenerateAudioPresentation,
@@ -76,6 +81,7 @@ export interface GenerateTabProps {
   audioPresentation?: GenerateAudioPresentation;
   referenceRecovery?: GenerationReferenceRecoveryState;
   referenceLabels?: Readonly<Record<string, string>>;
+  referenceResolutionInput?: Omit<ResolveProjectGenerationReferencesInput, "prompt">;
   onReferenceCommand?: (
     command: GenerationReferenceCommand,
   ) => void | Promise<void>;
@@ -84,7 +90,9 @@ export interface GenerateTabProps {
   jobMessage?: string;
   terminalErrorExplanation?: string;
   submitting?: boolean;
-  onSubmit?: (draft: GenerationDraftState) => void | Promise<void>;
+  onSubmit?: (draft: GenerationDraftState & {
+    referenceResolution?: ProjectGenerationReferenceResolution;
+  }) => void | Promise<void>;
   onEdit?: () => void;
   onRevalidate?: () => void;
   onRetryItem?: (category: "reference" | "audio") => void;
@@ -122,30 +130,6 @@ export const GenerateTab: React.FC<GenerateTabProps> = (props) => {
   const getDraft = useGenerationDraftStore((state) => state.getDraft);
   const saveDraft = useGenerationDraftStore((state) => state.saveDraft);
   const draft = storedDraft ?? getDraft(scope);
-  const selectedReferences = useMemo<GenerateReference[]>(
-    () =>
-      draft.referenceIds.map((referenceId) => {
-        const recoveryReference = props.referenceRecovery?.references.find(
-          (reference) => reference.id === referenceId,
-        );
-        return {
-          id: referenceId,
-          label:
-            props.referenceLabels?.[referenceId] ??
-            recoveryReference?.mediaId ??
-            referenceId,
-          origins: recoveryReference?.origins ?? ["draft"],
-          excluded: recoveryReference ? !recoveryReference.active : undefined,
-          target: draft.referenceTargets?.[referenceId],
-        };
-      }),
-    [
-      draft.referenceIds,
-      draft.referenceTargets,
-      props.referenceLabels,
-      props.referenceRecovery?.references,
-    ],
-  );
   const models = useMemo(() => {
     const all = props.models ?? [];
     if (!props.compatibleModelIds) return all;
@@ -174,6 +158,76 @@ export const GenerateTab: React.FC<GenerateTabProps> = (props) => {
   const [operationalError, setOperationalError] = useState<string>();
   const modelRef = useRef<HTMLDivElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const renderedScopeKeyRef = useRef(scopeKey);
+  const controlledPromptRef = useRef(props.prompt);
+  const scopeChangedOnRender = renderedScopeKeyRef.current !== scopeKey;
+  const controlledPromptChangedOnRender = controlledPromptRef.current !== props.prompt;
+  renderedScopeKeyRef.current = scopeKey;
+  controlledPromptRef.current = props.prompt;
+  const resolveReferences = useCallback(
+    (value: string) => props.referenceResolutionInput
+      ? resolveProjectGenerationReferences({
+          ...props.referenceResolutionInput,
+          prompt: value,
+        })
+      : undefined,
+    [props.referenceResolutionInput],
+  );
+  const referenceResolution = useMemo(
+    () => resolveReferences(prompt),
+    [prompt, resolveReferences],
+  );
+  const persistReferenceResolution = useCallback((
+    value: string,
+    resolution: ProjectGenerationReferenceResolution,
+  ) => {
+    const current = useGenerationDraftStore.getState().getDraft(scope);
+    const sameIds = current.referenceIds.length === resolution.referenceIds.length
+      && current.referenceIds.every((id, index) => id === resolution.referenceIds[index]);
+    const sameTargets = JSON.stringify(current.referenceTargets)
+      === JSON.stringify(resolution.referenceTargets);
+    if (current.prompt === value && sameIds && sameTargets) return;
+    saveDraft(scope, {
+      prompt: value,
+      referenceIds: [...resolution.referenceIds],
+      referenceTargets: { ...resolution.referenceTargets },
+    });
+  }, [saveDraft, scope]);
+  const selectedReferences = useMemo<GenerateReference[]>(() => {
+    const referenceIds = referenceResolution?.referenceIds ?? draft.referenceIds;
+    const referenceTargets = referenceResolution?.referenceTargets ?? draft.referenceTargets;
+    return referenceIds.map((referenceId) => {
+      const recoveryReference = props.referenceRecovery?.references.find(
+        (reference) => reference.id === referenceId,
+      );
+      const resolvedReference = referenceResolution?.submissionReferences.find(
+        (reference) => reference.key === referenceId,
+      );
+      const mediaItem = props.referenceResolutionInput?.mediaItems.find(
+        (item) => item.id === resolvedReference?.mediaVersionId,
+      );
+      const target = referenceTargets?.[referenceId];
+      return {
+        id: referenceId,
+        label:
+          props.referenceLabels?.[referenceId] ??
+          mediaItem?.name ??
+          (target?.kind === "missing" ? target.token : undefined) ??
+          recoveryReference?.mediaId ??
+          referenceId,
+        origins: [...(resolvedReference?.origins ?? recoveryReference?.origins ?? ["draft"])],
+        excluded: recoveryReference ? !recoveryReference.active : undefined,
+        target,
+      };
+    });
+  }, [
+    draft.referenceIds,
+    draft.referenceTargets,
+    props.referenceLabels,
+    props.referenceRecovery?.references,
+    props.referenceResolutionInput?.mediaItems,
+    referenceResolution,
+  ]);
   const scopeResetRef = useRef({
     prompt: props.prompt ?? draft.prompt,
     modelId: props.modelId ?? draft.modelId ?? models[0]?.id ?? "",
@@ -198,6 +252,17 @@ export const GenerateTab: React.FC<GenerateTabProps> = (props) => {
       setSubmitted(false);
     }
   }, [props.prompt]);
+
+  useEffect(() => {
+    if (!referenceResolution || scopeChangedOnRender || controlledPromptChangedOnRender) return;
+    persistReferenceResolution(prompt, referenceResolution);
+  }, [
+    controlledPromptChangedOnRender,
+    persistReferenceResolution,
+    prompt,
+    referenceResolution,
+    scopeChangedOnRender,
+  ]);
 
   useEffect(() => {
     const next = scopeResetRef.current;
@@ -233,7 +298,12 @@ export const GenerateTab: React.FC<GenerateTabProps> = (props) => {
     setPrompt(value);
     setSubmitted(false);
     setOperationalError(undefined);
-    saveDraft(scope, { prompt: value });
+    const resolution = resolveReferences(value);
+    if (resolution) {
+      persistReferenceResolution(value, resolution);
+    } else {
+      saveDraft(scope, { prompt: value });
+    }
     props.onPromptChange?.(value);
   };
 
@@ -283,8 +353,24 @@ export const GenerateTab: React.FC<GenerateTabProps> = (props) => {
         message,
       });
     });
+    referenceResolution?.diagnostics.forEach((diagnostic, index) => {
+      add({
+        field: "prompt",
+        id: `generate-error-reference-${index}`,
+        message: diagnostic.message,
+      });
+    });
+    if (referenceResolution && Object.values(referenceResolution.referenceTargets).some(
+      (target) => target.kind === "missing",
+    )) {
+      add({
+        field: "prompt",
+        id: "generate-error-reference-missing",
+        message: "A generation reference is missing or was deleted. Relink or remove it before submitting.",
+      });
+    }
     return errors;
-  }, [models, prompt, props.promptErrors, selectedModelId]);
+  }, [models, prompt, props.promptErrors, referenceResolution, selectedModelId]);
   const modelErrorIds = validationErrors
     .filter((error) => error.field === "model")
     .map((error) => error.id)
@@ -318,8 +404,15 @@ export const GenerateTab: React.FC<GenerateTabProps> = (props) => {
         key: scopeKey,
         modelId: selectedModelId,
         prompt,
+        referenceIds: referenceResolution
+          ? [...referenceResolution.referenceIds]
+          : draft.referenceIds,
+        referenceTargets: referenceResolution
+          ? { ...referenceResolution.referenceTargets }
+          : draft.referenceTargets,
         placementPolicy: placement,
         updatedAt: Date.now(),
+        ...(referenceResolution ? { referenceResolution } : {}),
       });
     } catch (error) {
       setSubmitted(false);

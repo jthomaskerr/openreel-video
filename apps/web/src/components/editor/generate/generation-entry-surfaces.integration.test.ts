@@ -3,9 +3,10 @@ import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 test("dialog and inspector use the one shared production generation runtime", async () => {
-  const [dialog, inspector] = await Promise.all([
+  const [dialog, inspector, generateTab] = await Promise.all([
     readFile(new URL("./GenerateAssetDialog.tsx", import.meta.url), "utf8"),
     readFile(new URL("../InspectorPanel.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../inspector/tabs/generation/GenerateTab.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(dialog, /getProductionGenerationRuntime/);
@@ -20,6 +21,8 @@ test("dialog and inspector use the one shared production generation runtime", as
   assert.doesNotMatch(dialog, /VITE_ORCHESTRATOR_URL/);
   assert.match(dialog, /wsRoute:\s*route/);
   assert.match(dialog, /prepareWaveSpeedGenerationDraft\(\{[\s\S]*route,[\s\S]*entryContext/);
+  assert.match(dialog, /resolveProjectGenerationReferences/);
+  assert.match(dialog, /referenceResolution\.submissionReferences\.map/);
 
   assert.match(inspector, /getProductionGenerationRuntime/);
   assert.match(inspector, /prepareWaveSpeedGenerationDraft/);
@@ -31,6 +34,7 @@ test("dialog and inspector use the one shared production generation runtime", as
     "placementDefault=",
     "audioPresentation=",
     "referenceRecovery=",
+    "referenceResolutionInput=",
     "onReferenceCommand=",
     "job=",
     "onSubmit=",
@@ -39,10 +43,16 @@ test("dialog and inspector use the one shared production generation runtime", as
   ]) {
     assert.ok(inspector.includes(prop), `Inspector is missing live GenerateTab prop ${prop}`);
   }
-  assert.match(inspector, /projectId:\s*project\.id,[\s\S]*body:\s*referenceMedia\.blob/);
+  assert.match(inspector, /projectId:\s*project\.id,[\s\S]*body:\s*source\.blob/);
+  assert.match(inspector, /draft\.referenceResolution\.submissionReferences\.map/);
   assert.match(inspector, /waveSpeedRouteKey\(candidate\)\s*===\s*draft\.modelId/);
   assert.match(inspector, /prepareWaveSpeedGenerationDraft\(\{[\s\S]*route,[\s\S]*entryContext/);
   assert.match(inspector, /saveReferenceRecovery/);
   assert.match(inspector, /referenceRecoveries/);
   assert.doesNotMatch(inspector, /\/api\/generate\/wavespeed\/models/);
+
+  assert.match(generateTab, /resolveProjectGenerationReferences/);
+  assert.match(generateTab, /referenceIds:\s*\[\.\.\.resolution\.referenceIds\]/);
+  assert.match(generateTab, /referenceTargets:\s*\{\s*\.\.\.resolution\.referenceTargets\s*\}/);
+  assert.match(generateTab, /referenceResolution/);
 });

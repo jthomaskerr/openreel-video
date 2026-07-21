@@ -3,6 +3,7 @@ import { Captions, Upload, Info, Pencil, AlertTriangle, List } from "lucide-reac
 import { useProjectStore } from "../../stores/project-store";
 import { useTimelineStore } from "../../stores/timeline-store";
 import { useUIStore } from "../../stores/ui-store";
+import { useMusicVideoStore } from "../../stores/music-video-store";
 import { useEngineStore } from "../../stores/engine-store";
 import { useProblemCount } from "../../stores/problem-store";
 import type { Transform, EditingTemplatePrimitive } from "@openreel/core";
@@ -62,6 +63,7 @@ import { AiTab } from "./inspector/tabs/AiTab";
 import { GenerateTab } from "./inspector/tabs/generation/GenerateTab";
 import type { GenerateAudioPresentation } from "./inspector/tabs/generation/GenerateTabSections";
 import { resolveGenerationEntryContext } from "../../features/generation/context/scene-generation";
+import type { ProjectGenerationReferenceResolution } from "../../features/generation/references/project-resolution";
 import {
   applyGenerationReferenceCommand,
   createGenerationReferenceRecoveryState,
@@ -208,6 +210,12 @@ export const InspectorPanel: React.FC = () => {
     if (selectedClipIds.length !== 1) return null;
     return getClip(selectedClipIds[0]) || null;
   }, [getClip, project.modifiedAt, selectedClipIds]);
+  const generationShotId = selectedTimelineClip
+    ? getSceneIdFromClip(selectedTimelineClip)
+    : undefined;
+  const generationShot = useMusicVideoStore((state) => generationShotId
+    ? state.projects[project.id]?.shots.find((shot) => shot.id === generationShotId)
+    : undefined);
 
   const generationJob = useGenerationJobStore((state) => {
     const selectedClipId = selectedTimelineClip?.id;
@@ -310,6 +318,41 @@ export const InspectorPanel: React.FC = () => {
     }
     return { kind: "pending" };
   }, [generationEntryContextResult.audioEligible, generationRoute]);
+
+  const generationReferenceResolutionInput = useMemo(() => {
+    const source = selectedClipMediaItem?.type === "image"
+      ? { mediaVersionId: selectedClipMediaItem.id, defaultRole: "source" }
+      : undefined;
+    const sourceDefinition = selectedClipMediaItem
+      ? project.generatedImageDefinitions.find((definition) =>
+          definition.currentMediaVersionId === selectedClipMediaItem.id
+          || definition.assetGroupId === (selectedClipMediaItem.assetGroupId ?? selectedClipMediaItem.id))
+      : undefined;
+    const metadataReferenceIds = Array.isArray(selectedTimelineClip?.metadata?.referenceAssetIds)
+      ? selectedTimelineClip.metadata.referenceAssetIds.filter(
+          (referenceId): referenceId is string => typeof referenceId === "string",
+        )
+      : [];
+    const shotReferenceIds = generationShot?.referenceAssetIds ?? metadataReferenceIds;
+    return {
+      mediaItems: project.mediaLibrary.items,
+      generatedImageDefinitions: project.generatedImageDefinitions,
+      tracks: project.timeline.tracks,
+      ...(source ? { source } : {}),
+      shotReferences: shotReferenceIds.map((mediaVersionId) => ({
+        mediaVersionId,
+        defaultRole: "reference-image",
+      })),
+      roleByReferenceKey: sourceDefinition?.draft.roleByReferenceKey ?? {},
+    };
+  }, [
+    generationShot?.referenceAssetIds,
+    project.generatedImageDefinitions,
+    project.mediaLibrary.items,
+    project.timeline.tracks,
+    selectedClipMediaItem,
+    selectedTimelineClip?.metadata?.referenceAssetIds,
+  ]);
 
   const generationReferenceSeed = useMemo(
     () => createGenerationReferenceRecoveryState({
@@ -415,6 +458,8 @@ export const InspectorPanel: React.FC = () => {
     prompt: string;
     providerInputs: Record<string, unknown>;
     referenceIds: string[];
+    referenceTargets: Record<string, import("@openreel/core").ReferenceTarget>;
+    referenceResolution?: ProjectGenerationReferenceResolution;
     placementPolicy: "none" | "create-linked-clip" | "replace-selected-clip-media";
     updatedAt: number;
   }) => {
@@ -434,6 +479,14 @@ export const InspectorPanel: React.FC = () => {
 
     setGenerationSubmitting(true);
     try {
+      if (!draft.referenceResolution) {
+        throw new Error("generation-reference-resolution-missing");
+      }
+      if (Object.values(draft.referenceResolution.referenceTargets).some(
+        (target) => target.kind === "missing",
+      )) {
+        throw new Error("generation-reference-target-missing");
+      }
       const preparedAudio = await prepareWaveSpeedProjectionAudio({
         projectId: project.id,
         supportsAudio: route.supportsAudio ?? false,
@@ -447,15 +500,31 @@ export const InspectorPanel: React.FC = () => {
       const generationAudio = preparedAudio.kind === "ready"
         ? preparedAudio.audio
         : undefined;
-      const references = generationReferenceRecovery.providerReferences.map((reference) => {
-        const source = generationReferenceRecovery.drafts.find(
-          (candidate) => candidate.id === reference.id,
+      const references = draft.referenceResolution.submissionReferences.map((reference) => {
+        const source = project.mediaLibrary.items.find(
+          (candidate) => candidate.id === reference.mediaVersionId,
         );
+        if (!source) {
+          throw new Error(`generation-reference-media-missing:${reference.mediaVersionId}`);
+        }
+        const remoteUrl = source.remoteUrl ?? source.originalUrl;
+        if (!source.blob && !remoteUrl) {
+          throw new Error(`generation-reference-content-missing:${reference.mediaVersionId}`);
+        }
         return {
-          mediaId: reference.mediaId,
-          versionId: reference.versionId,
-          origins: reference.origins,
-          value: source?.value,
+          ...reference,
+          value: {
+            projectId: project.id,
+            ...(source.blob
+              ? {
+                  body: source.blob,
+                  mimeType: source.blob.type || source.metadata.codec || "application/octet-stream",
+                }
+              : {
+                  url: remoteUrl,
+                  mimeType: source.metadata.codec || undefined,
+                }),
+          },
         };
       });
       const prepared = prepareWaveSpeedGenerationDraft({
@@ -490,7 +559,6 @@ export const InspectorPanel: React.FC = () => {
   }, [
     generationCapabilities,
     generationEntryContextResult,
-    generationReferenceRecovery,
     generationRuntime,
     project.id,
     project.mediaLibrary.items,
@@ -1413,6 +1481,7 @@ export const InspectorPanel: React.FC = () => {
                     audioPresentation={generationAudioPresentation}
                     referenceRecovery={generationReferenceRecovery}
                     referenceLabels={generationReferenceLabels}
+                    referenceResolutionInput={generationReferenceResolutionInput}
                     onReferenceCommand={handleGenerationReferenceCommand}
                     job={generationJob}
                     submitting={generationSubmitting}

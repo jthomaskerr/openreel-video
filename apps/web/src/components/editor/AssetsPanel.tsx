@@ -1323,7 +1323,13 @@ export const AssetsPanel: React.FC = () => {
         }
       }
 
-      setGenerateDialog({ sourceFile: file, previewUrl: item.thumbnailUrl, asset, shot });
+      setGenerateDialog({
+        sourceFile: file,
+        sourceMediaId: item.id,
+        previewUrl: item.thumbnailUrl,
+        asset,
+        shot,
+      });
     } catch (err) {
       console.error("[Generate] Failed to load media blob:", err);
       toast.error("Failed to open generator", err instanceof Error ? err.message : "Unknown error");

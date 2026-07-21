@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MediaItem } from "@openreel/core";
 import GenerateTab from "./GenerateTab";
 import { useGenerationDraftStore } from "../../../../../features/generation/drafts";
+import { canonicalMediaToken } from "../../../../../features/generation/references/resolve";
 import { readReferenceEditorRouteFromModalData } from "../../../../../features/references/navigation";
 import type {
   GenerationError,
@@ -34,6 +35,7 @@ const mockedProjectStore = vi.hoisted(() => ({
   state: {
     project: {
       timeline: { tracks: [] },
+      mediaLibrary: { items: [] as MediaItem[] },
       generatedImageDefinitions: [],
     },
     getMediaItem: (_mediaId: string): MediaItem | undefined => undefined,
@@ -375,6 +377,7 @@ describe("GenerateTab", () => {
     mockedProjectStore.state = {
       project: {
         timeline: { tracks: [] },
+        mediaLibrary: { items: [] },
         generatedImageDefinitions: [],
       },
       getMediaItem(mediaId: string) {
@@ -1506,36 +1509,204 @@ describe("GenerateTab", () => {
     });
   });
 
-  it("keeps an explicit missing selected-reference target in recovery state without navigation", () => {
-    useGenerationDraftStore.getState().saveDraft(
-      { kind: "new-asset", draftId: "draft-with-missing-target" },
-      {
-        referenceIds: ["reference:missing-character"],
-        referenceTargets: {
-          "reference:missing-character": {
-            kind: "missing",
-            token: "@{character:deleted-character}",
-          },
-        },
-      },
-      10,
+  it("existing prompt without seeded draft state resolves and persists without overwriting newer edits", async () => {
+    const first = image("media-first", {
+      assetGroupId: "asset-first",
+      blob: new Blob(["first"], { type: "image/png" }),
+    });
+    const second = image("media-second", {
+      assetGroupId: "asset-second",
+      blob: new Blob(["second"], { type: "image/png" }),
+    });
+    mockedProjectStore.state.project.mediaLibrary.items = [first, second];
+    mockedProjectStore.state.getMediaItem = (mediaId: string) =>
+      mockedProjectStore.state.project.mediaLibrary.items.find((item) => item.id === mediaId);
+    const initialPrompt = `Use ${canonicalMediaToken(first.id)}.`;
+    const nextPrompt = `Use ${canonicalMediaToken(second.id)}.`;
+
+    const view = render(
+      <GenerateTab
+        projectId="project-1"
+        draftId="hydrated-draft"
+        models={[{ id: "model-1", label: "Model" }]}
+        prompt={initialPrompt}
+        referenceResolutionInput={{
+          mediaItems: mockedProjectStore.state.project.mediaLibrary.items,
+          generatedImageDefinitions: [],
+          tracks: [],
+        }}
+      />,
     );
 
+    await waitFor(() => {
+      expect(useGenerationDraftStore.getState().getDraft({
+        kind: "new-asset",
+        draftId: "hydrated-draft",
+      })).toMatchObject({
+        prompt: initialPrompt,
+        referenceIds: ["reference:media-first"],
+        referenceTargets: {
+          "reference:media-first": { kind: "imported-image", mediaId: first.id },
+        },
+      });
+    });
+
+    fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: nextPrompt } });
+    await waitFor(() => {
+      expect(useGenerationDraftStore.getState().getDraft({
+        kind: "new-asset",
+        draftId: "hydrated-draft",
+      })).toMatchObject({
+        prompt: nextPrompt,
+        referenceIds: ["reference:media-second"],
+      });
+    });
+
+    view.rerender(
+      <GenerateTab
+        projectId="project-1"
+        draftId="hydrated-draft"
+        models={[{ id: "model-1", label: "Model" }]}
+        prompt={initialPrompt}
+        referenceResolutionInput={{
+          mediaItems: mockedProjectStore.state.project.mediaLibrary.items,
+          generatedImageDefinitions: [],
+          tracks: [],
+        }}
+      />,
+    );
+    expect(screen.getByLabelText("Prompt")).toHaveValue(nextPrompt);
+    expect(useGenerationDraftStore.getState().getDraft({
+      kind: "new-asset",
+      draftId: "hydrated-draft",
+    }).prompt).toBe(nextPrompt);
+  });
+
+  it("prompt resolution targets drive visible navigation and canonical submission order", async () => {
+    const source = image("media-source", {
+      assetGroupId: "asset-source",
+      blob: new Blob(["source"], { type: "image/png" }),
+    });
+    const mentioned = image("media-mentioned", {
+      assetGroupId: "asset-mentioned",
+      blob: new Blob(["mentioned"], { type: "image/png" }),
+    });
+    const shot = image("media-shot", {
+      assetGroupId: "asset-shot",
+      blob: new Blob(["shot"], { type: "image/png" }),
+    });
+    const mediaItems = [source, mentioned, shot];
+    mockedProjectStore.state.project.mediaLibrary.items = mediaItems;
+    mockedProjectStore.state.getMediaItem = (mediaId: string) =>
+      mediaItems.find((item) => item.id === mediaId);
+    const onSubmit = vi.fn();
+    const prompt = `Compose with ${canonicalMediaToken(mentioned.id)}.`;
+
+    render(
+      <GenerateTab
+        projectId="project-1"
+        draftId="resolved-draft"
+        models={[{ id: "model-1", label: "Model" }]}
+        prompt={prompt}
+        referenceResolutionInput={{
+          mediaItems,
+          generatedImageDefinitions: [],
+          tracks: [],
+          source: { mediaVersionId: source.id, defaultRole: "source" },
+          shotReferences: [{ mediaVersionId: shot.id, defaultRole: "reference-image" }],
+          roleByReferenceKey: {
+            "reference:media-mentioned": "style",
+          },
+        }}
+        onSubmit={onSubmit}
+      />,
+    );
+
+    const card = await screen.findByTestId(
+      "generate-reference-trigger-reference:media-mentioned",
+    );
+    fireEvent.click(card);
+    expect(mockedUIStore.state.activeModal).toBe("reference-editor");
+    expect(mockedUIStore.state.modalData).toMatchObject({
+      referenceEditorRoute: {
+        target: { kind: "imported-image", mediaId: mentioned.id },
+      },
+    });
+
+    fireEvent.submit(screen.getByTestId("generate-tab"));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]?.[0]).toMatchObject({
+      prompt,
+      referenceIds: [
+        "reference:media-source",
+        "reference:media-mentioned",
+        "reference:media-shot",
+      ],
+      referenceResolution: {
+        submissionReferences: [
+          expect.objectContaining({
+            key: "reference:media-source",
+            mediaVersionId: source.id,
+            order: 0,
+            origins: ["source"],
+          }),
+          expect.objectContaining({
+            key: "reference:media-mentioned",
+            mediaVersionId: mentioned.id,
+            order: 1,
+            origins: ["user"],
+            role: "style",
+          }),
+          expect.objectContaining({
+            key: "reference:media-shot",
+            mediaVersionId: shot.id,
+            order: 2,
+            origins: ["shot"],
+          }),
+        ],
+      },
+    });
+  });
+
+  it("keeps a deleted prompt target in typed recovery state without manual draft seeding", async () => {
+    const prompt = `Use ${canonicalMediaToken("deleted-media")}.`;
     render(
       <GenerateTab
         projectId="project-1"
         draftId="draft-with-missing-target"
         models={[{ id: "m", label: "Model" }]}
-        referenceLabels={{ "reference:missing-character": "Deleted character" }}
+        prompt={prompt}
+        referenceResolutionInput={{
+          mediaItems: [],
+          generatedImageDefinitions: [],
+          tracks: [],
+        }}
+        referenceLabels={{ "reference:deleted-media": "Deleted image" }}
       />,
     );
 
-    const card = screen.getByText("Deleted character").closest("li");
+    await waitFor(() => {
+      expect(useGenerationDraftStore.getState().getDraft({
+        kind: "new-asset",
+        draftId: "draft-with-missing-target",
+      })).toMatchObject({
+        prompt,
+        referenceIds: ["reference:deleted-media"],
+        referenceTargets: {
+          "reference:deleted-media": {
+            kind: "missing",
+            token: canonicalMediaToken("deleted-media"),
+          },
+        },
+      });
+    });
+
+    const card = screen.getByText("Deleted image").closest("li");
     expect(card).not.toBeNull();
     expect(within(card!).queryByRole("button")).toBeNull();
     expect(
       within(card!).getByRole("status", {
-        name: "Deleted character reference unavailable",
+        name: "Deleted image reference unavailable",
       }),
     ).toHaveTextContent("Relink or remove this reference");
     expect(mockedUIStore.state.activeModal).toBeNull();

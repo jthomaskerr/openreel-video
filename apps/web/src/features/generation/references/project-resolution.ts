@@ -7,6 +7,7 @@ import type {
 import type { ProjectCharacter } from "../context";
 import type { GenerationReferenceDraft } from "../submit-generation";
 import {
+  canonicalMediaToken,
   resolveGenerationReferences,
   type ReferenceCandidate,
 } from "./resolve";
@@ -26,13 +27,18 @@ interface ReferenceMetadataTrack {
   readonly clips?: readonly ReferenceMetadataClip[];
 }
 
+export interface ProjectReferenceSelection {
+  readonly mediaVersionId: string;
+  readonly defaultRole: string;
+}
+
 export interface ResolveProjectGenerationReferencesInput {
   readonly prompt: string;
   readonly mediaItems: readonly MediaItem[];
   readonly generatedImageDefinitions: readonly GeneratedImageIdentity[];
   readonly tracks: readonly ReferenceMetadataTrack[];
-  readonly source?: ReferenceCandidate;
-  readonly shotReferences?: readonly ReferenceCandidate[];
+  readonly source?: ProjectReferenceSelection;
+  readonly shotReferences?: readonly ProjectReferenceSelection[];
   readonly roleByReferenceKey?: Readonly<Record<string, string>>;
 }
 
@@ -83,11 +89,29 @@ function missingReferenceKey(token: string, start: number): string {
   return `reference:missing:${start}`;
 }
 
+function projectReferenceCandidate(
+  selection: ProjectReferenceSelection,
+  mediaItems: readonly MediaItem[],
+): ReferenceCandidate {
+  const item = mediaItems.find((candidate) => candidate.id === selection.mediaVersionId);
+  return {
+    mediaId: item?.assetGroupId ?? selection.mediaVersionId,
+    mediaVersionId: selection.mediaVersionId,
+    canonicalTokens: [canonicalMediaToken(selection.mediaVersionId)],
+    defaultRole: selection.defaultRole,
+  };
+}
+
 export function resolveProjectGenerationReferences(
   input: ResolveProjectGenerationReferencesInput,
 ): ProjectGenerationReferenceResolution {
   const characters = projectCharacters(input.tracks);
   const imageItems = input.mediaItems.filter((item) => item.type === "image");
+  const source = input.source
+    ? projectReferenceCandidate(input.source, imageItems)
+    : undefined;
+  const shotReferences = (input.shotReferences ?? []).map((selection) =>
+    projectReferenceCandidate(selection, imageItems));
   const resolution = resolveGenerationReferences({
     prompt: input.prompt,
     characters,
@@ -96,9 +120,9 @@ export function resolveProjectGenerationReferences(
       versionId: item.id,
       accessible: Boolean(item.blob || item.remoteUrl || item.fileHandle),
     })),
-    shotReferences: input.shotReferences ?? [],
+    shotReferences,
     roleByReferenceKey: input.roleByReferenceKey ?? {},
-    ...(input.source ? { source: input.source } : {}),
+    ...(source ? { source } : {}),
   });
   const referenceTargets: Record<string, ReferenceTarget> = {};
 
