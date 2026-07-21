@@ -107,6 +107,7 @@ export interface GenerationSanitizerPort {
 export interface ProviderSubmitPort {
   submit(input: {
     provider: GenerationProvider;
+    providerInstanceId: string;
     modelId: string;
     modelSchemaVersion: string;
     routing: GenerationRouteIdentity;
@@ -215,6 +216,13 @@ function validateDraft(draft: GenerationDraft): void {
       "invalid-draft",
       "Routing schema version must match draft",
       "routing.providerSchemaVersion",
+    );
+  }
+  if (route.data.requestedMode !== draft.context.mode) {
+    throw new GenerationSubmissionError(
+      "invalid-draft",
+      "Routing requested mode must match context mode",
+      "routing.requestedMode",
     );
   }
   if (draft.context.projectId !== draft.projectId) {
@@ -574,6 +582,7 @@ async function executeSubmission(
   try {
     providerSubmit = await ports.provider.submit({
       provider: snapshot.provider,
+      providerInstanceId: snapshot.providerInstanceId,
       modelId: snapshot.modelId,
       modelSchemaVersion: snapshot.modelSchemaVersion,
       routing: snapshot.routing,
