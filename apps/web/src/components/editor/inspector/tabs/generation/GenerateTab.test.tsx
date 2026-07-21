@@ -1410,7 +1410,10 @@ describe("GenerateTab", () => {
         models={[{ id: "m", label: "Model" }]}
         prompt="Generate this"
         onSubmit={onSubmit}
-        job={generationJob(placementError, { placementFailure: true })}
+        job={generationJob(placementError, {
+          placementFailure: true,
+          status: "needs-attention",
+        })}
         onRecoveryAction={onRecoveryAction}
       />,
     );
@@ -1418,7 +1421,7 @@ describe("GenerateTab", () => {
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
     fireEvent.submit(screen.getByTestId("generate-tab"));
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.getByRole("status")).toHaveTextContent("failed");
+    expect(screen.getByRole("status")).toHaveTextContent("needs-attention");
     expect(screen.getByRole("alert")).toHaveTextContent("placement failed");
     const retryPlacement = screen.getByRole("button", { name: /Retry placement/i });
     fireEvent.click(retryPlacement);
