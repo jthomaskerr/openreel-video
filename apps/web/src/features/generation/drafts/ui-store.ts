@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import type { ReferenceTarget } from "@openreel/core";
 import type { GenerationReferenceRecoveryState } from "./v2";
 
 export type GenerationDraftScope =
@@ -12,6 +13,7 @@ export interface GenerationDraftState {
   prompt: string;
   providerInputs: Record<string, unknown>;
   referenceIds: string[];
+  referenceTargets: Record<string, ReferenceTarget>;
   placementPolicy: "none" | "create-linked-clip" | "replace-selected-clip-media";
   updatedAt: number;
 }
@@ -21,6 +23,7 @@ const emptyDraft = (key: string): GenerationDraftState => ({
   prompt: "",
   providerInputs: {},
   referenceIds: [],
+  referenceTargets: {},
   placementPolicy: "none",
   updatedAt: 0,
 });
