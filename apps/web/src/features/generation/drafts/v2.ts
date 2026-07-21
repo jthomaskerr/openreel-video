@@ -1,4 +1,16 @@
-import type { GenerationContext, GenerationTarget } from "@openreel/music-video-domain/generation";
+import { z } from "zod";
+import type {
+  GenerationContext,
+  GenerationError,
+  GenerationTarget,
+} from "@openreel/music-video-domain/generation";
+import {
+  GenerationContextSchema,
+  GenerationReferenceDeactivateCommandSchema,
+  GenerationReferenceRemoveCommandSchema,
+  GenerationReferenceRetryCommandSchema,
+  ResolvedGenerationReferenceSchema,
+} from "@openreel/music-video-domain/generation";
 import type { GenerationDraft } from "../submit-generation";
 
 function stableValue(value: unknown): string {
@@ -167,6 +179,8 @@ export function normalizeProviderNeutralInputs(
 export function generationSubmissionDraftKey(input: {
   projectId: string;
   provider: string;
+  providerInstanceId: string;
+  routing: import("@openreel/music-video-domain/generation").GenerationRouteIdentity;
   modelId: string;
   modelSchemaVersion: string;
   target: GenerationTarget;
@@ -183,6 +197,8 @@ export function generationSubmissionDraftKey(input: {
   return input.idempotencyKey ?? stableSubmissionStringify({
     projectId: input.projectId,
     provider: input.provider,
+    providerInstanceId: input.providerInstanceId,
+    routing: input.routing,
     modelId: input.modelId,
     modelSchemaVersion: input.modelSchemaVersion,
     target: input.target,
@@ -250,43 +266,308 @@ function required<T>(value: T | undefined, field: string): T {
 
 export function buildGenerationSubmissionContext(input: {
   draft: GenerationDraft;
-  target: GenerationTarget;
   referenceTokens: readonly { tokenId: string }[];
   audioToken?: { tokenId: string };
+  preparationStatus?: "preparing" | "ready";
 }): GenerationContext {
+  const preparationStatus = input.preparationStatus ?? "preparing";
   const references = (input.draft.references ?? []).map((reference, index) => {
     const token = required(input.referenceTokens[index]?.tokenId, `references[${index}]`);
+    const versionId = reference.mediaVersionId ?? reference.versionId;
     return {
+      id: versionId ? `${reference.mediaId}:${versionId}` : reference.mediaId,
+      order: index + 1,
       mediaId: reference.mediaId,
-      ...(reference.mediaVersionId ?? reference.versionId
-        ? { versionId: reference.mediaVersionId ?? reference.versionId }
-        : {}),
+      ...(versionId ? { versionId } : {}),
       origins: reference.origins ?? ["user" as const],
-      remoteInput: { kind: "upload-token" as const, value: token },
+      state: "active" as const,
+      preparationStatus,
+      errorHistory: [],
+      uploadLeaseId: token,
     };
   });
-  const audio = input.draft.audio && input.audioToken
-    ? {
-        sourceMediaId: required(input.draft.audio.sourceMediaId, "sourceMediaId"),
-        sourceVersionId: required(input.draft.audio.sourceVersionId, "sourceVersionId"),
-        sourceClipId: required(input.draft.audio.sourceClipId, "sourceClipId"),
-        projectStartSeconds: required(input.draft.audio.projectStartSeconds, "projectStartSeconds"),
-        projectEndSeconds: required(input.draft.audio.projectEndSeconds, "projectEndSeconds"),
-        sourceStartSeconds: required(input.draft.audio.sourceStartSeconds, "sourceStartSeconds"),
-        sourceEndSeconds: required(input.draft.audio.sourceEndSeconds, "sourceEndSeconds"),
-        mimeType: required(input.draft.audio.mimeType, "mimeType"),
-        sha256: required(input.draft.audio.sha256, "sha256"),
-        remoteInput: { kind: "upload-token" as const, value: input.audioToken.tokenId },
-      }
-    : undefined;
-  return {
+
+  return GenerationContextSchema.parse({
+    ...input.draft.context,
     projectId: input.draft.projectId,
-    shotId: input.draft.context.shotId,
-    clipId: input.draft.context.clipId,
-    target: input.target,
-    timing: input.draft.context.timing,
     references,
-    ...(audio ? { audio } : {}),
     placementPolicy: input.draft.placementPolicy ?? input.draft.context.placementPolicy,
+  }) as GenerationContext;
+}
+
+export interface GenerationReferenceRecoveryDraft {
+  id: string;
+  mediaId: string;
+  versionId?: string;
+  origins?: GenerationReferenceOrigin[];
+  value?: unknown;
+}
+
+export type GenerationReferenceOrigin = "source" | "character" | "shot" | "user";
+
+export interface GenerationReferenceCanonical {
+  id: string;
+  order: number;
+  mediaId: string;
+  versionId?: string;
+  origins: GenerationReferenceOrigin[];
+  state: "active" | "failed";
+  preparationStatus: "preparing" | "ready" | "failed";
+  errorHistory: GenerationError[];
+  uploadLeaseId?: string;
+}
+
+export type GenerationReferenceRecoveryReference = GenerationReferenceCanonical & {
+  active: boolean;
+};
+
+const GenerationReferenceCommandSchema = z.discriminatedUnion("action", [
+  GenerationReferenceRetryCommandSchema.extend({ action: z.literal("retry") }),
+  GenerationReferenceRemoveCommandSchema.extend({ action: z.literal("remove") }),
+  GenerationReferenceDeactivateCommandSchema.extend({ action: z.literal("deactivate") }),
+]);
+
+export type GenerationReferenceCommand = z.infer<typeof GenerationReferenceCommandSchema>;
+
+export interface GenerationReferenceRecoveryState {
+  projectId: string;
+  jobId: string;
+  references: readonly GenerationReferenceRecoveryReference[];
+  drafts: readonly GenerationReferenceRecoveryDraft[];
+  providerReferences: readonly GenerationReferenceCanonical[];
+}
+
+export interface GenerationReferenceRecoveryPorts {
+  retryReference(input: GenerationReferenceRecoveryDraft): Promise<{ tokenId: string }>;
+  releaseUploadLease(input: { tokenId: string }): Promise<void>;
+  referenceMinimum?: number;
+}
+
+export class GenerationReferenceRecoveryScopeError extends Error {
+  readonly code = "generation-reference-recovery-scope-mismatch";
+
+  constructor(readonly projectId: string, readonly jobId: string) {
+    super(`Reference recovery command is scoped to ${projectId}/${jobId}`);
+    this.name = "GenerationReferenceRecoveryScopeError";
+  }
+}
+
+export class GenerationReferenceRecoveryError extends Error {
+  readonly code: "generation-reference-release-failed" | "generation-reference-release-cleanup-failed";
+  readonly field: string;
+  readonly referenceId: string;
+  readonly state: GenerationReferenceRecoveryState;
+  readonly newLeaseId: string;
+
+  constructor(
+    referenceId: string,
+    newLeaseId: string,
+    state: GenerationReferenceRecoveryState,
+    cause: unknown,
+    code: GenerationReferenceRecoveryError["code"] = "generation-reference-release-failed",
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "GenerationReferenceRecoveryError";
+    this.field = `references.${referenceId}.uploadLeaseId`;
+    this.referenceId = referenceId;
+    this.state = state;
+    this.newLeaseId = newLeaseId;
+    this.code = code;
+  }
+}
+
+const generationReferenceCollectionSchema = z.array(ResolvedGenerationReferenceSchema);
+
+export function parseGenerationReferenceCommand(value: unknown): GenerationReferenceCommand {
+  return GenerationReferenceCommandSchema.parse(value) as GenerationReferenceCommand;
+}
+
+export function parseGenerationReferencePreparation(value: unknown): GenerationReferenceCanonical[] {
+  return generationReferenceCollectionSchema.parse(value) as GenerationReferenceCanonical[];
+}
+
+export function validateGenerationReferenceMinimum<T extends { active: boolean }>(
+  references: readonly T[],
+  minimum: number | undefined,
+): void {
+  if (minimum !== undefined && references.filter((reference) => reference.active).length < minimum) {
+    throw new Error("generation-reference-required");
+  }
+}
+
+function providerReferences(
+  references: readonly GenerationReferenceRecoveryReference[],
+): GenerationReferenceCanonical[] {
+  return references
+    .filter((reference) =>
+      reference.active && reference.state === "active" && reference.preparationStatus === "ready")
+    .map(({ active: _active, ...reference }, index) => ({ ...reference, order: index + 1 }));
+}
+
+function withProviderReferences(
+  references: readonly GenerationReferenceRecoveryReference[],
+  drafts: readonly GenerationReferenceRecoveryDraft[],
+  scope: Pick<GenerationReferenceRecoveryState, "projectId" | "jobId">,
+): GenerationReferenceRecoveryState {
+  return {
+    projectId: scope.projectId,
+    jobId: scope.jobId,
+    references,
+    drafts,
+    providerReferences: providerReferences(references),
   };
+}
+
+export function createGenerationReferenceRecoveryState(input: {
+  projectId: string;
+  jobId: string;
+  references: readonly (Omit<GenerationReferenceRecoveryReference, "active"> & { active?: boolean })[];
+  drafts: readonly GenerationReferenceRecoveryDraft[];
+}): GenerationReferenceRecoveryState {
+  const references = input.references.map((reference) => ({
+    ...reference,
+    active: reference.active ?? true,
+  }));
+  return withProviderReferences(references, input.drafts, input);
+}
+
+function recoveryError(
+  cause: unknown,
+  field: string,
+  code = "generation-reference-retry-failed",
+): GenerationError {
+  return {
+    code,
+    message: cause instanceof Error ? cause.message : String(cause),
+    field,
+    retryable: true,
+  };
+}
+
+function leaseIsReferenced(
+  references: readonly GenerationReferenceRecoveryReference[],
+  tokenId: string,
+  exceptId?: string,
+): boolean {
+  return references.some((reference) =>
+    reference.id !== exceptId && reference.uploadLeaseId === tokenId);
+}
+
+export async function applyGenerationReferenceCommand(
+  state: GenerationReferenceRecoveryState,
+  commandInput: unknown,
+  ports: GenerationReferenceRecoveryPorts,
+): Promise<GenerationReferenceRecoveryState> {
+  const command = parseGenerationReferenceCommand(commandInput);
+  if (command.projectId !== state.projectId || command.jobId !== state.jobId) {
+    throw new GenerationReferenceRecoveryScopeError(command.projectId, command.jobId);
+  }
+  const index = state.references.findIndex((reference) => reference.id === command.referenceId);
+  if (index < 0) throw new Error("generation-reference-not-found");
+  const reference = state.references[index];
+
+  if (command.action === "remove") {
+    const references = state.references.filter((candidate) => candidate.id !== command.referenceId);
+    validateGenerationReferenceMinimum(references, ports.referenceMinimum);
+    if (reference.uploadLeaseId && !leaseIsReferenced(references, reference.uploadLeaseId)) {
+      await ports.releaseUploadLease({ tokenId: reference.uploadLeaseId });
+    }
+    return withProviderReferences(
+      references,
+      state.drafts.filter((draft) => draft.id !== command.referenceId),
+      state,
+    );
+  }
+
+  if (command.action === "deactivate") {
+    const references = state.references.map((candidate) =>
+      candidate.id === command.referenceId ? { ...candidate, active: false } : candidate);
+    validateGenerationReferenceMinimum(references, ports.referenceMinimum);
+    return withProviderReferences(references, state.drafts, state);
+  }
+
+  if (reference.active && reference.state === "active" && reference.preparationStatus === "ready") {
+    return state;
+  }
+
+  const draft = state.drafts.find((candidate) => candidate.id === command.referenceId);
+  if (!draft) throw new Error("generation-reference-draft-not-found");
+
+  let uploaded: { tokenId: string };
+  try {
+    uploaded = await ports.retryReference(draft);
+  } catch (cause) {
+    const error = recoveryError(cause, `references.${command.referenceId}.value`);
+    const references = state.references.map((candidate) =>
+      candidate.id === command.referenceId
+        ? {
+            ...candidate,
+            state: "failed" as const,
+            preparationStatus: "failed" as const,
+            errorHistory: [...candidate.errorHistory, error],
+          }
+        : candidate);
+    return withProviderReferences(references, state.drafts, state);
+  }
+
+  const references = state.references.map((candidate) =>
+    candidate.id === command.referenceId
+      ? {
+          ...candidate,
+          active: true,
+          state: "active" as const,
+          preparationStatus: "ready" as const,
+          uploadLeaseId: uploaded.tokenId,
+        }
+      : candidate);
+  if (
+    reference.uploadLeaseId
+    && reference.uploadLeaseId !== uploaded.tokenId
+    && !leaseIsReferenced(references, reference.uploadLeaseId, command.referenceId)
+  ) {
+    try {
+      await ports.releaseUploadLease({ tokenId: reference.uploadLeaseId });
+    } catch (cause) {
+      try {
+        await ports.releaseUploadLease({ tokenId: uploaded.tokenId });
+      } catch (cleanupCause) {
+        const error = recoveryError(
+          cleanupCause,
+          `references.${command.referenceId}.uploadLeaseId`,
+          "generation-reference-release-cleanup-failed",
+        );
+        const failedReferences = references.map((candidate) =>
+          candidate.id === command.referenceId
+            ? {
+                ...candidate,
+                preparationStatus: "failed" as const,
+                errorHistory: [...candidate.errorHistory, error],
+              }
+            : candidate);
+        throw new GenerationReferenceRecoveryError(
+          command.referenceId,
+          uploaded.tokenId,
+          withProviderReferences(failedReferences, state.drafts, state),
+          cleanupCause,
+          "generation-reference-release-cleanup-failed",
+        );
+      }
+      const error = recoveryError(
+        cause,
+        `references.${command.referenceId}.uploadLeaseId`,
+        "generation-reference-release-failed",
+      );
+      const retainedReferences = state.references.map((candidate) =>
+        candidate.id === command.referenceId
+          ? { ...candidate, errorHistory: [...candidate.errorHistory, error] }
+          : candidate);
+      throw new GenerationReferenceRecoveryError(
+        command.referenceId,
+        uploaded.tokenId,
+        withProviderReferences(retainedReferences, state.drafts, state),
+        cause,
+      );
+    }
+  }
+  return withProviderReferences(references, state.drafts, state);
 }

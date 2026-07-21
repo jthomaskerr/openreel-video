@@ -2,9 +2,12 @@ import type {
   GenerationContext,
   GenerationError,
   GenerationJob,
+  GenerationProvider,
   GenerationReferenceOrigin,
+  GenerationRouteIdentity,
   GenerationTarget,
 } from "@openreel/music-video-domain/generation";
+import { GenerationRouteIdentitySchema } from "@openreel/music-video-domain/generation";
 import {
   clearGenerationSubmissionDraftCache,
   createGenerationSubmissionRetryableDraft,
@@ -14,16 +17,21 @@ import {
 } from "./drafts/cache";
 import {
   assertNoLocalSubmissionUrls,
+  applyGenerationReferenceCommand,
   buildImmutableGenerationSubmissionDraft,
   buildGenerationSubmissionContext,
   generationSubmissionDraftKey,
   normalizeProviderNeutralInputs,
   ProviderNeutralInputError,
+  type GenerationReferenceRecoveryPorts,
+  type GenerationReferenceRecoveryState,
 } from "./drafts/v2";
 
 export interface GenerationDraft {
   projectId: string;
-  provider: string;
+  provider: GenerationProvider;
+  providerInstanceId: string;
+  routing: GenerationRouteIdentity;
   modelId: string;
   modelSchemaVersion: string;
   canonicalPrompt?: string;
@@ -98,9 +106,10 @@ export interface GenerationSanitizerPort {
 
 export interface ProviderSubmitPort {
   submit(input: {
-    provider: string;
+    provider: GenerationProvider;
     modelId: string;
     modelSchemaVersion: string;
+    routing: GenerationRouteIdentity;
     inputs: Record<string, unknown>;
     context: GenerationContext;
     references?: ReadonlyArray<{
@@ -142,6 +151,14 @@ export interface SubmitGenerationPorts {
   ids: GenerationIdFactory;
 }
 
+export async function recoverGenerationReference(input: {
+  state: GenerationReferenceRecoveryState;
+  command: unknown;
+  ports: GenerationReferenceRecoveryPorts;
+}): Promise<GenerationReferenceRecoveryState> {
+  return applyGenerationReferenceCommand(input.state, input.command, input.ports);
+}
+
 export class GenerationSubmissionError extends Error {
   readonly code: string;
   readonly field?: string;
@@ -171,6 +188,34 @@ function validateDraft(draft: GenerationDraft): void {
   if (!draft.modelId) throw new GenerationSubmissionError("invalid-draft", "Model is required", "modelId");
   if (!draft.modelSchemaVersion) {
     throw new GenerationSubmissionError("invalid-draft", "Model schema version is required", "modelSchemaVersion");
+  }
+  if (!(draft.provider === "kieai" || draft.provider === "wavespeed" || draft.provider === "atlascloud")) {
+    throw new GenerationSubmissionError("invalid-draft", "Provider is unsupported", "provider");
+  }
+  const route = GenerationRouteIdentitySchema.safeParse(draft.routing);
+  if (!route.success) {
+    throw new GenerationSubmissionError("invalid-draft", "Routing identity is invalid", "routing");
+  }
+  if (route.data.providerInstanceId !== draft.providerInstanceId) {
+    throw new GenerationSubmissionError(
+      "invalid-draft",
+      "Routing provider instance must match draft",
+      "routing.providerInstanceId",
+    );
+  }
+  if (route.data.providerModelId !== draft.modelId) {
+    throw new GenerationSubmissionError(
+      "invalid-draft",
+      "Routing provider model must match draft",
+      "routing.providerModelId",
+    );
+  }
+  if (route.data.providerSchemaVersion !== draft.modelSchemaVersion) {
+    throw new GenerationSubmissionError(
+      "invalid-draft",
+      "Routing schema version must match draft",
+      "routing.providerSchemaVersion",
+    );
   }
   if (draft.context.projectId !== draft.projectId) {
     throw new GenerationSubmissionError("invalid-draft", "Context project must match draft project", "context.projectId");
@@ -347,16 +392,22 @@ function buildJob(
   const now = clock.now();
   return {
     schemaVersion: 2,
+    contractVersion: 2,
     id: ids.next("job"),
+    projectId: draft.projectId,
     provider: draft.provider,
+    providerInstanceId: draft.providerInstanceId,
     modelId: draft.modelId,
     modelSchemaVersion: draft.modelSchemaVersion,
-    status: "queued",
+    routing: draft.routing,
+    providerJobId,
+    status: "submitting",
+    attempt: 1,
     createdAt: now,
     updatedAt: now,
     context,
     providerInputs: inputs as GenerationJob["providerInputs"],
-    attempts: [{ attemptNumber: 1, providerJobId, startedAt: now }],
+    attempts: [{ attemptNumber: 1, routing: draft.routing, providerJobId, startedAt: now }],
     checkpoints: {},
   };
 }
@@ -370,6 +421,8 @@ export async function submitGeneration(draft: GenerationDraft, ports: SubmitGene
   const submissionKey = generationSubmissionDraftKey({
     projectId: snapshot.projectId,
     provider: snapshot.provider,
+    providerInstanceId: snapshot.providerInstanceId,
+    routing: snapshot.routing,
     modelId: snapshot.modelId,
     modelSchemaVersion: snapshot.modelSchemaVersion,
     target: snapshot.target.kind === "new-version"
@@ -500,9 +553,9 @@ async function executeSubmission(
 
   const context = buildGenerationSubmissionContext({
     draft: snapshot,
-    target,
     referenceTokens,
     audioToken,
+    preparationStatus: "ready",
   });
   assertNoLocalSubmissionUrls(context, "context");
   const submittedReferences = orderedReferences.map((reference, index) => ({
@@ -523,6 +576,7 @@ async function executeSubmission(
       provider: snapshot.provider,
       modelId: snapshot.modelId,
       modelSchemaVersion: snapshot.modelSchemaVersion,
+      routing: snapshot.routing,
       inputs: sanitizedInputs,
       context,
       ...(submittedReferences.length ? { references: submittedReferences } : {}),
