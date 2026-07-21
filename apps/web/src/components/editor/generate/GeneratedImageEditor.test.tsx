@@ -156,6 +156,7 @@ function activeJob(
 function harness(input?: {
   definition?: GeneratedImageDefinition;
   jobs?: GeneratedImageControllerJob[];
+  submitError?: Error;
 }) {
   let project: GeneratedImageControllerProject = {
     id: "project-1",
@@ -163,6 +164,7 @@ function harness(input?: {
   };
   let jobs = input?.jobs ?? [];
   const submit = vi.fn(async () => {
+    if (input?.submitError) throw input.submitError;
     const job = activeJob();
     jobs = [job];
     return job;
@@ -322,6 +324,57 @@ describe("GeneratedImageEditor", () => {
     );
   });
 
+  it("persists the displayed default model when a new definition has none", async () => {
+    const emptyModel = definition({
+      draft: {
+        ...definition().draft,
+        provider: undefined,
+        modelId: undefined,
+        inputs: { duration: 4 },
+      },
+    });
+    const { controller, updateDraft } = harness({ definition: emptyModel });
+
+    await renderEditor({
+      controller,
+      definitionId: "definition-1",
+      placement: "modal",
+      mediaItems: [image()],
+      mentionOptions: [],
+      onOpenReference: vi.fn(),
+    });
+
+    await waitFor(() =>
+      expect(updateDraft).toHaveBeenCalledWith(
+        "definition-1",
+        expect.objectContaining({ provider: "wavespeed", modelId: "model-a" }),
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Generate image" })).toBeEnabled();
+  });
+
+  it("keeps inspector form groups single-column regardless of viewport width", async () => {
+    const { controller } = harness();
+    const { container } = await renderEditor({
+      controller,
+      definitionId: "definition-1",
+      placement: "inspector",
+      mediaItems: [image()],
+      mentionOptions: [],
+      onOpenReference: vi.fn(),
+    });
+
+    const modelSection = container.querySelector<HTMLElement>('[aria-label="Model"]');
+    const parameterSection = container.querySelector<HTMLElement>(
+      '[aria-label="Model parameters"]',
+    );
+
+    expect(modelSection).toHaveClass("grid-cols-1");
+    expect(modelSection).not.toHaveClass("sm:grid-cols-2");
+    expect(parameterSection).toHaveClass("grid-cols-1");
+    expect(parameterSection).not.toHaveClass("sm:grid-cols-2");
+  });
+
   it("announces validation, focuses the first invalid control, and exposes retry", async () => {
     const invalid = definition({
       draft: {
@@ -383,6 +436,23 @@ describe("GeneratedImageEditor", () => {
     expect(submit).toHaveBeenCalledTimes(1);
   });
 
+  it("surfaces rejected provider submissions as an actionable inline error", async () => {
+    const { controller } = harness({ submitError: new Error("Provider quota exhausted") });
+    await renderEditor({
+      controller,
+      definitionId: "definition-1",
+      placement: "modal",
+      mediaItems: [image()],
+      mentionOptions: [],
+      onOpenReference: vi.fn(),
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Generate image" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Provider quota exhausted");
+    expect(screen.getByRole("button", { name: "Generate image" })).toBeEnabled();
+  });
+
   it("renders GenerateTab through the shared editor/controller surface", async () => {
     await act(async () => {
       render(
@@ -397,8 +467,8 @@ describe("GeneratedImageEditor", () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByTestId("generate-tab")).toContainElement(
-      screen.getByTestId("generated-image-editor"),
+    expect(screen.getByTestId("generated-image-editor")).toContainElement(
+      screen.getByTestId("generate-tab"),
     );
     expect(screen.getByTestId("generated-image-editor")).toHaveAttribute(
       "data-placement",

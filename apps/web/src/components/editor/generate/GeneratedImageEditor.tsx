@@ -4,7 +4,7 @@ import type {
   ReferenceTarget,
 } from "@openreel/core";
 import type { MouseEvent as ReactMouseEvent, KeyboardEvent as ReactKeyboardEvent } from "react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   GeneratedImageController,
   GeneratedImageControllerInputField,
@@ -204,6 +204,7 @@ export function GeneratedImageEditor({
   const [actionError, setActionError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const legacyPromptRef = useRef<HTMLTextAreaElement>(null);
+  const initializingModelRef = useRef<string | null>(null);
   const state = controller.read(definitionId);
   const definition = state.definition;
   const providers = useMemo(
@@ -214,6 +215,32 @@ export function GeneratedImageEditor({
   const providerModels = state.models.filter(
     (model) => model.provider === selectedProvider,
   );
+
+  useEffect(() => {
+    const defaultModel = state.models[0];
+    if (!definition || definition.draft.modelId || !defaultModel) {
+      initializingModelRef.current = null;
+      return;
+    }
+    if (initializingModelRef.current === defaultModel.id) return;
+    initializingModelRef.current = defaultModel.id;
+    setPendingAction("model");
+    setActionError(null);
+    void controller
+      .changeModel(definitionId, defaultModel.id)
+      .then((result) => {
+        if (!result.ok) {
+          initializingModelRef.current = null;
+          setActionError(result.message);
+        }
+        setRevision((revision) => revision + 1);
+      })
+      .catch((error: unknown) => {
+        initializingModelRef.current = null;
+        setActionError(error instanceof Error ? error.message : "The default model could not be selected.");
+      })
+      .finally(() => setPendingAction(null));
+  }, [controller, definition, definitionId, state.models]);
 
   const refresh = () => setRevision((revision) => revision + 1);
 
@@ -235,6 +262,9 @@ export function GeneratedImageEditor({
           );
         }
       }
+      refresh();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Image generation failed.");
       refresh();
     } finally {
       setPendingAction(null);
@@ -392,7 +422,10 @@ export function GeneratedImageEditor({
         </h2>
       </header>
 
-      <section className="grid min-w-0 gap-3 sm:grid-cols-2" aria-label="Model">
+      <section
+        className={`grid min-w-0 gap-3 ${placement === "modal" ? "grid-cols-2" : "grid-cols-1"}`}
+        aria-label="Model"
+      >
         <label className="grid gap-1 text-xs text-text-secondary">
           Provider
           <select
@@ -488,7 +521,10 @@ export function GeneratedImageEditor({
       ) : null}
 
       {state.model?.inputFields.length ? (
-        <section className="grid min-w-0 gap-3 sm:grid-cols-2" aria-label="Model parameters">
+        <section
+          className={`grid min-w-0 gap-3 ${placement === "modal" ? "grid-cols-2" : "grid-cols-1"}`}
+          aria-label="Model parameters"
+        >
           {state.model.inputFields.map((field) => (
             <SchemaInput
               key={field.key}

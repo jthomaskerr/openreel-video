@@ -19,6 +19,7 @@ import {
   resolveReferenceEditorRoute,
 } from "../../../features/references/navigation";
 import { AssetInspectorWithTabs } from "../inspector/AssetInspectorWithTabs";
+import { ProjectGeneratedImageEditor } from "../generate/ProjectGeneratedImageEditor";
 import { CharacterMetadataInspector } from "../inspector/CharacterMetadataInspector";
 
 interface ReferenceEditorContentProps {
@@ -150,6 +151,15 @@ export function ReferenceEditorContent({
     );
   }
 
+  if (liveRoute.editor === "generated-image") {
+    return (
+      <ProjectGeneratedImageEditor
+        definitionId={liveRoute.definitionId}
+        placement={placement}
+      />
+    );
+  }
+
   return (
     <div data-reference-editor-placement={placement}>
       <AssetInspectorWithTabs item={mediaItem} />
@@ -168,10 +178,10 @@ export function ReferenceEditorModal({
   route,
   onClose,
 }: ReferenceEditorModalProps) {
-  if (!route) return null;
-
   const getMediaItem = useProjectStore((state) => state.getMediaItem);
   const project = useProjectStore((state) => state.project);
+  if (!route) return null;
+
   const liveRoute =
     route.editor === "missing"
       ? route

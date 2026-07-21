@@ -1,5 +1,5 @@
 import { AlertCircle, Loader2, RotateCcw, Sparkles, X } from "lucide-react";
-import type React from "react";
+import React, { useEffect, useState } from "react";
 import type { ReferenceTarget } from "@openreel/core";
 import {
   openReferenceTarget,
@@ -24,7 +24,13 @@ export function GenerateModelSection(props: {
   selectedModelId: string;
   onSelect: (id: string) => void;
 }) {
-  const selectedIndex = Math.max(0, props.models.findIndex((model) => model.id === props.selectedModelId));
+  const [activeModelId, setActiveModelId] = useState(props.selectedModelId);
+  useEffect(() => setActiveModelId(props.selectedModelId), [props.selectedModelId]);
+  const selectedIndex = Math.max(0, props.models.findIndex((model) => model.id === activeModelId));
+  const selectModel = (modelId: string) => {
+    setActiveModelId(modelId);
+    props.onSelect(modelId);
+  };
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (!props.models.length) return;
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight" && event.key !== "Home" && event.key !== "End") return;
@@ -35,7 +41,7 @@ export function GenerateModelSection(props: {
         : event.key === "End"
           ? props.models.length - 1
           : (selectedIndex + (event.key === "ArrowRight" ? 1 : -1) + props.models.length) % props.models.length;
-    props.onSelect(props.models[nextIndex].id);
+    selectModel(props.models[nextIndex].id);
   };
 
   return (
@@ -49,7 +55,7 @@ export function GenerateModelSection(props: {
         className="grid gap-2 outline-none"
       >
         {props.models.map((model, index) => {
-          const selected = model.id === props.selectedModelId;
+          const selected = model.id === activeModelId;
           return (
             <button
               key={model.id}
@@ -58,7 +64,7 @@ export function GenerateModelSection(props: {
               aria-selected={selected}
               data-testid={`model-option-${model.id}`}
               tabIndex={selected ? 0 : -1}
-              onClick={() => props.onSelect(model.id)}
+              onClick={() => selectModel(model.id)}
               className={[
                 "min-h-11 rounded-lg border px-3 text-left transition-colors focus:outline-none focus:ring-2 focus:ring-primary",
                 selected

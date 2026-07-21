@@ -7,7 +7,7 @@ import {
 import type { SchemaProperty, WavespeedModel } from "./index";
 
 export interface GenerationModelCapability extends SharedGenerationModelCapability {
-  provider: "wavespeed";
+  provider: "wavespeed" | "kieai";
   modelId: string;
   displayName: string;
   output: "image" | "video";
