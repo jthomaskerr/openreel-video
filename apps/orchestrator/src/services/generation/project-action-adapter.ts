@@ -35,6 +35,7 @@ export interface GenerationProjectActionAdapterOptions {
   readonly clock?: () => number;
   readonly actionId?: (input: { jobId: string; kind: GenerationProjectMutationKind }) => string;
   readonly maxConflictRetries?: number;
+  readonly readProjectFile?: (path: string) => Promise<string>;
   readonly beforeTransaction?: (input: { attempt: number; jobId: string; kind: GenerationProjectMutationKind }) => void | Promise<void>;
   readonly afterCommit?: (envelope: GenerationProjectActionEnvelope) => void | Promise<void>;
 }
@@ -105,17 +106,30 @@ function asBaseRevision(receipt: GitCommitReceipt, project: Project): ProjectBas
 }
 
 async function readConfirmedProjectSnapshot(
-  projectStore: ProjectStore,
-  gitStore: GitStore,
+  options: Pick<GenerationProjectActionAdapterOptions, "gitStore" | "projectStore" | "readProjectFile">,
   projectId: string,
 ): Promise<{ readonly project: Project; readonly revision: ProjectBaseRevision }> {
-  await recoverInterruptedSave(projectStore, gitStore, projectId);
-  return gitStore.withProjectTransaction(projectId, async () => {
+  await recoverInterruptedSave(options.projectStore, options.gitStore, projectId);
+  return options.gitStore.withProjectTransaction(projectId, async () => {
+    const projectPath = join(options.projectStore.projectDir(projectId), "project.json");
+    const projectRead = (options.readProjectFile ?? ((path: string) => readFile(path, "utf8")))(projectPath)
+      .catch((cause: unknown) => {
+        const code = cause && typeof cause === "object" && "code" in cause ? cause.code : undefined;
+        if (code === "ENOENT") {
+          throw new GenerationProjectActionError("generation-project-not-found", `Project ${projectId} was not found.`, { cause });
+        }
+        const suffix = typeof code === "string" ? ` (${code})` : "";
+        throw new GenerationProjectActionError(
+          "generation-project-read-failed",
+          `Unable to read project ${projectId}${suffix}.`,
+          { cause },
+        );
+      });
     const [rawProject, gitReceipt] = await Promise.all([
-      readFile(join(projectStore.projectDir(projectId), "project.json"), "utf8").catch(() => undefined),
-      gitStore.readConfirmedReceipt(projectId),
+      projectRead,
+      options.gitStore.readConfirmedReceipt(projectId),
     ]);
-    if (!rawProject || !gitReceipt) throw new GenerationProjectActionError("generation-project-not-found");
+    if (!gitReceipt) throw new GenerationProjectActionError("generation-project-not-found");
     const project = JSON.parse(rawProject) as Project;
     return { project, revision: asBaseRevision(gitReceipt, project) };
   });
@@ -236,7 +250,8 @@ export class GenerationProjectActionAdapter {
 
   constructor(private readonly options: GenerationProjectActionAdapterOptions) {
     this.clock = options.clock ?? (() => Date.now());
-    this.createActionId = options.actionId ?? (({ jobId, kind }) => `${jobId}:${kind}`);
+    this.createActionId = options.actionId ?? (({ jobId, kind }) =>
+      `generation-action-${createHash("sha256").update(JSON.stringify([jobId, kind])).digest("hex")}`);
     this.maxConflictRetries = options.maxConflictRetries ?? 3;
   }
 
@@ -435,7 +450,7 @@ export class GenerationProjectActionAdapter {
     try {
       const kind = placementKind(input.job);
       const semanticPayload = placementSemanticPayload(input.job, input.output);
-      const { project } = await readConfirmedProjectSnapshot(this.options.projectStore, this.options.gitStore, input.job.projectId);
+      const { project } = await readConfirmedProjectSnapshot(this.options, input.job.projectId);
       const receipt = findGenerationProjectReceipt(project, input.idempotencyKey);
       if (receipt) {
         if (receipt.kind !== kind || receipt.semanticPayload !== semanticPayload) {
@@ -451,7 +466,7 @@ export class GenerationProjectActionAdapter {
   }
 
   async getActionEnvelope(projectId: string, idempotencyKey: string): Promise<GenerationProjectActionEnvelope | undefined> {
-    const { project } = await readConfirmedProjectSnapshot(this.options.projectStore, this.options.gitStore, projectId);
+    const { project } = await readConfirmedProjectSnapshot(this.options, projectId);
     const receipt = findGenerationProjectReceipt(project, idempotencyKey);
     if (!receipt) return undefined;
     return { schemaVersion: 1, projectId, receipt, appliedRevision: await receiptAppliedRevision(this.options.gitStore, projectId, receipt) };
@@ -462,8 +477,7 @@ export class GenerationProjectActionAdapter {
       throw new GenerationProjectActionError("generation-project-action-identity-mismatch");
     }
     const { project: current, revision: currentRevision } = await readConfirmedProjectSnapshot(
-      this.options.projectStore,
-      this.options.gitStore,
+      this.options,
       command.projectId,
     );
     if (!revisionsEqual(command.expectedRevision, currentRevision)) throw new GenerationProjectActionError("generation-project-action-conflict");
@@ -496,14 +510,22 @@ export class GenerationProjectActionAdapter {
       target = appliedSnapshot;
     }
     const proposed = { ...target, modifiedAt: Math.max(current.modifiedAt + 1, this.clock()) };
-    const saved = await executeSaveTransaction(this.options.projectStore, this.options.gitStore, {
-      projectId: command.projectId,
-      baseRevision: currentRevision,
-      project: proposed,
-      requiredMediaManifest: buildRequiredMediaManifest(proposed),
-      saveIntent: "recovery",
-      destructiveIntent: true,
-    }, { serverRemovalManifest: serverRemovalManifest(current, proposed) });
+    let saved;
+    try {
+      saved = await executeSaveTransaction(this.options.projectStore, this.options.gitStore, {
+        projectId: command.projectId,
+        baseRevision: currentRevision,
+        project: proposed,
+        requiredMediaManifest: buildRequiredMediaManifest(proposed),
+        saveIntent: "recovery",
+        destructiveIntent: true,
+      }, { serverRemovalManifest: serverRemovalManifest(current, proposed) });
+    } catch (cause) {
+      if (cause instanceof SaveTransactionError && cause.body.code === "PROJECT_CONFLICT") {
+        throw new GenerationProjectActionError("generation-project-action-conflict", undefined, { cause });
+      }
+      throw cause;
+    }
     return {
       projectId: command.projectId,
       actionId: command.actionId,
@@ -611,7 +633,7 @@ export class GenerationProjectActionAdapter {
   }
 
   private async readExactReceipt(projectId: string, idempotencyKey: string, kind: GenerationProjectMutationKind, semanticPayload: string) {
-    const { project } = await readConfirmedProjectSnapshot(this.options.projectStore, this.options.gitStore, projectId);
+    const { project } = await readConfirmedProjectSnapshot(this.options, projectId);
     const receipt = findGenerationProjectReceipt(project, idempotencyKey);
     if (!receipt) return undefined;
     if (receipt.kind !== kind || receipt.semanticPayload !== semanticPayload) throw new GenerationProjectActionError("generation-idempotency-conflict");
@@ -621,8 +643,7 @@ export class GenerationProjectActionAdapter {
   private async mutateProject<T>(input: MutationInput<T>): Promise<MutationResult<T>> {
     for (let attempt = 0; attempt < this.maxConflictRetries; attempt += 1) {
       const { project: current, revision: baseRevision } = await readConfirmedProjectSnapshot(
-        this.options.projectStore,
-        this.options.gitStore,
+        this.options,
         input.job.projectId,
       );
       const existing = findGenerationProjectReceipt(current, input.idempotencyKey);
