@@ -9,11 +9,12 @@ import {
   canonicalizeGenerationProjectActionPayload,
   type GenerationJob,
   type GenerationOutput,
+  type GenerationProjectMutationReceipt,
   type GenerationTarget,
   type JsonValue,
 } from "@openreel/music-video-domain/generation";
 import { config } from "../../env.js";
-import { GitStore, type GitCommitReceipt } from "../../projects/git-store.js";
+import { GitStore, type GitCommitReceipt, type GitProjectTransaction } from "../../projects/git-store.js";
 import { buildRequiredMediaManifest } from "../../projects/media-manifest.js";
 import { ProjectStore } from "../../projects/project-store.js";
 import { storePendingUpload } from "../../projects/pending-media.js";
@@ -99,6 +100,43 @@ function generationProjectActions(item: MediaItem | undefined): {
       readonly shotAttempts?: Readonly<Record<string, readonly unknown[]>>;
     }
     : undefined;
+}
+
+function withGenerationReceipt(
+  item: MediaItem,
+  idempotencyKey: string,
+  receipt: GenerationProjectMutationReceipt,
+): MediaItem {
+  const generationMeta = item.generationMeta ?? {
+    provider: "wavespeed",
+    model: "wavespeed/model",
+    jobId: receipt.jobId,
+    status: "succeeded" as const,
+  };
+  const actions = generationProjectActions(item);
+  return {
+    ...item,
+    generationMeta: {
+      ...generationMeta,
+      inputs: {
+        ...generationMeta.inputs,
+        generationProjectActions: {
+          ...actions,
+          receipts: { ...actions?.receipts, [idempotencyKey]: receipt },
+        },
+      },
+    },
+  };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }
 
 interface AdapterFixture {
@@ -509,6 +547,44 @@ describe("GenerationProjectActionAdapter", () => {
     assert.deepEqual(reconciled, { outcome: "not-applied", replaySafe: true });
   });
 
+  it("classifies conflicting canonical reconciliation receipts as non-retryable", async () => {
+    const fixture = await adapterFixture();
+    const output = await cacheOutput(fixture);
+    const job = generationJob(fixture.project.id, { kind: "new-asset", placeholderMediaId: "conflicting-reconcile-output" }, {
+      context: { projectId: fixture.project.id, entryContext: { kind: "unlinked-range", rangeId: "range", startTime: 0, endTime: 2 }, mode: route.requestedMode, placementPolicy: "create-linked-clip", prompt: "generate", references: [], timing: { source: "timeline", startSeconds: 0, endSeconds: 2, durationSeconds: 2 } },
+    });
+    const current = await fixture.store.loadProject(fixture.project.id);
+    const gitReceipt = await fixture.gitStore.readConfirmedReceipt(fixture.project.id);
+    if (!current || !gitReceipt) throw new Error("fixture-project-missing");
+    const semanticPayload = canonicalizeGenerationProjectActionPayload({
+      jobId: job.id,
+      projectId: job.projectId,
+      policy: job.context.placementPolicy,
+      entryContext: job.context.entryContext,
+      timing: job.context.timing ?? null,
+      output,
+    } as unknown as JsonValue);
+    const firstReceipt: GenerationProjectMutationReceipt = {
+      schemaVersion: 1,
+      actionId: "reconcile-action-one",
+      jobId: job.id,
+      idempotencyKey: "conflicting-reconcile-key",
+      kind: "create-linked-clip",
+      semanticPayload,
+      baseRevision: revision(gitReceipt, current),
+      appliedAt: 1_000,
+    };
+    const secondReceipt = { ...firstReceipt, actionId: "reconcile-action-two" };
+    await seedMedia(fixture, withGenerationReceipt(imageItem("reconcile-holder-one"), "conflicting-reconcile-key", firstReceipt));
+    await seedMedia(fixture, withGenerationReceipt(imageItem("reconcile-holder-two"), "conflicting-reconcile-key", secondReceipt));
+
+    const reconciled = await fixture.adapter.reconcile({ job, output, idempotencyKey: "conflicting-reconcile-key" });
+
+    assert.equal(reconciled.outcome, "unknown");
+    assert.equal(reconciled.error?.code, "generation-idempotency-conflict");
+    assert.equal(reconciled.error?.retryable, false);
+  });
+
   it("retries a project action after a browser save conflict and preserves both changes", async () => {
     const fixture = await adapterFixture();
     const rawOutput = await cacheOutput(fixture);
@@ -567,6 +643,104 @@ describe("GenerationProjectActionAdapter", () => {
         retryable: true,
       },
     });
+  });
+
+  it("waits for an in-flight writer rollback before accepting a replay receipt", async () => {
+    const fixture = await adapterFixture();
+    const rawOutput = await cacheOutput(fixture);
+    const job = generationJob(fixture.project.id, { kind: "new-asset", placeholderMediaId: "rollback-output" }, {
+      context: { projectId: fixture.project.id, entryContext: { kind: "unlinked-range", rangeId: "range", startTime: 0, endTime: 2 }, mode: route.requestedMode, placementPolicy: "create-linked-clip", prompt: "generate", references: [], timing: { source: "timeline", startSeconds: 0, endSeconds: 2, durationSeconds: 2 } },
+    });
+    const ids = await fixture.adapter.finalize({ job, output: rawOutput, idempotencyKey: "rollback-finalize" });
+    const output = { ...rawOutput, ...ids };
+    const current = await fixture.store.loadProject(fixture.project.id);
+    const gitReceipt = await fixture.gitStore.readConfirmedReceipt(fixture.project.id);
+    if (!current || !gitReceipt) throw new Error("fixture-project-missing");
+    const semanticPayload = canonicalizeGenerationProjectActionPayload({
+      jobId: job.id,
+      projectId: job.projectId,
+      policy: job.context.placementPolicy,
+      entryContext: job.context.entryContext,
+      timing: job.context.timing ?? null,
+      output,
+    } as unknown as JsonValue);
+    const transientReceipt: GenerationProjectMutationReceipt = {
+      schemaVersion: 1,
+      actionId: `${job.id}-create-linked-clip`,
+      jobId: job.id,
+      idempotencyKey: "rollback-placement",
+      kind: "create-linked-clip",
+      semanticPayload,
+      baseRevision: revision(gitReceipt, current),
+      appliedAt: 7_000,
+    };
+    const transientProject: Project = {
+      ...current,
+      modifiedAt: current.modifiedAt + 1,
+      mediaLibrary: {
+        ...current.mediaLibrary,
+        items: current.mediaLibrary.items.map((item) => item.id === ids.versionId
+          ? withGenerationReceipt(item, "rollback-placement", transientReceipt)
+          : item),
+      },
+    };
+    const writerPaused = deferred<void>();
+    const allowRollback = deferred<void>();
+    const atomicReadAttempted = deferred<void>();
+    const originalWithProjectTransaction = fixture.gitStore.withProjectTransaction.bind(fixture.gitStore) as <T>(
+      projectId: string,
+      operation: (transaction: GitProjectTransaction) => Promise<T>,
+    ) => Promise<T>;
+    let unlockedTransactionCalls = 0;
+    let writerInjected = false;
+    let writerStarting = false;
+    let writerIsPaused = false;
+    let writerPromise: Promise<unknown> | undefined;
+    fixture.gitStore.withProjectTransaction = async <T>(
+      projectId: string,
+      operation: (transaction: GitProjectTransaction) => Promise<T>,
+    ): Promise<T> => {
+      const isWriterTransaction = writerStarting;
+      if (writerIsPaused && !isWriterTransaction) atomicReadAttempted.resolve(undefined);
+      if (!isWriterTransaction) unlockedTransactionCalls += 1;
+      const result = await originalWithProjectTransaction(projectId, operation);
+      if (!isWriterTransaction && !writerInjected && unlockedTransactionCalls === 2) {
+        writerInjected = true;
+        writerStarting = true;
+        writerPromise = executeSaveTransaction(fixture.store, fixture.gitStore, {
+          projectId,
+          baseRevision: revision(gitReceipt, current),
+          project: transientProject,
+          requiredMediaManifest: buildRequiredMediaManifest(transientProject),
+        }, {
+          beforeCommit: async () => {
+            writerIsPaused = true;
+            writerPaused.resolve(undefined);
+            await allowRollback.promise;
+            throw new Error("forced writer rollback");
+          },
+        });
+        writerStarting = false;
+        await writerPaused.promise;
+      }
+      return result;
+    };
+
+    const placementPromise = fixture.adapter.place({ job, output, idempotencyKey: "rollback-placement" });
+    const readMode = await Promise.race([
+      atomicReadAttempted.promise.then(() => "atomic" as const),
+      placementPromise.then(() => "returned-before-rollback" as const),
+    ]);
+    allowRollback.resolve(undefined);
+    if (!writerPromise) throw new Error("writer-did-not-start");
+    await assert.rejects(writerPromise, /forced writer rollback/);
+    writerIsPaused = false;
+    const placed = await placementPromise;
+    const reconciled = await fixture.adapter.reconcile({ job, output, idempotencyKey: "rollback-placement" });
+
+    assert.equal(readMode, "atomic");
+    assert.deepEqual(placed, { outcome: "applied" });
+    assert.deepEqual(reconciled, { outcome: "applied" });
   });
 
   it("reconciles a committed placement as applied after its response is lost", async () => {
@@ -639,6 +813,37 @@ describe("GenerationProjectActionAdapter", () => {
     assert.equal(undone.status, "applied");
     assert.equal(redone.operation, "redo");
     assert.equal(redone.status, "applied");
+  });
+
+  it("keeps a replay envelope bound to the receipt-introducing revision after unrelated saves", async () => {
+    const fixture = await adapterFixture();
+    const rawOutput = await cacheOutput(fixture);
+    const job = generationJob(fixture.project.id, { kind: "new-asset", placeholderMediaId: "replay-envelope-output" });
+    const finalized = await fixture.adapter.finalize({ job, output: rawOutput, idempotencyKey: "replay-envelope-key" });
+    const originalEnvelope = finalized.projectAction;
+    if (!originalEnvelope) throw new Error("action-envelope-missing");
+    const afterUnrelatedSave = await saveProjectMutation(fixture, (project) => ({ ...project, name: "Preserve after replay" }));
+    const afterUnrelatedReceipt = await fixture.gitStore.readConfirmedReceipt(fixture.project.id);
+    if (!afterUnrelatedReceipt) throw new Error("fixture-revision-missing");
+
+    const replayed = await fixture.adapter.finalize({ job, output: rawOutput, idempotencyKey: "replay-envelope-key" });
+    const replayEnvelope = replayed.projectAction;
+    if (!replayEnvelope) throw new Error("action-envelope-missing");
+
+    await assert.rejects(
+      fixture.adapter.applyProjectAction({
+        projectId: fixture.project.id,
+        actionId: replayEnvelope.receipt.actionId,
+        operation: "undo",
+        expectedRevision: revision(afterUnrelatedReceipt, afterUnrelatedSave),
+        envelope: replayEnvelope,
+      }),
+      (cause: unknown) => cause instanceof GenerationProjectActionError && cause.code === "generation-project-action-conflict",
+    );
+    const afterRejectedUndo = await fixture.store.loadProject(fixture.project.id);
+    assert.deepEqual(replayEnvelope.appliedRevision, originalEnvelope.appliedRevision);
+    assert.equal(afterRejectedUndo?.name, "Preserve after replay");
+    assert.equal(afterRejectedUndo?.mediaLibrary.items.some((item) => item.id === "replay-envelope-output"), true);
   });
 
   it("rejects undo and redo before they can overwrite unrelated intervening saves", async () => {
