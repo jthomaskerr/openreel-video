@@ -386,6 +386,30 @@ export class GenerationReferenceRecoveryScopeError extends Error {
   }
 }
 
+export class GenerationReferenceRecoveryValidationError extends Error {
+  readonly code = "generation-reference-required";
+  readonly field: string;
+  readonly referenceId: string;
+  readonly origin: GenerationReferenceOrigin | undefined;
+  readonly origins: readonly GenerationReferenceOrigin[];
+  readonly retryable = false;
+  readonly state: GenerationReferenceRecoveryState;
+
+  constructor(
+    reference: Pick<GenerationReferenceRecoveryReference, "id" | "origins">,
+    state: GenerationReferenceRecoveryState,
+    origin?: GenerationReferenceOrigin,
+  ) {
+    super("generation-reference-required");
+    this.name = "GenerationReferenceRecoveryValidationError";
+    this.field = `references.${reference.id}.active`;
+    this.referenceId = reference.id;
+    this.origin = origin ?? reference.origins[0];
+    this.origins = reference.origins;
+    this.state = state;
+  }
+}
+
 export class GenerationReferenceRecoveryError extends Error {
   readonly code: "generation-reference-release-failed" | "generation-reference-release-cleanup-failed";
   readonly field: string;
@@ -437,16 +461,22 @@ export function validateGenerationReferenceMinimum<T extends {
 }>(
   references: readonly T[],
   minimum: number | undefined,
+  affected: {
+    reference: Pick<GenerationReferenceRecoveryReference, "id" | "origins">;
+    state: GenerationReferenceRecoveryState;
+  },
   requiredOrigins: readonly GenerationReferenceOrigin[] = [],
 ): void {
   const available = references.filter((reference) =>
     reference.active && reference.state === "active" && reference.preparationStatus === "ready");
-  if (
-    (minimum !== undefined && available.length < minimum)
-    || requiredOrigins.some((origin) =>
-      !available.some((reference) => reference.origins.includes(origin)))
-  ) {
-    throw new Error("generation-reference-required");
+  const missingOrigin = requiredOrigins.find((origin) =>
+    !available.some((reference) => reference.origins.includes(origin)));
+  if ((minimum !== undefined && available.length < minimum) || missingOrigin) {
+    throw new GenerationReferenceRecoveryValidationError(
+      affected.reference,
+      affected.state,
+      missingOrigin,
+    );
   }
 }
 
@@ -526,6 +556,7 @@ export async function applyGenerationReferenceCommand(
     validateGenerationReferenceMinimum(
       references,
       ports.referenceMinimum,
+      { reference, state },
       requiredReferenceOrigins(state.references),
     );
     if (reference.uploadLeaseId && !leaseIsReferenced(references, reference.uploadLeaseId)) {
@@ -544,6 +575,7 @@ export async function applyGenerationReferenceCommand(
     validateGenerationReferenceMinimum(
       references,
       ports.referenceMinimum,
+      { reference, state },
       requiredReferenceOrigins(state.references),
     );
     return withProviderReferences(references, state.drafts, state);

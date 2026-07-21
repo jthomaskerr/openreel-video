@@ -675,7 +675,14 @@ describe("generation submission draft helpers", () => {
           releaseUploadLease,
           referenceMinimum: 1,
         },
-      )).rejects.toThrow("generation-reference-required");
+      )).rejects.toMatchObject({
+        name: "GenerationReferenceRecoveryValidationError",
+        code: "generation-reference-required",
+        field: "references.source.active",
+        referenceId: "source",
+        origin: "source",
+        state,
+      });
       expect(releaseUploadLease).not.toHaveBeenCalled();
     },
   );
