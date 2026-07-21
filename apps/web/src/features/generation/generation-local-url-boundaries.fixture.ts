@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ActionResult, MediaItem, Project } from "@openreel/core";
 import { finalizeGeneratedAsset, type GeneratedAssetFinalizationStore } from "./finalize-generated-asset";
 
-const project = (item: MediaItem): Project => ({ id: "project", name: "fixture", createdAt: 1, modifiedAt: 1, settings: { width: 1, height: 1, frameRate: 30, sampleRate: 48_000, channels: 2 }, mediaLibrary: { items: [item] }, timeline: { tracks: [], duration: 0, markers: [], subtitles: [] } });
+const project = (item: MediaItem): Project => ({ id: "project", name: "fixture", createdAt: 1, modifiedAt: 1, settings: { width: 1, height: 1, frameRate: 30, sampleRate: 48_000, channels: 2 }, mediaLibrary: { items: [item] }, generatedImageDefinitions: [], timeline: { tracks: [], duration: 0, markers: [], subtitles: [] } });
 const item = (thumbnailUrl: string): MediaItem => ({ id: "placeholder", name: "placeholder.png", type: "image", fileHandle: null, blob: null, metadata: { duration: 0, width: 10, height: 10, frameRate: 0, codec: "", sampleRate: 0, channels: 0, fileSize: 1 }, thumbnailUrl, assetGroupId: undefined });
 const localPrefixes = ["blob:", "local:", "file:"] as const;
 

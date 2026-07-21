@@ -51,6 +51,14 @@ function project(
   };
 }
 
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object") {
+    Object.freeze(value);
+    for (const nested of Object.values(value)) deepFreeze(nested);
+  }
+  return value;
+}
+
 function ok(actionId: string, replayed = false): ActionResult & { replayed?: boolean } {
   return {
     success: true,
@@ -60,6 +68,26 @@ function ok(actionId: string, replayed = false): ActionResult & { replayed?: boo
 }
 
 describe("finalizeGeneratedAsset", () => {
+  it("reconciles finalization by replacing an immutable project snapshot", async () => {
+    const originalProject = deepFreeze(project());
+    const store: GeneratedAssetFinalizationStore = {
+      project: originalProject,
+      finalizePlaceholder: vi.fn(async () => ok("finalize-action")),
+    };
+
+    const result = await finalizeGeneratedAsset(store, {
+      target: { kind: "new-asset", placeholderMediaId: "placeholder" },
+      item: { ...media("provider-output"), name: "Generated" },
+      blob: new Blob(["generated"]),
+      jobId: "job-immutable-project",
+    });
+
+    expect(result.success).toBe(true);
+    expect(store.project).not.toBe(originalProject);
+    expect(originalProject.mediaLibrary.items[0]?.name).toBe("placeholder.png");
+    expect(store.project.mediaLibrary.items[0]?.name).toBe("Generated");
+  });
+
   it("finalizes a new asset placeholder and appends one shot attempt with stable keys", async () => {
     const store: GeneratedAssetFinalizationStore = {
       project: project(),

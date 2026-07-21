@@ -1,7 +1,7 @@
 import type { ActionResult, MediaItem, Project } from "@openreel/core";
 
 export interface GeneratedAssetFinalizationStore {
-  readonly project: Project;
+  project: Project;
   /** Replace a placeholder in place, retaining its media ID. */
   finalizePlaceholder?: (input: {
     placeholderMediaId: string;
@@ -109,7 +109,7 @@ export async function finalizeGeneratedAsset(
   if (!finalizeResult.success) {
     return fail(mediaId, finalizeResult.error);
   }
-  reconcileProjectFinalization(store.project, input);
+  store.project = reconcileProjectFinalization(store.project, input);
 
   const replayed = isReplay(finalizeResult);
   if (!hasShotAttempt(input)) {
@@ -148,60 +148,68 @@ export async function finalizeGeneratedAsset(
   };
 }
 
-function reconcileProjectFinalization(project: Project, input: FinalizeGeneratedAssetInput): void {
+function reconcileProjectFinalization(project: Project, input: FinalizeGeneratedAssetInput): Project {
   const mediaId = input.target.placeholderMediaId;
   const mediaItems = project.mediaLibrary.items;
   const placeholderIndex = mediaItems.findIndex((item) => item.id === mediaId);
   if (placeholderIndex < 0) {
-    return;
+    return project;
   }
 
   const definition = findDefinition(project, input);
+  const sourceMediaId = input.target.kind === "new-version"
+    ? input.target.sourceMediaId
+    : undefined;
   const assetGroupId = input.target.kind === "new-version"
-    ? mediaItems.find((item) => item.id === input.target.sourceMediaId)?.assetGroupId
+    ? mediaItems.find((item) => item.id === sourceMediaId)?.assetGroupId
       ?? definition?.assetGroupId
       ?? mediaItems[placeholderIndex]?.assetGroupId
     : definition?.assetGroupId ?? mediaItems[placeholderIndex]?.assetGroupId;
 
-  if (assetGroupId) {
-    for (const item of mediaItems) {
-      if (item.assetGroupId === assetGroupId) {
-        item.isCurrent = item.id === mediaId;
-      }
-    }
-  }
-
-  mediaItems[placeholderIndex] = {
-    ...mediaItems[placeholderIndex],
-    ...input.item,
-    id: mediaId,
-    assetGroupId,
-    isCurrent: true,
-    ...(input.item.generationMeta ? { generationMeta: input.item.generationMeta } : {}),
-  };
-
-  if (!definition) {
-    return;
-  }
-
-  definition.currentMediaVersionId = mediaId;
-  if (!definition.sourceMediaVersionId) {
-    definition.sourceMediaVersionId = input.target.kind === "new-version"
-      ? input.target.sourceMediaId
-      : mediaId;
-  }
   const attemptId = extractAttemptId(input);
-  if (attemptId && !definition.attemptIds.includes(attemptId)) {
-    definition.attemptIds = [...definition.attemptIds, attemptId];
-  }
+  const nextItems = mediaItems.map((item, index) => {
+    if (index === placeholderIndex) {
+      return {
+        ...item,
+        ...input.item,
+        id: mediaId,
+        assetGroupId,
+        isCurrent: true,
+        ...(input.item.generationMeta ? { generationMeta: input.item.generationMeta } : {}),
+      };
+    }
+    return assetGroupId && item.assetGroupId === assetGroupId
+      ? { ...item, isCurrent: false }
+      : item;
+  });
+  const nextDefinitions = definition
+    ? project.generatedImageDefinitions.map((candidate) => candidate === definition
+      ? {
+          ...candidate,
+          currentMediaVersionId: mediaId,
+          sourceMediaVersionId: candidate.sourceMediaVersionId
+            ?? (input.target.kind === "new-version" ? input.target.sourceMediaId : mediaId),
+          attemptIds: attemptId && !candidate.attemptIds.includes(attemptId)
+            ? [...candidate.attemptIds, attemptId]
+            : candidate.attemptIds,
+        }
+      : candidate)
+    : project.generatedImageDefinitions;
+
+  return {
+    ...project,
+    mediaLibrary: { ...project.mediaLibrary, items: nextItems },
+    generatedImageDefinitions: nextDefinitions,
+  };
 }
 
 function findDefinition(project: Project, input: FinalizeGeneratedAssetInput) {
   if (input.target.kind === "new-version") {
+    const sourceMediaId = input.target.sourceMediaId;
     return project.generatedImageDefinitions.find((definition) =>
-      definition.currentMediaVersionId === input.target.sourceMediaId
-      || definition.sourceMediaVersionId === input.target.sourceMediaId
-      || definition.assetGroupId === project.mediaLibrary.items.find((item) => item.id === input.target.sourceMediaId)?.assetGroupId,
+      definition.currentMediaVersionId === sourceMediaId
+      || definition.sourceMediaVersionId === sourceMediaId
+      || definition.assetGroupId === project.mediaLibrary.items.find((item) => item.id === sourceMediaId)?.assetGroupId,
     );
   }
   return project.generatedImageDefinitions.find((definition) =>

@@ -207,6 +207,7 @@ function mockConfirmedBackendCreate() {
       projectBlobSha: "c".repeat(40),
       mediaManifestDigest: "sha256:test",
       lfsPayloads: [],
+      commitDueAt: null,
     });
     return project;
   });
@@ -300,6 +301,7 @@ describe("ProjectStore", () => {
             commitSha: "a".repeat(40), treeSha: "b".repeat(40),
             projectBlobSha: "c".repeat(40), mediaManifestDigest: "sha256:test",
             lfsPayloads: [],
+            commitDueAt: null,
           });
           return backendProject;
         });
@@ -417,6 +419,7 @@ describe("ProjectStore", () => {
         mediaManifestDigest: "sha256:test",
         lfsPayloads: [],
         committed: true,
+        commitDueAt: null,
       });
 
       useProjectStore.getState().loadProject({ ...existing, id: "backend-project" });

@@ -8,41 +8,54 @@ import {
   assertRecoveryTransition,
 } from "./state-machine";
 
+const routing = {
+  providerInstanceId: "wavespeed-prod",
+  providerModelId: "m",
+  requestedMode: "text-to-image",
+  providerSchemaId: "provider-schema",
+  providerEndpointId: "generate-image",
+  providerSchemaVersion: "s",
+} as const;
+
 const baseJob = (status: GenerationJob["status"] = "failed"): GenerationJob => ({
   schemaVersion: 2,
+  contractVersion: 2,
   id: "job-1",
+  projectId: "p",
   provider: "wavespeed",
+  providerInstanceId: routing.providerInstanceId,
   modelId: "m",
   modelSchemaVersion: "s",
+  routing,
+  providerJobId: "provider-1",
   status,
+  attempt: 1,
+  target: { kind: "new-asset", placeholderMediaId: "pm" },
   createdAt: 1,
   updatedAt: 1,
   context: {
     projectId: "p",
-    target: { kind: "new-asset", placeholderMediaId: "pm" },
+    entryContext: { kind: "new-asset" },
+    mode: "text-to-image",
+    prompt: "x",
     references: [
       {
+        id: "ref-1",
+        order: 1,
         mediaId: "ref-1",
         origins: ["source"],
-        remoteInput: { kind: "upload-token", value: "token-1" },
+        state: "active",
+        preparationStatus: "ready",
+        errorHistory: [],
+        uploadLeaseId: "lease-1",
       },
     ],
-    audio: {
-      sourceMediaId: "audio-1",
-      sourceVersionId: "version-1",
-      sourceClipId: "clip-1",
-      projectStartSeconds: 0,
-      projectEndSeconds: 1,
-      sourceStartSeconds: 0,
-      sourceEndSeconds: 1,
-      mimeType: "audio/mpeg",
-      sha256: "hash",
-      remoteInput: { kind: "upload-token", value: "audio-token" },
-    },
+    audioAssetId: "audio-1",
+    audioRange: { startTime: 0, endTime: 1 },
     placementPolicy: "none",
   },
   providerInputs: { prompt: "x" },
-  attempts: [{ attemptNumber: 1, providerJobId: "provider-1", startedAt: 1 }],
+  attempts: [{ attemptNumber: 1, routing, providerJobId: "provider-1", startedAt: 1 }],
   checkpoints: {},
 });
 
@@ -61,8 +74,8 @@ const placementCandidate = (): GenerationJob => {
 const replaySafePlacementFailure = (): GenerationJob => {
   const failure = { code: "generation-placement-failed", message: "placement was not applied", retryable: true };
   return {
-    ...baseJob("succeeded"),
-    context: { ...baseJob("succeeded").context, placementPolicy: "create-linked-clip" },
+    ...baseJob("needs-attention"),
+    context: { ...baseJob("needs-attention").context, placementPolicy: "create-linked-clip" },
     output: { mediaId: "media-1", versionId: "version-1", mimeType: "video/mp4", byteLength: 4, sha256: "hash", width: 16, height: 9, durationSeconds: 1 },
     checkpoints: { "placement-applied": { status: "failed", timestamp: 8, error: failure } },
     placement: { policy: "create-linked-clip", status: "failed", error: failure, replaySafe: true },
@@ -71,7 +84,7 @@ const replaySafePlacementFailure = (): GenerationJob => {
 
 describe("generation recovery state machine", () => {
   it("enumerates every allowed transition and rejects invalid ones", () => {
-    expect(allowedRecoveryActions("completed")).toEqual(["regenerate", "variation", "retry-finalization", "retry-placement"]);
+    expect(allowedRecoveryActions("completed")).toEqual(["variation", "retry-finalization", "retry-placement"]);
     expect(allowedRecoveryActions("needs-attention")).toContain("reconcile-placement");
     expect(allowedRecoveryActionsForJob(placementCandidate())).toContain("reconcile-placement");
     expect(allowedRecoveryActionsForJob(baseJob("needs-attention"))).not.toContain("reconcile-placement");
@@ -93,8 +106,8 @@ describe("generation recovery state machine", () => {
     const result = await controller.regenerate(baseJob("failed"));
 
     expect(resolveContext).toHaveBeenCalledTimes(1);
-    expect(resolveContext).toHaveBeenCalledWith(expect.objectContaining({ job: expect.objectContaining({ id: "job-1", attempts: [{ attemptNumber: 1, providerJobId: "provider-1", startedAt: 1 }] }) }));
-    expect(result.status).toBe("preparing");
+    expect(resolveContext).toHaveBeenCalledWith(expect.objectContaining({ job: expect.objectContaining({ id: "job-1", attempts: [{ attemptNumber: 1, routing, providerJobId: "provider-1", startedAt: 1 }] }) }));
+    expect(result.status).toBe("queued");
     expect(result.context.projectId).toBe("live-project");
     expect(result.attempts).toEqual(baseJob().attempts);
   });
@@ -134,9 +147,9 @@ describe("generation recovery state machine", () => {
     const placed = await controller.retryPlacement(replaySafePlacementFailure());
 
     expect(submit).not.toHaveBeenCalled();
-    expect(finalized.status).toBe("running");
+    expect(finalized.status).toBe("finalizing");
     expect(finalized.checkpoints["placeholder-finalized"]).toEqual({ status: "pending" });
-    expect(placed.status).toBe("running");
+    expect(placed.status).toBe("finalizing");
     expect(placed.checkpoints["placement-applied"]).toEqual({ status: "pending" });
   });
 
@@ -163,7 +176,8 @@ describe("generation recovery state machine", () => {
     expect(cancelProvider).toHaveBeenCalledTimes(1);
     expect(cancelProvider).toHaveBeenCalledWith({ provider: "wavespeed", providerJobId: "provider-1" });
     expect(cleanupUploads).toHaveBeenCalledTimes(1);
-    expect(cleanupUploads).toHaveBeenCalledWith(expect.objectContaining({ status: "canceling" }));
+    expect(cleanupUploads).toHaveBeenCalledWith(expect.objectContaining({ status: "canceled" }));
+    expect(save).toHaveBeenCalledTimes(1);
     expect(result.status).toBe("canceled");
   });
 

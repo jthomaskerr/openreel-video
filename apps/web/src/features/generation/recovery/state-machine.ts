@@ -25,8 +25,8 @@ export type RecoveryTransition = {
 const recoveryTransitions: RecoveryTransition[] = [
   {
     action: "regenerate",
-    from: ["completed", "failed", "canceled", "needs-attention"],
-    to: "preparing",
+    from: ["failed", "needs-attention"],
+    to: "queued",
     resolvesContext: true,
   },
   {
@@ -37,20 +37,20 @@ const recoveryTransitions: RecoveryTransition[] = [
   },
   {
     action: "retry-provider",
-    from: ["failed", "canceled"],
+    from: ["failed"],
     to: "queued",
     submitsProvider: true,
     incrementsAttempt: true,
   },
   {
     action: "retry-finalization",
-    from: ["completed", "failed"],
-    to: "running",
+    from: ["completed", "needs-attention"],
+    to: "finalizing",
   },
   {
     action: "retry-placement",
-    from: ["completed", "failed", "succeeded"],
-    to: "running",
+    from: ["completed", "needs-attention"],
+    to: "finalizing",
   },
   {
     action: "reconcile-placement",
@@ -59,8 +59,8 @@ const recoveryTransitions: RecoveryTransition[] = [
   },
   {
     action: "cancel",
-    from: ["preparing", "queued", "running"],
-    to: "canceling",
+    from: ["queued", "submitting", "running"],
+    to: "canceled",
     stopsPolling: true,
     cancelsProvider: true,
     cleansUploads: true,
@@ -80,7 +80,7 @@ export function isPlacementReconciliationCandidate(job: GenerationJob): boolean 
 }
 
 export function isPlacementRetryCandidate(job: GenerationJob): boolean {
-  return ["completed", "failed", "succeeded"].includes(job.status)
+  return ["completed", "needs-attention"].includes(job.status)
     && job.context.placementPolicy !== "none"
     && job.checkpoints["placement-applied"]?.status === "failed"
     && job.placement?.status === "failed"
@@ -127,7 +127,7 @@ export interface RecoveryPorts {
 const stableError = (code: string, cause?: unknown): GenerationError => ({
   code,
   retryable: true,
-  message: cause instanceof Error ? cause.message : undefined,
+  message: cause instanceof Error ? cause.message : code,
 });
 
 function nextAttemptNumber(job: GenerationJob): number {
@@ -147,9 +147,11 @@ function copyRecordedJob(job: GenerationJob): GenerationJob {
       references: job.context.references.map((reference) => ({
         ...reference,
         origins: [...reference.origins],
-        remoteInput: { ...reference.remoteInput },
+        errorHistory: reference.errorHistory.map((error) => ({ ...error })),
       })),
-      audio: job.context.audio ? { ...job.context.audio, remoteInput: { ...job.context.audio.remoteInput } } : undefined,
+      entryContext: { ...job.context.entryContext },
+      audioRange: job.context.audioRange ? { ...job.context.audioRange } : undefined,
+      timing: job.context.timing ? { ...job.context.timing } : undefined,
     },
   };
 }
@@ -173,7 +175,7 @@ export class GenerationRecoveryController {
 
     return this.ports.save({
       ...recorded,
-      status: "preparing",
+      status: "queued",
       error: undefined,
       updatedAt: this.ports.now(),
     });
@@ -207,6 +209,7 @@ export class GenerationRecoveryController {
           ...job.attempts,
           {
             attemptNumber,
+            routing: job.routing,
             providerJobId: result.providerJobId,
             startedAt,
           },
@@ -224,6 +227,7 @@ export class GenerationRecoveryController {
           ...job.attempts,
           {
             attemptNumber,
+            routing: job.routing,
             startedAt,
             endedAt,
             terminalError: error,
@@ -237,7 +241,7 @@ export class GenerationRecoveryController {
     assertRecoveryTransition(job, "retry-finalization");
     return this.ports.save({
       ...job,
-      status: "running",
+      status: "finalizing",
       error: undefined,
       updatedAt: this.ports.now(),
       checkpoints: {
@@ -251,7 +255,7 @@ export class GenerationRecoveryController {
     assertRecoveryTransition(job, "retry-placement");
     return this.ports.save({
       ...job,
-      status: "running",
+      status: "finalizing",
       error: undefined,
       updatedAt: this.ports.now(),
       checkpoints: {
@@ -273,9 +277,9 @@ export class GenerationRecoveryController {
     this.ports.stopPolling?.(job.id);
 
     const providerJobId = job.attempts.at(-1)?.providerJobId;
-    const canceling = await this.ports.save({
+    const canceled = await this.ports.save({
       ...job,
-      status: "canceling",
+      status: "canceled",
       updatedAt: this.ports.now(),
     });
 
@@ -285,11 +289,7 @@ export class GenerationRecoveryController {
       // Provider cancellation is best effort; the local cancel is authoritative.
     }
 
-    await this.ports.cleanupUploads?.(canceling);
-    return this.ports.save({
-      ...canceling,
-      status: "canceled",
-      updatedAt: this.ports.now(),
-    });
+    await this.ports.cleanupUploads?.(canceled);
+    return canceled;
   }
 }
