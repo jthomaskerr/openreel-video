@@ -88,20 +88,39 @@ describe("submitGeneration", () => {
     expect(p.cache.put).not.toHaveBeenCalled();
   });
 
-  it("rejects nested credential fields before provider submission", async () => {
+  it.each([
+    ["access_key", { access_key: "secret" }],
+    ["wavespeed_api_key", { wavespeed_api_key: "secret" }],
+    ["token", { token: "secret" }],
+  ])("rejects a reviewer-probed %s before any mutation", async (_name, nested) => {
     const p = ports();
 
     await expect(submitGeneration(draft({
       providerInputs: {
         prompt: "hello",
-        nested: { Authorization: "Bearer browser-secret" },
+        nested,
       },
     }), p)).rejects.toMatchObject({
       code: "invalid-draft",
-      field: "providerInputs.nested.Authorization",
+      field: expect.stringContaining("providerInputs.nested."),
     });
     expect(p.mutations.createPlaceholder).not.toHaveBeenCalled();
     expect(p.provider.submit).not.toHaveBeenCalled();
+  });
+
+  it("accepts benign pre-sanitizer names near credential terminology", async () => {
+    const providerInputs = {
+      prompt: "hello",
+      maxTokens: 512,
+      tokenCount: 12,
+      wavespeedApiKeyEnabled: false,
+      accessKeyframeId: "frame-1",
+    };
+    const p = ports();
+
+    await submitGeneration(draft({ providerInputs }), p);
+
+    expect(p.provider.submit).toHaveBeenCalledOnce();
   });
 
   it("rejects a requested-mode mismatch before placeholder, upload, or provider work", async () => {
@@ -227,7 +246,7 @@ describe("submitGeneration", () => {
     }));
 
     await expect(submitGeneration(draft({ references: failedPreparationReferences }), p))
-      .rejects.toMatchObject({ code: "invalid-draft", field: "references.0.status" });
+      .rejects.toMatchObject({ code: "generation-reference-required", field: "references.0.status" });
     expect(p.mutations.createPlaceholder).not.toHaveBeenCalled();
     expect(p.provider.submit).not.toHaveBeenCalled();
 
@@ -614,6 +633,9 @@ describe("submitGeneration", () => {
     ["google_api_key", { auth: { google_api_key: "secret" } }],
     ["accessKeySecret", { auth: { accessKeySecret: "secret" } }],
     ["AWS_SESSION_TOKEN", { auth: { AWS_SESSION_TOKEN: "secret" } }],
+    ["access_key", { auth: { access_key: "secret" } }],
+    ["wavespeed_api_key", { auth: { wavespeed_api_key: "secret" } }],
+    ["token", { auth: { token: "secret" } }],
   ])("rejects a sanitizer-introduced %s before provider submission", async (_name, inputs) => {
     const p = ports({
       sanitizer: { sanitize: vi.fn(() => ({ inputs })) },
@@ -629,6 +651,9 @@ describe("submitGeneration", () => {
   it("accepts benign sanitizer fields that merely contain credential words", async () => {
     const inputs = {
       accessKeyframeId: "frame-1",
+      maxTokens: 512,
+      tokenCount: 12,
+      wavespeedApiKeyEnabled: false,
       authorizationStatus: "approved",
       secretSceneDescription: "a hidden room",
     };

@@ -3,7 +3,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import type { GenerationJob, GenerationRouteIdentity } from "@openreel/music-video-domain/generation";
+import { parseGenerationJob, type GenerationJob, type GenerationRouteIdentity } from "@openreel/music-video-domain/generation";
 import { FileGenerationJobRepository } from "./repository.js";
 import { GenerationOrchestrator, validateGenerationRequestBoundary, type GenerationFinalizerPort, type GenerationProviderPort } from "./index.js";
 import { parseGenerationReferencePreparation } from "../../../../web/src/features/generation/drafts/v2.js";
@@ -89,18 +89,15 @@ test("serialized web preparation acceptance matches the production orchestrator 
   }];
   const cases = [
     { id: "accepted", preparation: validPreparation, expected: true },
-    { id: "rejected", preparation: [{ ...validPreparation[0], active: "no" }], expected: false },
+    {
+      id: "rejected-inactive-provider-input-reference",
+      preparation: validPreparation,
+      providerInputs: { references: [{ ...validPreparation[0], active: false }] },
+      expected: false,
+    },
   ] as const;
 
   for (const boundaryCase of cases) {
-    let clientAccepted = true;
-    try {
-      parseGenerationReferencePreparation(JSON.parse(JSON.stringify(boundaryCase.preparation)));
-    } catch {
-      clientAccepted = false;
-    }
-    assert.equal(clientAccepted, boundaryCase.expected);
-
     const directory = await mkdtemp(join(tmpdir(), "generation-reference-boundary-"));
     const log: string[] = [];
     const repository = new FileGenerationJobRepository(directory);
@@ -118,7 +115,17 @@ test("serialized web preparation acceptance matches the production orchestrator 
     const serialized = JSON.stringify({
       ...inputJob,
       context: { ...inputJob.context, references: boundaryCase.preparation },
+      providerInputs: "providerInputs" in boundaryCase ? boundaryCase.providerInputs : inputJob.providerInputs,
     });
+    let clientAccepted = true;
+    try {
+      parseGenerationReferencePreparation(JSON.parse(JSON.stringify(boundaryCase.preparation)));
+      parseGenerationJob(JSON.parse(serialized));
+    } catch {
+      clientAccepted = false;
+    }
+    assert.equal(clientAccepted, boundaryCase.expected);
+
     let orchestratorAccepted = true;
     try {
       await orchestrator.submit({

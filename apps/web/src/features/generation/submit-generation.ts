@@ -261,6 +261,13 @@ function validateDraft(draft: GenerationDraft): void {
       throw new GenerationSubmissionError("invalid-draft", "Reference media is required", `references.${index}.mediaId`);
     }
     const status = reference.status ?? "active";
+    if (status !== "active" && reference.origins?.includes("source")) {
+      throw new GenerationSubmissionError(
+        "generation-reference-required",
+        reference.reason ?? "Required source reference must be active and ready",
+        `references.${index}.status`,
+      );
+    }
     if (status === "overflow" && !draft.referenceOverflowAcknowledged) {
       throw new GenerationSubmissionError(
         "invalid-draft",

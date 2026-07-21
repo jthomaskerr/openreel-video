@@ -632,6 +632,54 @@ describe("generation submission draft helpers", () => {
     expect(releaseUploadLease).not.toHaveBeenCalled();
   });
 
+  it.each(["remove", "deactivate"] as const)(
+    "blocks %s of a required source when an active user reference still satisfies the numeric minimum",
+    async (action) => {
+      const state = createGenerationReferenceRecoveryState({
+        projectId: "p1",
+        jobId: "j1",
+        references: [
+          {
+            id: "source",
+            order: 1,
+            mediaId: "source-media",
+            origins: ["source"],
+            state: "active",
+            preparationStatus: "ready",
+            errorHistory: [],
+            uploadLeaseId: "source-lease",
+          },
+          {
+            id: "user",
+            order: 2,
+            mediaId: "user-media",
+            origins: ["user"],
+            state: "active",
+            preparationStatus: "ready",
+            errorHistory: [],
+            uploadLeaseId: "user-lease",
+          },
+        ],
+        drafts: [
+          { id: "source", mediaId: "source-media" },
+          { id: "user", mediaId: "user-media" },
+        ],
+      });
+      const releaseUploadLease = vi.fn(async () => {});
+
+      await expect(applyGenerationReferenceCommand(
+        state,
+        { action, projectId: "p1", jobId: "j1", referenceId: "source" },
+        {
+          retryReference: vi.fn(async () => ({ tokenId: "unused" })),
+          releaseUploadLease,
+          referenceMinimum: 1,
+        },
+      )).rejects.toThrow("generation-reference-required");
+      expect(releaseUploadLease).not.toHaveBeenCalled();
+    },
+  );
+
   it("removes an optional reference and releases only its unreferenced lease", async () => {
     const state = createGenerationReferenceRecoveryState({
       projectId: "p1",

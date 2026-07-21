@@ -126,6 +126,17 @@ const PROVIDER_SECRET_FIELD_NAMES = new Set([
   "xgoogapikey",
 ]);
 
+const PROVIDER_SECRET_FIELD_SUFFIXES = [
+  "accesskey",
+  "apikey",
+  "authorization",
+  "credential",
+  "credentials",
+  "password",
+  "secret",
+  "token",
+] as const;
+
 export class ProviderNeutralInputError extends TypeError {
   constructor(readonly path: string, reason: string) {
     super(`${reason} at ${path}`);
@@ -149,7 +160,9 @@ function isTransientTransportFieldName(key: string): boolean {
 }
 
 function isProviderSecretFieldName(key: string): boolean {
-  return PROVIDER_SECRET_FIELD_NAMES.has(key.replace(/[^a-z0-9]/gi, "").toLowerCase());
+  const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return PROVIDER_SECRET_FIELD_NAMES.has(normalized)
+    || PROVIDER_SECRET_FIELD_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
 }
 
 function normalizeProviderNeutralValue(
@@ -410,11 +423,29 @@ export function parseGenerationReferencePreparation(value: unknown): GenerationR
   return generationReferenceCollectionSchema.parse(value);
 }
 
-export function validateGenerationReferenceMinimum<T extends { active: boolean }>(
+function requiredReferenceOrigins(
+  references: readonly GenerationReferenceRecoveryReference[],
+): readonly GenerationReferenceOrigin[] {
+  return references.some((reference) => reference.origins.includes("source")) ? ["source"] : [];
+}
+
+export function validateGenerationReferenceMinimum<T extends {
+  active: boolean;
+  origins: readonly GenerationReferenceOrigin[];
+  state: "active" | "failed";
+  preparationStatus: "preparing" | "ready" | "failed";
+}>(
   references: readonly T[],
   minimum: number | undefined,
+  requiredOrigins: readonly GenerationReferenceOrigin[] = [],
 ): void {
-  if (minimum !== undefined && references.filter((reference) => reference.active).length < minimum) {
+  const available = references.filter((reference) =>
+    reference.active && reference.state === "active" && reference.preparationStatus === "ready");
+  if (
+    (minimum !== undefined && available.length < minimum)
+    || requiredOrigins.some((origin) =>
+      !available.some((reference) => reference.origins.includes(origin)))
+  ) {
     throw new Error("generation-reference-required");
   }
 }
@@ -492,7 +523,11 @@ export async function applyGenerationReferenceCommand(
 
   if (command.action === "remove") {
     const references = state.references.filter((candidate) => candidate.id !== command.referenceId);
-    validateGenerationReferenceMinimum(references, ports.referenceMinimum);
+    validateGenerationReferenceMinimum(
+      references,
+      ports.referenceMinimum,
+      requiredReferenceOrigins(state.references),
+    );
     if (reference.uploadLeaseId && !leaseIsReferenced(references, reference.uploadLeaseId)) {
       await ports.releaseUploadLease({ tokenId: reference.uploadLeaseId });
     }
@@ -506,7 +541,11 @@ export async function applyGenerationReferenceCommand(
   if (command.action === "deactivate") {
     const references = state.references.map((candidate) =>
       candidate.id === command.referenceId ? { ...candidate, active: false } : candidate);
-    validateGenerationReferenceMinimum(references, ports.referenceMinimum);
+    validateGenerationReferenceMinimum(
+      references,
+      ports.referenceMinimum,
+      requiredReferenceOrigins(state.references),
+    );
     return withProviderReferences(references, state.drafts, state);
   }
 
