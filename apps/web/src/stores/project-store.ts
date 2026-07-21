@@ -58,6 +58,7 @@ import {
   initializeAutoSave,
   stopAutoSave,
   type AutoSaveMetadata,
+  type AutoSaveSavedEvent,
 } from "../services/auto-save";
 import { useEngineStore } from "./engine-store";
 import { getMediaBridge, initializeMediaBridge } from "../bridges/media-bridge";
@@ -267,8 +268,14 @@ function installProjectWithoutPersistence(install: () => void): void {
 function ensureAutoSaveBindings(getProjectState: () => ProjectState): void {
   if (autoSaveBindingsInitialized) return;
 
-  const pushCurrentProjectToBackend = () => {
+  const pushCurrentProjectToBackend = (event?: unknown) => {
+    const saved = event as Partial<AutoSaveSavedEvent> | undefined;
+    if (!saved || typeof saved.projectId !== "string") {
+      console.warn("[Persistence] ignored malformed autosave completion", { event });
+      return;
+    }
     const project = getProjectState().project;
+    if (project.id !== saved.projectId) return;
     backendSaveService.scheduleSave(project, 0);
   };
 

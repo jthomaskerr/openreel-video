@@ -63,6 +63,12 @@ type AutoSaveEventType =
   | "recoveryAvailable";
 type AutoSaveEventCallback = (data?: unknown) => void;
 
+export interface AutoSaveSavedEvent {
+  projectId: string;
+  timestamp: number;
+  slot: number;
+}
+
 export class AutoSaveManager {
   private config: AutoSaveConfig;
   private db: IDBDatabase | null = null;

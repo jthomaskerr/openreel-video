@@ -11,6 +11,7 @@ const {
   mockEffectsBridge,
   mockEffectsBridgeState,
   mockSaveMediaBlob,
+  mockAutoSaveListeners,
   mockTransitionBridge,
   mockTransitionBridgeState
         } = vi.hoisted(() => {
@@ -103,6 +104,7 @@ const {
         };
 
   return {
+    mockAutoSaveListeners: new Map<string, (data: unknown) => void>(),
     mockEffectsBridge: effectsBridge,
     mockEffectsBridgeState: { clipEffects },
     mockSaveMediaBlob: vi.fn().mockResolvedValue(undefined),
@@ -114,7 +116,9 @@ const {
 vi.mock("../services/auto-save", () => ({
   autoSaveManager: {
     isStarted: vi.fn().mockReturnValue(false),
-    on: vi.fn(),
+    on: vi.fn((event: string, callback: (data: unknown) => void) => {
+      mockAutoSaveListeners.set(event, callback);
+    }),
     start: vi.fn(),
     markDirty: vi.fn(),
     forceSave: vi.fn().mockResolvedValue(undefined),
@@ -359,6 +363,22 @@ describe("ProjectStore", () => {
         }),
         0,
       );
+    });
+
+    it("does not rebind a completed autosave to a different active project", async () => {
+      await useProjectStore.getState().initializeAutoSave();
+      const saved = mockAutoSaveListeners.get("saved");
+      expect(saved).toBeDefined();
+
+      const current = useProjectStore.getState().project;
+      useProjectStore.getState().loadProject({ ...current, id: "project-b" });
+      const scheduleSave = vi
+        .spyOn(backendSaveService, "scheduleSave")
+        .mockImplementation(() => undefined);
+
+      saved?.({ projectId: "project-a", timestamp: 100, slot: 0 });
+
+      expect(scheduleSave).not.toHaveBeenCalled();
     });
 
     it("quarantines a recovered UUID instead of reconciling or saving it", () => {
