@@ -1,12 +1,10 @@
-import { AlertCircle, Loader2, RotateCcw, Sparkles, X } from "lucide-react";
-import type React from "react";
+import * as React from "react";
+import { Loader2, RotateCcw, Sparkles, X } from "lucide-react";
 import type { ReferenceTarget } from "@openreel/core";
 import {
   openReferenceTarget,
   referencePlacementFromEvent,
 } from "../../../../../features/references/navigation";
-import * as React from "react";
-import { Loader2, RotateCcw, Sparkles, X } from "lucide-react";
 import type {
   GenerationError,
   GenerationJob,
@@ -22,7 +20,6 @@ import {
   allowedRecoveryActionsForJob,
   type RecoveryAction,
 } from "../../../../../features/generation/recovery/state-machine";
-import type { RecoveryAction } from "../../../../../features/generation/recovery/state-machine";
 import {
   resolveGenerationRecoveryPresentation,
   type GenerationRecoveryPresentationAction,
@@ -333,6 +330,7 @@ export function GenerateReferenceSection(props: {
             );
           })}
         </ul>
+      ) : null}
       {references.length ? (
         <ol className="mt-2 min-w-0 max-w-full space-y-2">
           {references.map((reference) => {
@@ -419,9 +417,10 @@ export function GenerateReferenceSection(props: {
             );
           })}
         </ol>
-      ) : (
+      ) : !props.references?.length ? (
         <p className="mt-2 text-sm text-text-secondary">No references selected.</p>
-      )}
+      ) : null}
+    </section>
   );
 }
 
@@ -731,7 +730,6 @@ export function GenerateJobSection(props: {
         ) : null}
       </div>
       {displayedError || recovery?.action ? (
-      {props.job?.error ? (
         <div
           role="alert"
           aria-label="Generation error"
@@ -748,17 +746,6 @@ export function GenerateJobSection(props: {
             </>
           ) : null}
           {displayedError?.field ? (
-            <p className="break-words text-[11px] text-red-200 [overflow-wrap:anywhere]">
-              Field: {displayedError.field}
-          <p className="break-words text-sm font-medium text-red-300 [overflow-wrap:anywhere]">
-            {props.job.error.code}
-          </p>
-          <p className="break-words text-sm text-red-300 [overflow-wrap:anywhere]">
-            {props.job.error.message}
-          </p>
-          {props.job.error.field ? (
-            <p className="break-words text-[11px] text-red-200 [overflow-wrap:anywhere]">
-              Field: {props.job.error.field}
             <p className="break-words text-[11px] text-red-200 [overflow-wrap:anywhere]">
               Field: {displayedError.field}
             </p>

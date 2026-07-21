@@ -3,14 +3,13 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MediaItem } from "@openreel/core";
 import GenerateTab from "./GenerateTab";
+import { GenerateReferenceSection } from "./GenerateTabSections";
 import { useGenerationDraftStore } from "../../../../../features/generation/drafts";
 import { readReferenceEditorRouteFromModalData } from "../../../../../features/references/navigation";
 import type {
   GenerationError,
   GenerationJob,
 } from "@openreel/music-video-domain/generation";
-import GenerateTab from "./GenerateTab";
-import { useGenerationDraftStore } from "../../../../../features/generation/drafts";
 import type {
   GenerationReferenceCommand,
   GenerationReferenceRecoveryState,
@@ -31,19 +30,6 @@ const isRecoveryAction = (value: string): value is RecoveryAction =>
     "reconcile-placement",
     "cancel",
   ].includes(value);
-
-const model = { id: "model-1", label: "WaveSpeed model", provider: "WaveSpeed" };
-const isRecoveryAction = (value: string): value is RecoveryAction =>
-  [
-    "regenerate",
-    "variation",
-    "retry-provider",
-    "retry-finalization",
-    "retry-placement",
-    "reconcile-placement",
-    "cancel",
-  ].includes(value);
-
 
 const mockedProjectStore = vi.hoisted(() => ({
   state: {
@@ -404,6 +390,46 @@ describe("GenerateTab", () => {
     mockedUIStore.state.referenceEditorInspectorRoute = null;
     mockedUIStore.state.sidebarTab = "inspector";
     mockedUIStore.clearSelection.mockReset();
+  });
+
+  it("renders selected and recovery references together in one accessible section", () => {
+    const onCommand = vi.fn();
+
+    render(
+      <GenerateReferenceSection
+        references={[
+          {
+            id: "selected-reference",
+            label: "Selected Maya image",
+            origins: ["prompt"],
+            target: { kind: "imported-image", mediaId: "maya-media" },
+          },
+        ]}
+        recovery={referenceRecovery}
+        labels={{ "ref-1": "Maya" }}
+        onCommand={onCommand}
+      />,
+    );
+
+    const heading = screen.getByRole("heading", { name: "References" });
+    const section = heading.closest("section");
+    expect(section).not.toBeNull();
+    const references = within(section!);
+    expect(references.getAllByRole("list")).toHaveLength(2);
+    expect(references.getByTestId("generate-reference-trigger-selected-reference")).toHaveTextContent(
+      "Selected Maya image",
+    );
+
+    const failedCard = references.getByTestId("generation-reference-card-ref-1");
+    expect(within(failedCard).getByRole("alert", { name: "Maya reference error" })).toHaveTextContent(
+      "reference-upload-failed message",
+    );
+    fireEvent.click(within(failedCard).getByRole("button", { name: "Retry Maya" }));
+    expect(onCommand).toHaveBeenCalledWith(
+      { action: "retry", projectId: "project-1", jobId: "job-1", referenceId: "ref-1" },
+      "Maya",
+    );
+    expect(references.queryByText("No references selected.")).toBeNull();
   });
 
   it("renders failed references individually and keeps a deactivated card with exact commands", () => {
@@ -1325,32 +1351,38 @@ describe("GenerateTab", () => {
   it("focuses the first invalid field and announces the error summary", () => {
     render(<GenerateTab projectId="project-1" models={[{ id: "m", label: "Model" }]} promptErrors={{ prompt: "Prompt is required" }} />);
     fireEvent.submit(screen.getByTestId("generate-tab"));
-    expect(screen.getByRole("alert")).toHaveTextContent("Fix the highlighted fields");
+    const summary = screen.getByRole("alert", { name: "Generation form errors" });
+    expect(within(summary).getByRole("button", { name: "Prompt is required." })).toBeTruthy();
     expect(screen.getByLabelText("Prompt")).toHaveFocus();
   });
 
   it("prevents duplicate submit and exposes recovery actions in the job card", () => {
     const onSubmit = vi.fn();
-    const onRetry = vi.fn();
+    const onRecoveryAction = vi.fn<[RecoveryAction], void>();
+    const placementError: GenerationError = {
+      code: "placement-apply-failed",
+      message: "placement failed",
+      retryable: true,
+    };
     render(
       <GenerateTab
         projectId="project-1"
         models={[{ id: "m", label: "Model" }]}
         prompt="Generate this"
         onSubmit={onSubmit}
-        job={{ id: "job-1", status: "failed", error: "save failed", message: "needs attention", progress: 20 }}
-        onRetry={onRetry}
-        onSaveRetry={vi.fn()}
-        onPlacementRetry={vi.fn()}
+        job={generationJob(placementError, { placementFailure: true })}
+        onRecoveryAction={onRecoveryAction}
       />,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Generate" }));
     fireEvent.submit(screen.getByTestId("generate-tab"));
-    expect(onSubmit).toHaveBeenCalledTimes(1);
+    expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByRole("status")).toHaveTextContent("failed");
-    expect(screen.getByRole("alert")).toHaveTextContent("save failed");
-    expect(screen.getByRole("button", { name: /Retry placement/i })).toBeTruthy();
+    expect(screen.getByRole("alert")).toHaveTextContent("placement failed");
+    const retryPlacement = screen.getByRole("button", { name: /Retry placement/i });
+    fireEvent.click(retryPlacement);
+    expect(onRecoveryAction).toHaveBeenCalledWith("retry-placement");
   });
 
   it("supports roving focus with Home and End on the model list", () => {
@@ -1377,23 +1409,20 @@ describe("GenerateTab", () => {
   it("keeps the narrow panel layout defensive", () => {
     render(<GenerateTab projectId="project-1" models={[{ id: "m", label: "Model" }]} />);
     expect(screen.getByTestId("generate-tab").className).toContain("min-w-0");
-    expect(screen.getByTestId("generate-tab").className).toContain("overflow-x-hidden");
+    expect(screen.getByRole("region", { name: "Status" }).className).toContain("max-w-full");
+    expect(screen.getByTestId("generation-actions").className).toContain("flex-wrap");
   });
 
   it("routes a reference card click to the modal and Shift-click to the inspector", () => {
     render(
-      <GenerateTab
-        context="shot"
-        shotId="shot-1"
-        projectId="project-1"
-        models={[{ id: "img", label: "Image" }]}
+      <GenerateReferenceSection
         references={[
           {
             id: "r1",
             label: "Mood board",
             origins: ["user"],
             target: { kind: "imported-image", mediaId: "media-imported-1" },
-          } as any,
+          },
         ]}
       />,
     );
