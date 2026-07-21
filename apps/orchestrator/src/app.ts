@@ -12,9 +12,10 @@ import { GenerationFinalizer } from "./services/generation/finalization";
 import { FileGenerationJobRepository } from "./services/generation/repository";
 import { UploadRepository } from "./services/generation/uploads";
 import type { GenerationProviderPort } from "./services/generation/index";
+import { GenerationProjectActionAdapter } from "./services/generation/project-action-adapter";
 import { WaveSpeedProvider } from "./services/wavespeed/client";
 import { mkdirSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 
@@ -58,6 +59,11 @@ export function createApp(): Express {
       status: async () => { throw new Error("provider-not-configured"); },
     };
   const downloadCacheDir = join(config.generationDataDir, "download-cache");
+  const projectActions = new GenerationProjectActionAdapter({
+    projectStore,
+    gitStore,
+    downloadCacheDir,
+  });
   const wavespeedRouter = createWaveSpeedRouter({
     repository: generationRepository,
     uploads: uploadRepository,
@@ -68,6 +74,7 @@ export function createApp(): Express {
     authenticate,
     owner: async ({ ownerId, projectId }) => ownerId === config.authenticatedOwnerId && Boolean(await projectStore.loadProject(projectId)),
     discoverModels: async () => routes.map(({ identity }) => ({ ...identity })),
+    applyProjectAction: (command) => projectActions.applyProjectAction(command),
     createFinalizer: (repository) => new GenerationFinalizer(repository, {
       download: {
         download: async ({ providerJobId }) => {
@@ -100,74 +107,9 @@ export function createApp(): Express {
         },
       },
       inspect: { inspect: async ({ bytes, mimeType }) => inspectOutput(bytes, mimeType) },
-      placeholder: {
-        finalize: async ({ job, output }) => {
-          const providerJobId = job.providerJobId;
-          if (!providerJobId) throw new Error("generation-provider-id-missing");
-          const project = await projectStore.loadProject(job.projectId);
-          if (!project) throw new Error("generation-project-not-found");
-          const existing = project.mediaLibrary.items.find((item) => item.generationMeta?.jobId === job.id);
-          if (existing) return { mediaId: existing.assetGroupId ?? existing.id, versionId: existing.id };
-
-          const cacheKey = createHash("sha256").update(providerJobId).digest("hex");
-          const [{ mimeType }, bytes] = await Promise.all([
-            readFile(join(downloadCacheDir, `${cacheKey}.json`), "utf8").then((value) => JSON.parse(value) as { mimeType: string }),
-            readFile(join(downloadCacheDir, `${cacheKey}.bin`)),
-          ]);
-          const extension = outputExtension(mimeType);
-          const mediaId = `generated-${job.id}`;
-          const versionId = `${mediaId}-v1`;
-          const filename = `${versionId}.${extension}`;
-          await mkdir(config.generatedAssetsDir, { recursive: true });
-          await writeFile(join(config.generatedAssetsDir, filename), bytes);
-          const inspected = inspectOutput(bytes, mimeType);
-          await projectStore.saveProject({
-            ...project,
-            mediaLibrary: {
-              items: [...project.mediaLibrary.items, {
-                id: versionId,
-                name: filename,
-                type: mimeType.startsWith("video/") ? "video" : "image",
-                fileHandle: null,
-                blob: null,
-                metadata: {
-                  fileSize: bytes.byteLength,
-                  width: output.width ?? inspected.width ?? 0,
-                  height: output.height ?? inspected.height ?? 0,
-                  duration: output.durationSeconds ?? 0,
-                  frameRate: 0,
-                  codec: mimeType,
-                  sampleRate: 0,
-                  channels: 0,
-                },
-                thumbnailUrl: null,
-                originalUrl: `/assets/${encodeURIComponent(filename)}`,
-                assetGroupId: mediaId,
-                isCurrent: true,
-                generationMeta: {
-                  provider: job.provider,
-                  model: job.modelId,
-                  prompt: job.context.prompt,
-                  jobId: job.id,
-                  status: "succeeded",
-                },
-              }],
-            },
-          });
-          return { mediaId, versionId };
-        },
-      },
-      shot: {
-        link: async () => { throw new Error("generation-project-shot-link-unavailable"); },
-      },
-      placement: {
-        place: async () => ({
-          outcome: "not-applied",
-          replaySafe: true,
-          error: { code: "generation-project-placement-unavailable", message: "Server timeline placement is unavailable", retryable: false },
-        }),
-        reconcile: async () => ({ outcome: "unknown" }),
-      },
+      placeholder: projectActions,
+      shot: projectActions,
+      placement: projectActions,
     }),
   });
   void projectStore.migrateUuidDirs().catch((err) => {

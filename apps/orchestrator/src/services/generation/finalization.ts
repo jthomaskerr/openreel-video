@@ -108,8 +108,8 @@ function completed(job: GenerationJob, checkpoint: GenerationCheckpointName) {
   return job.checkpoints[checkpoint]?.status === "completed";
 }
 
-function idempotencyKey(jobId: string, stage: string) {
-  return `generation:${jobId}:${stage}`;
+export function generationFinalizationIdempotencyKey(jobId: string, stage: string) {
+  return `generation-stage-${createHash("sha256").update(JSON.stringify([jobId, stage])).digest("hex")}`;
 }
 
 function outputMediaId(job: GenerationJob) {
@@ -163,7 +163,7 @@ export class GenerationFinalizer {
           }
         }
         job = await this.requireJob(job.id);
-        const completionKey = idempotencyKey(job.id, "finalization");
+        const completionKey = generationFinalizationIdempotencyKey(job.id, "finalization");
       const claimResult = await this.repository.claimFinalization({
         jobId: job.id,
         providerInstanceId: job.providerInstanceId,
@@ -179,7 +179,7 @@ export class GenerationFinalizer {
         }
         if (!completed(job, "placeholder-finalized")) {
           const output = job.output!;
-        const { projectAction, ...ids } = await this.ports.placeholder.finalize({ job, output, idempotencyKey: idempotencyKey(job.id, "placeholder-finalized") });
+        const { projectAction, ...ids } = await this.ports.placeholder.finalize({ job, output, idempotencyKey: generationFinalizationIdempotencyKey(job.id, "placeholder-finalized") });
         if (isLocalUrl(ids.mediaId) || isLocalUrl(ids.versionId)) throw new Error("generation-local-url-forbidden");
         await this.repository.update(job.id, (current) => ({
           ...current,
@@ -191,7 +191,7 @@ export class GenerationFinalizer {
         job = await this.requireJob(job.id);
         const currentShotId = shotId(job);
         if (currentShotId && this.ports.shot && !completed(job, "shot-linked")) {
-          await this.ports.shot.link({ job, output: job.output!, idempotencyKey: idempotencyKey(job.id, "shot-linked") });
+          await this.ports.shot.link({ job, output: job.output!, idempotencyKey: generationFinalizationIdempotencyKey(job.id, "shot-linked") });
           await this.mark(job.id, "shot-linked", { status: "completed", timestamp: this.now() });
         }
         if (job.context.placementPolicy !== "none" && this.ports.placement && !completed(job, "placement-applied")) {
@@ -218,7 +218,7 @@ export class GenerationFinalizer {
     if (!job.output?.mediaId || !job.output.versionId || requiredCheckpoints.some((checkpoint) => !completed(job, checkpoint))) {
       throw new Error("generation-placement-retry-precondition");
     }
-    const placementKey = idempotencyKey(jobId, "placement-applied");
+    const placementKey = generationFinalizationIdempotencyKey(jobId, "placement-applied");
     const ownership = await this.acquirePlacement(jobId, placementKey);
     if (ownership.job) return ownership.job;
     const claim = ownership.claim!;
@@ -247,7 +247,7 @@ export class GenerationFinalizer {
     let job = await this.requireJob(jobId);
     const claim = await this.repository.getPlacementClaim(jobId);
     if (!claim) throw new Error("generation-placement-reconciliation-unavailable");
-    const placementKey = idempotencyKey(jobId, "placement-applied");
+    const placementKey = generationFinalizationIdempotencyKey(jobId, "placement-applied");
     const recovery = await this.repository.recoverPlacement(jobId, placementKey);
     if (recovery.kind === "owner-live") return this.requireJob(jobId);
     if (recovery.kind === "safe-retry") return this.completeRecoveredFinalization(await this.retryPlacement(jobId));
@@ -259,7 +259,7 @@ export class GenerationFinalizer {
   }
 
   private async applyPlacementResult(jobId: string, result: PlacementAttemptResult, ownerToken?: string): Promise<GenerationJob> {
-    const placementKey = idempotencyKey(jobId, "placement-applied");
+    const placementKey = generationFinalizationIdempotencyKey(jobId, "placement-applied");
     const claim = ownerToken ? await this.repository.reconcilePlacement(jobId, placementKey, ownerToken, result.outcome, { replaySafe: result.replaySafe }) : undefined;
     if (result.outcome === "applied") {
       return this.commitPlacementProjection(jobId, claim, { status: "completed", timestamp: this.now() }, (currentJob) => ({ ...currentJob, status: "succeeded", error: undefined, placement: { policy: currentJob.context.placementPolicy, status: "applied", appliedAt: this.now() }, updatedAt: this.now() }));
@@ -300,7 +300,7 @@ export class GenerationFinalizer {
   }
 
   private async executePlacement(job: GenerationJob): Promise<GenerationJob> {
-    const placementKey = idempotencyKey(job.id, "placement-applied");
+    const placementKey = generationFinalizationIdempotencyKey(job.id, "placement-applied");
     const ownership = await this.acquirePlacement(job.id, placementKey);
     if (ownership.job) return ownership.job;
     const claim = ownership.claim!;

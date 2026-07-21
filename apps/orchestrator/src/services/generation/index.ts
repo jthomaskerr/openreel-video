@@ -38,9 +38,20 @@ export interface GenerationProviderStatus {
 export interface GenerationFinalizerPort {
   finalize(input: { job: GenerationJob; output: GenerationOutputIdentity; idempotencyKey: string }): Promise<void>;
   reconcilePlacement(jobId: string): Promise<GenerationJob>;
+  retryPlacement?(jobId: string): Promise<GenerationJob>;
 }
 
-export interface GenerationRouteManifestEntry { identity: GenerationRouteIdentity; schemaFingerprint: string; clientSchemaFingerprint: string; serverSchemaFingerprint: string; clientAcceptance: boolean; serverAcceptance: boolean; configurationVersion: string }
+export interface GenerationRouteManifestEntry {
+  identity: GenerationRouteIdentity;
+  schemaFingerprint: string;
+  clientSchemaFingerprint: string;
+  serverSchemaFingerprint: string;
+  clientAcceptance: boolean;
+  serverAcceptance: boolean;
+  configurationVersion: string;
+  inputSchema?: Readonly<Record<string, unknown>>;
+  supportsAudio?: boolean;
+}
 export interface GenerationRequestBoundary { contentType: string; byteLength: number; maxBytes: number; timeoutMs: number; maxTimeoutMs: number }
 export interface GenerationRequestBoundaryPort { validate(input: GenerationRequestBoundary): void }
 export interface GenerationOrchestratorOptions {
@@ -248,6 +259,12 @@ export class GenerationOrchestrator {
       return { ...current, status: "finalizing", updatedAt: this.clock() };
     });
     return this.dispatchPlacementReconciliation(job.id);
+  }
+
+  async retryPlacement(input: GenerationJobCommand): Promise<GenerationJob> {
+    const job = await this.requireOwned(input);
+    if (!this.options.finalizer.retryPlacement) throw new Error("generation-placement-retry-unavailable");
+    return this.options.finalizer.retryPlacement(job.id);
   }
 
   private async dispatchPlacementReconciliation(jobId: string): Promise<GenerationJob> {
