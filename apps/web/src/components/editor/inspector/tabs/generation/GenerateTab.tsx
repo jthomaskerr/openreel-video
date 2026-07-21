@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { ReferenceTarget } from "@openreel/core";
-import { generationDraftKey, useGenerationDraftStore, type GenerationDraftState, type GenerationDraftScope } from "../../../../../features/generation/drafts";
 import type {
   GenerationJob,
   GenerationPlacementPolicy,
@@ -123,6 +122,24 @@ export const GenerateTab: React.FC<GenerateTabProps> = (props) => {
   const getDraft = useGenerationDraftStore((state) => state.getDraft);
   const saveDraft = useGenerationDraftStore((state) => state.saveDraft);
   const draft = storedDraft ?? getDraft(scope);
+  const selectedReferences = useMemo<GenerateReference[]>(
+    () =>
+      draft.referenceIds.map((referenceId) => {
+        const recoveryReference = props.referenceRecovery?.references.find(
+          (reference) => reference.id === referenceId,
+        );
+        return {
+          id: referenceId,
+          label:
+            props.referenceLabels?.[referenceId] ??
+            recoveryReference?.mediaId ??
+            referenceId,
+          origins: recoveryReference?.origins ?? ["draft"],
+          excluded: recoveryReference ? !recoveryReference.active : undefined,
+        };
+      }),
+    [draft.referenceIds, props.referenceLabels, props.referenceRecovery?.references],
+  );
   const models = useMemo(() => {
     const all = props.models ?? [];
     if (!props.compatibleModelIds) return all;
@@ -402,6 +419,7 @@ export const GenerateTab: React.FC<GenerateTabProps> = (props) => {
         describedBy={showValidationSummary ? promptErrorIds : undefined}
       />
       <GenerateReferenceSection
+        references={selectedReferences}
         recovery={props.referenceRecovery}
         labels={props.referenceLabels}
         onCommand={props.onReferenceCommand ? handleReferenceCommand : undefined}
