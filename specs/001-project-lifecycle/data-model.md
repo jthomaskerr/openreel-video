@@ -14,15 +14,15 @@ Existing `@openreel/core` aggregate. Required durable fields:
 - `generatedImageDefinitions`: project-owned generated definitions.
 - optional text/shape/SVG/sticker overlays and all other supported project fields.
 
-Validation is non-mutating. Candidate projects are installed only after validation succeeds.
+Canonical backend candidates are installed only after loading succeeds. Strict portable/recovery validation is Future Scope.
 
-## Project File Envelope
+## Project File Envelope (existing export; strict validation Future Scope)
 
 - `version: "1.0.0"`: current strict file format.
 - `project: Project`: complete supported project data with runtime-only blobs/handles stripped for portable export.
 - optional metadata remains supported by `ProjectSerializer`.
 
-Legacy state: a raw `Project` object is treated as version `0` and migrated in memory into the current envelope. Unknown future versions are rejected. The original source bytes/file remain unchanged.
+The installed serializer normalizes legacy project data. Strict unknown-future-version rejection and non-mutating migration guarantees are deferred.
 
 ## Persistence Status
 
@@ -34,7 +34,7 @@ Legacy state: a raw `Project` object is treated as version `0` and migrated in m
 - `conflictingProject: Project | null`
 - `error: string | null`
 
-Clean invariant: the status belongs to the active project, represents confirmed durable state, and `persistedModifiedAt === project.modifiedAt`.
+Clean invariant: `confirmedReceipt.projectId === project.id` and `confirmedReceipt.sourceModifiedAt === project.modifiedAt`. Phase may remain `idle` immediately after canonical load.
 
 ## Save Intent
 
@@ -55,9 +55,9 @@ Queued/retry state is keyed by `projectId`; it is never reconstructed from which
 - `slot: number`.
 - `data: string`: serialized project data.
 
-Offer invariant: only the newest valid record for the requested project whose timestamp is later than the durable project's `modifiedAt` is offered.
+Current invariant: rotating records retain origin identity, name, time, and slot. Newer-only validated offering is Future Scope.
 
-Restore transition:
+Future Scope restore transition:
 
 ```text
 candidate record
@@ -72,7 +72,7 @@ candidate record
 
 Any failure before installation leaves both active and durable state unchanged.
 
-## Project Transition Request
+## Project Transition Request (Future Scope)
 
 - `sourceProjectId: string`.
 - `sourceProjectName: string`.
@@ -82,7 +82,7 @@ Any failure before installation leaves both active and durable state unchanged.
 
 Only one transition request is active in the editor UI. Save proceeds only after `forceSave()` resolves with canonical confirmation. Discard affects only the active in-memory session. Cancel performs no replacement.
 
-## Conflict Recovery
+## Conflict Recovery UI (Future Scope)
 
 - `localProject: Project`: preserved in-memory edit.
 - `durableProject: Project | null`: newer server state returned by the conflict or a subsequent read.

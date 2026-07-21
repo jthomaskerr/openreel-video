@@ -1,5 +1,7 @@
 # Project Lifecycle Persistence Implementation Plan
 
+> Scope reconciliation (2026-07-21): this original full plan is retained for design history. The user approved a minimal-correctness implementation and deferred new decoders, transition/conflict dialogs, chooser retry UI, and recovery semantic changes. Execute only the active tasks in `specs/001-project-lifecycle/tasks.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Correct the demonstrated project lifecycle safety gaps while retaining the existing canonical persistence implementation.
