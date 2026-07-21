@@ -25,6 +25,20 @@ interface PersistenceStatusState {
   reset: () => void;
 }
 
+type PersistenceConfirmation = Pick<
+  PersistenceStatusState,
+  "projectId" | "confirmedReceipt"
+>;
+
+export function isProjectDirty(
+  project: Pick<Project, "id" | "modifiedAt">,
+  status: PersistenceConfirmation,
+): boolean {
+  return status.projectId !== project.id
+    || status.confirmedReceipt?.projectId !== project.id
+    || status.confirmedReceipt.sourceModifiedAt !== project.modifiedAt;
+}
+
 export const usePersistenceStatusStore = create<PersistenceStatusState>((set) => ({
   phase: "idle",
   projectId: null,
