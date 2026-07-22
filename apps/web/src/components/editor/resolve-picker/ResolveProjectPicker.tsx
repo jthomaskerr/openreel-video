@@ -12,14 +12,22 @@ import {
 import type { ResolvePreview } from "@openreel/core";
 import {
   getPreview,
+  getExportJob,
+  cancelExport,
+  launchResolveBridge,
   listProjects,
+  startExport,
   type ResolveBridgeRequestOptions,
   type ResolveProjectListItem,
 } from "../../../services/resolve-bridge-client";
 import { ProjectList } from "./ProjectList";
 import { ProjectMetadata } from "./ProjectMetadata";
+import {
+  useResolveExportJob,
+  type ResolveExportJobClient,
+} from "./useResolveExportJob";
 
-export interface ResolveProjectPickerClient {
+export interface ResolveProjectPickerClient extends ResolveExportJobClient {
   readonly listProjects: (
     options?: ResolveBridgeRequestOptions,
   ) => Promise<ResolveProjectListItem[]>;
@@ -32,11 +40,18 @@ export interface ResolveProjectPickerClient {
 export interface ResolveProjectPickerProps {
   readonly open: boolean;
   readonly onClose: () => void;
-  readonly onLaunch: (preview: ResolvePreview) => void;
+  readonly onLaunch?: (preview: ResolvePreview) => void;
   readonly client?: ResolveProjectPickerClient;
 }
 
-const defaultClient: ResolveProjectPickerClient = { listProjects, getPreview };
+const defaultClient: ResolveProjectPickerClient = {
+  listProjects,
+  getPreview,
+  startExport,
+  getExportJob,
+  cancelExport,
+  launch: launchResolveBridge,
+};
 
 function isAbort(error: unknown, signal: AbortSignal): boolean {
   return signal.aborted || (
@@ -57,6 +72,7 @@ export function ResolveProjectPicker({
   const [projectsState, setProjectsState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [previewState, setPreviewState] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [previewRetry, setPreviewRetry] = useState(0);
+  const exportJob = useResolveExportJob(client);
   const searchRef = useRef<HTMLInputElement>(null);
   const listControllerRef = useRef<AbortController | null>(null);
   const previewControllerRef = useRef<AbortController | null>(null);
@@ -95,6 +111,7 @@ export function ResolveProjectPicker({
     if (!open) {
       listControllerRef.current?.abort();
       previewControllerRef.current?.abort();
+      exportJob.reset();
       return;
     }
     setQuery("");
@@ -103,7 +120,7 @@ export function ResolveProjectPicker({
       listControllerRef.current?.abort();
       previewControllerRef.current?.abort();
     };
-  }, [loadProjects, open]);
+  }, [loadProjects, open, exportJob.reset]);
 
   useEffect(() => {
     if (!open || !selectedId || projectsState !== "ready") {
@@ -151,7 +168,25 @@ export function ResolveProjectPicker({
 
   const selectProject = (projectId: string) => {
     if (projectId === selectedId && previewState !== "error") return;
+    exportJob.reset();
     setSelectedId(projectId);
+  };
+
+  const launchPreview = (selectedPreview: ResolvePreview) => {
+    onLaunch?.(selectedPreview);
+    void exportJob.start(
+      selectedPreview.projectId,
+      selectedPreview.revision,
+      {
+        projectId: selectedPreview.projectId,
+        projectModifiedAt: selectedPreview.modifiedAt,
+        target: "resolve",
+        range: {
+          startTime: 0,
+          endTime: selectedPreview.durationFrames / selectedPreview.frameRate,
+        },
+      },
+    );
   };
 
   const emptyMessage = projects.length === 0
@@ -257,7 +292,20 @@ export function ResolveProjectPicker({
               </div>
             )}
             {previewState === "ready" && preview && (
-              <ProjectMetadata preview={preview} onLaunch={onLaunch} />
+              <ProjectMetadata
+                preview={preview}
+                onLaunch={() => launchPreview(preview)}
+                onCancel={() => void exportJob.cancel()}
+                onRetryLaunch={exportJob.retryLaunch}
+                phase={exportJob.phase}
+                percent={exportJob.percent}
+                warnings={exportJob.warnings}
+                statusMessage={exportJob.statusMessage}
+                launchError={exportJob.launchError}
+                canStart={exportJob.canStart}
+                canCancel={exportJob.canCancel}
+                isStarting={exportJob.isStarting}
+              />
             )}
             {previewState === "idle" && projectsState === "ready" && projects.length === 0 && (
               <div className="flex min-h-52 items-center justify-center p-6 text-center text-sm text-muted-foreground">

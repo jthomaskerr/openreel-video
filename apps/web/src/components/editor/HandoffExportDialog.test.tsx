@@ -91,12 +91,12 @@ describe("HandoffExportDialog", () => {
     render(<Harness />);
 
     fireEvent.click(screen.getByRole("button", { name: "Continue editing" }));
-    fireEvent.click(screen.getByRole("button", { name: /DaVinci Resolve/i }));
+    fireEvent.click(screen.getByRole("button", { name: /iMovie/i }));
     fireEvent.click(screen.getByRole("button", { name: /Start handoff/i }));
 
     await waitFor(() => expect(onStart).toHaveBeenCalledTimes(1));
     expect(onStart.mock.calls[0][0]).toMatchObject({
-      target: "resolve",
+      target: "imovie",
       range: { startTime: 0, endTime: 12 },
     });
   });
@@ -185,29 +185,26 @@ describe("HandoffExportDialog", () => {
         );
       });
     render(<HandoffExportDialog isOpen onClose={vi.fn()} project={project} onStart={onStart} />);
-    fireEvent.click(screen.getByRole("button", { name: /DaVinci Resolve/i }));
+    fireEvent.click(screen.getByRole("button", { name: /iMovie/i }));
     fireEvent.click(screen.getByRole("button", { name: /Start handoff/i }));
     fireEvent.click(await screen.findByRole("button", { name: /Cancel handoff/i }));
     expect(await screen.findByText(/Handoff cancelled/i)).toBeInTheDocument();
   });
 
-  it("presents completed Resolve artifacts and a compatibility report download", async () => {
+  it("routes Resolve through the backend project picker without calling the browser handoff", async () => {
+    const onStart = vi.fn(async () => completedResolveResult());
     render(
       <HandoffExportDialog
         isOpen
         onClose={vi.fn()}
         project={project}
-        onStart={vi.fn(async () => completedResolveResult())}
+        onStart={onStart}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /DaVinci Resolve/i }));
     fireEvent.click(screen.getByRole("button", { name: /Start handoff/i }));
-    expect(await screen.findByText("Media/Camera.mov")).toBeInTheDocument();
-    expect(screen.getByText("Fixture.fcpxml")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Download compatibility report/i })).toHaveAttribute(
-      "download",
-      "compatibility-report.md",
-    );
+    expect(await screen.findByRole("heading", { name: /Open an OpenReel project in DaVinci Resolve/i })).toBeVisible();
+    expect(onStart).not.toHaveBeenCalled();
   });
 
   it("labels recoverable failures with a retry action", async () => {
@@ -216,7 +213,7 @@ describe("HandoffExportDialog", () => {
       .mockResolvedValueOnce(failedResult())
       .mockResolvedValueOnce(completedResolveResult());
     render(<HandoffExportDialog isOpen onClose={vi.fn()} project={project} onStart={onStart} />);
-    fireEvent.click(screen.getByRole("button", { name: /DaVinci Resolve/i }));
+    fireEvent.click(screen.getByRole("button", { name: /iMovie/i }));
     fireEvent.click(screen.getByRole("button", { name: /Start handoff/i }));
     expect(await screen.findByRole("button", { name: /Retry handoff/i })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Retry handoff/i }));
@@ -256,7 +253,7 @@ describe("HandoffExportDialog", () => {
       },
     }));
     render(<HandoffExportDialog isOpen onClose={vi.fn()} project={project} onStart={onStart} />);
-    fireEvent.click(screen.getByRole("button", { name: /DaVinci Resolve/i }));
+    fireEvent.click(screen.getByRole("button", { name: /iMovie/i }));
     fireEvent.click(screen.getByRole("button", { name: /Start handoff/i }));
     expect(await screen.findByText(/Blocking/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Camera A\.mov/)).toHaveLength(2);

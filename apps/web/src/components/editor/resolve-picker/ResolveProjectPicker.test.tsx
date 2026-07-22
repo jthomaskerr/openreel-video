@@ -50,6 +50,33 @@ function client(
   return {
     listProjects: vi.fn(async () => [vintageSummary]),
     getPreview: vi.fn(async (projectId) => preview(projectId, "Vintage Tokyo")),
+    startExport: vi.fn(async (requestedProjectId, input) => ({
+      job: {
+        id: "2430ba4b-6b35-4c51-8ed2-cf0920710617",
+        projectId: requestedProjectId,
+        revision: input.revision,
+        phase: "ready" as const,
+        processed: 38,
+        total: 38,
+        percent: 100,
+        warnings: [],
+        createdAt: "2026-07-22T10:00:00.000Z",
+        updatedAt: "2026-07-22T10:00:00.000Z",
+      },
+      jobId: "2430ba4b-6b35-4c51-8ed2-cf0920710617",
+      revision: input.revision,
+      phase: "ready" as const,
+      statusUrl: `/api/projects/${requestedProjectId}/exports/resolve/2430ba4b-6b35-4c51-8ed2-cf0920710617`,
+      cancelUrl: `/api/projects/${requestedProjectId}/exports/resolve/2430ba4b-6b35-4c51-8ed2-cf0920710617`,
+      bridgeLaunchUrl: "openreel-resolve://import/9b705f5b-638e-4307-bf1f-313ba3e157b7",
+    })),
+    getExportJob: vi.fn(async () => {
+      throw new Error("not polled in picker tests");
+    }),
+    cancelExport: vi.fn(async () => {
+      throw new Error("not cancelled in picker tests");
+    }),
+    launch: vi.fn(),
     ...overrides,
   };
 }
@@ -67,12 +94,13 @@ function deferred<T>() {
 describe("ResolveProjectPicker", () => {
   it("searches projects and exposes every selected-project metadata field", async () => {
     const onLaunch = vi.fn();
+    const pickerClient = client();
     render(
       <ResolveProjectPicker
         open
         onClose={vi.fn()}
         onLaunch={onLaunch}
-        client={client()}
+        client={pickerClient}
       />,
     );
 
@@ -91,11 +119,28 @@ describe("ResolveProjectPicker", () => {
     expect(screen.getByText("38 clips")).toBeVisible();
     expect(screen.getByText("33 media items")).toBeVisible();
     expect(screen.getByText(/compatible with 2 warnings/i)).toBeVisible();
+    expect(screen.getByRole("region", { name: /rendered output preview/i })).toBeVisible();
+    expect(screen.getByRole("region", { name: /mini timeline/i })).toBeVisible();
+    expect(screen.getByText(/no clips to preview/i)).toBeVisible();
 
     fireEvent.click(screen.getByRole("button", { name: "Open in Resolve" }));
     expect(onLaunch).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: "vintage-tokyo", revision: "revision-vintage-tokyo" }),
     );
+    await waitFor(() => expect(pickerClient.startExport).toHaveBeenCalledWith(
+      "vintage-tokyo",
+      {
+        revision: "revision-vintage-tokyo",
+        selection: {
+          projectId: "vintage-tokyo",
+          projectModifiedAt: vintageSummary.modifiedAt,
+          target: "resolve",
+          range: { startTime: 0, endTime: 266 },
+        },
+      },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
+    expect(pickerClient.launch).toHaveBeenCalledTimes(1);
   });
 
   it("preserves backend order and supports roving listbox keyboard selection", async () => {

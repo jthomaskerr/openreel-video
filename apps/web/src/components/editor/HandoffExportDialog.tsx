@@ -19,6 +19,10 @@ import {
   HandoffTarget,
   Project,
 } from "@openreel/core";
+import {
+  ResolveProjectPicker,
+  type ResolveProjectPickerClient,
+} from "./resolve-picker/ResolveProjectPicker";
 
 interface RunHandoffOptions {
   readonly signal: AbortSignal;
@@ -36,6 +40,7 @@ export interface HandoffExportDialogProps {
   readonly project: Project;
   readonly selectedRange?: ExportRange | null;
   readonly onStart?: RunHandoff;
+  readonly resolveClient?: ResolveProjectPickerClient;
 }
 
 type DialogStatus = "idle" | "running" | "completed" | "blocked" | "cancelled" | "failed";
@@ -59,12 +64,14 @@ export function HandoffExportDialog({
   project,
   selectedRange,
   onStart = unavailableStart,
+  resolveClient,
 }: HandoffExportDialogProps) {
   const [target, setTarget] = useState<HandoffTarget | null>(null);
   const [rangeMode, setRangeMode] = useState<"full" | "selected">("full");
   const [status, setStatus] = useState<DialogStatus>("idle");
   const [progress, setProgress] = useState<HandoffProgress | null>(null);
   const [result, setResult] = useState<HandoffResult | null>(null);
+  const [resolvePickerOpen, setResolvePickerOpen] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -74,12 +81,17 @@ export function HandoffExportDialog({
     setStatus("idle");
     setProgress(null);
     setResult(null);
+    setResolvePickerOpen(false);
     abortControllerRef.current?.abort();
     abortControllerRef.current = null;
   }, [isOpen]);
 
   const start = async () => {
     if (!target || status === "running") return;
+    if (target === "resolve") {
+      setResolvePickerOpen(true);
+      return;
+    }
     const range =
       rangeMode === "selected" && selectedRange
         ? { ...selectedRange }
@@ -120,7 +132,8 @@ export function HandoffExportDialog({
       : null;
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && status !== "running" && onClose()}>
+    <>
+    <Dialog open={isOpen && !resolvePickerOpen} onOpenChange={(open) => !open && status !== "running" && onClose()}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-background-secondary border-border p-0 gap-0">
         <DialogHeader className="p-5 border-b border-border bg-background-tertiary">
           <div className="flex items-start gap-3">
@@ -336,6 +349,12 @@ export function HandoffExportDialog({
         </div>
       </DialogContent>
     </Dialog>
+    <ResolveProjectPicker
+      open={isOpen && resolvePickerOpen}
+      onClose={() => setResolvePickerOpen(false)}
+      client={resolveClient}
+    />
+    </>
   );
 }
 

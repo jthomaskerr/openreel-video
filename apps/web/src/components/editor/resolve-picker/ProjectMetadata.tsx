@@ -1,10 +1,24 @@
-import { AlertTriangle, Ban, CalendarDays, CheckCircle2, Clock3 } from "lucide-react";
-import { Button } from "@openreel/ui";
+import { AlertTriangle, Ban, CalendarDays, CheckCircle2, Clock3, Loader2 } from "lucide-react";
+import { Button, Progress } from "@openreel/ui";
 import type { ResolvePreview } from "@openreel/core";
+import type { ResolvePublicExportJob } from "../../../services/resolve-bridge-client";
+import { ClipGroups } from "./ClipGroups";
+import { MiniTimeline } from "./MiniTimeline";
+import { RenderedOutputPreview } from "./RenderedOutputPreview";
 
 export interface ProjectMetadataProps {
   readonly preview: ResolvePreview;
-  readonly onLaunch: (preview: ResolvePreview) => void;
+  readonly onLaunch: () => void;
+  readonly onCancel: () => void;
+  readonly onRetryLaunch: () => void;
+  readonly phase: ResolvePublicExportJob["phase"] | null;
+  readonly percent: number;
+  readonly warnings: readonly string[];
+  readonly statusMessage: string;
+  readonly launchError: string | null;
+  readonly canStart: boolean;
+  readonly canCancel: boolean;
+  readonly isStarting: boolean;
 }
 
 const dateFormatter = new Intl.DateTimeFormat("en-GB", {
@@ -32,7 +46,20 @@ function compatibilityText(preview: ResolvePreview): string {
     : "Ready for Resolve";
 }
 
-export function ProjectMetadata({ preview, onLaunch }: ProjectMetadataProps) {
+export function ProjectMetadata({
+  preview,
+  onLaunch,
+  onCancel,
+  onRetryLaunch,
+  phase,
+  percent,
+  warnings,
+  statusMessage,
+  launchError,
+  canStart,
+  canCancel,
+  isStarting,
+}: ProjectMetadataProps) {
   const compatibility = compatibilityText(preview);
   const CompatibilityIcon = preview.compatibility.status === "blocked"
     ? Ban
@@ -100,8 +127,23 @@ export function ProjectMetadata({ preview, onLaunch }: ProjectMetadataProps) {
           </div>
         </dl>
 
-        <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-          Rich rendered output, timeline, and clip previews load in this detail region.
+        <RenderedOutputPreview render={preview.render} />
+        <MiniTimeline timeline={preview.miniTimeline} />
+        <ClipGroups groups={preview.clipGroups} />
+
+        <div aria-live="polite" className="space-y-2 rounded-md border bg-card p-4 text-sm">
+          <div className="flex items-center justify-between gap-3">
+            <p role="status" className="font-medium">{statusMessage}</p>
+            {phase && <span className="font-mono text-xs text-muted-foreground">{phase}</span>}
+          </div>
+          {(isStarting || (phase && phase !== "completed" && phase !== "failed" && phase !== "cancelled")) && (
+            <Progress value={percent} aria-label="Resolve export progress" />
+          )}
+          {warnings.length > 0 && (
+            <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+              {warnings.map((warning, index) => <li key={`${index}:${warning}`}>{warning}</li>)}
+            </ul>
+          )}
         </div>
       </div>
 
@@ -109,14 +151,32 @@ export function ProjectMetadata({ preview, onLaunch }: ProjectMetadataProps) {
         <p className="text-xs text-muted-foreground">
           Revision <span className="font-mono">{preview.revision}</span>
         </p>
-        <Button
-          type="button"
-          className="min-h-11 min-w-36"
-          disabled={preview.compatibility.status === "blocked"}
-          onClick={() => onLaunch(preview)}
-        >
-          Open in Resolve
-        </Button>
+        <div className="flex flex-wrap justify-end gap-2">
+          {canCancel && (
+            <Button type="button" variant="outline" className="min-h-11" onClick={onCancel}>
+              Cancel Resolve export
+            </Button>
+          )}
+          {launchError ? (
+            <Button type="button" className="min-h-11 min-w-36" onClick={onRetryLaunch}>
+              Retry opening Resolve
+            </Button>
+          ) : (
+            <Button
+              type="button"
+              className="min-h-11 min-w-36"
+              disabled={preview.compatibility.status === "blocked" || !canStart}
+              onClick={onLaunch}
+            >
+              {isStarting ? (
+                <span className="flex items-center gap-2">
+                  <Loader2 aria-hidden="true" className="h-4 w-4 animate-spin motion-reduce:animate-none" />
+                  Starting export…
+                </span>
+              ) : "Open in Resolve"}
+            </Button>
+          )}
+        </div>
       </footer>
     </section>
   );
