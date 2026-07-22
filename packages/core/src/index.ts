@@ -20,6 +20,7 @@ export * from "./device";
 export * from "./media-availability";
 export * from "./generation/references";
 export * from "./generation/wavespeed";
+export * from "./export/handoff";
 export {
   ExportEngine,
   getExportEngine,
@@ -38,6 +39,7 @@ export type {
   ExportStats,
   ExportError,
   ExportErrorCode,
+  ExportRange,
   UpscalingSettings,
   UpscaleQuality,
 } from "./export/types";

@@ -173,6 +173,8 @@ import {
   VIDEO_QUALITY_PRESETS,
 } from "./types";
 import type { Project, Timeline, Track, Clip } from "../types";
+import { createImovieExportProfile } from "./handoff/imovie-profile";
+import { createHandoffFixtureProject } from "./handoff/__fixtures__/projects";
 
 const createMockProject = (overrides?: Partial<Project>): Project => ({
   id: "test-project-id",
@@ -580,6 +582,27 @@ describe("ExportEngine", () => {
       expect(exportEngine.isInitialized()).toBe(false);
       expect(exportEngine.isMediaBunnyAvailable()).toBe(false);
     });
+  });
+});
+
+describe("iMovie handoff export regression", () => {
+  it("creates target-only MOV settings without mutating generic export defaults", () => {
+    const project = createHandoffFixtureProject();
+    const genericBefore = structuredClone(DEFAULT_VIDEO_SETTINGS);
+    const settings = createImovieExportProfile(project, {
+      projectId: project.id,
+      projectModifiedAt: project.modifiedAt,
+      target: "imovie",
+      range: { startTime: 1, endTime: 4 },
+    });
+    expect(settings).toMatchObject({
+      format: "mov",
+      codec: "h264",
+      audioSettings: { format: "aac", sampleRate: 48_000 },
+      range: { startTime: 1, endTime: 4 },
+    });
+    expect(DEFAULT_VIDEO_SETTINGS).toEqual(genericBefore);
+    expect(DEFAULT_VIDEO_SETTINGS.format).toBe("mp4");
   });
 });
 
