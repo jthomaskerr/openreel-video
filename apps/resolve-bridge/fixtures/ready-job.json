@@ -1,0 +1,28 @@
+{
+  "jobId": "11111111-1111-4111-8111-111111111111",
+  "projectId": "vintage-tokyo",
+  "revision": "0123456789abcdef0123456789abcdef01234567",
+  "artifacts": [
+    {
+      "name": "Vintage Tokyo.fcpxml",
+      "url": "/api/projects/vintage-tokyo/exports/resolve/11111111-1111-4111-8111-111111111111/artifacts/Vintage%20Tokyo.fcpxml?capability=22222222-2222-4222-8222-222222222222",
+      "mediaType": "application/xml",
+      "byteLength": 690,
+      "sha256": "12323f112807aef0febcf64f622c3f7d1cad2e69e93567c06f7a1dc56434c2c9"
+    },
+    {
+      "name": "manifest.json",
+      "url": "/api/projects/vintage-tokyo/exports/resolve/11111111-1111-4111-8111-111111111111/artifacts/manifest.json?capability=22222222-2222-4222-8222-222222222222",
+      "mediaType": "application/json",
+      "byteLength": 889,
+      "sha256": "45e9be657bc2a73459b4645d969b34e7c3f1166714c550dd52ea2afd34edf2d1"
+    },
+    {
+      "name": "compatibility-report.md",
+      "url": "/api/projects/vintage-tokyo/exports/resolve/11111111-1111-4111-8111-111111111111/artifacts/compatibility-report.md?capability=22222222-2222-4222-8222-222222222222",
+      "mediaType": "text/markdown",
+      "byteLength": 46,
+      "sha256": "1552771bf7ce667ee194595ca537b2bdc11809c2acdd1500b9d40cea1a778ad3"
+    }
+  ]
+}
