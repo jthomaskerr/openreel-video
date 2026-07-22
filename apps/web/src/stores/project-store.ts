@@ -79,13 +79,20 @@ import {
   loadDirectoryHandle,
   scanDirectoryRecursive,
 } from "../services/media-storage";
-import { parseSRT } from "./project/subtitle-helpers";
+import { parseImportableSRT, parseSRT } from "./project/subtitle-helpers";
 import { backendSaveService, isClientOnlyProjectId } from "../services/backend-save";
 import { blobToDataUrl, restoreMediaItem } from "../utils/media-recovery";
 import { projectManager } from "../services/project-manager";
 import { reportRuntimeError, toast } from "./notification-store";
 import { usePersistenceStatusStore } from "./persistence-status-store";
 import { mediaAvailabilityRuntime } from "../services/media-verification";
+import { findMediaDependencies } from "../services/media-dependencies";
+import {
+  evaluateMediaImportPreflight,
+  getMediaStorageEvidence,
+  parseConfiguredMaxMediaSourceBytes,
+} from "../services/media-import-policy";
+import { normalizeMediaMetadataPatch } from "../services/media-metadata";
 import {
   applySceneHistoryEntry,
   SCENE_HISTORY_ACTION,
@@ -2004,6 +2011,36 @@ export const useProjectStore = create<ProjectState>()(
         const { project } = get();
 
         try {
+          const storageEvidence = await getMediaStorageEvidence();
+          const preflight = evaluateMediaImportPreflight({
+            sourceBytes: file.size,
+            maxSourceBytes: parseConfiguredMaxMediaSourceBytes(
+              import.meta.env.VITE_MAX_MEDIA_IMPORT_BYTES,
+            ),
+            knownAvailableBytes: storageEvidence.knownAvailableBytes,
+          });
+          if (!preflight.accepted) {
+            return {
+              success: false,
+              error: {
+                code: "STORAGE_FULL" as const,
+                message: `${file.name} cannot be imported because it exceeds the ${preflight.reason.replaceAll("-", " ")} limit of ${preflight.limitBytes} bytes.`,
+                details: {
+                  filename: file.name,
+                  sourceBytes: file.size,
+                  reason: preflight.reason,
+                  limitBytes: preflight.limitBytes,
+                },
+                suggestion:
+                  preflight.reason === "configured-cap"
+                    ? "Raise VITE_MAX_MEDIA_IMPORT_BYTES or choose a smaller file."
+                    : "Free browser storage or choose a smaller file.",
+              },
+              warnings: storageEvidence.warning
+                ? [storageEvidence.warning]
+                : undefined,
+            };
+          }
           // SRT subtitle files bypass MediaBunny (which lacks SRT codec support).
           // Parse the text directly and create a subtitle media item.
           const isSrt =
@@ -2021,7 +2058,19 @@ export const useProjectStore = create<ProjectState>()(
 
           if (isSrt) {
             const srtText = await file.text();
-            const { subtitles, errors } = parseSRT(srtText);
+            const parsedSrt = parseImportableSRT(srtText);
+            if (!parsedSrt.success) {
+              return {
+                success: false,
+                error: {
+                  code: "DECODE_ERROR" as const,
+                  message: parsedSrt.error,
+                  details: { filename: file.name, errors: parsedSrt.errors },
+                  suggestion: "Correct the SRT timing blocks and import the file again.",
+                },
+              };
+            }
+            const { subtitles, errors } = parsedSrt;
 
             if (errors.length > 0) {
               console.warn(
@@ -2078,6 +2127,7 @@ export const useProjectStore = create<ProjectState>()(
             };
             set({ project: updatedProject });
 
+            let persistenceWarning: string | undefined;
             try {
               await saveMediaBlob(
                 updatedProject.id,
@@ -2092,6 +2142,7 @@ export const useProjectStore = create<ProjectState>()(
                 file.name,
               );
             } catch (err) {
+              persistenceWarning = `Local media persistence failed: ${err instanceof Error ? err.message : "Unknown storage error"}`;
               console.error(
                 "[ProjectStore] Failed to persist SRT blob:",
                 err,
@@ -2101,6 +2152,13 @@ export const useProjectStore = create<ProjectState>()(
             return {
               success: true,
               actionId: srtMediaId,
+              warnings:
+                errors.length > 0 || persistenceWarning
+                  ? [
+                      ...errors.map((error) => `Subtitle parse warning: ${error}`),
+                      ...(persistenceWarning ? [persistenceWarning] : []),
+                    ]
+                  : undefined,
             };
           }
 
@@ -2241,6 +2299,7 @@ export const useProjectStore = create<ProjectState>()(
 
           set({ project: updatedProject });
 
+          let persistenceWarning: string | undefined;
           try {
             await saveMediaBlob(
               updatedProject.id,
@@ -2255,6 +2314,7 @@ export const useProjectStore = create<ProjectState>()(
               file.name,
             );
           } catch (err) {
+            persistenceWarning = `Local media persistence failed: ${err instanceof Error ? err.message : "Unknown storage error"}`;
             console.error("[ProjectStore] Failed to persist media blob:", err);
           }
 
@@ -2301,6 +2361,7 @@ export const useProjectStore = create<ProjectState>()(
           return {
             success: true,
             actionId: newMediaItem.id,
+            warnings: persistenceWarning ? [persistenceWarning] : undefined,
           };
         } catch (error) {
           return {
@@ -2316,6 +2377,18 @@ export const useProjectStore = create<ProjectState>()(
 
       deleteMedia: async (mediaId: string) => {
         const { project, actionExecutor } = get();
+        const dependencies = findMediaDependencies(project, mediaId);
+        if (dependencies.total > 0) {
+          return {
+            success: false,
+            error: {
+              code: "ACTION_FAILED" as const,
+              message: `Cannot delete media used by ${dependencies.total} ${dependencies.total === 1 ? "dependency" : "dependencies"}.`,
+              details: { dependencies },
+              suggestion: "Remove or replace the dependent clips and workflow references first.",
+            },
+          };
+        }
         const action: Action = {
           type: "media/delete",
           id: uuidv4(),
@@ -2325,9 +2398,17 @@ export const useProjectStore = create<ProjectState>()(
         const result = await actionExecutor.execute(action, project);
         if (result.success) {
           set({ project: { ...project } });
-          deleteMediaBlob(mediaId).catch((err) =>
-            console.warn("[ProjectStore] Failed to delete media blob:", err),
-          );
+          try {
+            await deleteMediaBlob(mediaId);
+          } catch (err) {
+            const warning = `Media was removed from the project, but stored bytes could not be cleaned up: ${err instanceof Error ? err.message : "Unknown storage error"}`;
+            console.warn("[ProjectStore] Failed to delete media blob:", {
+              projectId: project.id,
+              mediaId,
+              error: err,
+            });
+            return { ...result, warnings: [...(result.warnings ?? []), warning] };
+          }
         }
         return result;
       },
@@ -2550,11 +2631,12 @@ export const useProjectStore = create<ProjectState>()(
 
       updateMediaMetadata: async (mediaId: string, patch: { title?: string; description?: string; tags?: string[]; group?: string }) => {
         const { project, actionExecutor } = get();
+        const normalizedPatch = normalizeMediaMetadataPatch(patch);
         const action: Action = {
           type: "media/updateMetadata" as Action["type"],
           id: uuidv4(),
           timestamp: Date.now(),
-          params: { mediaId, patch },
+          params: { mediaId, patch: normalizedPatch },
         };
         const result = await actionExecutor.execute(action, project);
         if (result.success) {

@@ -34,14 +34,29 @@ export function MetadataEditor({ item, onSaved }: MetadataEditorProps) {
 
   const save = useCallback(async () => {
     setSaving(true);
-    await updateMeta(freshItem.id, {
-      title: title || undefined,
-      description: description || undefined,
-      tags: tags.length > 0 ? tags : undefined,
-      group: group || undefined,
-    });
-    setSaving(false);
-    onSaved();
+    try {
+      const result = await updateMeta(freshItem.id, {
+        title: title || undefined,
+        description: description || undefined,
+        tags: tags.length > 0 ? tags : undefined,
+        group: group || undefined,
+      });
+      if (!result.success) {
+        toast.error(
+          "Metadata could not be saved",
+          result.error?.message ?? "The asset metadata was not changed.",
+        );
+        return;
+      }
+      onSaved();
+    } catch (error) {
+      toast.error(
+        "Metadata could not be saved",
+        error instanceof Error ? error.message : "Unknown metadata error",
+      );
+    } finally {
+      setSaving(false);
+    }
   }, [freshItem.id, title, description, tags, group, updateMeta, onSaved]);
 
   const addTag = useCallback(() => {

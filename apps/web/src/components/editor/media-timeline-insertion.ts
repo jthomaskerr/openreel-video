@@ -23,14 +23,39 @@ export function isCompatibleInsertionTrack(
 }
 
 /** Insert a Media-pane item at the timeline position visible when the action starts. */
-export async function insertMediaAtCurrentTime(mediaId: string): Promise<void> {
+export type MediaInsertionResult =
+  | {
+      success: true;
+      mediaId: string;
+      trackId: string;
+      clipId: string;
+      startTime: number;
+    }
+  | {
+      success: false;
+      stage: "resolve-media" | "resolve-track" | "create-track" | "create-clip";
+      mediaId: string;
+      trackId?: string;
+      message: string;
+    };
+
+export async function insertMediaAtCurrentTime(
+  mediaId: string,
+): Promise<MediaInsertionResult> {
   const timelineState = useTimelineStore.getState();
   const capturedTime = timelineState.isScrubbing && timelineState.scrubPosition !== null
     ? timelineState.scrubPosition
     : timelineState.playheadPosition;
   const projectState = useProjectStore.getState();
   const mediaItem = projectState.getMediaItem(mediaId);
-  if (!mediaItem) return;
+  if (!mediaItem) {
+    return {
+      success: false,
+      stage: "resolve-media",
+      mediaId,
+      message: `Media ${mediaId} is no longer available. Relink or re-import it and try again.`,
+    };
+  }
 
   const trackType = getDefaultTrackType(mediaItem.type);
   const uiState = useUIStore.getState();
@@ -49,7 +74,14 @@ export async function insertMediaAtCurrentTime(mediaId: string): Promise<void> {
       projectState.project.timeline.tracks.map((track) => track.id),
     );
     const result = await projectState.addTrack(trackType);
-    if (!result.success) return;
+    if (!result.success) {
+      return {
+        success: false,
+        stage: "create-track",
+        mediaId,
+        message: result.error?.message ?? `Could not create a ${trackType} track.`,
+      };
+    }
 
     targetTrack = useProjectStore
       .getState()
@@ -58,27 +90,57 @@ export async function insertMediaAtCurrentTime(mediaId: string): Promise<void> {
           !previousTrackIds.has(track.id) &&
           isCompatibleInsertionTrack(track, mediaItem.type),
       );
-    if (!targetTrack) return;
+    if (!targetTrack) {
+      return {
+        success: false,
+        stage: "resolve-track",
+        mediaId,
+        message: `The new ${trackType} track could not be resolved. Try adding a track manually.`,
+      };
+    }
   }
 
-  useUIStore.getState().setActiveTrack(targetTrack.id);
+  const targetTrackId = targetTrack.id;
   const previousClipIds = new Set(
     targetTrack.clips.map((clip) => clip.id),
   );
   const result = await useProjectStore
     .getState()
-    .addClip(targetTrack.id, mediaId, capturedTime);
-  if (!result.success) return;
+    .addClip(targetTrackId, mediaId, capturedTime);
+  if (!result.success) {
+    return {
+      success: false,
+      stage: "create-clip",
+      mediaId,
+      trackId: targetTrackId,
+      message: result.error?.message ?? "Could not add the media clip to the timeline.",
+    };
+  }
 
   const insertedClip = useProjectStore
     .getState()
-    .project.timeline.tracks.find((track) => track.id === targetTrack.id)
+    .project.timeline.tracks.find((track) => track.id === targetTrackId)
     ?.clips.find((clip) => !previousClipIds.has(clip.id));
-  if (insertedClip) {
-    useUIStore.getState().select({
-      id: insertedClip.id,
-      type: "clip",
-      trackId: targetTrack.id,
-    });
+  if (!insertedClip) {
+    return {
+      success: false,
+      stage: "create-clip",
+      mediaId,
+      trackId: targetTrackId,
+      message: "The timeline accepted the operation but the new clip could not be found.",
+    };
   }
+  useUIStore.getState().setActiveTrack(targetTrackId);
+  useUIStore.getState().select({
+    id: insertedClip.id,
+    type: "clip",
+    trackId: targetTrackId,
+  });
+  return {
+    success: true,
+    mediaId,
+    trackId: targetTrackId,
+    clipId: insertedClip.id,
+    startTime: capturedTime,
+  };
 }

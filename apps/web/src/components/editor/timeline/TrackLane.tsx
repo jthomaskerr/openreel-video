@@ -189,10 +189,19 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
               useProjectStore.getState().project.mediaLibrary.items.map(i => i.id)
             );
             const result = await importMedia(file);
+            if (!result.success) {
+              toast.error(
+                "Could not import dropped media",
+                result.error?.message ?? `${file.name} could not be imported.`,
+              );
+              continue;
+            }
             if (result.success) {
               const newItem = useProjectStore
                 .getState()
-                .project.mediaLibrary.items.find(i => !beforeIds.has(i.id));
+                .project.mediaLibrary.items.find(
+                  (item) => item.id === result.actionId || !beforeIds.has(item.id),
+                );
               if (newItem) {
                 const rejection = getMediaDropRejection(track, newItem.type);
                 if (rejection) {
@@ -205,15 +214,31 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
                 const MEDIA_TO_CLIP_TYPE: Partial<Record<string, "audio" | "image">> = {
                   audio: "audio", image: "image",
                 };
-                await addClip(track.id, newItem.id, resolvedTime, {
+                const clipResult = await addClip(track.id, newItem.id, resolvedTime, {
                   type: TRACK_TO_CLIP_TYPE[track.type] ?? MEDIA_TO_CLIP_TYPE[newItem.type] ?? "video",
                 });
+                if (!clipResult.success) {
+                  toast.error(
+                    "Could not add media to timeline",
+                    clipResult.error?.message ?? `Failed to add ${file.name} to ${track.name}.`,
+                  );
+                  continue;
+                }
                 setActiveTrack(track.id);
                 toast.success(`Added to ${track.name}`, file.name);
+              } else {
+                toast.error(
+                  "Could not add media to timeline",
+                  `The imported asset for ${file.name} could not be resolved.`,
+                );
               }
             }
           } catch (err) {
             console.error("[TrackLane] External file drop failed:", err);
+            toast.error(
+              "External media drop failed",
+              err instanceof Error ? err.message : "Unknown drop error",
+            );
           }
         }
         return;
@@ -243,8 +268,12 @@ export const TrackLane: React.FC<TrackLaneProps> = ({
         }
         const resolvedTime = resolveDropTime(e.clientX);
         if (resolvedTime !== null) onDropMedia(track.id, data.mediaId, resolvedTime);
-      } catch {
-        // Silently ignore parse errors
+      } catch (error) {
+        console.error("[TrackLane] Invalid internal media drop payload", error);
+        toast.error(
+          "Cannot add media",
+          "The dragged media payload was invalid. Drag the asset again.",
+        );
       }
     },
     [track, onDropMedia, setActiveTrack, resolveDropTime, getDraggedMediaType],

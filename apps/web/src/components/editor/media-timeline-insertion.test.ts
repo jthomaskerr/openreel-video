@@ -200,4 +200,67 @@ describe("Media-pane timeline insertion", () => {
     expect(useUIStore.getState().activeTrackId).toBe("new-video-track");
     expect(useUIStore.getState().selectedItems[0]?.id).toBe("inserted-clip");
   });
+
+  it("returns an actionable missing-media failure without changing selection", async () => {
+    seedProject([], [track("video-track", "video")]);
+    useUIStore.setState({
+      selectedItems: [{ id: "existing", type: "clip", trackId: "video-track" }],
+    });
+
+    const result = await insertMediaAtCurrentTime("missing-media");
+
+    expect(result).toEqual({
+      success: false,
+      stage: "resolve-media",
+      mediaId: "missing-media",
+      message: "Media missing-media is no longer available. Relink or re-import it and try again.",
+    });
+    expect(useUIStore.getState().selectedItems[0]?.id).toBe("existing");
+  });
+
+  it("returns track-creation failure and keeps the previous active track", async () => {
+    seedProject([media("video-media", "video")], [track("audio-track", "audio")]);
+    useUIStore.setState({ activeTrackId: "audio-track" });
+    useProjectStore.setState({
+      addTrack: vi.fn(async () => ({
+        success: false,
+        error: { code: "ACTION_FAILED" as const, message: "track failed" },
+      })),
+    });
+
+    const result = await insertMediaAtCurrentTime("video-media");
+
+    expect(result).toMatchObject({
+      success: false,
+      stage: "create-track",
+      mediaId: "video-media",
+      message: "track failed",
+    });
+    expect(useUIStore.getState().activeTrackId).toBe("audio-track");
+  });
+
+  it("returns clip-creation failure without claiming a new selection", async () => {
+    seedProject([media("audio-media", "audio")], [track("audio-track", "audio")]);
+    useUIStore.setState({ activeTrackId: "audio-track" });
+    useUIStore.setState({
+      selectedItems: [{ id: "existing", type: "clip", trackId: "audio-track" }],
+    });
+    useProjectStore.setState({
+      addClip: vi.fn(async () => ({
+        success: false,
+        error: { code: "ACTION_FAILED" as const, message: "clip failed" },
+      })),
+    });
+
+    const result = await insertMediaAtCurrentTime("audio-media");
+
+    expect(result).toMatchObject({
+      success: false,
+      stage: "create-clip",
+      mediaId: "audio-media",
+      trackId: "audio-track",
+      message: "clip failed",
+    });
+    expect(useUIStore.getState().selectedItems[0]?.id).toBe("existing");
+  });
 });

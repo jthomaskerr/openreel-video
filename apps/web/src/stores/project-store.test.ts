@@ -522,6 +522,57 @@ describe("ProjectStore", () => {
     });
   });
 
+  describe("safe media deletion", () => {
+    it("blocks deletion while a timeline clip references the asset", async () => {
+      const project = useProjectStore.getState().project;
+      const media = { id: "media-used", name: "used.mov", type: "video" } as MediaItem;
+      useProjectStore.setState({
+        project: {
+          ...project,
+          mediaLibrary: { items: [media] },
+          timeline: {
+            ...project.timeline,
+            tracks: [
+              {
+                id: "track-1",
+                type: "video",
+                name: "Video",
+                clips: [{ id: "clip-1", mediaId: media.id } as Clip],
+                transitions: [],
+                locked: false,
+                hidden: false,
+                muted: false,
+                solo: false,
+              },
+            ],
+          },
+        },
+      });
+
+      const result = await useProjectStore.getState().deleteMedia(media.id);
+
+      expect(result.success).toBe(false);
+      expect(result.error?.details?.dependencies).toMatchObject({
+        timelineClipIds: ["clip-1"],
+        total: 1,
+      });
+      expect(useProjectStore.getState().getMediaItem(media.id)).toBeDefined();
+    });
+
+    it("deletes an unreferenced asset through the project action", async () => {
+      const project = useProjectStore.getState().project;
+      const media = { id: "media-unused", name: "unused.mov", type: "video" } as MediaItem;
+      useProjectStore.setState({
+        project: { ...project, mediaLibrary: { items: [media] } },
+      });
+
+      const result = await useProjectStore.getState().deleteMedia(media.id);
+
+      expect(result.success).toBe(true);
+      expect(useProjectStore.getState().getMediaItem(media.id)).toBeUndefined();
+    });
+  });
+
   describe("media import duplicate handling", () => {
     function seedProjectWithMedia(item: MediaItem, clip?: Clip) {
       const base = useProjectStore.getState().project;

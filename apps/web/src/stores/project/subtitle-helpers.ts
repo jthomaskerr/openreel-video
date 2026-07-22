@@ -111,6 +111,20 @@ export function parseSRT(content: string): {
   return { subtitles, errors };
 }
 
+export function parseImportableSRT(content: string):
+  | { success: true; subtitles: Subtitle[]; errors: string[] }
+  | { success: false; error: string; errors: string[] } {
+  const parsed = parseSRT(content);
+  if (parsed.subtitles.length === 0) {
+    return {
+      success: false,
+      error: "The subtitle file contains no valid cues.",
+      errors: parsed.errors,
+    };
+  }
+  return { success: true, ...parsed };
+}
+
 export function generateSRT(subtitles: Subtitle[]): string {
   const sortedSubtitles = [...subtitles].sort(
     (a, b) => a.startTime - b.startTime,

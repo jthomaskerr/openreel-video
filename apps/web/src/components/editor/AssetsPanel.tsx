@@ -29,6 +29,7 @@ import {
 } from "./panels/EffectsTransitionsPanel";
 import { useTtsAudioStore } from "../../stores/tts-store";
 import { toast } from "../../stores/notification-store";
+import { importMediaBatch } from "../../services/media-import-batch";
 import {
   Input,
   ScrollArea,
@@ -743,13 +744,23 @@ const MediaThumbnailRow = React.memo(
     }, [item]);
 
     const handleDelete = useCallback(async () => {
-      await useProjectStore.getState().deleteMedia(item.id);
+      const result = await useProjectStore.getState().deleteMedia(item.id);
+      if (!result.success) {
+        toast.error(
+          "Media could not be deleted",
+          [result.error?.message, result.error?.suggestion].filter(Boolean).join(" "),
+        );
+        return;
+      }
+      if (result.warnings?.length) {
+        toast.warning("Media deleted with cleanup warning", result.warnings.join("\n"));
+      }
     }, [item.id]);
 
     const handleReplace = useCallback(async () => {
       const input = document.createElement("input");
       input.type = "file";
-      input.accept = "video/*,audio/*,image/*";
+      input.accept = "video/*,audio/*,image/*,.srt,text/srt,application/x-subrip";
       input.onchange = async (e) => {
         try {
           const file = (e.target as HTMLInputElement).files?.[0];
@@ -786,7 +797,11 @@ const MediaThumbnailRow = React.memo(
     );
 
     const handleAddToTimeline = useCallback(async () => {
-      await insertMediaAtCurrentTime(item.id);
+      const result = await insertMediaAtCurrentTime(item.id);
+      if (!result.success) {
+        console.error("[AssetsPanel] Media timeline insertion failed", result);
+        toast.error("Could not add media to timeline", result.message);
+      }
     }, [item.id]);
 
     const handleOpenGenerate = useCallback(() => {
@@ -1030,23 +1045,54 @@ export const AssetsPanel: React.FC = () => {
       const fileArray = Array.from(files);
 
       try {
-        for (let i = 0; i < fileArray.length; i++) {
-          const file = fileArray[i];
-          setImportProgress(
-            `Importing ${file.name} (${i + 1}/${fileArray.length})...`,
+        const outcomes = await importMediaBatch(fileArray, {
+          importFile: importMedia,
+          onProgress: ({ filename, index, total, stage }) => {
+            setImportProgress(
+              `${stage === "preflight" ? "Checking" : "Importing"} ${filename} (${index}/${total})...`,
+            );
+          },
+        });
+        const durable = outcomes.filter(
+          (outcome) => outcome.status === "durable-success",
+        ).length;
+        const degraded = outcomes.filter(
+          (outcome) => outcome.status === "degraded-success",
+        );
+        const unsuccessful = outcomes.filter(
+          (outcome) => outcome.status === "failed" || outcome.status === "rejected",
+        );
+        const warningOutcomes = outcomes.filter(
+          (outcome) => outcome.warnings.length > 0,
+        );
+
+        if (
+          degraded.length > 0 ||
+          unsuccessful.length > 0 ||
+          warningOutcomes.length > 0
+        ) {
+          const details = Array.from(
+            new Set([...degraded, ...unsuccessful, ...warningOutcomes]),
+          )
+            .map((outcome) =>
+              `${outcome.file.name}: ${[outcome.message, ...outcome.warnings].join(" ")}`,
+            )
+            .join("\n");
+          toast.warning(
+            `Imported ${durable} of ${outcomes.length} files durably`,
+            details,
           );
-
-          const result = await importMedia(file);
-
-          // If it's a video with audio, extract audio to separate track
-          if (result.success && file.type.startsWith("video/")) {
-            setImportProgress(`Extracting audio from ${file.name}...`);
-            // Audio extraction is handled by the importMedia function
-            // The audio track is created automatically when adding to timeline
-          }
+        } else {
+          toast.success(
+            `Imported ${durable} ${durable === 1 ? "file" : "files"}`,
+          );
         }
       } catch (error) {
         console.error("Import failed:", error);
+        toast.error(
+          "Media import failed",
+          error instanceof Error ? error.message : "Unknown import error",
+        );
       } finally {
         setIsImporting(false);
         setImportProgress("");
@@ -1075,14 +1121,22 @@ export const AssetsPanel: React.FC = () => {
                     const file = await fileHandle.getFile();
                     await saveFileHandle(file.name, file.size, fileHandle);
                   }
-                } catch {
-                  // Ignore — handle capture is best-effort
+                } catch (error) {
+                  const droppedFileName = item.getAsFile()?.name ?? "Dropped file";
+                  console.warn("[AssetsPanel] Failed to save dropped-file recovery handle", {
+                    name: droppedFileName,
+                    error,
+                  });
+                  toast.warning(
+                    "Automatic media recovery is unavailable",
+                    `${droppedFileName} imported without a saved file handle. You may need to relink it after reopening the project.`,
+                  );
                 }
               })
           : [];
 
       await Promise.all(handlePromises);
-      handleFileImport(droppedFiles);
+      await handleFileImport(droppedFiles);
     },
     [handleFileImport],
   );
@@ -1111,23 +1165,51 @@ export const AssetsPanel: React.FC = () => {
         return; // user cancelled
       }
 
-      try { await saveDirectoryHandle(useProjectStore.getState().project.id, dirHandle); } catch { /* best-effort */ }
+      try {
+        await saveDirectoryHandle(useProjectStore.getState().project.id, dirHandle);
+      } catch (error) {
+        console.warn("[AssetsPanel] Failed to save relink directory handle", {
+          projectId: useProjectStore.getState().project.id,
+          directory: dirHandle.name,
+          error,
+        });
+        toast.warning(
+          "Folder recovery will not be automatic",
+          "Relinking can continue, but this folder may need to be selected again after reopening the project.",
+        );
+      }
       const fileMap = await scanDirectoryRecursive(dirHandle);
 
       setIsImporting(true);
       let linked = 0;
+      let failed = 0;
+      let ambiguous = 0;
       for (const item of placeholders) {
         const key = item.sourceFile
           ? `${item.sourceFile.name.toLowerCase()}:${item.sourceFile.size}`
           : null;
         const entry = key ? fileMap.get(key) : null;
-        if (entry) {
+        if (entry?.ambiguous) {
+          ambiguous++;
+        } else if (entry) {
           setImportProgress(`Relinking ${item.name}…`);
           try {
-            try { await saveFileHandle(entry.file.name, entry.file.size, entry.handle); } catch { /* best-effort */ }
-            await useProjectStore.getState().replaceMediaAsset(item.id, entry.file, dirHandle.name);
-            linked++;
+            try {
+              await saveFileHandle(entry.file.name, entry.file.size, entry.handle);
+            } catch (error) {
+              console.warn("[AssetsPanel] Failed to save relinked-file handle", {
+                mediaId: item.id,
+                filename: entry.file.name,
+                error,
+              });
+            }
+            const result = await useProjectStore
+              .getState()
+              .replaceMediaAsset(item.id, entry.file, dirHandle.name);
+            if (result.success) linked++;
+            else failed++;
           } catch (err) {
+            failed++;
             console.error(`[AssetsPanel] Failed to relink ${item.name}:`, err);
           }
         }
@@ -1135,10 +1217,14 @@ export const AssetsPanel: React.FC = () => {
       setIsImporting(false);
       setImportProgress("");
 
-      if (linked > 0) {
-        toast.success(`Relinked ${linked} of ${placeholders.length} asset${placeholders.length !== 1 ? "s" : ""}`);
+      const unmatched = placeholders.length - linked - failed - ambiguous;
+      if (failed > 0 || ambiguous > 0 || unmatched > 0) {
+        toast.warning(
+          `Relinked ${linked} of ${placeholders.length} asset${placeholders.length !== 1 ? "s" : ""}`,
+          `${unmatched} unmatched, ${ambiguous} ambiguous, ${failed} failed.`,
+        );
       } else {
-        toast.error("No matches found", "None of the files in the selected folder matched the missing assets by filename.");
+        toast.success(`Relinked ${linked} of ${placeholders.length} asset${placeholders.length !== 1 ? "s" : ""}`);
       }
       return;
     }
@@ -1174,27 +1260,34 @@ export const AssetsPanel: React.FC = () => {
     if (files.length === 0) return;
 
     // Build name:size map from flat file list (webkitdirectory is flat)
-    const fileMap = new Map<string, File>();
+    const fileMap = new Map<string, File | null>();
     for (const file of files) {
       const key = `${file.name.toLowerCase()}:${file.size}`;
-      if (!fileMap.has(key)) {
-        fileMap.set(key, file);
-      }
+      fileMap.set(key, fileMap.has(key) ? null : file);
     }
 
     setIsImporting(true);
     let linked = 0;
+    let failed = 0;
+    let ambiguous = 0;
     for (const item of placeholders) {
       const key = item.sourceFile
         ? `${item.sourceFile.name.toLowerCase()}:${item.sourceFile.size}`
         : null;
-      const file = key ? fileMap.get(key) : undefined;
+      const candidate = key ? fileMap.get(key) : undefined;
+      if (candidate === null) {
+        ambiguous++;
+        continue;
+      }
+      const file = candidate;
       if (file) {
         setImportProgress(`Relinking ${item.name}…`);
         try {
-          await useProjectStore.getState().replaceMediaAsset(item.id, file);
-          linked++;
+          const result = await useProjectStore.getState().replaceMediaAsset(item.id, file);
+          if (result.success) linked++;
+          else failed++;
         } catch (err) {
+          failed++;
           console.error(`[AssetsPanel] Failed to relink ${item.name}:`, err);
         }
       }
@@ -1202,16 +1295,26 @@ export const AssetsPanel: React.FC = () => {
     setIsImporting(false);
     setImportProgress("");
 
-    if (linked > 0) {
-      toast.success(`Relinked ${linked} of ${placeholders.length} asset${placeholders.length !== 1 ? "s" : ""}`);
+    const unmatched = placeholders.length - linked - failed - ambiguous;
+    if (failed > 0 || ambiguous > 0 || unmatched > 0) {
+      toast.warning(
+        `Relinked ${linked} of ${placeholders.length} asset${placeholders.length !== 1 ? "s" : ""}`,
+        `${unmatched} unmatched, ${ambiguous} ambiguous, ${failed} failed.`,
+      );
     } else {
-      toast.error("No matches found", "None of the files in the selected folder matched the missing assets by filename.");
+      toast.success(`Relinked ${linked} of ${placeholders.length} asset${placeholders.length !== 1 ? "s" : ""}`);
     }
   }, []);
 
   const addMediaToTimeline = useCallback(async (item: MediaItem) => {
     const { addClipToNewTrack } = useProjectStore.getState();
-    await addClipToNewTrack(item.id);
+    const result = await addClipToNewTrack(item.id);
+    if (!result.success) {
+      toast.error(
+        "Could not add media to timeline",
+        result.error?.message ?? `Failed to add ${item.name} to a new track.`,
+      );
+    }
   }, []);
 
   const handleConfirmAspectRatioMatch = useCallback(async () => {
@@ -1281,10 +1384,25 @@ export const AssetsPanel: React.FC = () => {
         const result = await importMedia(file);
         if (result.success && result.actionId) {
           const { addClipToNewTrack } = useProjectStore.getState();
-          await addClipToNewTrack(result.actionId);
+          const clipResult = await addClipToNewTrack(result.actionId);
+          if (!clipResult.success) {
+            toast.error(
+              "Background was imported but not added",
+              clipResult.error?.message ?? "Could not create the background clip.",
+            );
+          }
+        } else {
+          toast.error(
+            "Background import failed",
+            result.error?.message ?? "Could not import the generated background.",
+          );
         }
       } catch (error) {
         console.error("Failed to generate background:", error);
+        toast.error(
+          "Background generation failed",
+          error instanceof Error ? error.message : "Unknown background error",
+        );
       } finally {
         setGeneratingBackground(null);
       }
@@ -2081,7 +2199,7 @@ export const AssetsPanel: React.FC = () => {
           ref={fileInputRef}
           type="file"
           multiple
-          accept="video/*,audio/*,image/*"
+          accept="video/*,audio/*,image/*,.srt,text/srt,application/x-subrip"
           onChange={(e) => handleFileImport(e.target.files)}
           className="hidden"
         />

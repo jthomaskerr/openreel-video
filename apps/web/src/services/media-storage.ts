@@ -67,6 +67,20 @@ export async function loadDirectoryHandle(projectId: string): Promise<{ handle: 
 export interface FoundFileEntry {
   file: File;
   handle: FileSystemFileHandle;
+  ambiguous?: boolean;
+}
+
+export function addRelinkCandidate(
+  fileMap: Map<string, FoundFileEntry>,
+  entry: FoundFileEntry,
+): void {
+  const key = `${entry.file.name.toLowerCase()}:${entry.file.size}`;
+  const existing = fileMap.get(key);
+  if (existing) {
+    fileMap.set(key, { ...existing, ambiguous: true });
+    return;
+  }
+  fileMap.set(key, { ...entry, ambiguous: false });
 }
 
 /**
@@ -87,17 +101,16 @@ export async function scanDirectoryRecursive(
         if (handle.kind === "file") {
           const fh = handle as FileSystemFileHandle;
           const file = await fh.getFile();
-          const key = `${file.name.toLowerCase()}:${file.size}`;
-          // First file found wins (shallower nesting)
-          if (!fileMap.has(key)) {
-            fileMap.set(key, { file, handle: fh });
-          }
+          addRelinkCandidate(fileMap, { file, handle: fh });
         } else if (handle.kind === "directory") {
           pending.push(handle as FileSystemDirectoryHandle);
         }
       }
-    } catch {
-      // Permission denied on a subdirectory — skip it
+    } catch (error) {
+      console.warn("[MediaStorage] Could not scan a relink directory", {
+        directory: current.name,
+        error,
+      });
       continue;
     }
   }
