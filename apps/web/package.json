@@ -11,6 +11,7 @@
     "deploy:preview": "wrangler pages deploy dist --project-name=openreel --branch=preview",
     "test": "vitest",
     "test:run": "vitest run",
+    "test:integration": "tsx --test \"src/**/*.integration.test.ts\"",
     "test:e2e": "playwright test",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",

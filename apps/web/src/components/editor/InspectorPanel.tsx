@@ -1340,7 +1340,7 @@ export const InspectorPanel: React.FC = () => {
               />
             ) : isSelectedMetadataClip ? (
               metadataKind === "note" ? (
-                <InspectorTabPanel tab="note" active={activeTab}>
+                <InspectorTabPanel tab="note" active={activeTab} labelledByTab={clipTabIds.includes("note")}>
                   <MetadataClipInspector clip={selectedTimelineClip!} kind="note" />
                 </InspectorTabPanel>
               ) : (
@@ -1352,7 +1352,7 @@ export const InspectorPanel: React.FC = () => {
                   <SceneMetadataInspector clip={selectedTimelineClip} />
                 )}
                 <InspectorTabErrorBoundary key={activeTab}>
-                <InspectorTabPanel tab="effects" active={activeTab}>
+                <InspectorTabPanel tab="effects" active={activeTab} labelledByTab={clipTabIds.includes("effects")}>
                   <EffectsTab
                     clipId={clipId}
                     clipType={clipType}
@@ -1380,7 +1380,7 @@ export const InspectorPanel: React.FC = () => {
                     handleToleranceChange={handleToleranceChange}
                   />
                 </InspectorTabPanel>
-                <InspectorTabPanel tab="ai" active={activeTab}>
+                <InspectorTabPanel tab="ai" active={activeTab} labelledByTab={clipTabIds.includes("ai")}>
                   <AiTab
                     clipId={clipId}
                     clipType={clipType}
@@ -1404,7 +1404,7 @@ export const InspectorPanel: React.FC = () => {
                     isApplyingSelectedClipEffect={isApplyingSelectedClipEffect}
                   />
                 </InspectorTabPanel>
-                <InspectorTabPanel tab="generate" active={activeTab}>
+                <InspectorTabPanel tab="generate" active={activeTab} labelledByTab={clipTabIds.includes("generate")}>
                   <GenerateTab
                     projectId={project.id}
                     shotId={generationShotId}
@@ -1431,7 +1431,7 @@ export const InspectorPanel: React.FC = () => {
                     onCancel={handleGenerationCancel}
                   />
                 </InspectorTabPanel>
-                <InspectorTabPanel tab="audio" active={activeTab}>
+                <InspectorTabPanel tab="audio" active={activeTab} labelledByTab={clipTabIds.includes("audio")}>
                   <AudioTab
                     clipId={clipId}
                     clipType={clipType}
@@ -1440,7 +1440,7 @@ export const InspectorPanel: React.FC = () => {
                     selectedNoiseReductionEffect={selectedNoiseReductionEffect}
                   />
                 </InspectorTabPanel>
-                <InspectorTabPanel tab="transform" active={activeTab}>
+                <InspectorTabPanel tab="transform" active={activeTab} labelledByTab={clipTabIds.includes("transform")}>
                   <TransformTab
                     clipId={clipId}
                     clipType={clipType}
@@ -1451,16 +1451,16 @@ export const InspectorPanel: React.FC = () => {
                     handleTransformChange={handleTransformChange}
                   />
                 </InspectorTabPanel>
-                <InspectorTabPanel tab="speed" active={activeTab}>
+                <InspectorTabPanel tab="speed" active={activeTab} labelledByTab={clipTabIds.includes("speed")}>
                   <SpeedTab showVideoControls={showVideoControls} selectedClip={selectedClip} />
                 </InspectorTabPanel>
-                <InspectorTabPanel tab="animate" active={activeTab}>
+                <InspectorTabPanel tab="animate" active={activeTab} labelledByTab={clipTabIds.includes("animate")}>
                   <AnimateTab clipId={clipId} clipType={clipType} showTextSection={showTextSection} />
                 </InspectorTabPanel>
-                <InspectorTabPanel tab="color" active={activeTab}>
+                <InspectorTabPanel tab="color" active={activeTab} labelledByTab={clipTabIds.includes("color")}>
                   <ColorTab clipId={clipId} showColorGrading={showColorGrading} />
                 </InspectorTabPanel>
-                <InspectorTabPanel tab="style" active={activeTab}>
+                <InspectorTabPanel tab="style" active={activeTab} labelledByTab={clipTabIds.includes("style")}>
                   <StyleTab
                     clipId={clipId}
                     showTextSection={showTextSection}

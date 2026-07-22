@@ -18,9 +18,9 @@ import {
 } from "./index";
 
 export const SCENE_AUDIO_REQUIRES_PLACEMENT =
-  "Place scene on timeline generate audio from timing.";
+  "Place this scene on the timeline to generate audio from its timing.";
 export const SCENE_AUDIO_REQUIRES_SELECTION =
-  "Select timeline projection generate audio timing.";
+  "Select a timeline projection to generate audio from its timing.";
 
 export type SceneGenerationDisabledCode =
   | "audio-requires-placement"

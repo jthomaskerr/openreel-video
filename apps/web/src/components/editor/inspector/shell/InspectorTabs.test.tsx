@@ -28,7 +28,7 @@ describe("InspectorTabs", () => {
       <>
         <InspectorTabs tabs={tabs} activeId="color" onSelect={() => {}} />
         {tabs.map((tab) => (
-          <InspectorTabPanel key={tab.id} tab={tab.id} active="color">
+          <InspectorTabPanel key={tab.id} tab={tab.id} active="color" labelledByTab>
             {tab.label} panel
           </InspectorTabPanel>
         ))}
@@ -42,11 +42,6 @@ describe("InspectorTabs", () => {
       expect(tab).toHaveAttribute("aria-controls", tab.id.replace("inspector-tab-", "inspector-panel-"));
       const panel = document.getElementById(tab.getAttribute("aria-controls")!);
       expect(panel).not.toBeNull();
-      if (tab.getAttribute("aria-selected") === "true") {
-        expect(panel).toHaveAttribute("aria-labelledby", tab.id);
-      } else {
-        expect(panel).not.toHaveAttribute("aria-labelledby");
-      }
       expect(panel).toHaveAttribute("aria-labelledby", tab.id);
     });
     expect(renderedTabs.filter((tab) => tab.tabIndex === 0)).toEqual([
@@ -64,7 +59,7 @@ describe("InspectorTabs", () => {
           onSelect={() => {}}
         />
         {configuredTabs.map((tab) => (
-          <InspectorTabPanel key={tab.id} tab={tab.id} active="transform">
+          <InspectorTabPanel key={tab.id} tab={tab.id} active="transform" labelledByTab>
             {tab.label} panel
           </InspectorTabPanel>
         ))}

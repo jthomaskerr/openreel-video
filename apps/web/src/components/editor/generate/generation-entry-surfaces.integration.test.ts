@@ -10,8 +10,9 @@ test("dialog and inspector use the one shared production generation runtime", as
   ]);
 
   assert.match(dialog, /getProductionGenerationRuntime/);
-  assert.match(dialog, /prepareWaveSpeedGenerationDraft/);
+  assert.match(dialog, /prepareProjectWaveSpeedSubmission/);
   assert.match(dialog, /generationRuntime\.readCapabilities/);
+  assert.match(dialog, /prepareWaveSpeedGenerationDraft/);
   assert.match(dialog, /prepareWaveSpeedProjectionAudio/);
   assert.doesNotMatch(dialog, /submitGenerationJob/);
   assert.doesNotMatch(dialog, /fetchModelsCached/);
@@ -20,14 +21,15 @@ test("dialog and inspector use the one shared production generation runtime", as
   assert.doesNotMatch(dialog, /linkedMediaIds/);
   assert.doesNotMatch(dialog, /VITE_ORCHESTRATOR_URL/);
   assert.match(dialog, /wsRoute:\s*route/);
-  assert.match(dialog, /prepareWaveSpeedGenerationDraft\(\{[\s\S]*route,[\s\S]*entryContext/);
+  assert.match(dialog, /prepareProjectWaveSpeedSubmission\(\{[\s\S]*route,[\s\S]*entryContext/);
   assert.match(dialog, /resolveProjectGenerationReferences/);
   assert.match(dialog, /referenceResolution\.submissionReferences\.map/);
 
   assert.match(inspector, /getProductionGenerationRuntime/);
-  assert.match(inspector, /prepareWaveSpeedGenerationDraft/);
-  assert.match(inspector, /prepareWaveSpeedProjectionAudio/);
-  assert.match(inspector, /audio:\s*generationAudio/);
+  assert.match(inspector, /prepareProjectWaveSpeedSubmission/);
+  assert.doesNotMatch(inspector, /prepareWaveSpeedGenerationDraft/);
+  assert.doesNotMatch(inspector, /prepareWaveSpeedProjectionAudio/);
+  assert.match(inspector, /generationRuntime\.controller\.submit\(prepared\)/);
   for (const prop of [
     "entryContextResult=",
     "destination=",
@@ -43,10 +45,7 @@ test("dialog and inspector use the one shared production generation runtime", as
   ]) {
     assert.ok(inspector.includes(prop), `Inspector is missing live GenerateTab prop ${prop}`);
   }
-  assert.match(inspector, /projectId:\s*project\.id,[\s\S]*body:\s*source\.blob/);
-  assert.match(inspector, /draft\.referenceResolution\.submissionReferences\.map/);
-  assert.match(inspector, /waveSpeedRouteKey\(candidate\)\s*===\s*draft\.modelId/);
-  assert.match(inspector, /prepareWaveSpeedGenerationDraft\(\{[\s\S]*route,[\s\S]*entryContext/);
+  assert.match(inspector, /prepareProjectWaveSpeedSubmission\(\{[\s\S]*route,[\s\S]*entryContext/);
   assert.match(inspector, /saveReferenceRecovery/);
   assert.match(inspector, /referenceRecoveries/);
   assert.doesNotMatch(inspector, /\/api\/generate\/wavespeed\/models/);

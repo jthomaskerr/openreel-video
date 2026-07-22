@@ -261,11 +261,17 @@ describe("placeGeneratedAssetOnTimeline", () => {
       }),
     });
 
-    store.replaceClipMedia = vi.fn(async (clipId, mediaId) => {
+    store.replaceClipMedia = vi.fn(async (clipId, mediaId, idempotencyKey) => {
       track = {
         ...track,
         clips: track.clips.map((clip) =>
-          clip.id === clipId ? { ...clip, mediaId } : clip,
+          clip.id === clipId
+            ? {
+                ...clip,
+                mediaId,
+                metadata: { ...clip.metadata, idempotencyKey },
+              }
+            : clip,
         ) as Track["clips"],
       };
       return { success: true, actionId: "replace-action" };
@@ -343,11 +349,17 @@ describe("placeGeneratedAssetOnTimeline", () => {
       }),
     });
 
-    store.replaceClipMedia = vi.fn(async (clipId, mediaId) => {
+    store.replaceClipMedia = vi.fn(async (clipId, mediaId, idempotencyKey) => {
       track = {
         ...track,
         clips: track.clips.map((clip) =>
-          clip.id === clipId ? { ...clip, mediaId } : clip,
+          clip.id === clipId
+            ? {
+                ...clip,
+                mediaId,
+                metadata: { ...clip.metadata, idempotencyKey },
+              }
+            : clip,
         ) as Track["clips"],
       };
       return { success: true, actionId: "replace-action" };
