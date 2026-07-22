@@ -14,6 +14,10 @@ import { GenerationFinalizer } from "../services/generation/finalization.js";
 import { FileGenerationJobRepository } from "../services/generation/repository.js";
 import type { GenerationProviderPort, GenerationProviderStatus } from "../services/generation/index.js";
 import {
+  WaveSpeedFakeProvider,
+  WaveSpeedFakeProviderError,
+} from "../testing/wavespeed-fake-provider.js";
+import {
   createWaveSpeedRouter,
   parseGenerationRouteManifest,
   type ValidatedGenerationRouteManifestEntry,
@@ -130,12 +134,13 @@ async function fixture(options?: {
   routes?: readonly import("./wavespeed.js").ValidatedGenerationRouteManifestEntry[];
   applyProjectAction?: (command: GenerationProjectActionCommand) => Promise<unknown>;
   finalizationFailure?: Error;
+  provider?: GenerationProviderPort;
 }) {
   const repository = new FileGenerationJobRepository(await mkdtemp(join(tmpdir(), "wavespeed-route-integration-")));
   let providerSubmits = 0;
   let providerStatusReads = 0;
   let placeholderFinalizations = 0;
-  const provider: GenerationProviderPort = {
+  const provider: GenerationProviderPort = options?.provider ?? {
     submit: async ({ job }) => { providerSubmits += 1; return { providerJobId: `provider-${job.id}` }; },
     status: async ({ providerJobId }) => {
       providerStatusReads += 1;
@@ -591,4 +596,135 @@ test("authenticated project actions use the durable domain command unchanged", a
   assert.equal(response.status, 200);
   assert.deepEqual(received, command);
   assert.equal(response.body.result.status, "applied");
+});
+
+test("deterministic fake provider fixes IDs, sequences, output bytes, cancellation, retry, and idempotent counters", async () => {
+  const provider = new WaveSpeedFakeProvider({
+    statusSequences: [
+      [
+        { status: "submitting" },
+        { status: "running" },
+        { status: "completed", outputMediaIds: ["fake-output-0001"] },
+      ],
+      [{ status: "running" }],
+    ],
+    outputBytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+    outputMimeType: "image/png",
+  });
+  const job = persistedJob("fake-provider-job", "queued");
+
+  const first = await provider.submit({
+    job,
+    attemptNumber: 1,
+    idempotencyKey: "fake-provider-job:1",
+  });
+  assert.equal(first.providerJobId, "fake-wavespeed-job-0001");
+  assert.deepEqual(await provider.status({ providerJobId: first.providerJobId, routing: route }), {
+    providerJobId: first.providerJobId,
+    status: "submitting",
+  });
+  assert.equal((await provider.status({ providerJobId: first.providerJobId, routing: route })).status, "running");
+  assert.deepEqual(await provider.status({ providerJobId: first.providerJobId, routing: route }), {
+    providerJobId: first.providerJobId,
+    status: "completed",
+    outputMediaIds: ["fake-output-0001"],
+  });
+  assert.deepEqual(await provider.downloadOutput({ providerJobId: first.providerJobId }), {
+    bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+    mimeType: "image/png",
+  });
+
+  const replay = await provider.submit({
+    job,
+    attemptNumber: 1,
+    idempotencyKey: "fake-provider-job:1",
+  });
+  assert.equal(replay.providerJobId, first.providerJobId);
+
+  const retry = await provider.submit({
+    job: { ...job, attempt: 2 },
+    attemptNumber: 2,
+    idempotencyKey: "fake-provider-job:2",
+  });
+  assert.equal(retry.providerJobId, "fake-wavespeed-job-0002");
+  await provider.cancel({ providerJobId: retry.providerJobId, routing: route });
+  assert.equal((await provider.status({ providerJobId: retry.providerJobId, routing: route })).status, "canceled");
+
+  assert.deepEqual(provider.snapshot(), {
+    submitCalls: 3,
+    providerReservations: 2,
+    duplicateSubmitCalls: 1,
+    statusReads: 4,
+    cancelCalls: 1,
+    downloadCalls: 1,
+    submissionsByIdempotencyKey: {
+      "fake-provider-job:1": 2,
+      "fake-provider-job:2": 1,
+    },
+  });
+});
+
+test("deterministic fake provider injects each boundary failure by call number without sleeps", async () => {
+  const provider = new WaveSpeedFakeProvider({
+    failures: {
+      submit: { 1: { code: "fake-submit-failed", message: "submit failed", retryable: true } },
+      status: { 1: { code: "fake-poll-failed", message: "poll failed", retryable: true } },
+      cancel: { 1: { code: "fake-cancel-failed", message: "cancel failed", retryable: true } },
+      download: { 1: { code: "fake-download-failed", message: "download failed", retryable: true } },
+    },
+  });
+  const job = persistedJob("failure-injection", "queued");
+
+  await assert.rejects(
+    provider.submit({ job, attemptNumber: 1, idempotencyKey: "failure-injection:1" }),
+    (error: unknown) => error instanceof WaveSpeedFakeProviderError && error.code === "fake-submit-failed",
+  );
+  const submitted = await provider.submit({ job, attemptNumber: 1, idempotencyKey: "failure-injection:1" });
+  await assert.rejects(
+    provider.status({ providerJobId: submitted.providerJobId, routing: route }),
+    (error: unknown) => error instanceof WaveSpeedFakeProviderError && error.code === "fake-poll-failed",
+  );
+  await assert.rejects(
+    provider.cancel({ providerJobId: submitted.providerJobId, routing: route }),
+    (error: unknown) => error instanceof WaveSpeedFakeProviderError && error.code === "fake-cancel-failed",
+  );
+  await assert.rejects(
+    provider.downloadOutput({ providerJobId: submitted.providerJobId }),
+    (error: unknown) => error instanceof WaveSpeedFakeProviderError && error.code === "fake-download-failed",
+  );
+  assert.equal(provider.snapshot().providerReservations, 1);
+});
+
+test("production route with fake provider keeps submit, output, and finalization counts exactly once across request replay and poll replay", async () => {
+  const provider = new WaveSpeedFakeProvider({
+    statusSequences: [[{
+      status: "completed",
+      outputUrls: ["https://fixtures.openreel.invalid/fake-output.png"],
+      outputMediaIds: ["fake-output-0001"],
+    }]],
+  });
+  const f = await fixture({ provider });
+
+  const submitted = await invoke(f.router, "POST", "/api/generate/wavespeed/", request("fake-production-route"));
+  assert.equal(submitted.status, 202);
+  const replayedSubmit = await invoke(f.router, "POST", "/api/generate/wavespeed/", request("fake-production-route"));
+  assert.equal(replayedSubmit.status, 202);
+  assert.equal(replayedSubmit.body.job.id, submitted.body.job.id);
+
+  const firstPoller = await invoke(f.router, "GET", "/api/generate/wavespeed/fake-production-route");
+  const secondPoller = await invoke(f.router, "GET", "/api/generate/wavespeed/fake-production-route");
+  assert.equal(firstPoller.body.job.status, "succeeded");
+  assert.equal(secondPoller.body.job.status, "succeeded");
+  assert.equal(firstPoller.body.job.output.mediaId, "media-fake-production-route");
+  assert.deepEqual(firstPoller.body.job.outputMediaIds, ["fake-output-0001"]);
+  assert.equal(f.counts().placeholderFinalizations, 1);
+  assert.deepEqual(provider.snapshot(), {
+    submitCalls: 1,
+    providerReservations: 1,
+    duplicateSubmitCalls: 0,
+    statusReads: 1,
+    cancelCalls: 0,
+    downloadCalls: 0,
+    submissionsByIdempotencyKey: { "generation:fake-production-route:attempt:1": 1 },
+  });
 });

@@ -39,6 +39,31 @@ function outputExtension(mimeType: string): string {
   throw new Error("generation-output-mime-unsupported");
 }
 
+interface ResolveGenerationProviderInput {
+  readonly injectedProvider?: GenerationProviderPort;
+  readonly productionProvider?: GenerationProviderPort;
+}
+
+interface CreateAppOptions {
+  readonly generationProvider?: GenerationProviderPort;
+}
+
+export function resolveGenerationProvider(input: ResolveGenerationProviderInput): {
+  readonly provider: GenerationProviderPort;
+  readonly configured: boolean;
+  readonly productionProvider?: GenerationProviderPort;
+} {
+  const configuredProvider = input.injectedProvider ?? input.productionProvider;
+  return {
+    provider: configuredProvider ?? {
+      submit: async () => { throw new Error("provider-not-configured"); },
+      status: async () => { throw new Error("provider-not-configured"); },
+    },
+    configured: Boolean(configuredProvider),
+    productionProvider: input.productionProvider,
+  };
+}
+
 function inspectOutput(bytes: Uint8Array, mimeType: string) {
   if (mimeType === "image/png" && bytes.byteLength >= 24) {
     const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -47,19 +72,20 @@ function inspectOutput(bytes: Uint8Array, mimeType: string) {
   return {};
 }
 
-export function createApp(): Express {
+export function createApp(options: CreateAppOptions = {}): Express {
   const gitStore = new GitStore(config.projectsRepo);
   const projectStore = new ProjectStore(gitStore);
   const generationRepository = new FileGenerationJobRepository(config.generationDataDir);
   const uploadRepository = new UploadRepository(`${config.generationDataDir}/uploads`);
   const routes = parseGenerationRouteManifest(config.generationRouteManifestJson);
-  const wavespeedProvider = config.wavespeedApiKey
+  const wavespeedProvider = !options.generationProvider && config.wavespeedApiKey
     ? new WaveSpeedProvider({ baseUrl: config.wavespeedBaseUrl, apiKey: config.wavespeedApiKey })
     : undefined;
-  const provider: GenerationProviderPort = wavespeedProvider ?? {
-      submit: async () => { throw new Error("provider-not-configured"); },
-      status: async () => { throw new Error("provider-not-configured"); },
-    };
+  const generationRuntime = resolveGenerationProvider({
+    injectedProvider: options.generationProvider,
+    productionProvider: wavespeedProvider,
+  });
+  const provider = generationRuntime.provider;
   const inputMaterializer = wavespeedProvider
     ? new WaveSpeedInputMaterializer({ uploads: uploadRepository, routes, mediaUpload: wavespeedProvider })
     : undefined;
@@ -76,7 +102,7 @@ export function createApp(): Express {
     inputMaterializer,
     routes,
     releaseEnabled: config.generationV2ReleaseEnabled,
-    configured: Boolean(config.wavespeedApiKey),
+    configured: generationRuntime.configured,
     authenticate,
     owner: async ({ ownerId, projectId }) => ownerId === config.authenticatedOwnerId && Boolean(await projectStore.loadProject(projectId)),
     discoverModels: async () => routes.map(({ identity, inputSchema, supportsAudio }) => ({
@@ -120,7 +146,7 @@ export function createApp(): Express {
   app.get("/api/health", (_req, res) => {
     res.json({
       ok: true,
-      wavespeed: !!config.wavespeedApiKey,
+      wavespeed: generationRuntime.configured,
       kieAi: !!config.kieAiApiKey,
       claude: !!config.claudeToken,
     });

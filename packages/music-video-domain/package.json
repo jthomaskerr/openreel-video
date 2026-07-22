@@ -21,8 +21,8 @@
     "test:run": "vitest run"
   },
   "dependencies": {
-    "atlascloud-cli": "^0.1.16",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "atlascloud-cli": "^0.1.16"
   },
   "devDependencies": {
     "typescript": "^5.4.5",

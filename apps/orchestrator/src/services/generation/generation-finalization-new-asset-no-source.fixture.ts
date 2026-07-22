@@ -12,7 +12,7 @@ import { FileGenerationJobRepository } from "./repository.js";
 const route = { providerInstanceId: "wavespeed-prod", providerModelId: "model", requestedMode: "text-to-image" as const, providerSchemaId: "schema", providerEndpointId: "submit", providerSchemaVersion: "2026-01" };
 const LOCAL_PREFIXES = ["blob:", "local:", "file:"] as const;
 function makeJob(id: string, providerJobId: string, placeholderMediaId = "placeholder-no-source"): GenerationJob {
-  return { schemaVersion: 2, contractVersion: 2, id, projectId: "project", provider: "wavespeed", providerInstanceId: route.providerInstanceId, modelId: route.providerModelId, modelSchemaVersion: route.providerSchemaVersion, routing: route, providerJobId, status: "queued", attempt: 1, context: { projectId: "project", entryContext: { kind: "new-asset" }, mode: "text-to-image", placementPolicy: "none", prompt: "a new image", references: [] }, providerInputs: { placeholderMediaId }, attempts: [{ attemptNumber: 1, routing: route, providerJobId, startedAt: 1 }], checkpoints: {}, createdAt: 1, updatedAt: 1 };
+  return { schemaVersion: 2, contractVersion: 2, id, projectId: "project", provider: "wavespeed", providerInstanceId: route.providerInstanceId, modelId: route.providerModelId, modelSchemaVersion: route.providerSchemaVersion, routing: route, providerJobId, status: "queued", attempt: 1, target: { kind: "new-asset", placeholderMediaId }, context: { projectId: "project", entryContext: { kind: "new-asset" }, mode: "text-to-image", placementPolicy: "none", prompt: "a new image", references: [] }, providerInputs: { placeholderMediaId }, attempts: [{ attemptNumber: 1, routing: route, providerJobId, startedAt: 1 }], checkpoints: {}, createdAt: 1, updatedAt: 1 };
 }
 
 test("new-asset with no source finalizes once without shot or placement work", async () => {
@@ -36,7 +36,7 @@ test("new-asset with no source finalizes once without shot or placement work", a
   let providerSubmits = 0;
   const provider: GenerationProviderPort = {
     submit: async () => { providerSubmits += 1; return { providerJobId: "provider-no-source" }; },
-    status: async () => ({ providerJobId: "provider-no-source", status: "running" as const }),
+    status: async () => ({ providerJobId: "provider-no-source", status: "completed" as const, outputMediaIds: ["provider-output-no-source"] }),
   };
   const orchestrator = new GenerationOrchestrator({
     repository,
@@ -44,12 +44,19 @@ test("new-asset with no source finalizes once without shot or placement work", a
     routes: [{ identity: route, schemaFingerprint: "schema", clientSchemaFingerprint: "schema", serverSchemaFingerprint: "schema", clientAcceptance: true, serverAcceptance: true, configurationVersion: "v2" }],
     releaseEnabled: true,
     owner: () => true,
-    finalizer: { finalize: async () => {}, reconcilePlacement: async () => { throw new Error("generation-placement-reconciliation-unavailable"); } },
+    finalizer: {
+      finalize: ({ job: current, output }) => finalizer.finalize(current.id, {
+        provider: current.provider,
+        providerJobId: output.providerJobId,
+        ...(current.outputMediaIds?.[0] ? { outputIdentity: current.outputMediaIds[0] } : {}),
+      }),
+      reconcilePlacement: (jobId) => finalizer.reconcilePlacement(jobId),
+    },
     requestBoundary: { validate: () => {} },
     clock: () => 2,
   });
   await orchestrator.submit({ ownerId: "owner", job: { ...job, providerJobId: undefined, attempts: [{ ...job.attempts[0], providerJobId: undefined }], status: "queued" }, request: { contentType: "application/json", byteLength: 1, maxBytes: 10, timeoutMs: 1, maxTimeoutMs: 2 } });
-  const result = await finalizer.finalize(job.id, { provider: "wavespeed", providerJobId: "provider-no-source" });
+  const result = await orchestrator.status({ ownerId: "owner", projectId: "project", jobId: job.id });
   const replay = await finalizer.finalize(job.id, { provider: "wavespeed", providerJobId: "provider-no-source" });
   assert.equal(result.status, "succeeded");
   assert.equal(replay.status, "succeeded");

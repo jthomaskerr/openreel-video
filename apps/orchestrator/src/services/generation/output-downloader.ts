@@ -121,11 +121,11 @@ async function readCache(cacheDir: string, input: DownloadInput): Promise<Downlo
   return { bytes, mimeType: mimeTypeFrom(metadata.mimeType) };
 }
 
-async function resolveOutputUrl(
+async function resolveProviderOutput(
   input: DownloadInput,
   provider: GenerationProviderPort,
-): Promise<string> {
-  if (input.transientOutputUrl) return input.transientOutputUrl;
+): Promise<{ readonly outputUrl: string } | DownloadedGenerationOutput> {
+  if (input.transientOutputUrl) return { outputUrl: input.transientOutputUrl };
   const state = await provider.status({
     providerJobId: input.providerJobId,
     routing: input.routing,
@@ -135,12 +135,20 @@ async function resolveOutputUrl(
     ?? urls.map((_url, index) => `provider-output:${state.providerJobId}:${index}`);
   if (state.providerJobId !== input.providerJobId
     || state.status !== "completed"
-    || urls.length !== 1
     || identities.length !== 1
     || identities[0] !== input.outputIdentity) {
     throw new Error("generation-output-identity-invalid");
   }
-  return urls[0]!;
+  if (urls.length === 1) return { outputUrl: urls[0]! };
+  if (urls.length !== 0 || !provider.downloadOutput) {
+    throw new Error("generation-output-identity-invalid");
+  }
+  const output = await provider.downloadOutput({
+    providerJobId: input.providerJobId,
+    outputIdentity: input.outputIdentity,
+    routing: input.routing,
+  });
+  return { bytes: output.bytes, mimeType: mimeTypeFrom(output.mimeType) };
 }
 
 export function createReplaySafeGenerationOutputDownloader(
@@ -151,16 +159,23 @@ export function createReplaySafeGenerationOutputDownloader(
       const exactInput: DownloadInput = input;
       const cached = await readCache(options.cacheDir, exactInput);
       if (cached) return cached;
-      const outputUrl = await resolveOutputUrl(exactInput, options.provider);
-      const url = new URL(outputUrl);
-      if (url.protocol !== "https:") throw new Error("generation-local-url-forbidden");
-      const fetchOutput = options.fetch ?? ((target, init) => fetch(target, init));
-      const response = await fetchOutput(url.href, {
-        signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
-      });
-      if (!response.ok) throw new Error(`generation-output-download-failed:${response.status}`);
-      const mimeType = mimeTypeFrom(response.headers.get("content-type"));
-      const bytes = new Uint8Array(await response.arrayBuffer());
+      const providerOutput = await resolveProviderOutput(exactInput, options.provider);
+      let bytes: Uint8Array;
+      let mimeType: string;
+      if ("outputUrl" in providerOutput) {
+        const url = new URL(providerOutput.outputUrl);
+        if (url.protocol !== "https:") throw new Error("generation-local-url-forbidden");
+        const fetchOutput = options.fetch ?? ((target, init) => fetch(target, init));
+        const response = await fetchOutput(url.href, {
+          signal: AbortSignal.timeout(options.timeoutMs ?? 30_000),
+        });
+        if (!response.ok) throw new Error(`generation-output-download-failed:${response.status}`);
+        mimeType = mimeTypeFrom(response.headers.get("content-type"));
+        bytes = new Uint8Array(await response.arrayBuffer());
+      } else {
+        bytes = providerOutput.bytes;
+        mimeType = providerOutput.mimeType;
+      }
       const sha256 = createHash("sha256").update(bytes).digest("hex");
       const metadata: CacheMetadata = {
         providerInstanceId: exactInput.providerInstanceId,

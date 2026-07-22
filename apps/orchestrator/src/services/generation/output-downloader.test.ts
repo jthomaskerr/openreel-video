@@ -72,3 +72,50 @@ test("downloader keys replay cache by provider instance, job, and opaque output 
   assert.equal(providerReads, 1);
   assert.equal(fetches, 2);
 });
+
+test("downloader resolves opaque output identity through provider bytes without a durable URL", async () => {
+  const cacheDir = await mkdtemp(join(tmpdir(), "generation-output-cache-opaque-"));
+  let providerReads = 0;
+  let providerDownloads = 0;
+  const provider: GenerationProviderPort = {
+    submit: async () => ({ providerJobId: "unused" }),
+    status: async (input) => {
+      providerReads += 1;
+      return {
+        providerJobId: input.providerJobId,
+        status: "completed",
+        outputMediaIds: ["fake-output-0001"],
+      };
+    },
+    downloadOutput: async (input) => {
+      providerDownloads += 1;
+      assert.deepEqual(input, {
+        providerJobId: "fake-wavespeed-job-0001",
+        outputIdentity: "fake-output-0001",
+        routing,
+      });
+      return { bytes: new Uint8Array([0x89, 0x50, 0x4e, 0x47]), mimeType: "image/png" };
+    },
+  };
+  const downloader = createReplaySafeGenerationOutputDownloader({
+    cacheDir,
+    provider,
+    fetch: async () => { throw new Error("network-must-not-be-used-for-opaque-provider-output"); },
+  });
+  const input = {
+    provider: "wavespeed",
+    providerInstanceId: routing.providerInstanceId,
+    providerJobId: "fake-wavespeed-job-0001",
+    outputIdentity: "fake-output-0001",
+    routing,
+  };
+
+  const first = await downloader.download(input);
+  const replay = await downloader.download(input);
+
+  assert.deepEqual([...first.bytes], [0x89, 0x50, 0x4e, 0x47]);
+  assert.equal(first.mimeType, "image/png");
+  assert.deepEqual(replay, first);
+  assert.equal(providerReads, 1);
+  assert.equal(providerDownloads, 1);
+});

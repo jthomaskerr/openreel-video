@@ -4,12 +4,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { GenerationJob } from "@openreel/music-video-domain/generation";
+import { GenerationFinalizer } from "./finalization.js";
 import { GenerationOrchestrator, type GenerationProviderPort } from "./index.js";
 import { FileGenerationJobRepository } from "./repository.js";
 
 const route = { providerInstanceId: "wavespeed-prod", providerModelId: "model", requestedMode: "text-to-image" as const, providerSchemaId: "schema", providerEndpointId: "submit", providerSchemaVersion: "2026-01" };
 function makeJob(id: string): GenerationJob {
-  return { schemaVersion: 2, contractVersion: 2, id, projectId: "project", provider: "wavespeed", providerInstanceId: route.providerInstanceId, modelId: route.providerModelId, modelSchemaVersion: route.providerSchemaVersion, routing: route, status: "queued", attempt: 1, context: { projectId: "project", entryContext: { kind: "new-asset" }, mode: "text-to-image", placementPolicy: "none", prompt: id, references: [] }, providerInputs: {}, attempts: [{ attemptNumber: 1, routing: route, startedAt: 1 }], checkpoints: {}, createdAt: 1, updatedAt: 1 };
+  return { schemaVersion: 2, contractVersion: 2, id, projectId: "project", provider: "wavespeed", providerInstanceId: route.providerInstanceId, modelId: route.providerModelId, modelSchemaVersion: route.providerSchemaVersion, routing: route, status: "queued", attempt: 1, target: { kind: "new-asset", placeholderMediaId: `placeholder-${id}` }, context: { projectId: "project", entryContext: { kind: "new-asset" }, mode: "text-to-image", placementPolicy: "none", prompt: id, references: [] }, providerInputs: {}, attempts: [{ attemptNumber: 1, routing: route, startedAt: 1 }], checkpoints: {}, createdAt: 1, updatedAt: 1 };
 }
 
 test("rollback preserves continuation for submitted V2 jobs while blocking new submits", async () => {
@@ -28,11 +29,41 @@ test("rollback preserves continuation for submitted V2 jobs while blocking new s
     status: async ({ providerJobId }) => ({ providerJobId, status: statuses.get(providerJobId.replace("provider-", "")) ?? "running", outputMediaIds: ["provider-output-1"] }),
     cancel: async () => {},
   };
-  const makeOrchestrator = (releaseEnabled: boolean, finalizer = { finalize: async ({ idempotencyKey }: { idempotencyKey: string }) => { finalizerCalls += 1; if (idempotencyKey.includes("recover-job") && failFirstFinalization) { failFirstFinalization = false; throw new Error("finalizer retry"); } }, reconcilePlacement: async () => { throw new Error("generation-placement-reconciliation-unavailable"); } }) => new GenerationOrchestrator({
-    repository, provider, releaseEnabled, owner: () => true, finalizer,
-    routes: [{ identity: route, schemaFingerprint: "schema", clientSchemaFingerprint: "schema", serverSchemaFingerprint: "schema", clientAcceptance: true, serverAcceptance: true, configurationVersion: "v2" }],
-    requestBoundary: { validate: () => {} }, clock: () => 2,
-  });
+  const makeOrchestrator = (releaseEnabled: boolean) => {
+    const structuralFinalizer = new GenerationFinalizer(repository, {
+      download: { download: async () => ({ bytes: new Uint8Array([1, 2, 3]), mimeType: "image/png" }) },
+      verify: { verify: async () => {} },
+      inspect: { inspect: async () => ({ width: 10, height: 10 }) },
+      placeholder: {
+        finalize: async ({ job }) => {
+          finalizerCalls += 1;
+          if (job.id === "recover-job" && failFirstFinalization) {
+            failFirstFinalization = false;
+            throw new Error("finalizer retry");
+          }
+          return { mediaId: `media-${job.id}`, versionId: `version-${job.id}` };
+        },
+      },
+      clock: () => 3,
+    });
+    return new GenerationOrchestrator({
+      repository,
+      provider,
+      releaseEnabled,
+      owner: () => true,
+      finalizer: {
+        finalize: ({ job, output }) => structuralFinalizer.finalize(job.id, {
+          provider: job.provider,
+          providerJobId: output.providerJobId,
+          ...(job.outputMediaIds?.[0] ? { outputIdentity: job.outputMediaIds[0] } : {}),
+        }),
+        reconcilePlacement: (jobId) => structuralFinalizer.reconcilePlacement(jobId),
+      },
+      routes: [{ identity: route, schemaFingerprint: "schema", clientSchemaFingerprint: "schema", serverSchemaFingerprint: "schema", clientAcceptance: true, serverAcceptance: true, configurationVersion: "v2" }],
+      requestBoundary: { validate: () => {} },
+      clock: () => 2,
+    });
+  };
   const submit = async (id: string) => makeOrchestrator(true).submit({ ownerId: "owner", job: makeJob(id), request: { contentType: "application/json", byteLength: 1, maxBytes: 10, timeoutMs: 1, maxTimeoutMs: 2 } });
   await submit("poll-job");
   await submit("cancel-job");

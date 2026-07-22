@@ -24,6 +24,7 @@ export interface GenerationProviderPort {
   submit(input: { job: GenerationJob; attemptNumber: number; idempotencyKey: string }): Promise<{ providerJobId: string }>;
   reconcileSubmission?(input: { job: GenerationJob; attemptNumber: number; idempotencyKey: string }): Promise<{ status: "submitted" | "pending" | "unknown"; providerJobId?: string }>;
   status(input: { providerJobId: string; routing: GenerationRouteIdentity }): Promise<GenerationProviderStatus>;
+  downloadOutput?(input: { providerJobId: string; outputIdentity: string; routing: GenerationRouteIdentity }): Promise<{ bytes: Uint8Array; mimeType: string }>;
   cancel?(input: { providerJobId: string; routing: GenerationRouteIdentity }): Promise<void>;
 }
 
