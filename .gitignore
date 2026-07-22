@@ -67,6 +67,12 @@ CLAUDE.md
 .wrangler/
 .claude/settings.local.json
 .serena/memories/
+.codex/*
+!.codex/config.toml
+!.codex/prompts/
+!.codex/prompts/**
+!.codex/rules/
+!.codex/rules/**
 apps/web/vite.config.ts.timestamp-*.mjs
 
 

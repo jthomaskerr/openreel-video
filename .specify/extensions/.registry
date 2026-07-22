@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "extensions": {
+    "time-machine": {
+      "version": "1.0.0",
+      "source": "local",
+      "manifest_hash": "sha256:8ad282a27149aa67765dbebd4031a0175394de5eb1578649f563e651c9eb5a92",
+      "enabled": true,
+      "priority": 10,
+      "registered_commands": {
+        "codex": [
+          "speckit.time-machine.analyze",
+          "speckit.time-machine.next",
+          "speckit.time-machine.status"
+        ]
+      },
+      "registered_skills": [],
+      "installed_at": "2026-07-21T07:44:46.036996+00:00"
+    }
+  }
+}

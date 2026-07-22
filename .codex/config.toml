@@ -1,4 +1,11 @@
-[mcp_servers.serena]
-enabled = true
-required = true
-startup_timeout_sec = 30
+[projects."/Volumes/Joseph/Projects1/ai-agents/openreel-video"]
+trust_level = "trusted"
+
+[projects."/Volumes/Joseph/Projects1/ai-agents/leegle-eegle"]
+trust_level = "trusted"
+
+[projects."/Volumes/Joseph/Projects1/drums/Librarian"]
+trust_level = "trusted"
+
+[tui.model_availability_nux]
+"gpt-5.6-sol" = 4
