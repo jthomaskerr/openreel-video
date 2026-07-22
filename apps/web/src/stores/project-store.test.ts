@@ -559,6 +559,47 @@ describe("ProjectStore", () => {
       expect(useProjectStore.getState().getMediaItem(media.id)).toBeDefined();
     });
 
+    it("preserves project history when an external media deletion is blocked", async () => {
+      const project = useProjectStore.getState().project;
+      const media = {
+        id: "media-resolve-reference",
+        name: "resolve-reference.mov",
+        type: "video",
+        externallyReferenced: true,
+      } as MediaItem;
+      useProjectStore.setState({
+        project: { ...project, mediaLibrary: { items: [media] } },
+      });
+
+      const metadataResult = await useProjectStore
+        .getState()
+        .updateMediaMetadata(media.id, { title: "Resolve reference" });
+      expect(metadataResult.success).toBe(true);
+
+      const beforeDelete = useProjectStore.getState();
+      const beforeProject = beforeDelete.project;
+      const beforeHistory = beforeDelete.actionHistory.getHistory();
+
+      const result = await beforeDelete.deleteMedia(media.id);
+
+      expect(result).toMatchObject({
+        success: false,
+        error: { code: "EXTERNAL_MEDIA_DELETE_BLOCKED" },
+      });
+      expect(useProjectStore.getState().project).toBe(beforeProject);
+      expect(useProjectStore.getState().getMediaItem(media.id)).toBeDefined();
+      expect(useProjectStore.getState().actionHistory.getHistory()).toEqual(
+        beforeHistory,
+      );
+      expect(useProjectStore.getState().canUndo()).toBe(true);
+      expect(useProjectStore.getState().canRedo()).toBe(false);
+
+      const undoResult = await useProjectStore.getState().undo();
+      expect(undoResult.success).toBe(true);
+      expect(useProjectStore.getState().getMediaItem(media.id)?.title).toBeUndefined();
+      expect(useProjectStore.getState().getMediaItem(media.id)).toBeDefined();
+    });
+
     it("deletes an unreferenced asset through the project action", async () => {
       const project = useProjectStore.getState().project;
       const media = { id: "media-unused", name: "unused.mov", type: "video" } as MediaItem;

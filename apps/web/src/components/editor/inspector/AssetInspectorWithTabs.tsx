@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { WaveformPreview } from "./WaveformPreview";
 import { AlertTriangle, Film, Music, ImageIcon, FileText, Layers, Sparkles, GitBranch, Link2, RefreshCw, Trash2, Download, Pause, Play, X as XIcon } from "lucide-react";
 import type { MediaItem } from "@openreel/core";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@openreel/ui";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
 import { useTimelineStore } from "../../../stores/timeline-store";
@@ -763,6 +764,10 @@ function AssetInspectorToolbar({ item }: { item: MediaItem }) {
   const setInspectedAsset = useUIStore((s) => s.setInspectedAsset);
   const availability = useMediaAvailabilityView(projectId, item);
   const category = resolveAssetCategory(item);
+  const deletionProtected = item.externallyReferenced === true;
+  const deletionProtectionId = `external-media-delete-protection-${item.id}`;
+  const deletionProtectionMessage =
+    "This asset is referenced by an external Resolve project and cannot be deleted. You can still replace the media or edit its metadata.";
   const canRegenerate =
     item.type === "image" &&
     !category.isMetadata &&
@@ -850,15 +855,16 @@ function AssetInspectorToolbar({ item }: { item: MediaItem }) {
   }, [item.blob, item.name]);
 
   return (
-    <div className="flex items-center gap-1.5 px-3 py-1.5 border-b border-border shrink-0 bg-background-secondary/50">
-      <button
-        onClick={handleReplace}
-        className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-text-secondary hover:text-text hover:bg-hover transition-colors"
-        title="Create a new current version from a local file"
-      >
-        <RefreshCw size={11} />
-        Replace
-      </button>
+    <div className="border-b border-border shrink-0 bg-background-secondary/50">
+      <div className="flex items-center gap-1.5 px-3 py-1.5">
+        <button
+          onClick={handleReplace}
+          className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-text-secondary hover:text-text hover:bg-hover transition-colors"
+          title="Create a new current version from a local file"
+        >
+          <RefreshCw size={11} />
+          Replace
+        </button>
       {canRegenerate && (
         <button
           type="button"
@@ -882,15 +888,37 @@ function AssetInspectorToolbar({ item }: { item: MediaItem }) {
           Download
         </button>
       )}
-      <div className="flex-1" />
-      <button
-        onClick={handleDelete}
-        className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors"
-        title="Delete asset"
-      >
-        <Trash2 size={11} />
-        Delete
-      </button>
+        <div className="flex-1" />
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex" tabIndex={deletionProtected ? 0 : undefined}>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deletionProtected}
+                aria-label="Delete asset"
+                aria-describedby={deletionProtected ? deletionProtectionId : undefined}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors disabled:cursor-not-allowed disabled:text-text-muted disabled:hover:bg-transparent"
+              >
+                <Trash2 size={11} />
+                Delete
+              </button>
+            </span>
+          </TooltipTrigger>
+          {deletionProtected && (
+            <TooltipContent>{deletionProtectionMessage}</TooltipContent>
+          )}
+        </Tooltip>
+      </div>
+      {deletionProtected && (
+        <p
+          id={deletionProtectionId}
+          className="flex items-start gap-1.5 px-3 pb-2 text-[10px] leading-relaxed text-text-muted"
+        >
+          <Link2 size={12} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span>{deletionProtectionMessage}</span>
+        </p>
+      )}
     </div>
   );
 }
