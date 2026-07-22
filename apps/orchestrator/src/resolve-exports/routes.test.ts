@@ -10,6 +10,7 @@ const projectId = "vintage-tokyo";
 const jobId = "11111111-1111-4111-8111-111111111111";
 const token = "22222222-2222-4222-8222-222222222222";
 const requestId = "33333333-3333-4333-8333-333333333333";
+const capability = "44444444-4444-4444-8444-444444444444";
 const now = "2026-07-22T00:00:00.000Z";
 
 const job: ResolveExportJob = {
@@ -49,9 +50,11 @@ function fakeService(overrides: Partial<ResolveExportRouteService> = {}): Resolv
     cancel: async () => ({ ...job, phase: "cancelled" }),
     redeem: async () => ({
       jobId, projectId, revision: job.revision,
+      artifactAccessToken: capability,
       artifacts: [{ path: "/Volumes/secret/exports/resolve/job/manifest.json", mediaType: "application/json", byteLength: 42, sha256: "b".repeat(64) }],
     }),
     recordImportResult: async (_jobId, input) => input,
+    readArtifact: async () => ({ mediaType: "application/json", bytes: Buffer.from("{}") }),
     ...overrides,
   };
 }
@@ -103,7 +106,13 @@ test("Resolve routes expose preview, export, status, cancellation, redemption, a
     assert.ok(!JSON.stringify(await cancelled.json()).includes(token));
     const redemption = await fetch(`${baseUrl}/resolve-launches/${token}/redeem`, { method: "POST" });
     assert.equal(redemption.status, 200);
-    assert.ok(!JSON.stringify(await redemption.json()).includes("/Volumes/"));
+    const redemptionBody = await redemption.json() as { artifacts: Array<{ url: string }> };
+    assert.ok(!JSON.stringify(redemptionBody).includes("/Volumes/"));
+    const artifact = await fetch(`${baseUrl.replace("/api/projects", "")}${redemptionBody.artifacts[0]!.url}`);
+    assert.equal(artifact.status, 200);
+    assert.equal(await artifact.text(), "{}");
+    assert.equal(artifact.headers.get("cache-control"), "no-store");
+    assert.equal((await fetch(`${baseUrl}/${projectId}/exports/resolve/${jobId}/artifacts/%2Fsecret?capability=${capability}`)).status, 404);
     const imported = await fetch(`${baseUrl}/${projectId}/exports/resolve/${jobId}/import-result`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(result),
     });
@@ -158,6 +167,16 @@ test("forwarded headers never grant non-loopback bridge access", async () => {
   }, () => false);
 });
 
+test("a restart-invalidated artifact capability returns a stable recovery action", async () => {
+  await withRouter(fakeService({
+    readArtifact: async () => { throw new ResolveExportServiceError("ARTIFACT_CAPABILITY_EXPIRED", "internal path /Volumes/private"); },
+  }), async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/${projectId}/exports/resolve/${jobId}/artifacts/manifest.json?capability=${capability}`);
+    assert.equal(response.status, 410);
+    assert.deepEqual(await response.json(), { error: { code: "ARTIFACT_CAPABILITY_EXPIRED", message: "Artifact access expired. Start a new Resolve export job." } });
+  });
+});
+
 test("Resolve routes pass exact route parameters and parsed payloads to the service", async () => {
   const calls: unknown[] = [];
   const service = fakeService({
@@ -165,7 +184,7 @@ test("Resolve routes pass exact route parameters and parsed payloads to the serv
     start: async (id, revision, selection) => { calls.push(["start", id, revision, selection]); return job; },
     status: async (id) => { calls.push(["status", id]); return job; },
     cancel: async (id) => { calls.push(["cancel", id]); return { ...job, phase: "cancelled" }; },
-    redeem: async (value) => { calls.push(["redeem", value]); return { jobId, projectId, revision: job.revision, artifacts: [] }; },
+    redeem: async (value) => { calls.push(["redeem", value]); return { jobId, projectId, revision: job.revision, artifacts: [], artifactAccessToken: capability }; },
     recordImportResult: async (id, input) => { calls.push(["result", id, input]); return input; },
   });
   await withRouter(service, async (baseUrl) => {

@@ -15,6 +15,7 @@ export interface ResolveExportRouteService {
   cancel(jobId: string): Promise<ResolveExportJob>;
   redeem(launchToken: string): Promise<ResolveLaunchPayload>;
   recordImportResult(jobId: string, input: ResolveImportResult): Promise<ResolveImportResult>;
+  readArtifact(projectId: string, jobId: string, name: string, artifactAccessToken: string): Promise<{ readonly mediaType: string; readonly bytes: Buffer }>;
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -62,7 +63,7 @@ function safeError(status: number, code: string): { readonly error: { readonly c
     410: "The Resolve launch request is no longer available.",
     500: "The Resolve export could not be processed.",
   };
-  return { error: { code, message: messages[status] ?? messages[500] } };
+  return { error: { code, message: code === "ARTIFACT_CAPABILITY_EXPIRED" ? "Artifact access expired. Start a new Resolve export job." : messages[status] ?? messages[500] } };
 }
 
 function statusFor(error: unknown): { readonly status: number; readonly code: string } {
@@ -78,6 +79,7 @@ function statusFor(error: unknown): { readonly status: number; readonly code: st
       return { status: 404, code: error.code };
     case "LAUNCH_TOKEN_EXPIRED":
     case "LAUNCH_TOKEN_USED":
+    case "ARTIFACT_CAPABILITY_EXPIRED":
       return { status: 410, code: error.code };
     case "STALE_PROJECT_REVISION":
     case "WORKTREE_REVISION_MISMATCH":
@@ -205,12 +207,30 @@ export function createResolveExportRouter(service: ResolveExportRouteService, op
         revision: payload.revision,
         artifacts: payload.artifacts.map(({ path, mediaType, byteLength, sha256 }) => ({
           name: path.slice(path.lastIndexOf("/") + 1),
-          url: `/api/projects/${payload.projectId}/exports/resolve/${payload.jobId}/artifacts/${encodeURIComponent(path.slice(path.lastIndexOf("/") + 1))}`,
+          url: `/api/projects/${payload.projectId}/exports/resolve/${payload.jobId}/artifacts/${encodeURIComponent(path.slice(path.lastIndexOf("/") + 1))}?capability=${encodeURIComponent(payload.artifactAccessToken)}`,
           mediaType,
           byteLength,
           sha256,
         })),
       });
+    } catch (error) {
+      sendFailure(res, error);
+      return undefined;
+    }
+  });
+
+  router.get("/:projectId/exports/resolve/:jobId/artifacts/:name", async (req, res) => {
+    if (!peerIsLoopback(req.socket.remoteAddress)) return res.status(404).json(safeError(404, "ARTIFACT_NOT_FOUND"));
+    if (!validProjectId(req.params.projectId) || !UUID.test(req.params.jobId) || !req.params.name || req.params.name === "." || req.params.name === ".." || req.params.name !== decodeURIComponent(req.params.name) || req.params.name.includes("/") || req.params.name.includes("\\")) {
+      return res.status(404).json(safeError(404, "ARTIFACT_NOT_FOUND"));
+    }
+    const capability = typeof req.query.capability === "string" ? req.query.capability : "";
+    if (!UUID.test(capability)) return res.status(404).json(safeError(404, "ARTIFACT_NOT_FOUND"));
+    try {
+      const artifact = await service.readArtifact(req.params.projectId, req.params.jobId, req.params.name, capability);
+      res.setHeader("Content-Type", artifact.mediaType);
+      res.setHeader("Cache-Control", "no-store");
+      return res.send(artifact.bytes);
     } catch (error) {
       sendFailure(res, error);
       return undefined;
