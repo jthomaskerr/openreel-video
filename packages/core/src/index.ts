@@ -1,4 +1,5 @@
 export * from "./types";
+export * from "./identity";
 export * from "./project-persistence";
 export * from "./utils";
 export * from "./actions";
