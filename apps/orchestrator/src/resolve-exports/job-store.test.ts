@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -37,6 +38,34 @@ const selection: HandoffSelection = {
   target: "resolve",
   range: { startTime: 0, endTime: 2 },
 };
+
+const TRANSACTION_ID = "55555555-5555-4555-8555-555555555555";
+const BASE_COMMIT_SHA = "c".repeat(40);
+
+interface RawJournal extends Record<string, unknown> {
+  writes: Array<Record<string, unknown>>;
+  publishedPaths: string[];
+}
+
+function journalFile(root: string): string {
+  return join(
+    root,
+    "vintage-tokyo",
+    "exports",
+    "resolve",
+    job().id,
+    ".transactions",
+    `${TRANSACTION_ID}.json`,
+  );
+}
+
+function sha256(bytes: string): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function jobPath(name: string): string {
+  return `exports/resolve/${job().id}/${name}`;
+}
 
 function record(): PersistedResolveExportJob {
   return {
@@ -225,11 +254,11 @@ describe("ResolveExportJobStore", () => {
     const first = `exports/resolve/${job().id}/manifest.json`;
     const second = `exports/resolve/${job().id}/job.json`;
     const journal = await store.prepareTransaction({
-      transactionId: "55555555-5555-4555-8555-555555555555",
+      transactionId: TRANSACTION_ID,
       kind: "start",
       projectId: "vintage-tokyo",
       jobId: job().id,
-      baseCommitSha: "confirmed-revision",
+      baseCommitSha: BASE_COMMIT_SHA,
       writes: [
         { path: first, bytes: Buffer.from("manifest") },
         { path: second, bytes: Buffer.from("job") },
@@ -251,5 +280,76 @@ describe("ResolveExportJobStore", () => {
     await expect(readFile(join(root, "vintage-tokyo", first))).rejects.toMatchObject({ code: "ENOENT" });
     await expect(readFile(join(root, "vintage-tokyo", second))).rejects.toMatchObject({ code: "ENOENT" });
     expect(await fresh.listTransactions()).toEqual([]);
+  });
+
+  test.each([
+    ["tampered before image", (raw: RawJournal) => {
+      raw.writes[0]!.beforeBase64 = Buffer.from("tampered-before").toString("base64");
+    }],
+    ["tampered after image", (raw: RawJournal) => {
+      raw.writes[0]!.afterBase64 = Buffer.from("tampered-after").toString("base64");
+    }],
+    ["malformed write", (raw: RawJournal) => {
+      delete raw.writes[0]!.afterSha256;
+    }],
+    ["duplicate write path", (raw: RawJournal) => {
+      raw.writes.push({ ...raw.writes[0]! });
+    }],
+    ["published path outside writes", (raw: RawJournal) => {
+      raw.publishedPaths = [jobPath("other.json")];
+    }],
+    ["noncanonical base64", (raw: RawJournal) => {
+      raw.writes[0]!.afterBase64 = "YQ";
+      raw.writes[0]!.afterSha256 = sha256("a");
+    }],
+    ["unknown exact-schema key", (raw: RawJournal) => {
+      raw.untrusted = true;
+    }],
+    ["invalid transaction kind", (raw: RawJournal) => {
+      raw.kind = "other";
+    }],
+    ["invalid prepared timestamp", (raw: RawJournal) => {
+      raw.preparedAt = "not-a-timestamp";
+    }],
+    ["non-full base commit SHA", (raw: RawJournal) => {
+      raw.baseCommitSha = "short";
+    }],
+    ["empty write set", (raw: RawJournal) => {
+      raw.writes = [];
+      raw.publishedPaths = [];
+    }],
+    ["physical job identity mismatch", (raw: RawJournal) => {
+      raw.jobId = "99999999-9999-4999-8999-999999999999";
+    }],
+    ["physical transaction identity mismatch", (raw: RawJournal) => {
+      raw.transactionId = "99999999-9999-4999-8999-999999999999";
+    }],
+  ] as const)("rejects a %s without replaying or deleting the journal", async (_label, mutate) => {
+    const { root, store } = await fixture();
+    const target = jobPath("job.json");
+    await store.writeArtifact("vintage-tokyo", job().id, "job.json", "before");
+    await store.prepareTransaction({
+      transactionId: TRANSACTION_ID,
+      kind: "redeem",
+      projectId: "vintage-tokyo",
+      jobId: job().id,
+      baseCommitSha: BASE_COMMIT_SHA,
+      writes: [{ path: target, bytes: Buffer.from("after") }],
+    });
+    const path = journalFile(root);
+    const raw = JSON.parse(await readFile(path, "utf8")) as RawJournal;
+    mutate(raw);
+    await writeFile(path, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+
+    const fresh = new ResolveExportJobStore({
+      projectDir: (projectId) => join(root, projectId),
+      listProjectIds: async () => ["vintage-tokyo"],
+    });
+    await expect(fresh.listTransactions()).rejects.toMatchObject({
+      code: "RESOLVE_JOB_CORRUPT",
+      identifiers: { projectId: "vintage-tokyo", jobId: job().id },
+    });
+    expect(await readFile(join(root, "vintage-tokyo", target), "utf8")).toBe("before");
+    await expect(readFile(path, "utf8")).resolves.toContain("transactionId");
   });
 });

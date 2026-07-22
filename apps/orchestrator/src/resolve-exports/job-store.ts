@@ -12,6 +12,10 @@ import { assertValidProjectId } from "../projects/storage-validation";
 
 const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[a-f0-9]{64}$/;
+const FULL_COMMIT_SHA = /^[a-f0-9]{40}$/;
+const EARLIEST_JOURNAL_TIMESTAMP = Date.UTC(2000, 0, 1);
+const MAX_JOURNAL_FUTURE_SKEW_MS = 5 * 60 * 1_000;
+const TRANSACTION_KINDS = new Set<ResolveTransactionKind>(["start", "cancel", "redeem", "import-result"]);
 
 function sameSha256(left: string, right: string): boolean {
   if (!SHA256.test(left) || !SHA256.test(right)) return false;
@@ -61,6 +65,7 @@ export type ResolveTransactionKind = "start" | "cancel" | "redeem" | "import-res
 export interface ResolveTransactionWrite {
   readonly path: string;
   readonly beforeBase64: string | null;
+  readonly beforeSha256: string | null;
   readonly afterBase64: string;
   readonly afterSha256: string;
 }
@@ -128,6 +133,40 @@ function publicJobForPersistence(job: ResolveExportJob): ResolveExportJob {
 function hasOnlyKeys(value: Record<string, unknown>, allowed: readonly string[]): boolean {
   const allowedKeys = new Set(allowed);
   return Object.keys(value).every((key) => allowedKeys.has(key));
+}
+
+function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+  return Object.keys(value).length === expected.length && hasOnlyKeys(value, expected);
+}
+
+function canonicalBase64(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  return Buffer.from(value, "base64").toString("base64") === value;
+}
+
+function verifiedImage(base64: string, digest: string): Buffer {
+  const bytes = Buffer.from(base64, "base64");
+  const actual = crypto.createHash("sha256").update(bytes).digest("hex");
+  if (!sameSha256(actual, digest)) throw new Error("journal image digest mismatch");
+  return bytes;
+}
+
+function validJournalTimestamp(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp)
+    && new Date(timestamp).toISOString() === value
+    && timestamp >= EARLIEST_JOURNAL_TIMESTAMP
+    && timestamp <= Date.now() + MAX_JOURNAL_FUTURE_SKEW_MS;
+}
+
+function validTransactionPath(jobId: string, path: unknown): path is string {
+  if (path === "project.json") return true;
+  if (typeof path !== "string") return false;
+  const prefix = `exports/resolve/${jobId}/`;
+  if (!path.startsWith(prefix)) return false;
+  const name = path.slice(prefix.length);
+  return Boolean(name) && name !== "." && name !== ".." && !name.includes("/") && !name.includes("\\");
 }
 
 function parseRecord(value: unknown, identifiers: { projectId?: string; jobId?: string }): PersistedResolveExportJob {
@@ -337,18 +376,99 @@ export class ResolveExportJobStore {
     }
   }
 
-  #parseJournal(value: unknown): ResolveTransactionJournal {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw new ResolveJobStoreError("RESOLVE_JOB_CORRUPT", "Resolve transaction journal is invalid");
+  #parseJournal(
+    value: unknown,
+    expected: { readonly projectId: string; readonly jobId: string; readonly transactionId: string },
+  ): ResolveTransactionJournal {
+    const identifiers = { projectId: expected.projectId, jobId: expected.jobId };
+    try {
+      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not an object");
+      const candidate = value as Record<string, unknown>;
+      if (!hasExactKeys(candidate, [
+        "version",
+        "transactionId",
+        "kind",
+        "projectId",
+        "jobId",
+        "baseCommitSha",
+        "writes",
+        "publishedPaths",
+        "preparedAt",
+      ])) throw new Error("invalid journal keys");
+      if (
+        candidate.version !== 1
+        || candidate.transactionId !== expected.transactionId
+        || candidate.projectId !== expected.projectId
+        || candidate.jobId !== expected.jobId
+        || !JOB_ID.test(expected.transactionId)
+        || !JOB_ID.test(expected.jobId)
+        || typeof candidate.kind !== "string"
+        || !TRANSACTION_KINDS.has(candidate.kind as ResolveTransactionKind)
+        || typeof candidate.baseCommitSha !== "string"
+        || !FULL_COMMIT_SHA.test(candidate.baseCommitSha)
+        || !validJournalTimestamp(candidate.preparedAt)
+      ) throw new Error("invalid journal identity");
+      assertValidProjectId(expected.projectId);
+      if (!Array.isArray(candidate.writes) || candidate.writes.length === 0) {
+        throw new Error("invalid journal writes");
+      }
+
+      const writes = candidate.writes.map((value): ResolveTransactionWrite => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid write");
+        const write = value as Record<string, unknown>;
+        if (!hasExactKeys(write, ["path", "beforeBase64", "beforeSha256", "afterBase64", "afterSha256"])) {
+          throw new Error("invalid write keys");
+        }
+        if (!validTransactionPath(expected.jobId, write.path)) throw new Error("invalid write path");
+        if (!canonicalBase64(write.afterBase64) || typeof write.afterSha256 !== "string" || !SHA256.test(write.afterSha256)) {
+          throw new Error("invalid after image");
+        }
+        verifiedImage(write.afterBase64, write.afterSha256);
+        if (write.beforeBase64 === null || write.beforeSha256 === null) {
+          if (write.beforeBase64 !== null || write.beforeSha256 !== null) throw new Error("incomplete before image");
+        } else {
+          if (
+            !canonicalBase64(write.beforeBase64)
+            || typeof write.beforeSha256 !== "string"
+            || !SHA256.test(write.beforeSha256)
+          ) throw new Error("invalid before image");
+          verifiedImage(write.beforeBase64, write.beforeSha256);
+        }
+        return {
+          path: write.path,
+          beforeBase64: write.beforeBase64,
+          beforeSha256: write.beforeSha256,
+          afterBase64: write.afterBase64,
+          afterSha256: write.afterSha256,
+        };
+      });
+      const writePaths = writes.map((write) => write.path);
+      if (new Set(writePaths).size !== writePaths.length) throw new Error("duplicate write path");
+      if (!Array.isArray(candidate.publishedPaths)) throw new Error("invalid published paths");
+      const publishedPaths = candidate.publishedPaths.map((path) => {
+        if (typeof path !== "string" || !writePaths.includes(path)) throw new Error("invalid published path");
+        return path;
+      });
+      if (new Set(publishedPaths).size !== publishedPaths.length) throw new Error("duplicate published path");
+
+      return {
+        version: 1,
+        transactionId: expected.transactionId,
+        kind: candidate.kind as ResolveTransactionKind,
+        projectId: expected.projectId,
+        jobId: expected.jobId,
+        baseCommitSha: candidate.baseCommitSha,
+        writes,
+        publishedPaths,
+        preparedAt: candidate.preparedAt,
+      };
+    } catch {
+      throw new ResolveJobStoreError(
+        "RESOLVE_JOB_CORRUPT",
+        "Resolve transaction journal is invalid",
+        identifiers,
+      );
     }
-    const candidate = value as ResolveTransactionJournal;
-    if (
-      candidate.version !== 1 || !JOB_ID.test(candidate.transactionId)
-      || !JOB_ID.test(candidate.jobId) || typeof candidate.projectId !== "string"
-      || typeof candidate.baseCommitSha !== "string" || !Array.isArray(candidate.writes)
-      || !Array.isArray(candidate.publishedPaths)
-    ) throw new ResolveJobStoreError("RESOLVE_JOB_CORRUPT", "Resolve transaction journal is invalid");
-    return candidate;
   }
 
   async #journalPath(journal: Pick<ResolveTransactionJournal, "projectId" | "jobId" | "transactionId">, create: boolean) {
@@ -359,8 +479,13 @@ export class ResolveExportJobStore {
   }
 
   async #writeJournal(journal: ResolveTransactionJournal): Promise<void> {
-    const path = await this.#journalPath(journal, true);
-    await this.#atomicWrite(path!, `${JSON.stringify(journal, null, 2)}\n`);
+    const validated = this.#parseJournal(journal, {
+      projectId: journal.projectId,
+      jobId: journal.jobId,
+      transactionId: journal.transactionId,
+    });
+    const path = await this.#journalPath(validated, true);
+    await this.#atomicWrite(path!, `${JSON.stringify(validated, null, 2)}\n`);
   }
 
   async prepareTransaction(input: PrepareResolveTransaction): Promise<ResolveTransactionJournal> {
@@ -381,6 +506,9 @@ export class ResolveExportJobStore {
       writes.push({
         path: write.path,
         beforeBase64: before?.toString("base64") ?? null,
+        beforeSha256: before
+          ? crypto.createHash("sha256").update(before).digest("hex")
+          : null,
         afterBase64: after.toString("base64"),
         afterSha256: crypto.createHash("sha256").update(after).digest("hex"),
       });
@@ -404,10 +532,17 @@ export class ResolveExportJobStore {
     initial: ResolveTransactionJournal,
     afterPublish?: (path: string) => void | Promise<void>,
   ): Promise<ResolveTransactionJournal> {
-    let journal = initial;
+    let journal = this.#parseJournal(initial, {
+      projectId: initial.projectId,
+      jobId: initial.jobId,
+      transactionId: initial.transactionId,
+    });
+    const afterImages = new Map(
+      journal.writes.map((write) => [write.path, verifiedImage(write.afterBase64, write.afterSha256)]),
+    );
     for (const write of journal.writes) {
       const target = await this.#transactionTarget(journal.projectId, journal.jobId, write.path, true);
-      await this.#atomicWrite(target, Buffer.from(write.afterBase64, "base64"));
+      await this.#atomicWrite(target, afterImages.get(write.path)!);
       const publishedHash = crypto.createHash("sha256").update(await readFile(target)).digest("hex");
       if (publishedHash !== write.afterSha256) {
         throw new ResolveJobStoreError(
@@ -427,22 +562,37 @@ export class ResolveExportJobStore {
   }
 
   async restoreTransaction(
-    journal: ResolveTransactionJournal,
+    initial: ResolveTransactionJournal,
     generation: "before" | "after",
   ): Promise<void> {
+    const journal = this.#parseJournal(initial, {
+      projectId: initial.projectId,
+      jobId: initial.jobId,
+      transactionId: initial.transactionId,
+    });
+    const images = new Map(journal.writes.map((write) => {
+      const encoded = generation === "after" ? write.afterBase64 : write.beforeBase64;
+      const digest = generation === "after" ? write.afterSha256 : write.beforeSha256;
+      return [write.path, encoded === null ? null : verifiedImage(encoded, digest!)] as const;
+    }));
     for (const write of journal.writes) {
       const target = await this.#transactionTarget(journal.projectId, journal.jobId, write.path, true);
-      const encoded = generation === "after" ? write.afterBase64 : write.beforeBase64;
-      if (encoded === null) {
+      const bytes = images.get(write.path)!;
+      if (bytes === null) {
         await rm(target, { force: true });
         await syncDirectory(dirname(target));
       } else {
-        await this.#atomicWrite(target, Buffer.from(encoded, "base64"));
+        await this.#atomicWrite(target, bytes);
       }
     }
   }
 
-  async completeTransaction(journal: ResolveTransactionJournal): Promise<void> {
+  async completeTransaction(initial: ResolveTransactionJournal): Promise<void> {
+    const journal = this.#parseJournal(initial, {
+      projectId: initial.projectId,
+      jobId: initial.jobId,
+      transactionId: initial.transactionId,
+    });
     const path = await this.#journalPath(journal, false);
     if (!path) return;
     await rm(path, { force: true });
@@ -473,14 +623,18 @@ export class ResolveExportJobStore {
         const directory = await this.#safeTransactionsDirectory(projectId, jobId, false);
         if (!directory) continue;
         for (const filename of (await readdir(directory)).filter((entry) => entry.endsWith(".json")).sort()) {
-          const journal = this.#parseJournal(JSON.parse(await readFile(join(directory, filename), "utf8")));
-          if (journal.projectId !== projectId || journal.jobId !== jobId || `${journal.transactionId}.json` !== filename) {
-            throw new ResolveJobStoreError("RESOLVE_JOB_CORRUPT", "Resolve transaction journal is rebound", {
-              projectId,
-              jobId,
-            });
+          const transactionId = filename.slice(0, -".json".length);
+          try {
+            const raw = JSON.parse(await readFile(join(directory, filename), "utf8")) as unknown;
+            journals.push(this.#parseJournal(raw, { projectId, jobId, transactionId }));
+          } catch (error) {
+            if (error instanceof ResolveJobStoreError && error.code === "RESOLVE_JOB_CORRUPT") throw error;
+            throw new ResolveJobStoreError(
+              "RESOLVE_JOB_CORRUPT",
+              "Resolve transaction journal is invalid",
+              { projectId, jobId },
+            );
           }
-          journals.push(journal);
         }
       }
     }
