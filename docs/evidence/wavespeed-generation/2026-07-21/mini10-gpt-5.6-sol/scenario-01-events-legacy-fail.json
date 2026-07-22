@@ -1,0 +1,20 @@
+{
+  "capturedAt": "2026-07-21T12:28:58Z",
+  "events": [
+    {
+      "stage": "entry-point-inspection",
+      "entryPoint": "dialog",
+      "formIdentity": "legacy-provider-dialog",
+      "sharedControllerFormPresent": false,
+      "providerSubmitCount": 0
+    },
+    {
+      "stage": "entry-point-inspection",
+      "entryPoint": "inspector",
+      "formIdentity": "generate-tab",
+      "sharedControllerFormPresent": true,
+      "providerSubmitCount": 0
+    }
+  ],
+  "sensitivePayloadsRecorded": false
+}

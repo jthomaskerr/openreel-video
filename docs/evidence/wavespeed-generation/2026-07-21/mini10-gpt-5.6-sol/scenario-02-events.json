@@ -1,0 +1,18 @@
+{
+  "capturedAt": "2026-07-21T13:12:37.652Z",
+  "events": [
+    {
+      "stage": "new-asset-submit",
+      "logicalJobId": "b92a6d1c-ebee-4c2f-a462-0180391f45d5",
+      "providerJobId": "fake-wavespeed-job-0004",
+      "entryContext": { "kind": "new-asset" },
+      "timing": null,
+      "audioAssetId": null,
+      "audioRange": null,
+      "placementPolicy": "none",
+      "references": [],
+      "providerInputKeys": ["prompt"]
+    }
+  ],
+  "sensitivePayloadsRecorded": false
+}

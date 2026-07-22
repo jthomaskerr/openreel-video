@@ -1,0 +1,41 @@
+{
+  "capturedAt": "2026-07-21T13:05:36.782Z",
+  "scope": "production generation route and local deterministic fake provider",
+  "requests": [
+    {
+      "entryPoint": "inspector",
+      "method": "POST",
+      "route": "/api/generate/wavespeed/",
+      "status": 202,
+      "providerJobId": "fake-wavespeed-job-0002"
+    },
+    {
+      "entryPoint": "dialog",
+      "method": "POST",
+      "route": "/api/generate/wavespeed/",
+      "status": 202,
+      "providerJobId": "fake-wavespeed-job-0003"
+    }
+  ],
+  "providerSnapshot": {
+    "submitCalls": 3,
+    "providerReservations": 3,
+    "duplicateSubmitCalls": 0,
+    "statusReads": 6,
+    "cancelCalls": 0,
+    "downloadCalls": 0,
+    "scenarioSubmitDelta": 2
+  },
+  "providerEventTimestamps": {
+    "inspectorSubmit": "2026-07-21T13:03:04.153Z",
+    "inspectorCompletedPoll": "2026-07-21T13:03:08.389Z",
+    "dialogSubmit": "2026-07-21T13:04:52.411Z",
+    "dialogCompletedPoll": "2026-07-21T13:04:56.774Z"
+  },
+  "sanitization": {
+    "headersRecorded": false,
+    "bodiesRecorded": false,
+    "queryValuesRecorded": false,
+    "rawPromptsRecorded": false
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "capturedAt": "2026-07-21T13:12:37.652Z",
+  "events": [
+    {
+      "stage": "audio-capability-rendered",
+      "providerModelId": "wavespeed/model-1",
+      "requestedMode": "text-to-image",
+      "supportsAudio": false,
+      "presentation": "The selected model does not support audio.",
+      "zeroWorkExplanation": "No audio resolution, extraction, cache, upload, or provider audio work will run.",
+      "audioUploadCalls": 0,
+      "audioExtractionCalls": 0
+    }
+  ],
+  "sensitivePayloadsRecorded": false
+}

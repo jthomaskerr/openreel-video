@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "wavespeed-generation-browser-batch/v1",
+  "capturedAt": "2026-07-21T12:28:58Z",
+  "browser": {
+    "engine": "Chromium",
+    "control": "Chrome CDP fallback",
+    "applicationUrl": "http://localhost:5173/editor?projectId=vintage-tokyo#/editor",
+    "nonLocalNetworkBlocked": true
+  },
+  "scenarios": [
+    {
+      "scenario": 1,
+      "status": "FAIL",
+      "expected": "Inspector and dialog render the same provider-neutral Generate form and produce an identical sanitized request through one controller.",
+      "actual": "The inspector uses the data-testid=generate-tab form, while the modal has no form or shared-controller test id and renders the legacy provider-specific WaveSpeed UI. No provider call was made.",
+      "failureCode": "generation-entry-point-controller-drift",
+      "routing": {
+        "provider": "wavespeed",
+        "providerInstanceId": "wavespeed",
+        "requestedMode": "text-to-image",
+        "providerModelId": "wavespeed/model-1",
+        "providerSchemaId": "schema-1",
+        "providerEndpointId": "endpoint-1",
+        "providerSchemaVersion": "1"
+      },
+      "references": [],
+      "audio": {
+        "requestedRange": null,
+        "actualRange": null,
+        "sha256": null
+      },
+      "artifactCounts": {
+        "providerSubmissions": 0,
+        "outputs": 0,
+        "shotAttempts": 0,
+        "placements": 0
+      },
+      "artifacts": {
+        "screenshot": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-01-legacy-dialog.png",
+        "screenshotSha256": "bbef2390d4b61bf3b5be9f035031e901b7d1b16e79672b2525420dba5376780c",
+        "network": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-01-network.json",
+        "events": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-01-events.json"
+      }
+    }
+  ]
+}

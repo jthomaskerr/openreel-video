@@ -1,0 +1,78 @@
+{
+  "capturedAt": "2026-07-21T13:05:36.782Z",
+  "events": [
+    {
+      "stage": "entry-point-submit",
+      "entryPoint": "inspector",
+      "formIdentity": "generate-tab",
+      "logicalJobId": "71790f21-e589-401d-b1e2-c1526fcd497c",
+      "providerJobId": "fake-wavespeed-job-0002",
+      "sanitizedRequest": {
+        "routing": {
+          "providerInstanceId": "wavespeed-production",
+          "providerModelId": "wavespeed/model-1",
+          "requestedMode": "text-to-image",
+          "providerSchemaId": "wavespeed-schema",
+          "providerEndpointId": "submit",
+          "providerSchemaVersion": "2026-07"
+        },
+        "entryContext": {
+          "kind": "unlinked-range",
+          "rangeId": "9bc8cda5-c122-41a5-9b9b-54a448e029b3",
+          "startTime": 27.325514739229025,
+          "endTime": 35.38283900226757,
+          "destinationTrackId": "track-1783523715492"
+        },
+        "timing": {
+          "source": "manual",
+          "startSeconds": 27.325514739229025,
+          "endSeconds": 35.38283900226757,
+          "durationSeconds": 8.057324263038549
+        },
+        "placementPolicy": "create-linked-clip",
+        "promptSha256": "59ed6c74a8779ee6a19ca3b5d7aecaa21f0ff0d0471b618c3a9b7044307605dc",
+        "references": [],
+        "providerInputKeys": ["prompt"]
+      }
+    },
+    {
+      "stage": "entry-point-submit",
+      "entryPoint": "dialog",
+      "formIdentity": "generate-tab",
+      "logicalJobId": "cc68890a-da2d-4831-8dcb-b61a8972c6c2",
+      "providerJobId": "fake-wavespeed-job-0003",
+      "sanitizedRequest": {
+        "routing": {
+          "providerInstanceId": "wavespeed-production",
+          "providerModelId": "wavespeed/model-1",
+          "requestedMode": "text-to-image",
+          "providerSchemaId": "wavespeed-schema",
+          "providerEndpointId": "submit",
+          "providerSchemaVersion": "2026-07"
+        },
+        "entryContext": {
+          "kind": "unlinked-range",
+          "rangeId": "9bc8cda5-c122-41a5-9b9b-54a448e029b3",
+          "startTime": 27.325514739229025,
+          "endTime": 35.38283900226757,
+          "destinationTrackId": "track-1783523715492"
+        },
+        "timing": {
+          "source": "manual",
+          "startSeconds": 27.325514739229025,
+          "endSeconds": 35.38283900226757,
+          "durationSeconds": 8.057324263038549
+        },
+        "placementPolicy": "create-linked-clip",
+        "promptSha256": "59ed6c74a8779ee6a19ca3b5d7aecaa21f0ff0d0471b618c3a9b7044307605dc",
+        "references": [],
+        "providerInputKeys": ["prompt"]
+      }
+    }
+  ],
+  "comparison": {
+    "identical": true,
+    "excludedVolatileFields": ["logicalJobId", "providerJobId", "placeholderMediaId"]
+  },
+  "sensitivePayloadsRecorded": false
+}

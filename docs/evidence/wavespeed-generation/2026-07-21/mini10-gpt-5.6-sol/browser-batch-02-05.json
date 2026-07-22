@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "wavespeed-generation-browser-batch/v1",
+  "capturedAt": "2026-07-21T13:12:37.652Z",
+  "browser": {
+    "engine": "Chromium",
+    "applicationUrl": "http://localhost:5173/editor?projectId=vintage-tokyo#/editor",
+    "nonLocalNetworkBlocked": true
+  },
+  "scenarios": [
+    {
+      "scenario": 2,
+      "status": "PASS",
+      "expected": "New asset has no inferred timeline/audio context and placement none.",
+      "actual": "The live new-asset dialog showed no inferred source, timing, references, or audio; the accepted production request persisted entryContext new-asset, null timing/audio, empty references, and placementPolicy none.",
+      "screenshot": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-02-new-asset.png",
+      "screenshotSha256": "cc98aac1e3db9eada07d1944173e4bf481ac6f1ca705f5eed6e6e5cbea3edcd7",
+      "network": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-02-network.json",
+      "events": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-02-events.json"
+    },
+    {
+      "scenario": 3,
+      "status": "PASS",
+      "expected": "Unplaced shot blocks audio and ambiguous projections require selection.",
+      "actual": "An unplaced audio-enabled scene and a scene with two projections each disabled Generate with distinct actionable live-status text and zero provider reservation.",
+      "screenshot": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-03-multiple-projections.png",
+      "supplementalScreenshot": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-03-unplaced-audio-blocked.png",
+      "screenshotSha256": "4ccf9216ce9e19b6a05221ffce40a0308d31a1d513fd97a2343d9eba61f26dce",
+      "network": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-03-network.json",
+      "events": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-03-events.json"
+    },
+    {
+      "scenario": 4,
+      "status": "PASS",
+      "expected": "Unlinked range and selected linked projection show exact timing and visible changeable default placement.",
+      "actual": "The live forms showed the exact manual range and selected timeline projection ranges; linked default was Replace selected clip media and changed to Library only through the visible select.",
+      "screenshot": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-04-linked-projection.png",
+      "screenshotSha256": "ec4f754588a1dd6b253d8b1007510f1c0269297aeeaac47c627810b2fd1ba283",
+      "network": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-04-network.json",
+      "events": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-04-events.json"
+    },
+    {
+      "scenario": 5,
+      "status": "PASS",
+      "expected": "Non-audio model performs zero audio work.",
+      "actual": "The selected supportsAudio=false route displayed unsupported and zero-work explanations; no audio extraction or upload request occurred.",
+      "screenshot": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-05-non-audio-zero-work.png",
+      "screenshotSha256": "08bf56599a2f5861a17b3042bd6bf3833a8de7312d590a79a6aae2aa036edc8e",
+      "network": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-05-network.json",
+      "events": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-05-events.json"
+    }
+  ]
+}

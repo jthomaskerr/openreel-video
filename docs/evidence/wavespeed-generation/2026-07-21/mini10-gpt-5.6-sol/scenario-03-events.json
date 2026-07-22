@@ -1,0 +1,25 @@
+{
+  "capturedAt": "2026-07-21T13:12:37.652Z",
+  "events": [
+    {
+      "stage": "entry-context-blocked",
+      "case": "unplaced-shot-audio",
+      "sceneId": "scene-37e55945-4c4b-4711-b140-bea5d5dc8277",
+      "statusText": "Place scene on timeline generate audio from timing.",
+      "generateDisabled": true
+    },
+    {
+      "stage": "entry-context-blocked",
+      "case": "ambiguous-projection",
+      "sceneId": "scene-37e55945-4c4b-4711-b140-bea5d5dc8277",
+      "projectionClipIds": [
+        "5ddd9042-e723-4580-af2d-d66094116d86",
+        "abf4bcfb-a7d5-41ec-9edc-054a33f3d103"
+      ],
+      "statusText": "Select timeline projection generate audio timing.",
+      "generateDisabled": true
+    }
+  ],
+  "providerReservations": 0,
+  "sensitivePayloadsRecorded": false
+}

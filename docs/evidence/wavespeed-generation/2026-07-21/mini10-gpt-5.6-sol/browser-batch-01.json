@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "wavespeed-generation-browser-batch/v1",
+  "capturedAt": "2026-07-21T13:05:36.782Z",
+  "browser": {
+    "engine": "Chromium",
+    "control": "Chrome CDP fallback",
+    "applicationUrl": "http://localhost:5173/editor?projectId=vintage-tokyo#/editor",
+    "nonLocalNetworkBlocked": true
+  },
+  "scenarios": [
+    {
+      "scenario": 1,
+      "status": "PASS",
+      "expected": "Inspector and dialog render the same provider-neutral Generate form and produce an identical sanitized request through one controller.",
+      "actual": "Both entry points rendered data-testid=generate-tab and separate live submissions produced identical sanitized routing, entry context, timing, placement, prompt hash, reference order, and provider-input keys. Volatile logical/provider/placeholder identities were excluded from parity comparison.",
+      "routing": {
+        "providerInstanceId": "wavespeed-production",
+        "providerModelId": "wavespeed/model-1",
+        "requestedMode": "text-to-image",
+        "providerSchemaId": "wavespeed-schema",
+        "providerEndpointId": "submit",
+        "providerSchemaVersion": "2026-07"
+      },
+      "references": [],
+      "audio": {
+        "requestedRange": null,
+        "actualRange": null,
+        "sha256": null
+      },
+      "artifactCounts": {
+        "providerSubmissions": { "expected": 2, "actual": 2 },
+        "outputs": { "expected": 0, "actual": 0 },
+        "shotAttempts": { "expected": 0, "actual": 0 },
+        "placements": { "expected": 0, "actual": 0 },
+        "duplicateProviderSubmissions": { "expected": 0, "actual": 0 }
+      },
+      "artifacts": {
+        "screenshot": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-01-pass.png",
+        "screenshotSha256": "a100ae8fa742d78931f11ee6dc6994118e9f46954133d998a10c3a9bc4b51f21",
+        "network": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-01-network.json",
+        "events": "docs/evidence/wavespeed-generation/2026-07-21/mini10-gpt-5.6-sol/scenario-01-events.json"
+      }
+    }
+  ]
+}

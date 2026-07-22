@@ -1,0 +1,30 @@
+{
+  "capturedAt": "2026-07-21T13:12:37.652Z",
+  "requests": [
+    {
+      "method": "POST",
+      "route": "/api/generate/wavespeed/",
+      "status": 202,
+      "providerJobId": "fake-wavespeed-job-0004"
+    }
+  ],
+  "providerSnapshot": {
+    "submitCalls": 4,
+    "providerReservations": 4,
+    "duplicateSubmitCalls": 0,
+    "statusReads": 8,
+    "scenarioSubmitDelta": 1,
+    "scenarioAudioUploadDelta": 0,
+    "scenarioSourceUploadDelta": 0
+  },
+  "providerEventTimestamps": {
+    "submit": "2026-07-21T13:11:27.877Z",
+    "runningPoll": "2026-07-21T13:11:29.771Z",
+    "completedPoll": "2026-07-21T13:11:32.767Z"
+  },
+  "sanitization": {
+    "headersRecorded": false,
+    "bodiesRecorded": false,
+    "rawPromptsRecorded": false
+  }
+}

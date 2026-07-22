@@ -1,0 +1,32 @@
+{
+  "capturedAt": "2026-07-21T13:12:37.652Z",
+  "events": [
+    {
+      "stage": "entry-context-rendered",
+      "case": "unlinked-range",
+      "rangeId": "9bc8cda5-c122-41a5-9b9b-54a448e029b3",
+      "timing": {
+        "source": "manual",
+        "startSeconds": 27.325514739229025,
+        "endSeconds": 35.38283900226757,
+        "durationSeconds": 8.057324263038549
+      },
+      "defaultPlacement": "create-linked-clip"
+    },
+    {
+      "stage": "entry-context-rendered",
+      "case": "linked-projection",
+      "sceneId": "scene-37e55945-4c4b-4711-b140-bea5d5dc8277",
+      "clipId": "5ddd9042-e723-4580-af2d-d66094116d86",
+      "timing": {
+        "source": "timeline",
+        "startSeconds": 0,
+        "endSeconds": 3.3829931972789113,
+        "durationSeconds": 3.3829931972789113
+      },
+      "defaultPlacement": "replace-selected-clip-media",
+      "userSelectedPlacement": "none"
+    }
+  ],
+  "sensitivePayloadsRecorded": false
+}

@@ -1,0 +1,18 @@
+{
+  "capturedAt": "2026-07-21T12:28:58Z",
+  "scope": "provider generation routes while both entry points were inspected",
+  "requests": [],
+  "providerSnapshot": {
+    "submitCalls": 0,
+    "providerReservations": 0,
+    "duplicateSubmitCalls": 0,
+    "statusReads": 0,
+    "cancelCalls": 0,
+    "downloadCalls": 0
+  },
+  "sanitization": {
+    "headersRecorded": false,
+    "bodiesRecorded": false,
+    "queryValuesRecorded": false
+  }
+}
