@@ -4,6 +4,7 @@ import { test } from "vitest";
 import type { ResolveExportJob, ResolveImportResult, ResolvePreview } from "@openreel/core";
 import { isLoopbackRemoteAddress, createResolveExportRouter, type ResolveExportRouteService } from "./routes";
 import { ResolveExportServiceError } from "./service";
+import { createApp } from "../app";
 
 const projectId = "vintage-tokyo";
 const jobId = "11111111-1111-4111-8111-111111111111";
@@ -65,6 +66,19 @@ async function withRouter(service: ResolveExportRouteService, run: (baseUrl: str
     const address = server.address();
     assert.ok(address && typeof address === "object");
     await run(`http://127.0.0.1:${address.port}/api/projects`);
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+}
+
+async function withApp(run: (baseUrl: string) => Promise<void>) {
+  const app = createApp();
+  const server = app.listen(0, "127.0.0.1");
+  try {
+    await new Promise<void>((resolve) => server.once("listening", resolve));
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    await run(`http://127.0.0.1:${address.port}`);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
@@ -142,4 +156,47 @@ test("forwarded headers never grant non-loopback bridge access", async () => {
     const response = await fetch(`${baseUrl}/resolve-launches/${token}/redeem`, { method: "POST", headers: { "x-forwarded-for": "127.0.0.1", forwarded: "for=127.0.0.1" } });
     assert.equal(response.status, 404);
   }, () => false);
+});
+
+test("Resolve routes pass exact route parameters and parsed payloads to the service", async () => {
+  const calls: unknown[] = [];
+  const service = fakeService({
+    preview: async (id) => { calls.push(["preview", id]); return preview; },
+    start: async (id, revision, selection) => { calls.push(["start", id, revision, selection]); return job; },
+    status: async (id) => { calls.push(["status", id]); return job; },
+    cancel: async (id) => { calls.push(["cancel", id]); return { ...job, phase: "cancelled" }; },
+    redeem: async (value) => { calls.push(["redeem", value]); return { jobId, projectId, revision: job.revision, artifacts: [] }; },
+    recordImportResult: async (id, input) => { calls.push(["result", id, input]); return input; },
+  });
+  await withRouter(service, async (baseUrl) => {
+    await fetch(`${baseUrl}/${projectId}/resolve-preview`);
+    await fetch(`${baseUrl}/${projectId}/exports/resolve`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(startRequest()) });
+    await fetch(`${baseUrl}/${projectId}/exports/resolve/${jobId}`);
+    await fetch(`${baseUrl}/${projectId}/exports/resolve/${jobId}`, { method: "DELETE" });
+    await fetch(`${baseUrl}/resolve-launches/${token}/redeem`, { method: "POST" });
+    await fetch(`${baseUrl}/${projectId}/exports/resolve/${jobId}/import-result`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(result) });
+  });
+  assert.deepEqual(calls, [
+    ["preview", projectId],
+    ["start", projectId, "a".repeat(40), startRequest().selection],
+    ["status", jobId],
+    ["status", jobId], ["cancel", jobId],
+    ["redeem", token],
+    ["status", jobId], ["result", jobId, result],
+  ]);
+});
+
+test("production app mounts bounded Resolve JSON parsing before the general project router", async () => {
+  await withApp(async (baseUrl) => {
+    const malformed = await fetch(`${baseUrl}/api/projects/${projectId}/exports/resolve`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{",
+    });
+    assert.equal(malformed.status, 400);
+    assert.deepEqual(await malformed.json(), { error: { code: "INVALID_RESOLVE_REQUEST_JSON", message: "The Resolve export request is invalid." } });
+    const oversized = await fetch(`${baseUrl}/api/projects/${projectId}/exports/resolve`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: `"${"a".repeat(262_145)}"`,
+    });
+    assert.equal(oversized.status, 400);
+    assert.deepEqual(await oversized.json(), { error: { code: "RESOLVE_REQUEST_TOO_LARGE", message: "The Resolve export request is invalid." } });
+  });
 });
