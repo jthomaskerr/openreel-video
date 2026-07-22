@@ -14,6 +14,7 @@ const ResolveProjectListItemSchema = z
   .object({
     id: z.string().min(1),
     name: z.string().min(1),
+    description: z.string(),
     createdAt: z.number().finite(),
     modifiedAt: z.number().finite(),
   })

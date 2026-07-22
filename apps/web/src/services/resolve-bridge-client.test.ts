@@ -125,10 +125,10 @@ describe("Resolve bridge client", () => {
 
   it("uses the exact list and preview endpoints and parses their public DTOs", async () => {
     const listFetcher = vi.fn(async () => jsonResponse([
-      { id: projectId, name: "Vintage Tokyo", createdAt: 1, modifiedAt: 2 },
+      { id: projectId, name: "Vintage Tokyo", description: "A neon travel film", createdAt: 1, modifiedAt: 2 },
     ]));
     await expect(listProjects({ fetch: listFetcher })).resolves.toEqual([
-      { id: projectId, name: "Vintage Tokyo", createdAt: 1, modifiedAt: 2 },
+      { id: projectId, name: "Vintage Tokyo", description: "A neon travel film", createdAt: 1, modifiedAt: 2 },
     ]);
     expect(listFetcher).toHaveBeenCalledWith(
       "http://localhost:4041/api/projects",
@@ -141,6 +141,12 @@ describe("Resolve bridge client", () => {
       `http://localhost:4041/api/projects/${encodedProjectId}/resolve-preview`,
       { method: "GET", signal: undefined },
     );
+  });
+
+  it("requires every strict public project summary to include a description", async () => {
+    await expect(listProjects({ fetch: vi.fn(async () => jsonResponse([
+      { id: projectId, name: "Legacy summary", createdAt: 1, modifiedAt: 2 },
+    ])) })).rejects.toMatchObject({ code: "INVALID_RESPONSE" });
   });
 
   it("posts the exact start request and parses the backend's strict 202 envelope", async () => {
@@ -199,7 +205,7 @@ describe("Resolve bridge client", () => {
 
   it.each([
     ["project list", () => listProjects({ fetch: vi.fn(async () => jsonResponse([
-      { id: projectId, name: "Vintage Tokyo", createdAt: 1, modifiedAt: 2, extra: true },
+      { id: projectId, name: "Vintage Tokyo", description: "A neon travel film", createdAt: 1, modifiedAt: 2, extra: true },
     ])) })],
     ["preview", () => getPreview(projectId, { fetch: vi.fn(async () => jsonResponse({
       ...preview,

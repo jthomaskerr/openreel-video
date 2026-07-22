@@ -140,9 +140,9 @@ export function ResolveProjectPicker({
     if (!normalized) return projects;
     return projects.filter((project) =>
       project.name.toLocaleLowerCase().includes(normalized) ||
-      (project.id === preview?.projectId && preview.description.toLocaleLowerCase().includes(normalized)),
+      project.description.toLocaleLowerCase().includes(normalized),
     );
-  }, [preview, projects, query]);
+  }, [projects, query]);
 
   useEffect(() => {
     if (visibleProjects.length === 0 || visibleProjects.some((project) => project.id === selectedId)) return;

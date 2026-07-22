@@ -10,6 +10,7 @@ import type { ResolveBridgeRequestOptions } from "../../../services/resolve-brid
 const vintageSummary = {
   id: "vintage-tokyo",
   name: "Vintage Tokyo",
+  description: "A neon travel film",
   createdAt: Date.UTC(2026, 6, 11, 9),
   modifiedAt: Date.UTC(2026, 6, 22, 10),
 };
@@ -212,5 +213,35 @@ describe("ResolveProjectPicker", () => {
     );
 
     expect(await screen.findByText(/no openreel projects are available/i)).toBeVisible();
+  });
+
+  it("finds an unselected project by its summary description", async () => {
+    const descriptiveProjects = [
+      { ...vintageSummary, description: "Neon streets and late-night trains" },
+      {
+        ...vintageSummary,
+        id: "quiet-archive",
+        name: "Quiet Archive",
+        description: "Temple gardens and analogue field recordings",
+      },
+    ];
+    render(
+      <ResolveProjectPicker
+        open
+        onClose={vi.fn()}
+        onLaunch={vi.fn()}
+        client={client({
+          listProjects: vi.fn(async () => descriptiveProjects),
+          getPreview: vi.fn(async (projectId) =>
+            preview(projectId, projectId === "quiet-archive" ? "Quiet Archive" : "Vintage Tokyo"),
+          ),
+        })}
+      />,
+    );
+
+    const search = screen.getByRole("searchbox", { name: /search projects/i });
+    fireEvent.change(search, { target: { value: "field recordings" } });
+    expect(await screen.findByRole("option", { name: /quiet archive/i })).toBeVisible();
+    expect(screen.queryByRole("option", { name: /vintage tokyo/i })).not.toBeInTheDocument();
   });
 });

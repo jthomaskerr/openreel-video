@@ -224,6 +224,29 @@ async function withProjectRouter(
   }
 }
 
+test("GET project summaries serializes the persisted description", async () => {
+  const summary = {
+    id: "vintage-tokyo",
+    name: "Vintage Tokyo",
+    description: "Neon streets and analogue field recordings",
+    createdAt: 1,
+    modifiedAt: 2,
+    duration: 10,
+    frameRate: 30,
+    trackCount: 2,
+    clipCount: 4,
+  };
+  await withProjectRouter(
+    { listProjects: async () => [summary] },
+    {},
+    async (baseUrl) => {
+      const response = await fetch(`${baseUrl}/api/projects`);
+      assert.equal(response.status, 200);
+      assert.deepEqual(await response.json(), [summary]);
+    },
+  );
+});
+
 test("GET returns the project with a complete confirmed persistence receipt", async () => {
   const project = projectFixture("vintage-tokyo", "Loaded Project");
   await withProjectRouter(
