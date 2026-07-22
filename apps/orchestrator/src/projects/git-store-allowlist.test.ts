@@ -60,6 +60,31 @@ test("commit returns verified identities from the created commit", async () => {
   }
 });
 
+test("commit lifecycle hooks bracket the ref update and committed files remain readable", async () => {
+  const { fixtureRoot, gitStore, projectStore } = await makeStore();
+  try {
+    const project = await projectStore.createProject("Lifecycle Hooks");
+    const events: string[] = [];
+    const receipt = await gitStore.commit(project.id, "test: observe commit lifecycle", {
+      allowlist: ["project.json"],
+      expectedEntries: [{ status: "A", path: "project.json" }],
+      hooks: {
+        afterStage: () => { events.push("after-stage"); },
+        afterTree: () => { events.push("after-tree"); },
+        beforeRefUpdate: () => { events.push("before-ref-update"); },
+        afterRefUpdate: () => { events.push("after-ref-update"); },
+      },
+    });
+
+    assert.deepEqual(events, ["after-stage", "after-tree", "before-ref-update", "after-ref-update"]);
+    assert.ok(receipt.commitSha);
+    const committed = await gitStore.readFileAtCommit(project.id, receipt.commitSha, "project.json");
+    assert.equal((JSON.parse(committed ?? "null") as { id?: string } | null)?.id, project.id);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("expected cached entries are order-independent", async () => {
   const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
   try {

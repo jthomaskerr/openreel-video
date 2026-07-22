@@ -49,6 +49,14 @@ export interface GitCommitReceipt {
 export interface GitCommitTransaction {
   allowlist: readonly string[];
   expectedEntries: readonly GitStagedNameStatusEntry[];
+  hooks?: GitCommitLifecycleHooks;
+}
+
+export interface GitCommitLifecycleHooks {
+  readonly afterStage?: () => void | Promise<void>;
+  readonly afterTree?: () => void | Promise<void>;
+  readonly beforeRefUpdate?: () => void | Promise<void>;
+  readonly afterRefUpdate?: () => void | Promise<void>;
 }
 
 export interface GitProjectTransaction {
@@ -588,6 +596,7 @@ export class GitStore {
     if (allowlist.length > 0) {
       await this.git(["add", "-A", "--", ...allowlist], wtPath);
     }
+    await transaction.hooks?.afterStage?.();
 
     const { stdout: cachedDiff } = await this.git(["diff", "--cached", "--name-status", "-z"], wtPath);
     const actualEntries = parseCachedNameStatus(cachedDiff);
@@ -595,7 +604,12 @@ export class GitStore {
 
     if (entriesToComparableStrings(normalizedActual).join("\n") !== entriesToComparableStrings(expectedEntries).join("\n")) {
       if (allowlist.length > 0) {
-        await this.git(["reset", "--", ...allowlist], wtPath).catch(() => undefined);
+        await this.git(["reset", "--", ...allowlist], wtPath).catch((resetError) => {
+          console.warn("[GitStore] failed to unstage mismatched commit entries", {
+            projectId,
+            error: resetError instanceof Error ? resetError.message : "unknown error",
+          });
+        });
       }
       throw new Error(
         `Cached diff did not match the expected allowlisted entries for ${projectId}\nExpected: ${JSON.stringify(expectedEntries)}\nActual: ${JSON.stringify(normalizedActual)}`,
@@ -620,16 +634,19 @@ export class GitStore {
 
     try {
       const treeSha = (await this.git(["write-tree"], wtPath)).stdout.trim();
+      await transaction.hooks?.afterTree?.();
       const commitArgs = ["commit-tree", treeSha, "-m", message, ...(parentCommitSha ? ["-p", parentCommitSha] : [])];
       const { stdout: commitShaRaw } = await execFileAsync(this.gitExecutable, commitArgs, { cwd: wtPath });
       const commitSha = commitShaRaw.trim();
       const actualMediaManifestDigest = await this.#resolveCommittedManifestDigest(projectId, commitSha);
       const receipt = await this.#resolveReceiptFromCommit(projectId, commitSha, actualMediaManifestDigest);
       await this.#verifyCommittedReceipt(projectId, receipt, treeSha, stagedProjectBlobSha, expectedMediaManifestDigest);
+      await transaction.hooks?.beforeRefUpdate?.();
       await this.git(
         ["update-ref", `refs/heads/project/${projectId}`, commitSha, ...(parentCommitSha ? [parentCommitSha] : [])],
         this.repoDir,
       );
+      await transaction.hooks?.afterRefUpdate?.();
       if (allowlist.length > 0) {
         await this.git(["reset", "--", ...allowlist], wtPath).catch((resetErr) => {
           console.warn(`[GitStore] failed to clear staged paths for ${projectId}:`, resetErr);
@@ -640,7 +657,12 @@ export class GitStore {
       const execErr = err as ExecException & { stdout?: string; stderr?: string };
       const output = `${execErr.message ?? ""} ${execErr.stdout ?? ""} ${execErr.stderr ?? ""}`;
       if (allowlist.length > 0) {
-        await this.git(["reset", "--", ...allowlist], wtPath).catch(() => undefined);
+        await this.git(["reset", "--", ...allowlist], wtPath).catch((resetError) => {
+          console.warn("[GitStore] failed to unstage aborted commit entries", {
+            projectId,
+            error: resetError instanceof Error ? resetError.message : "unknown error",
+          });
+        });
       }
       if (output.includes("nothing to commit")) {
         const confirmed = await this.readConfirmedReceipt(projectId);
@@ -709,6 +731,18 @@ export class GitStore {
     try {
       const { stdout } = await this.git(["show", `${sha}:project.json`], wtPath);
       return JSON.parse(stdout) as Project;
+    } catch {
+      return null;
+    }
+  }
+
+  async readFileAtCommit(projectId: string, sha: string, relativePath: string): Promise<string | null> {
+    assertValidProjectId(projectId);
+    const normalizedPath = normalizeCommitPath(relativePath);
+    const wtPath = this.worktreePath(projectId);
+    if (!existsSync(join(wtPath, ".git"))) return null;
+    try {
+      return (await this.git(["show", `${sha}:${normalizedPath}`], wtPath)).stdout;
     } catch {
       return null;
     }

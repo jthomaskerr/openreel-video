@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -62,6 +62,7 @@ function record(): PersistedResolveExportJob {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "openreel-resolve-job-store-"));
   roots.push(root);
+  await mkdir(join(root, "vintage-tokyo"));
   const store = new ResolveExportJobStore({
     projectDir: (projectId) => join(root, projectId),
     listProjectIds: async () => ["vintage-tokyo"],
@@ -168,5 +169,87 @@ describe("ResolveExportJobStore", () => {
 
     await expect(store.load("vintage-tokyo", job().id))
       .rejects.toMatchObject({ code: "RESOLVE_JOB_CORRUPT" });
+  });
+
+  test.each(["project", "job"] as const)("rejects a record rebound to another physical %s location", async (kind) => {
+    const { root, store } = await fixture();
+    await store.save(record());
+    const path = join(root, "vintage-tokyo", "exports", "resolve", job().id, "job.json");
+    const persisted = JSON.parse(await readFile(path, "utf8")) as PersistedResolveExportJob;
+    const otherJobId = "99999999-9999-4999-8999-999999999999";
+    const rebound = kind === "project"
+      ? {
+        ...persisted,
+        job: { ...persisted.job, projectId: "other-project" },
+        selection: { ...persisted.selection, projectId: "other-project" },
+      }
+      : {
+        ...persisted,
+        job: { ...persisted.job, id: otherJobId },
+        artifacts: persisted.artifacts.map((artifact) => ({
+          ...artifact,
+          path: artifact.path.replace(job().id, otherJobId),
+        })),
+      };
+    await writeFile(path, JSON.stringify(rebound));
+
+    await expect(store.load("vintage-tokyo", job().id))
+      .rejects.toMatchObject({ code: "RESOLVE_JOB_CORRUPT" });
+  });
+
+  test.each(["exports", "resolve", "job"] as const)("rejects a symlinked %s path component", async (component) => {
+    const { root, store } = await fixture();
+    const projectRoot = join(root, "vintage-tokyo");
+    const outside = await mkdtemp(join(tmpdir(), "openreel-resolve-escape-"));
+    roots.push(outside);
+    await mkdir(projectRoot, { recursive: true });
+    if (component === "exports") {
+      await symlink(outside, join(projectRoot, "exports"));
+    } else {
+      await mkdir(join(projectRoot, "exports"), { recursive: true });
+      if (component === "resolve") {
+        await symlink(outside, join(projectRoot, "exports", "resolve"));
+      } else {
+        await mkdir(join(projectRoot, "exports", "resolve"), { recursive: true });
+        await symlink(outside, join(projectRoot, "exports", "resolve", job().id));
+      }
+    }
+
+    await expect(store.writeArtifact("vintage-tokyo", job().id, "escape.json", "secret"))
+      .rejects.toMatchObject({ code: "INVALID_RESOLVE_JOB_PATH" });
+    expect(await readdir(outside)).toEqual([]);
+  });
+
+  test("durably journals before-images and recovers an interrupted multi-file publish", async () => {
+    const { root, store } = await fixture();
+    const first = `exports/resolve/${job().id}/manifest.json`;
+    const second = `exports/resolve/${job().id}/job.json`;
+    const journal = await store.prepareTransaction({
+      transactionId: "55555555-5555-4555-8555-555555555555",
+      kind: "start",
+      projectId: "vintage-tokyo",
+      jobId: job().id,
+      baseCommitSha: "confirmed-revision",
+      writes: [
+        { path: first, bytes: Buffer.from("manifest") },
+        { path: second, bytes: Buffer.from("job") },
+      ],
+    });
+
+    await expect(store.publishTransaction(journal, (path) => {
+      if (path === first) throw new Error("simulated process loss");
+    })).rejects.toThrow("simulated process loss");
+
+    const fresh = new ResolveExportJobStore({
+      projectDir: (projectId) => join(root, projectId),
+      listProjectIds: async () => ["vintage-tokyo"],
+    });
+    const [recovered] = await fresh.listTransactions();
+    expect(recovered.publishedPaths).toEqual([first]);
+    await fresh.restoreTransaction(recovered, "before");
+    await fresh.completeTransaction(recovered);
+    await expect(readFile(join(root, "vintage-tokyo", first))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(readFile(join(root, "vintage-tokyo", second))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await fresh.listTransactions()).toEqual([]);
   });
 });
