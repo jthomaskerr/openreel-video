@@ -134,11 +134,33 @@
 - Destination-app testing only: rejected because it is slow, manual, and poor at isolating deterministic regressions.
 - Paid or probabilistic evals: not applicable; no LLM-dependent behavior is introduced.
 
+## Decision 12: Advertise Only Exact Builds with Passing Evidence
+
+**Decision**: Keep the advertised compatibility set empty for each target until the release matrix contains at least one passing row with the exact application build, operating system, fixture identity, artifact SHA-256, result, comparisons, evidence, verifier, and date. Resolve 20.3.2 build 20.3.20009 is the locally installed candidate. Do not infer iMovie support from a version family; record the exact installed candidate only when destination verification runs.
+
+**Rationale**: Family labels such as Resolve 20.x and iMovie 10.4.x overclaim compatibility and cannot be reproduced. Implementation does not require inventing an iMovie build, while release remains blocked until both targets have passing exact-build evidence.
+
+**Alternatives considered**:
+
+- Advertise version families before verification: rejected because a passing build does not establish every patch release.
+- Hard-code an uninstalled iMovie version: rejected because it would create an unsupported compatibility claim.
+
+## Decision 13: Make Interaction and Performance Gates Reproducible
+
+**Decision**: Count the valid start path from visible export controls as three primary activations: open the handoff dialog, select the target, and activate Start after automatic assessment. Benchmark the deterministic 1,000-clip fixture across five warm-process runs on Apple M4, 16 GiB RAM, macOS, and Node.js 26.5.0; require a median under five seconds and no run above six seconds.
+
+**Rationale**: Explicit start and end states make the UX outcome testable, while a recorded runtime and hardware baseline makes performance results comparable instead of machine-dependent assertions.
+
+**Alternatives considered**:
+
+- Count scrolling and focus movement: rejected because they do not submit or change workflow state.
+- Use one unrecorded timing run: rejected because warm-up and machine variance would make the gate non-reproducible.
+
 ## Resolved Technical Context
 
 - **Language**: TypeScript 5.x in the existing pnpm monorepo.
 - **Core dependencies**: MediaBunny 1.25.3, `@xmldom/xmldom`, existing export/video/audio engines.
 - **Web dependencies**: React 18, File System Access API, existing storage, notification, analytics, and UI packages.
-- **Tests**: Vitest 1.6, Testing Library, Playwright 1.61, deterministic fixtures, manual Resolve/iMovie import matrix.
+- **Tests**: Vitest 1.6, Testing Library, Playwright 1.61, deterministic fixtures, repeated-export equivalence, a recorded performance harness, and an exact-build Resolve/iMovie import matrix.
 - **Persistence**: No new database state. Output artifacts live in the user-selected file system; compatibility baseline is maintained in repository documentation.
 - **Scale**: 1,000 clips, 60-minute timelines, and multi-gigabyte collected media without loading the full package into memory.

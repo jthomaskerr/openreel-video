@@ -7,8 +7,8 @@ This guide proves the implementation against the feature specification, contract
 - Node.js 18 or later and pnpm installed.
 - Repository dependencies installed with `pnpm install`.
 - A Chromium-class browser for Resolve directory export.
-- A supported DaVinci Resolve 20.x build.
-- A supported iMovie 10.4.x build on macOS.
+- DaVinci Resolve 20.3.2 build 20.3.20009 as the locally installed candidate, or another exact candidate build that will receive its own matrix row.
+- An exact iMovie candidate build on macOS. Do not describe it as supported until its matrix row passes.
 - A representative OpenReel project with:
   - at least two video tracks and two audio tracks;
   - gaps and repeated uses of one media source;
@@ -54,7 +54,10 @@ Expected:
 - Compatibility tests cover every supported and blocking feature code plus stable issue ordering.
 - Media naming tests prove case-insensitive collision safety and path traversal rejection.
 - FCPXML parses successfully, all references resolve, all durations are positive, relative media URLs stay under `Media/`, and golden fixtures match.
+- Two unchanged exports with the same target and range produce equivalent structure, media mapping, artifact names, and report ordering.
 - Existing range, engine, and diagnostic tests remain green.
+
+Run the recorded performance gate on Apple M4, 16 GiB RAM, macOS, and Node.js 26.5.0. The test performs five warm-process assessments of the deterministic 1,000-clip fixture. The median MUST remain below five seconds and no run may exceed six seconds.
 
 ## 3. Web Coordinator and UI Gates
 
@@ -85,16 +88,17 @@ Open `http://localhost:5173` in the browser tool and validate the exact scenario
 
 ### Scenario A: Ready Resolve Handoff
 
-1. Open the representative project.
-2. Choose **Export → DaVinci Resolve**.
-3. Select the complete timeline.
-4. Review the compatibility assessment.
-5. Start export and select an empty destination directory.
+1. Open the representative project, select the complete timeline, and leave export controls visible.
+2. Activate the handoff export control (primary activation 1).
+3. Select **DaVinci Resolve** (primary activation 2); compatibility assessment runs automatically.
+4. Review the compatibility assessment without another activation.
+5. Activate **Start** (primary activation 3), then select an empty destination directory in the system picker.
 
 Expected:
 
 - The dialog says the result remains editable.
 - The ready assessment has no blocking issues.
+- Start is reached in exactly three primary activations; scrolling, focus movement, passive review, and the system destination picker are not counted.
 - Progress visibly moves through assessment, destination, media resolution, packaging, and saving.
 - The selected directory contains:
 

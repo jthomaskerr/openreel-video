@@ -11,7 +11,6 @@
     "range",
     "artifacts",
     "issues",
-    "substitutions",
     "unsupportedItems",
     "result",
     "generatedAt"
@@ -39,12 +38,6 @@
       "type": "array",
       "items": {
         "$ref": "#/$defs/issue"
-      }
-    },
-    "substitutions": {
-      "type": "array",
-      "items": {
-        "$ref": "#/$defs/substitution"
       }
     },
     "unsupportedItems": {
@@ -281,23 +274,6 @@
             "failed",
             "cancelled"
           ]
-        }
-      }
-    },
-    "substitution": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "entity",
-        "description"
-      ],
-      "properties": {
-        "entity": {
-          "$ref": "#/$defs/entity"
-        },
-        "description": {
-          "type": "string",
-          "minLength": 1
         }
       }
     },

@@ -268,7 +268,6 @@ Structured source for the Markdown report.
 | `range` | start/end/duration frames and display times | Required |
 | `artifacts` | safe relative paths, hashes, sizes, status | Required |
 | `issues` | non-sensitive issue projection | Required |
-| `substitutions` | list | Empty in initial Resolve contract |
 | `unsupportedItems` | list | Required when present |
 | `result` | completed, failed, or cancelled summary | Required |
 | `generatedAt` | ISO timestamp | Required but excluded from equivalence tests |

@@ -56,15 +56,16 @@ An editor reviews a compatibility assessment before creating a handoff. Missing 
 ### Edge Cases
 
 - The timeline is empty, has zero duration, or the selected range contains no visible or audible content.
-- A selected range begins or ends inside a clip, transition, speed change, title, or audio fade.
-- The project frame rate differs from one or more source assets, or timing lands between target-editor frames.
-- A clip is reversed, frozen, retimed, nested, generated, compound, or uses an OpenReel-only effect.
-- A track is hidden, muted, locked, empty, or contains overlapping clips.
-- Media is offline, browser-local permission has expired, a source URL is unavailable, or two assets have the same filename.
-- A source filename or project name contains characters not accepted by the destination or local file system.
-- The user cancels during compatibility assessment, media collection, rendering, packaging, or save selection.
-- The destination file already exists or available storage is insufficient.
-- The handoff is imported into a target-editor version outside the supported compatibility matrix.
+- A selected range beginning or ending inside a supported clip is boundary-trimmed; intersection with an unsupported transition, speed change, title, or audio fade blocks editable Resolve export and directs the user to the flattened MOV handoff.
+- Source frame rates differing from the project rate are projected through the deterministic destination timebase; any represented boundary remains within one destination frame.
+- Reversed, frozen, retimed, nested, generated, compound, transitioned, titled, or OpenReel-effect content blocks editable Resolve export in this release and remains available through the flattened MOV handoff.
+- Hidden video and muted audio are excluded. Lock state does not change export inclusion. Empty tracks contribute no artifacts, while supported overlaps preserve track and timing order.
+- Offline media, expired permissions, and unavailable verified URLs block before destination selection. Equal filenames receive deterministic collision-safe names without merging distinct media IDs.
+- Invalid source or project-name characters are sanitized deterministically and reported; generated references remain contained inside the selected destination.
+- Cancellation during any active stage produces a cancelled state, never an import-ready state, and reports any explicitly incomplete output that could not be removed safely.
+- Existing destination collisions require an explicit replacement or alternate-name decision. Insufficient storage or write failure closes open writers, reports the failing artifact, and never reports success.
+- Import into an editor build without a passing exact-version compatibility-matrix row is unsupported and is disclosed before export and in the compatibility report.
+- A browser without Resolve directory-write capability blocks that target with supported-browser guidance; the single-file flattened MOV target remains available when its codec preflight passes.
 
 ## Requirements *(mandatory)*
 
@@ -79,17 +80,24 @@ An editor reviews a compatibility assessment before creating a handoff. Missing 
 - **FR-007**: The iMovie handoff MUST preserve the visible composite, mixed audible audio, aspect ratio, orientation, frame rate, and selected-range duration of the OpenReel render.
 - **FR-008**: Before creating artifacts, the system MUST assess media availability, invalid timing, and edits that cannot be represented faithfully for the selected target.
 - **FR-009**: The compatibility assessment MUST identify each material issue by project, track, clip, or media asset as applicable and MUST distinguish blocking errors, flattening notices, and informational differences.
-- **FR-010**: A feature that cannot be represented in the editable Resolve handoff MUST be rendered into a faithful substitute when that outcome is supported and disclosed; otherwise the editable export MUST be blocked and the user MUST be directed to the flattened handoff.
+- **FR-010**: A material feature that cannot be represented deterministically by the initial editable Resolve contract MUST block editable export and direct the user to the flattened MOV handoff. This release MUST NOT claim or generate per-clip substitutes.
 - **FR-011**: Required missing or inaccessible media MUST block any handoff that would otherwise omit or misrepresent that content. The failure MUST include an actionable relink or permission-recovery step.
 - **FR-012**: Hidden video tracks and muted audio tracks MUST remain excluded from the output unless the user explicitly changes their project state before export.
-- **FR-013**: Each completed handoff MUST include a human-readable compatibility report naming the project, target, exported range, output artifacts, warnings, substitutions, unsupported items, and compatibility baseline.
+- **FR-013**: Each completed handoff MUST include a human-readable compatibility report naming the project, target, exported range, output artifacts, warnings, blocking or flattened-only items, and compatibility baseline.
 - **FR-014**: Output names and internal media references MUST be deterministic, collision-safe, and valid for the user's local file system.
 - **FR-015**: Repeated export of an unchanged project with the same target and range MUST produce equivalent timeline structure and media mapping.
 - **FR-016**: Users MUST be able to cancel without receiving a misleading success state or a partially completed artifact presented as import-ready.
 - **FR-017**: Export progress MUST distinguish assessment, media resolution, rendering when applicable, packaging, and saving.
 - **FR-018**: Any failure MUST remain visible, state whether retry is safe, and include the target and failing stage without exposing private source locations beyond what the user needs to resolve the problem.
 - **FR-019**: Existing general-purpose MP4, WebM, MOV, WAV, image, and OpenReel project exports MUST remain available and retain their current behavior.
-- **FR-020**: The supported target-editor compatibility matrix MUST identify the tested DaVinci Resolve and iMovie versions and MUST be updated whenever the emitted handoff contract changes.
+- **FR-020**: The supported target-editor compatibility matrix MUST identify exact application builds and operating systems, MUST contain at least one passing row per advertised target before release, and MUST be updated whenever the emitted handoff contract changes. A target-editor build MUST NOT be advertised as supported without a passing row.
+
+### Verification Requirements
+
+- **VR-001**: Deterministic core behavior and every failure path MUST have failing-first local tests covering frame math, range projection, representability, naming, serialization, cancellation, retryability, and redaction.
+- **VR-002**: No LLM or probabilistic behavior is introduced, so no probabilistic eval is required. Any later probabilistic compatibility classifier requires a separate specification and eval threshold.
+- **VR-003**: Browser verification MUST reproduce both targets, full and selected ranges, blocked preflight, cancellation, write failure, safe retry, completed artifacts, and the three-primary-action path.
+- **VR-004**: Destination verification MUST record the exact editor build, operating system, fixture identity, artifact SHA-256, import result, timing and drift comparison, screenshots or recordings, verifier, and date.
 
 ### Key Entities
 
@@ -99,7 +107,7 @@ An editor reviews a compatibility assessment before creating a handoff. Missing 
 - **Timeline Handoff**: The editable sequence description containing project timing, tracks, clips, source ranges, and media references.
 - **Media Reference**: The stable mapping between an OpenReel media asset, its source identity, collected output name, and destination-editor reference.
 - **Rendered Handoff**: The self-contained movie whose picture and mixed audio represent the selected OpenReel range.
-- **Compatibility Report**: The user-readable record of target, range, artifacts, warnings, substitutions, unsupported content, and compatibility baseline.
+- **Compatibility Report**: The user-readable record of target, range, artifacts, warnings, blocking or flattened-only content, and compatibility baseline.
 
 ### Assumptions
 
@@ -132,7 +140,7 @@ An editor reviews a compatibility assessment before creating a handoff. Missing 
 - **SC-002**: For supported editable properties, imported Resolve clip boundaries and source ranges differ from OpenReel by no more than one destination frame, with no cumulative audio drift across a 60-minute fixture.
 - **SC-003**: 100% of the maintained horizontal, vertical, and square iMovie fixtures import into every supported iMovie version without conversion and preserve dimensions, orientation, frame rate, duration within one frame, and synchronized audible audio.
 - **SC-004**: 100% of missing required media and unsupported material edits in the compatibility fixture set are reported before artifact creation; none are silently omitted.
-- **SC-005**: A user can choose a target, review compatibility, and start a valid handoff in no more than three primary actions.
-- **SC-006**: Compatibility assessment completes within 5 seconds for a project containing 1,000 clips on the project's supported baseline device.
+- **SC-005**: Starting with export controls visible and any range already selected, a valid handoff starts in at most three primary activations: open the handoff dialog, select the target, and activate Start after automatic compatibility assessment. Scrolling, focus movement, and passive review are not primary activations.
+- **SC-006**: For the deterministic 1,000-clip fixture on the recorded baseline of Apple M4, 16 GiB RAM, macOS, and Node.js 26.5.0, compatibility assessment completes with a median under 5 seconds across five warm-process runs and no run above 6 seconds.
 - **SC-007**: Cancellation and injected failures at every export stage produce no import-ready success state and always identify the failed or cancelled stage.
 - **SC-008**: Existing export regression fixtures continue to pass with unchanged output behavior.

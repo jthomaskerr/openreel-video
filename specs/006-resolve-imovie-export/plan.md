@@ -17,10 +17,10 @@ The design adds pure compatibility and serialization modules under the existing 
 **Language/Version**: TypeScript 5.x; repository supports Node.js 18+
 **Primary Dependencies**: Existing `@openreel/core` export/video/audio engines, MediaBunny 1.25.3, new `@xmldom/xmldom` 0.9.x, React 18, File System Access API
 **Storage**: Existing in-memory blobs, IndexedDB media records, retained file/directory handles, verified remote media URLs, and user-selected output files/directories; no new database
-**Testing**: Vitest 1.6, Testing Library, Playwright 1.61, deterministic FCPXML/report fixtures, manual Resolve/iMovie compatibility matrix
-**Target Platform**: OpenReel web editor; Chromium-class browser required for Resolve directory export, current supported browsers for single-file iMovie export
+**Testing**: Vitest 1.6, Testing Library, Playwright 1.61, deterministic FCPXML/report fixtures, repeated-export equivalence tests, and an exact-build Resolve/iMovie compatibility matrix
+**Target Platform**: OpenReel web editor; Chromium-class browser required for Resolve directory export, current supported browsers for single-file iMovie export; local Resolve verification baseline is 20.3.2 build 20.3.20009, while iMovie support remains unadvertised until an exact build passes the release matrix
 **Project Type**: pnpm web monorepo with reusable core package and React web application
-**Performance Goals**: Compatibility assessment for 1,000 clips in under 5 seconds; frame-boundary error no greater than one destination frame; no cumulative audio drift across a 60-minute fixture
+**Performance Goals**: Across five warm-process runs on Apple M4, 16 GiB RAM, macOS, and Node.js 26.5.0, 1,000-clip assessment median under 5 seconds with no run above 6 seconds; frame-boundary error no greater than one destination frame; no cumulative audio drift across a 60-minute fixture
 **Constraints**: Preserve current export behavior; never silently omit material edits or media; stream multi-gigabyte media without whole-package buffering; cancellation must not produce an import-ready success state; private native paths must not enter reports or diagnostics
 **Scale/Scope**: One project timeline, up to 1,000 clips and multiple tracks, 60-minute validation fixture, multi-gigabyte media collection, two target profiles, one editable interchange version
 
@@ -28,20 +28,20 @@ The design adds pure compatibility and serialization modules under the existing 
 
 *GATE: Must pass before Phase 0 research and after Phase 1 design.*
 
-The repository constitution file is an unratified placeholder and contains no enforceable project-specific principles. The active repository instructions therefore provide the effective gates.
+The ratified OpenReel Video Constitution v1.0.0 is authoritative.
 
-| Gate | Pre-Research | Post-Design Evidence |
-|------|--------------|----------------------|
-| Reuse existing architecture and avoid unnecessary greenfield services | PASS | Core extension plus thin web coordinator; no server, database, or new renderer |
-| Deterministic behavior has local, non-flaky tests | PASS | Timebase, assessment, naming, XML, reports, state transitions, and UI contracts have explicit fixture tests |
-| Probabilistic behavior includes evals | PASS | No LLM or probabilistic behavior is introduced; no eval is required |
-| User-visible failures are explicit and actionable | PASS | Typed blocking/warning/info issues, staged failures, identifiers, retryability, and visible report |
-| UI changes receive browser verification | PASS | Quickstart requires exact target/range/preflight/cancel/download browser scenarios |
-| External compatibility has traceable evidence | PASS | Versioned compatibility matrix records artifact hashes, destination versions, timing comparisons, screenshots, and recordings |
-| Existing exports remain regression protected | PASS | Existing export tests remain required and handoff code uses separate types and entry points |
-| Dependencies are researched before adoption | PASS | `@xmldom/xmldom` selected after compatibility, maintenance, adoption, and fit comparison in [research.md](./research.md) |
+| Constitutional Gate | Pre-Research | Post-Design Evidence |
+|---------------------|--------------|----------------------|
+| I. Measurable outcome and complete evidence | PASS | FR/SC outcomes map to deterministic, browser, and exact-build release evidence |
+| II. Deterministic core and explicit judgment boundary | PASS | Timebase, projection, assessment, mapping, XML, reports, and profiles are pure typed code; no LLM or probabilistic behavior is introduced |
+| III. Test-first and eval-gated verification | PASS | Every implementation task follows a failing test; no eval is required; UI tasks include exact browser workflows |
+| IV. Service ownership and typed contracts | PASS | Core owns pure handoff contracts; the web coordinator owns injected browser I/O; shared types precede dependents |
+| V. Explicit failure, observability, and data safety | PASS | Typed staged errors, stable identifiers, cancellation, retryability, incomplete-output disclosure, and redacted events are designed |
+| VI. Evidence-based release and repository discipline | PASS | Exact editor builds, OS, hashes, comparisons, screenshots, recordings, verifier, and date are required before support is advertised |
+| Dependency and simplicity policy | PASS | Existing exporter remains authoritative; no server, database, ZIP layer, or per-clip bake pipeline; the XML dependency comparison is documented in [research.md](./research.md) |
+| Requirement traceability | PASS | Tasks must cite every FR and buildable SC identifier and place public contracts before dependent work |
 
-**Gate result**: PASS before research and PASS after design. No justified violations.
+**Gate result**: PASS before research and PASS after design. No constitutional violation or complexity exception is required.
 
 ## Project Structure
 
@@ -126,6 +126,8 @@ docs/
 
 The web coordinator accepts a project snapshot, target, range, destination adapter, media resolver, existing export engine, progress callback, and `AbortSignal`. This keeps browser I/O injectable and permits deterministic failure tests.
 
+The handoff dialog consumes the existing full/range selection. Starting with export controls visible, the counted valid path is exactly: open the handoff dialog, select the target, and activate Start after automatic assessment. Scrolling, focus movement, and passive review do not count as primary activations.
+
 ### 2. Compatibility Assessment
 
 Assessment runs before any destination prompt or artifact write:
@@ -205,7 +207,7 @@ Every asynchronous boundary checks the operation's `AbortSignal`. Structured, re
 
 ### 8. Compatibility Matrix
 
-`docs/export-compatibility.md` records:
+`docs/export-compatibility.md` records one row per exact application build and operating system:
 
 - target application and exact version;
 - operating system;
@@ -218,7 +220,7 @@ Every asynchronous boundary checks the operation's `AbortSignal`. Structured, re
 - screenshot/recording evidence path;
 - verifier and verification date.
 
-The initial supported version is the exact current Resolve 20.x and iMovie 10.4.x build used for release verification. A target is not marked supported until all maintained fixtures pass.
+Resolve 20.3.2 build 20.3.20009 is the locally available candidate baseline. The initial advertised compatibility set is empty for each target until a row passes all maintained fixtures. Release requires at least one passing exact-build row for Resolve and one for iMovie; an untested family such as "20.x" or "10.4.x" is never advertised as supported.
 
 ## Testing Strategy
 
@@ -231,6 +233,7 @@ The initial supported version is the exact current Resolve 20.x and iMovie 10.4.
 - Filename sanitization, Unicode, reserved names, and collision suffixes.
 - FCPXML parsing, required resources, relative URLs, lanes, source ranges, and golden fixtures.
 - Report content, redaction, determinism, and target baseline.
+- Two unchanged exports with the same target and range produce equivalent timeline structure, media mapping, artifact names, and report ordering.
 - Property-based checks for frame conversions and collision-free names.
 
 ### Web Integration Gates
@@ -238,6 +241,7 @@ The initial supported version is the exact current Resolve 20.x and iMovie 10.4.
 - Resolve directory structure, unique media copy, streamed writes, permission denial, quota/write failure, cancellation, and retry.
 - iMovie settings passed to the existing exporter, MOV extension, progress mapping, cancellation, and save fallback.
 - Dialog target descriptions, editable/flattened distinction, range validation, issue list, blocked state, progress phases, completion, and visible errors.
+- The valid default/full-range path starts in exactly three primary activations, with keyboard and pointer variants using the same automatic assessment.
 - Existing `ExportDialog`, `Toolbar`, export engine, range, diagnostics, and export integration regressions.
 
 ### Browser Verification
@@ -246,7 +250,7 @@ Use the running editor to reproduce both target workflows. Verify the exact targ
 
 ### Destination Compatibility Gate
 
-Import maintained artifacts into the exact supported Resolve and iMovie builds. Compare sequence structure, clip timing, trims, track order, dimensions, frame rate, duration, picture, audio sync, and drift. Store the compatibility matrix row and evidence before shipping.
+Import maintained artifacts into candidate Resolve and iMovie builds. Compare sequence structure, clip timing, trims, track order, dimensions, frame rate, duration, picture, audio sync, and drift. Store the exact build, operating system, fixture identity, artifact SHA-256, result, screenshots or recordings, verifier, and date. Do not advertise either target until it has at least one passing exact-build row.
 
 ## Delivery Order
 
