@@ -1,6 +1,48 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { MediaItem, Track } from "@openreel/core";
-import { getAudioPlaybackClips } from "./preview-audio-playback";
+import {
+  getAudioPlaybackClips,
+  startPlaybackAudioResume,
+  startPlaybackAudioWarmup,
+} from "./preview-audio-playback";
+
+describe("startPlaybackAudioResume", () => {
+  it("does not block visual playback on an unresolved AudioContext resume", () => {
+    const resume = vi.fn(() => new Promise<void>(() => {}));
+
+    expect(startPlaybackAudioResume(resume, vi.fn())).toBeUndefined();
+    expect(resume).toHaveBeenCalledOnce();
+  });
+
+  it("reports a rejected AudioContext resume", async () => {
+    const error = new Error("audio permission denied");
+    const onError = vi.fn();
+
+    startPlaybackAudioResume(() => Promise.reject(error), onError);
+    await Promise.resolve();
+
+    expect(onError).toHaveBeenCalledWith(error);
+  });
+});
+
+describe("startPlaybackAudioWarmup", () => {
+  it("does not block playback on an unresolved audio decode", () => {
+    const warmup = vi.fn(() => new Promise<void>(() => {}));
+
+    expect(startPlaybackAudioWarmup(warmup, vi.fn())).toBeUndefined();
+    expect(warmup).toHaveBeenCalledOnce();
+  });
+
+  it("reports a rejected background warmup", async () => {
+    const error = new Error("decode failed");
+    const onError = vi.fn();
+
+    startPlaybackAudioWarmup(() => Promise.reject(error), onError);
+    await Promise.resolve();
+
+    expect(onError).toHaveBeenCalledWith(error);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Fixtures

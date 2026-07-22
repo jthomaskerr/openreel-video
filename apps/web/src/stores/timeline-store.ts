@@ -57,6 +57,8 @@ export interface TimelineState {
   setTrackHeightById: (trackId: string, height: number) => void;
   getTrackHeight: (trackId: string) => number;
   setLoopEnabled: (enabled: boolean) => void;
+  setLoopStart: (position: number) => void;
+  setLoopEnd: (position: number) => void;
   setLoopRange: (start: number, end: number) => void;
   timeToPixels: (time: number) => number;
   pixelsToTime: (pixels: number) => number;
@@ -296,7 +298,24 @@ export const useTimelineStore = create<TimelineState>()(
     },
 
     setLoopEnabled: (enabled: boolean) => {
-      set({ loopEnabled: enabled });
+      const { loopStart, loopEnd } = get();
+      set({ loopEnabled: enabled && loopStart < loopEnd });
+    },
+
+    setLoopStart: (position: number) => {
+      const loopStart = Math.max(0, position);
+      set((state) => ({
+        loopStart,
+        loopEnabled: state.loopEnabled && loopStart < state.loopEnd,
+      }));
+    },
+
+    setLoopEnd: (position: number) => {
+      const loopEnd = Math.max(0, position);
+      set((state) => ({
+        loopEnd,
+        loopEnabled: state.loopEnabled && state.loopStart < loopEnd,
+      }));
     },
 
     setLoopRange: (start: number, end: number) => {

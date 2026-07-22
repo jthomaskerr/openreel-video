@@ -8,6 +8,7 @@ export interface ClockSubscriber {
 export interface ClockOptions {
   audioContext?: AudioContext;
   frameRate?: number;
+  now?: () => number;
 }
 
 export class MasterTimelineClock {
@@ -15,7 +16,8 @@ export class MasterTimelineClock {
   private state: ClockState = "stopped";
   private playbackRate: number = 1.0;
 
-  private startAudioContextTime: number = 0;
+  private readonly now: () => number;
+  private startWallClockTime: number = 0;
   private startTimelineTime: number = 0;
   private pausedAt: number = 0;
 
@@ -35,6 +37,7 @@ export class MasterTimelineClock {
 
   constructor(options: ClockOptions = {}) {
     this.audioContext = options.audioContext || new AudioContext();
+    this.now = options.now || (() => performance.now());
     this.frameRate = options.frameRate || 30;
     this.frameDuration = 1000 / this.frameRate;
   }
@@ -44,8 +47,7 @@ export class MasterTimelineClock {
       return this.pausedAt;
 
     const elapsed =
-      (this.audioContext.currentTime - this.startAudioContextTime) *
-      this.playbackRate;
+      ((this.now() - this.startWallClockTime) / 1000) * this.playbackRate;
     let time = this.startTimelineTime + elapsed;
 
     if (this.loopEnabled && this.loopEnd > this.loopStart) {
@@ -100,7 +102,7 @@ export class MasterTimelineClock {
     if (this.state === "playing") {
       const currentTime = this.currentTime;
       this.startTimelineTime = currentTime;
-      this.startAudioContextTime = this.audioContext.currentTime;
+      this.startWallClockTime = this.now();
     }
     this.playbackRate = Math.max(0.1, Math.min(rate, 16));
   }
@@ -109,11 +111,13 @@ export class MasterTimelineClock {
     if (this.state === "playing") return;
 
     if (this.audioContext.state === "suspended") {
-      await this.audioContext.resume();
+      void this.audioContext.resume().catch((error) => {
+        console.warn("[MasterClock] Audio context resume failed:", error);
+      });
     }
 
     this.startTimelineTime = this.pausedAt;
-    this.startAudioContextTime = this.audioContext.currentTime;
+    this.startWallClockTime = this.now();
     this.state = "playing";
 
     this.notifyStateChange();
@@ -144,7 +148,7 @@ export class MasterTimelineClock {
 
     if (this.state === "playing") {
       this.startTimelineTime = clampedTime;
-      this.startAudioContextTime = this.audioContext.currentTime;
+      this.startWallClockTime = this.now();
     } else {
       this.pausedAt = clampedTime;
     }
@@ -186,7 +190,11 @@ export class MasterTimelineClock {
       const time = this.currentTime;
 
       if (time >= this.duration && !this.loopEnabled) {
-        this.stop();
+        this.pausedAt = this.duration;
+        this.state = "stopped";
+        this.stopUpdateLoop();
+        this.notifyTimeUpdate(this.duration);
+        this.notifyStateChange();
         return;
       }
 

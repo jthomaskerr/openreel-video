@@ -23,6 +23,7 @@ import { useProjectStore } from "../../stores/project-store";
 import { useTimelineStore } from "../../stores/timeline-store";
 import { useUIStore } from "../../stores/ui-store";
 import { useThemeStore } from "../../stores/theme-store";
+import { useSettingsStore } from "../../stores/settings-store";
 import { ExportProgressOverlay } from "./ExportProgressOverlay";
 import { getRenderBridge } from "../../bridges/render-bridge";
 import { getEffectsBridge } from "../../bridges/effects-bridge";
@@ -78,7 +79,11 @@ import {
   loadAndDrawThumbnail,
   resolvePlaceholderColors,
 } from "./preview/index";
-import { getAudioPlaybackClips } from "./preview-audio-playback";
+import {
+  getAudioPlaybackClips,
+  startPlaybackAudioResume,
+  startPlaybackAudioWarmup,
+} from "./preview-audio-playback";
 import {
   collectImagePlaybackClips,
   createMediaImageBitmap,
@@ -86,7 +91,17 @@ import {
   isImagePlaybackClip,
 } from "./preview/media-image-source";
 import { paintPlaybackBackground } from "./preview/playback-canvas";
-import { resolvePlaybackCleanupPosition } from "./preview/playback-lifecycle";
+import {
+  isValidLoopRange,
+  resolvePlaybackCleanupPosition,
+  resolvePlaybackSessionStart,
+  resolvePlaybackStopPosition,
+  shouldInitializeDecodedVideo,
+} from "./preview/playback-lifecycle";
+import {
+  getLoopMarkerPercentages,
+  PreviewTransportControls,
+} from "./preview/PreviewTransportControls";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 import {
   getPersonSegmentationEngine,
@@ -965,13 +980,27 @@ export const Preview: React.FC = () => {
     playbackState,
     playbackLockedReason,
     playbackRate,
+    loopEnabled,
+    loopStart,
+    loopEnd,
     isScrubbing,
     pause,
     togglePlayback,
     seekTo,
     seekRelative,
-    setPlayheadPosition
+    setPlayheadPosition,
+    setPlaybackRate,
+    setLoopEnabled,
+    setLoopStart,
+    setLoopEnd,
   } = useTimelineStore();
+
+  const revertToPlaybackStartOnStop = useSettingsStore(
+    (state) => state.revertToPlaybackStartOnStop,
+  );
+  const setRevertToPlaybackStartOnStop = useSettingsStore(
+    (state) => state.setRevertToPlaybackStartOnStop,
+  );
 
   useEffect(() => {
     isScrubbingRef.current = isScrubbing;
@@ -1221,6 +1250,10 @@ export const Preview: React.FC = () => {
 
   const rateRef = useRef(playbackRate);
   const startPositionRef = useRef(playheadPosition);
+  const playbackSessionStartRef = useRef(playheadPosition);
+  const cleanupPositionOverrideRef = useRef<number | null>(null);
+  const previousPlaybackStateRef = useRef(playbackState);
+  const [playbackRestartToken, setPlaybackRestartToken] = useState(0);
 
   // MediaBunny playback resources - map of clipId to resources for multi-track playback
   const playbackResourcesRef = useRef<
@@ -1240,13 +1273,42 @@ export const Preview: React.FC = () => {
 
   useEffect(() => {
     rateRef.current = playbackRate;
+    const masterClock = getMasterClock();
+    masterClock.setPlaybackRate(playbackRate);
+    audioGraphRef.current?.setPlaybackRate(playbackRate);
   }, [playbackRate]);
 
   useEffect(() => {
+    getMasterClock().setLoop(
+      loopEnabled && isValidLoopRange(loopStart, loopEnd),
+      loopStart,
+      loopEnd,
+    );
+  }, [loopEnabled, loopStart, loopEnd]);
+
+  useEffect(() => {
     if (!isPlaying) {
-      startPositionRef.current = playheadPosition;
+      const stoppedPlaying = previousPlaybackStateRef.current === "playing";
+      const stopPosition = stoppedPlaying
+        ? resolvePlaybackStopPosition({
+          revertToSessionStart: revertToPlaybackStartOnStop,
+          sessionStart: playbackSessionStartRef.current,
+          stoppedPosition: startPositionRef.current,
+        })
+        : playheadPosition;
+      startPositionRef.current = stopPosition;
+      if (Math.abs(playheadPosition - stopPosition) > 0.001) {
+        setPlayheadPosition(stopPosition);
+      }
     }
-  }, [isPlaying, playheadPosition]);
+    previousPlaybackStateRef.current = playbackState;
+  }, [
+    isPlaying,
+    playbackState,
+    playheadPosition,
+    revertToPlaybackStartOnStop,
+    setPlayheadPosition,
+  ]);
 
   const cleanupPlaybackResources = useCallback(() => {
     const resources = playbackResourcesRef.current;
@@ -1497,7 +1559,12 @@ export const Preview: React.FC = () => {
       }
 
       if (scheduledClips.length > 0) {
-        await audioGraph.resume();
+        startPlaybackAudioResume(
+          () => audioGraph.resume(),
+          (error) => {
+            console.warn("[Preview] Audio context resume failed:", error);
+          },
+        );
         audioGraph.scheduleClips(scheduledClips);
       }
     },
@@ -2758,11 +2825,9 @@ export const Preview: React.FC = () => {
         }
       }
 
-      try {
-        await preDecodeAllAudioBuffers();
-      } catch (error) {
+      startPlaybackAudioWarmup(preDecodeAllAudioBuffers, (error) => {
         console.warn("[Preview] Audio warmup failed:", error);
-      }
+      });
 
       const videoCache = new Map<
         string,
@@ -2805,6 +2870,7 @@ export const Preview: React.FC = () => {
         const video = document.createElement("video");
         video.src = url;
         video.muted = true;
+        video.playbackRate = rateRef.current;
         video.playsInline = true;
         video.preload = "auto";
 
@@ -2855,12 +2921,19 @@ export const Preview: React.FC = () => {
 
       const masterClock = getMasterClock();
       masterClock.setDuration(actualEndTime);
+      masterClock.setLoop(
+        loopEnabled && isValidLoopRange(loopStart, loopEnd),
+        loopStart,
+        loopEnd,
+      );
+      masterClock.setPlaybackRate(rateRef.current);
       masterClock.seek(startPosition);
 
       if (!audioGraphRef.current) {
         audioGraphRef.current = getRealtimeAudioGraph();
       }
       const audioGraph = audioGraphRef.current;
+      audioGraph.setPlaybackRate(rateRef.current);
       audioGraph.setPreviewMuted(isMuted);
 
       const tracksWithAudio = timelineTracks.filter(
@@ -2877,7 +2950,12 @@ export const Preview: React.FC = () => {
         });
       }
 
-      await audioGraph.resume();
+      startPlaybackAudioResume(
+        () => audioGraph.resume(),
+        (error) => {
+          console.warn("[Preview] Audio context resume failed:", error);
+        },
+      );
       audioGraph.seekTo(startPosition);
       await masterClock.play();
       audioGraph.startScheduler(getAudioClipsForScheduler);
@@ -2934,6 +3012,7 @@ export const Preview: React.FC = () => {
         clip: (typeof clips)[0]["clip"],
         time: number,
       ): Promise<void> => {
+        video.playbackRate = rateRef.current;
         const speedEngine = getSpeedEngine();
         const localTime = Math.max(
           0,
@@ -2984,10 +3063,8 @@ export const Preview: React.FC = () => {
 
         const currentPlayhead = masterClock.currentTime;
 
-        if (currentPlayhead >= actualEndTime) {
+        if (!loopEnabled && currentPlayhead >= actualEndTime) {
           cleanup();
-          setPlayheadPosition(0);
-          startPositionRef.current = 0;
           onEnd();
           return;
         }
@@ -3448,6 +3525,9 @@ export const Preview: React.FC = () => {
       getMediaItem,
       getAudioClipsForScheduler,
       isMuted,
+      loopEnabled,
+      loopEnd,
+      loopStart,
       preDecodeAllAudioBuffers,
       releaseVideoElement,
       renderOverlayClipsInTrackOrder,
@@ -3485,11 +3565,39 @@ export const Preview: React.FC = () => {
     let isActive = true;
     let nativeCleanup: (() => void) | null = null;
     let playbackCompleted = false;
-    const playbackStartPosition = startPositionRef.current;
-    const completePlayback = () => {
+    const playbackStartPosition = resolvePlaybackSessionStart({
+      requestedPosition: startPositionRef.current,
+      timelineEnd: actualEndTime,
+      loopEnabled,
+      loopStart,
+      loopEnd,
+    });
+    playbackSessionStartRef.current = playbackStartPosition;
+    startPositionRef.current = playbackStartPosition;
+    if (
+      Math.abs(
+        useTimelineStore.getState().playheadPosition - playbackStartPosition,
+      ) > 0.001
+    ) {
+      setPlayheadPosition(playbackStartPosition);
+    }
+    const completePlayback = (stoppedPosition = actualEndTime) => {
       playbackCompleted = true;
-      setPlayheadPosition(0);
-      startPositionRef.current = 0;
+      if (loopEnabled && isValidLoopRange(loopStart, loopEnd)) {
+        cleanupPositionOverrideRef.current = loopStart;
+        startPositionRef.current = loopStart;
+        setPlayheadPosition(loopStart);
+        setPlaybackRestartToken((token) => token + 1);
+        return;
+      }
+      const stopPosition = resolvePlaybackStopPosition({
+        revertToSessionStart: revertToPlaybackStartOnStop,
+        sessionStart: playbackSessionStartRef.current,
+        stoppedPosition,
+      });
+      setPlayheadPosition(stopPosition);
+      cleanupPositionOverrideRef.current = stopPosition;
+      startPositionRef.current = stopPosition;
       pause();
     };
 
@@ -3979,6 +4087,9 @@ export const Preview: React.FC = () => {
       });
 
       for (const { clip, trackIndex } of initialClips) {
+        if (!shouldInitializeDecodedVideo(getMediaItem(clip.mediaId)?.type)) {
+          continue;
+        }
         if (!playbackResourcesRef.current.has(clip.id)) {
           const resources = await initClipResources(clip, trackIndex);
           if (resources) {
@@ -3999,11 +4110,9 @@ export const Preview: React.FC = () => {
         return;
       }
 
-      try {
-        await preDecodeAllAudioBuffers();
-      } catch (error) {
+      startPlaybackAudioWarmup(preDecodeAllAudioBuffers, (error) => {
         console.warn("[Preview] Audio warmup failed:", error);
-      }
+      });
 
       if (!audioGraphRef.current) {
         audioGraphRef.current = getRealtimeAudioGraph();
@@ -4025,7 +4134,12 @@ export const Preview: React.FC = () => {
         });
       }
 
-      await audioGraph.resume();
+      startPlaybackAudioResume(
+        () => audioGraph.resume(),
+        (error) => {
+          console.warn("[Preview] Audio context resume failed:", error);
+        },
+      );
 
       // Audio-only path: skip canvas entirely when there is nothing to render visually.
       // The WebGPU renderer owns the canvas context, so canvas.getContext("2d") always
@@ -4033,8 +4147,15 @@ export const Preview: React.FC = () => {
       if (!hasAnyVisualContent) {
         const masterClock = getMasterClock();
         masterClock.setDuration(actualEndTime);
+        masterClock.setLoop(
+          loopEnabled && isValidLoopRange(loopStart, loopEnd),
+          loopStart,
+          loopEnd,
+        );
+        masterClock.setPlaybackRate(rateRef.current);
         masterClock.seek(playbackStartPosition);
         audioGraph.seekTo(playbackStartPosition);
+        audioGraph.setPlaybackRate(rateRef.current);
         await masterClock.play();
         audioGraph.startScheduler(getAudioClipsForScheduler);
 
@@ -4085,9 +4206,16 @@ export const Preview: React.FC = () => {
 
       const masterClock = getMasterClock();
       masterClock.setDuration(actualEndTime);
+      masterClock.setLoop(
+        loopEnabled && isValidLoopRange(loopStart, loopEnd),
+        loopStart,
+        loopEnd,
+      );
+      masterClock.setPlaybackRate(rateRef.current);
       masterClock.seek(playbackStartPosition);
 
       audioGraph.seekTo(playbackStartPosition);
+      audioGraph.setPlaybackRate(rateRef.current);
       await masterClock.play();
       audioGraph.startScheduler(getAudioClipsForScheduler);
 
@@ -4125,7 +4253,11 @@ export const Preview: React.FC = () => {
             cleanupPlaybackResources();
             cleanupAudioResources();
             if (!isScrubbingRef.current) {
-              pause();
+              if (masterClock.currentTime >= actualEndTime) {
+                completePlayback(masterClock.currentTime);
+              } else {
+                pause();
+              }
             }
             return;
           }
@@ -4988,12 +5120,15 @@ export const Preview: React.FC = () => {
       isActive = false;
       nativePlaybackActiveRef.current = false;
       const masterClock = getMasterClock();
-      startPositionRef.current = resolvePlaybackCleanupPosition({
-        completed: playbackCompleted,
-        startPosition: startPositionRef.current,
-        clockIsActive: masterClock.isPlaying || masterClock.isPaused,
-        clockPosition: masterClock.currentTime,
-      });
+      const cleanupPositionOverride = cleanupPositionOverrideRef.current;
+      startPositionRef.current = cleanupPositionOverride
+        ?? resolvePlaybackCleanupPosition({
+          completed: playbackCompleted,
+          startPosition: startPositionRef.current,
+          clockIsActive: masterClock.isPlaying || masterClock.isPaused,
+          clockPosition: masterClock.currentTime,
+        });
+      cleanupPositionOverrideRef.current = null;
       if (nativeCleanup) {
         nativeCleanup();
         nativeCleanup = null;
@@ -5017,9 +5152,14 @@ export const Preview: React.FC = () => {
     };
   }, [
     isPlaying,
+    playbackRestartToken,
     canUseNativeVideoPlayback,
     startNativeVideoPlayback,
     actualEndTime,
+    loopEnabled,
+    loopStart,
+    loopEnd,
+    revertToPlaybackStartOnStop,
     setPlayheadPosition,
     pause,
     getMediaItem,
@@ -6267,6 +6407,47 @@ export const Preview: React.FC = () => {
     [actualEndTime, seekTo],
   );
 
+  const handleTogglePreviewPlayback = useCallback(() => {
+    if (isPlaying) {
+      const masterClock = getMasterClock();
+      const stoppedPosition = masterClock.isPlaying || masterClock.isPaused
+        ? masterClock.currentTime
+        : useTimelineStore.getState().playheadPosition;
+      const stopPosition = resolvePlaybackStopPosition({
+        revertToSessionStart: revertToPlaybackStartOnStop,
+        sessionStart: playbackSessionStartRef.current,
+        stoppedPosition,
+      });
+      cleanupPositionOverrideRef.current = stopPosition;
+      startPositionRef.current = stopPosition;
+      setPlayheadPosition(stopPosition);
+      pause();
+      return;
+    }
+
+    const sessionStart = resolvePlaybackSessionStart({
+      requestedPosition: useTimelineStore.getState().playheadPosition,
+      timelineEnd: actualEndTime,
+      loopEnabled,
+      loopStart,
+      loopEnd,
+    });
+    playbackSessionStartRef.current = sessionStart;
+    startPositionRef.current = sessionStart;
+    setPlayheadPosition(sessionStart);
+    togglePlayback();
+  }, [
+    actualEndTime,
+    isPlaying,
+    loopEnabled,
+    loopEnd,
+    loopStart,
+    pause,
+    revertToPlaybackStartOnStop,
+    setPlayheadPosition,
+    togglePlayback,
+  ]);
+
   const handleSkipBack = useCallback(() => {
     seekRelative(-5);
   }, [seekRelative]);
@@ -6318,6 +6499,11 @@ export const Preview: React.FC = () => {
 
   const progressPercentage =
     actualEndTime > 0 ? (playheadPosition / actualEndTime) * 100 : 0;
+  const loopMarkers = getLoopMarkerPercentages(
+    loopStart,
+    loopEnd,
+    actualEndTime,
+  );
 
   const showResizeHandles = !isPlaying && selectedClip && clipBounds;
 
@@ -6794,6 +6980,24 @@ export const Preview: React.FC = () => {
           >
             <div className="absolute right-0 top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow-md opacity-0 group-hover:opacity-100 transition-opacity transform scale-0 group-hover:scale-100 duration-100 border border-black/20" />
           </div>
+          {loopMarkers && loopEnd > loopStart && (
+            <>
+              <div
+                className="absolute inset-y-0 z-10 w-0.5 bg-status-warning pointer-events-none"
+                style={{ left: `${loopMarkers.start}%` }}
+                role="img"
+                aria-label="Loop start"
+                title={`Loop start ${formatTime(loopStart)}`}
+              />
+              <div
+                className="absolute inset-y-0 z-10 w-0.5 bg-status-warning pointer-events-none"
+                style={{ left: `${loopMarkers.end}%` }}
+                role="img"
+                aria-label="Loop end"
+                title={`Loop end ${formatTime(loopEnd)}`}
+              />
+            </>
+          )}
         </div>
 
         {/* Controls row */}
@@ -6828,9 +7032,7 @@ export const Preview: React.FC = () => {
             <SkipBack size={13} />
           </button>
           <button
-            onClick={() => {
-              togglePlayback();
-            }}
+            onClick={handleTogglePreviewPlayback}
             disabled={Boolean(playbackLockedReason)}
             title={playbackLockedReason ?? (isPlaying ? "Pause" : "Play")}
             className={`w-8 h-8 rounded-full flex items-center justify-center transition-all ${
@@ -6857,6 +7059,20 @@ export const Preview: React.FC = () => {
         </div>
 
         <div className="flex gap-1 items-center">
+          <PreviewTransportControls
+            playheadPosition={playheadPosition}
+            duration={actualEndTime}
+            revertToPlaybackStartOnStop={revertToPlaybackStartOnStop}
+            onRevertToPlaybackStartOnStopChange={setRevertToPlaybackStartOnStop}
+            loopEnabled={loopEnabled}
+            loopStart={loopStart}
+            loopEnd={loopEnd}
+            onLoopEnabledChange={setLoopEnabled}
+            onSetLoopStart={setLoopStart}
+            onSetLoopEnd={setLoopEnd}
+            playbackRate={playbackRate}
+            onPlaybackRateChange={setPlaybackRate}
+          />
           <button
             onClick={() => setIsMuted(!isMuted)}
             className={`w-7 h-7 grid place-items-center rounded-md transition-colors ${

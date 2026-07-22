@@ -108,3 +108,39 @@ describe("TimelineStore zoom limits", () => {
     expect(useTimelineStore.getState().pixelsPerSecond).toBe(1);
   });
 });
+
+describe("TimelineStore A-B loop boundaries", () => {
+  beforeEach(() => {
+    useTimelineStore.setState({
+      loopEnabled: false,
+      loopStart: 0,
+      loopEnd: 0,
+    });
+  });
+
+  it("sets A and B independently", () => {
+    useTimelineStore.getState().setLoopStart(3);
+    useTimelineStore.getState().setLoopEnd(8);
+
+    expect(useTimelineStore.getState()).toMatchObject({
+      loopStart: 3,
+      loopEnd: 8,
+    });
+  });
+
+  it("refuses to enable an invalid loop range", () => {
+    useTimelineStore.getState().setLoopStart(8);
+    useTimelineStore.getState().setLoopEnd(3);
+    useTimelineStore.getState().setLoopEnabled(true);
+
+    expect(useTimelineStore.getState().loopEnabled).toBe(false);
+  });
+
+  it("disables an active loop when a boundary makes it invalid", () => {
+    useTimelineStore.getState().setLoopRange(3, 8);
+    useTimelineStore.getState().setLoopEnabled(true);
+    useTimelineStore.getState().setLoopEnd(2);
+
+    expect(useTimelineStore.getState().loopEnabled).toBe(false);
+  });
+});

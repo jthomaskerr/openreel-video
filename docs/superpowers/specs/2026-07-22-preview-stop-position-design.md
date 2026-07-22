@@ -29,6 +29,7 @@ Playback no longer changes timeline navigation unexpectedly. By default, the pre
 - The footer exposes an accessible slider using the timeline store's existing `0.1x` through `4.0x` contract, with a visible numeric value and `1.0x` default.
 - Speed changes take effect during playback without changing the playhead position.
 - Master-clock progression, decoded video cadence, native playback, and preview audio use the same rate so audio, video, and the visible playhead remain synchronized.
+- The master clock uses monotonic wall time and never waits for `AudioContext.resume()`, so a suspended or permission-blocked audio context cannot freeze visual playback or second play. Audio resume failures remain observable and audio scheduling catches up from the shared transport position when audio becomes available.
 - Playback speed is an editor-session transport state. It does not alter clip speed or rendered export timing.
 
 ## Components and Data Flow

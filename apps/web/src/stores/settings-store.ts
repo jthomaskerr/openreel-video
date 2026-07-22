@@ -53,6 +53,7 @@ export interface SettingsState {
   autoSaveInterval: number;
   toastDurationMs: number;
   language: string;
+  revertToPlaybackStartOnStop: boolean;
 
   // AI/Service preferences
   defaultTtsProvider: TtsProvider;
@@ -79,6 +80,7 @@ export interface SettingsState {
   setAutoSaveInterval: (minutes: number) => void;
   setToastDurationMs: (milliseconds: number) => void;
   setLanguage: (lang: string) => void;
+  setRevertToPlaybackStartOnStop: (enabled: boolean) => void;
   setDefaultTtsProvider: (provider: TtsProvider) => void;
   addLlmInstance: (partial: LlmInstanceInput) => string;
   updateLlmInstance: (id: string, patch: LlmInstancePatch) => void;
@@ -109,6 +111,7 @@ export const useSettingsStore = create<SettingsState>()(
         autoSaveInterval: 5,
         toastDurationMs: 6000,
         language: "en",
+        revertToPlaybackStartOnStop: false,
 
         defaultTtsProvider: "elevenlabs" as TtsProvider,
         llmInstances: [],
@@ -135,6 +138,8 @@ export const useSettingsStore = create<SettingsState>()(
           set({ toastDurationMs: Math.max(1000, Math.min(30000, milliseconds)) }),
 
         setLanguage: (lang: string) => set({ language: lang }),
+        setRevertToPlaybackStartOnStop: (enabled: boolean) =>
+          set({ revertToPlaybackStartOnStop: enabled }),
 
         setDefaultTtsProvider: (provider: TtsProvider) =>
           set({ defaultTtsProvider: provider }),
@@ -249,12 +254,13 @@ export const useSettingsStore = create<SettingsState>()(
       }),
       {
         name: "openreel-settings",
-        version: 3,
+        version: 4,
         partialize: (state) => ({
           autoSave: state.autoSave,
           autoSaveInterval: state.autoSaveInterval,
           toastDurationMs: state.toastDurationMs,
           language: state.language,
+          revertToPlaybackStartOnStop: state.revertToPlaybackStartOnStop,
           defaultTtsProvider: state.defaultTtsProvider,
           llmInstances: state.llmInstances,
           defaultLlmInstanceId: state.defaultLlmInstanceId,
@@ -282,6 +288,8 @@ export const useSettingsStore = create<SettingsState>()(
             wavespeedHasApiKey: state.wavespeedHasApiKey ?? false,
             kieaiHasApiKey: state.kieaiHasApiKey ?? false,
             toastDurationMs: state.toastDurationMs ?? 6000,
+            revertToPlaybackStartOnStop:
+              state.revertToPlaybackStartOnStop ?? false,
           };
         },
       },

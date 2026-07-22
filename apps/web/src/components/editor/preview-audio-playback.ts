@@ -1,5 +1,19 @@
 import type { MediaItem, Track } from "@openreel/core";
 
+export function startPlaybackAudioWarmup(
+  warmup: () => Promise<void>,
+  onError: (error: unknown) => void,
+): void {
+  void warmup().catch(onError);
+}
+
+export function startPlaybackAudioResume(
+  resume: () => Promise<void>,
+  onError: (error: unknown) => void,
+): void {
+  void resume().catch(onError);
+}
+
 export type AudioPlaybackClip = {
   track: Track;
   clip: Track["clips"][number];

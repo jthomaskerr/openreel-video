@@ -92,3 +92,18 @@ describe("settings-store notifications", () => {
     expect(useSettingsStore.getState().toastDurationMs).toBe(1000);
   });
 });
+
+describe("settings-store preview transport", () => {
+  it("defaults to preserving the stopped playhead", () => {
+    expect(useSettingsStore.getState().revertToPlaybackStartOnStop).toBe(false);
+  });
+
+  it("persists the rewind-on-stop preference", () => {
+    useSettingsStore.getState().setRevertToPlaybackStartOnStop(true);
+
+    expect(useSettingsStore.getState().revertToPlaybackStartOnStop).toBe(true);
+    expect(
+      JSON.parse(localStorage.getItem("openreel-settings") ?? "{}").state,
+    ).toMatchObject({ revertToPlaybackStartOnStop: true });
+  });
+});
