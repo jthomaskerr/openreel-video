@@ -55,10 +55,10 @@ function fakeService(overrides: Partial<ResolveExportRouteService> = {}): Resolv
   };
 }
 
-async function withRouter(service: ResolveExportRouteService, run: (baseUrl: string) => Promise<void>) {
+async function withRouter(service: ResolveExportRouteService, run: (baseUrl: string) => Promise<void>, peerIsLoopback?: (address: string | undefined) => boolean) {
   const app = express();
   app.use(express.json());
-  app.use("/api/projects", createResolveExportRouter(service));
+  app.use("/api/projects", createResolveExportRouter(service, { peerIsLoopback }));
   const server = app.listen(0, "127.0.0.1");
   try {
     await new Promise<void>((resolve) => server.once("listening", resolve));
@@ -81,21 +81,27 @@ test("Resolve routes expose preview, export, status, cancellation, redemption, a
     assert.equal(startedBody.statusUrl, `/api/projects/${projectId}/exports/resolve/${jobId}`);
     assert.equal(startedBody.cancelUrl, startedBody.statusUrl);
     assert.ok(!JSON.stringify(startedBody).includes("/Volumes/"));
-    assert.equal((await fetch(`${baseUrl}/${projectId}/exports/resolve/${jobId}`)).status, 200);
-    assert.equal((await fetch(`${baseUrl}/${projectId}/exports/resolve/${jobId}`, { method: "DELETE" })).status, 200);
+    const status = await fetch(`${baseUrl}/${projectId}/exports/resolve/${jobId}`);
+    assert.equal(status.status, 200);
+    assert.ok(!JSON.stringify(await status.json()).includes(token));
+    const cancelled = await fetch(`${baseUrl}/${projectId}/exports/resolve/${jobId}`, { method: "DELETE" });
+    assert.equal(cancelled.status, 200);
+    assert.ok(!JSON.stringify(await cancelled.json()).includes(token));
     const redemption = await fetch(`${baseUrl}/resolve-launches/${token}/redeem`, { method: "POST" });
     assert.equal(redemption.status, 200);
     assert.ok(!JSON.stringify(await redemption.json()).includes("/Volumes/"));
-    assert.equal((await fetch(`${baseUrl}/${projectId}/exports/resolve/${jobId}/import-result`, {
+    const imported = await fetch(`${baseUrl}/${projectId}/exports/resolve/${jobId}/import-result`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(result),
-    })).status, 200);
+    });
+    assert.equal(imported.status, 202);
+    assert.ok(!JSON.stringify(await imported.json()).includes(result.artifactSha256));
   });
 });
 
 test("Resolve routes reject malformed and unknown request fields before the service", async () => {
   let startCalls = 0;
   await withRouter(fakeService({ start: async () => { startCalls += 1; return job; } }), async (baseUrl) => {
-    for (const body of [startRequest({ unexpected: true }), { revision: "bad", selection: {} }]) {
+  for (const body of [startRequest({ unexpected: true }), { revision: "bad", selection: {} }, startRequest({ revision: "x" })]) {
       const response = await fetch(`${baseUrl}/${projectId}/exports/resolve`, {
         method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
       });
@@ -127,6 +133,13 @@ test("Resolve routes map stable service errors and never leak paths, hashes, tok
 });
 
 test("loopback redemption accepts IPv4 and IPv6 loopback addresses only", () => {
-  for (const address of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) assert.equal(isLoopbackRemoteAddress(address), true);
+  for (const address of ["127.0.0.1", "127.44.3.2", "::1", "::ffff:127.0.0.1", "::ffff:127.44.3.2"]) assert.equal(isLoopbackRemoteAddress(address), true);
   for (const address of [undefined, "192.168.1.2", "::ffff:192.168.1.2"]) assert.equal(isLoopbackRemoteAddress(address), false);
+});
+
+test("forwarded headers never grant non-loopback bridge access", async () => {
+  await withRouter(fakeService(), async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/resolve-launches/${token}/redeem`, { method: "POST", headers: { "x-forwarded-for": "127.0.0.1", forwarded: "for=127.0.0.1" } });
+    assert.equal(response.status, 404);
+  }, () => false);
 });

@@ -23,6 +23,18 @@ import { mkdirSync } from "node:fs";
 import { timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 
+function isResolveControlRequest(path: string): boolean {
+  return path.startsWith("/resolve-launches/") || /\/exports\/resolve(?:\/[^/]+\/import-result)?$/.test(path);
+}
+
+function resolveControlJsonError(error: unknown, req: express.Request, res: express.Response, next: express.NextFunction): void {
+  if (!isResolveControlRequest(req.path)) return next(error);
+  const code = error && typeof error === "object" && "type" in error && (error as { type?: string }).type === "entity.too.large"
+    ? "RESOLVE_REQUEST_TOO_LARGE"
+    : "INVALID_RESOLVE_REQUEST_JSON";
+  res.status(400).json({ error: { code, message: "The Resolve export request is invalid." } });
+}
+
 function authenticate(request: unknown): { ownerId: string } | undefined {
   if (!config.orchestratorAuthToken) return undefined;
   const header = String((request as { headers?: { authorization?: string } }).headers?.authorization ?? "");
@@ -145,6 +157,11 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   app.use(cors());
   app.use("/api/generate/wavespeed/upload", express.raw({ limit: "50mb", type: ["image/*", "video/*", "audio/*"] }));
+  app.use("/api/projects", (req, res, next) => isResolveControlRequest(req.path)
+    ? express.json({ limit: "256kb" })(req, res, next)
+    : next());
+  app.use("/api/projects", resolveControlJsonError);
+  app.use("/api/projects", createResolveExportRouter(resolveExportService));
   app.use(express.json({ limit: "50mb" }));
 
   // Serve locally cached generated assets (scene images etc.)
@@ -165,7 +182,6 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   app.use("/api/import/neuralframes", neuralframesRouter);
   app.use("/api/generate/wavespeed", wavespeedRouter);
-  app.use("/api/projects", createResolveExportRouter(resolveExportService));
   app.use("/api/projects", createProjectRouter(projectStore, gitStore));
 
   return app;

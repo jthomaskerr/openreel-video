@@ -19,6 +19,7 @@ export interface ResolveExportRouteService {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROJECT_ID = /^[A-Za-z0-9](?:[A-Za-z0-9._~-]{0,126}[A-Za-z0-9])?$/;
+const COMMIT_SHA = /^[a-f0-9]{40}$/i;
 
 type ResolveStartRequest = { readonly revision: string; readonly selection: HandoffSelection };
 
@@ -31,7 +32,7 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): b
 }
 
 function parseStartRequest(value: unknown): ResolveStartRequest | null {
-  if (!isPlainRecord(value) || !hasOnlyKeys(value, ["revision", "selection"]) || typeof value.revision !== "string" || !value.revision) return null;
+  if (!isPlainRecord(value) || !hasOnlyKeys(value, ["revision", "selection"]) || typeof value.revision !== "string" || !COMMIT_SHA.test(value.revision)) return null;
   const selection = value.selection;
   if (!isPlainRecord(selection) || !hasOnlyKeys(selection, ["projectId", "projectModifiedAt", "target", "range"])
     || typeof selection.projectId !== "string" || !selection.projectId
@@ -116,11 +117,22 @@ async function projectJob(
 export function isLoopbackRemoteAddress(address: string | undefined): boolean {
   if (!address) return false;
   const normalized = address.toLowerCase();
-  return normalized === "127.0.0.1" || normalized === "::1" || normalized === "::ffff:127.0.0.1";
+  const ipv4 = normalized.startsWith("::ffff:") ? normalized.slice(7) : normalized;
+  if (ipv4 === "::1") return true;
+  const octets = ipv4.split(".");
+  return octets.length === 4 && octets.every((octet) => /^\d{1,3}$/.test(octet) && Number(octet) <= 255) && Number(octets[0]) === 127;
 }
 
-export function createResolveExportRouter(service: ResolveExportRouteService): Router {
+type ResolveRouterOptions = { readonly peerIsLoopback?: (address: string | undefined) => boolean };
+
+function publicJob(job: ResolveExportJob) {
+  const { bridgeLaunchUrl: _bridgeLaunchUrl, ...safe } = job;
+  return safe;
+}
+
+export function createResolveExportRouter(service: ResolveExportRouteService, options: ResolveRouterOptions = {}): Router {
   const router = Router();
+  const peerIsLoopback = options.peerIsLoopback ?? isLoopbackRemoteAddress;
 
   router.get("/:projectId/resolve-preview", async (req, res) => {
     if (!validProjectId(req.params.projectId)) return res.status(400).json(safeError(400, "INVALID_PROJECT_ID"));
@@ -139,7 +151,7 @@ export function createResolveExportRouter(service: ResolveExportRouteService): R
     try {
       const job = await service.start(req.params.projectId, input.revision, input.selection);
       const statusUrl = `/api/projects/${req.params.projectId}/exports/resolve/${job.id}`;
-      return res.status(202).json({ job, jobId: job.id, revision: job.revision, phase: job.phase, statusUrl, cancelUrl: statusUrl });
+      return res.status(202).json({ job: publicJob(job), jobId: job.id, revision: job.revision, phase: job.phase, statusUrl, cancelUrl: statusUrl, bridgeLaunchUrl: job.bridgeLaunchUrl });
     } catch (error) {
       sendFailure(res, error);
       return undefined;
@@ -149,7 +161,7 @@ export function createResolveExportRouter(service: ResolveExportRouteService): R
   router.get("/:projectId/exports/resolve/:jobId", async (req, res) => {
     if (!validProjectId(req.params.projectId)) return res.status(400).json(safeError(400, "INVALID_PROJECT_ID"));
     try {
-      return res.json(await projectJob(service, req.params.projectId, req.params.jobId));
+      return res.json(publicJob(await projectJob(service, req.params.projectId, req.params.jobId)));
     } catch (error) {
       sendFailure(res, error);
       return undefined;
@@ -160,7 +172,7 @@ export function createResolveExportRouter(service: ResolveExportRouteService): R
     if (!validProjectId(req.params.projectId)) return res.status(400).json(safeError(400, "INVALID_PROJECT_ID"));
     try {
       await projectJob(service, req.params.projectId, req.params.jobId);
-      return res.json(await service.cancel(req.params.jobId));
+      return res.json(publicJob(await service.cancel(req.params.jobId)));
     } catch (error) {
       sendFailure(res, error);
       return undefined;
@@ -168,12 +180,14 @@ export function createResolveExportRouter(service: ResolveExportRouteService): R
   });
 
   router.post("/:projectId/exports/resolve/:jobId/import-result", async (req, res) => {
+    if (!peerIsLoopback(req.socket.remoteAddress)) return res.status(404).json(safeError(404, "IMPORT_RESULT_NOT_FOUND"));
     if (!validProjectId(req.params.projectId)) return res.status(400).json(safeError(400, "INVALID_PROJECT_ID"));
     const parsed = ResolveImportResultSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json(safeError(400, "IMPORT_RESULT_INVALID"));
     try {
       await projectJob(service, req.params.projectId, req.params.jobId);
-      return res.json(await service.recordImportResult(req.params.jobId, parsed.data));
+      await service.recordImportResult(req.params.jobId, parsed.data);
+      return res.status(202).json({ jobId: req.params.jobId, status: "accepted" });
     } catch (error) {
       sendFailure(res, error);
       return undefined;
@@ -181,7 +195,7 @@ export function createResolveExportRouter(service: ResolveExportRouteService): R
   });
 
   router.post("/resolve-launches/:launchToken/redeem", async (req: Request, res: Response) => {
-    if (!isLoopbackRemoteAddress(req.socket.remoteAddress)) return res.status(404).json(safeError(404, "LAUNCH_REDEMPTION_NOT_FOUND"));
+    if (!peerIsLoopback(req.socket.remoteAddress)) return res.status(404).json(safeError(404, "LAUNCH_REDEMPTION_NOT_FOUND"));
     if (!UUID.test(req.params.launchToken)) return res.status(404).json(safeError(404, "LAUNCH_TOKEN_INVALID"));
     try {
       const payload = await service.redeem(req.params.launchToken);
@@ -189,8 +203,10 @@ export function createResolveExportRouter(service: ResolveExportRouteService): R
         jobId: payload.jobId,
         projectId: payload.projectId,
         revision: payload.revision,
-        artifacts: payload.artifacts.map(({ path, byteLength, sha256 }) => ({
+        artifacts: payload.artifacts.map(({ path, mediaType, byteLength, sha256 }) => ({
           name: path.slice(path.lastIndexOf("/") + 1),
+          url: `/api/projects/${payload.projectId}/exports/resolve/${payload.jobId}/artifacts/${encodeURIComponent(path.slice(path.lastIndexOf("/") + 1))}`,
+          mediaType,
           byteLength,
           sha256,
         })),
