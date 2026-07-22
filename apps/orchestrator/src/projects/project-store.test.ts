@@ -153,10 +153,11 @@ test("project summaries normalize a compatible legacy project shape", async () =
   }
 });
 
-test("project summaries surface malformed persisted projects with their project ID", async () => {
+test("project summaries surface malformed persisted projects without leaking content into errors or logs", async () => {
   const root = await mkdtemp(join(tmpdir(), "openreel-malformed-project-summary-"));
+  const secret = "PRIVATE_PROJECT_CONTENT_MARKER";
   await mkdir(join(root, "vintage-tokyo"), { recursive: true });
-  await writeFile(join(root, "vintage-tokyo", "project.json"), "{not-json");
+  await writeFile(join(root, "vintage-tokyo", "project.json"), `{${secret}`);
   const gitStore = {
     repoDir: root,
     ensureSharedRepo: async () => undefined,
@@ -164,14 +165,57 @@ test("project summaries surface malformed persisted projects with their project 
     withProjectTransaction: async (_projectId: string, operation: (transaction: unknown) => Promise<unknown>) => operation({}),
   } as unknown as GitStore;
 
+  const originalError = console.error;
+  const logs: unknown[][] = [];
+  console.error = (...args: unknown[]) => { logs.push(args); };
   try {
     await assert.rejects(new ProjectStore(gitStore).listProjects(), (error: unknown) => {
       assert.ok(error instanceof ProjectSummaryLoadError);
       assert.equal(error.code, "PROJECT_SUMMARY_UNAVAILABLE");
       assert.equal(error.projectId, "vintage-tokyo");
+      assert.equal(error.kind, "invalid_json");
+      assert.equal(error.message.includes(root), false);
+      assert.equal(error.message.includes(secret), false);
       return true;
     });
+    assert.deepEqual(logs, [["[ProjectStore] project summary unavailable", {
+      code: "PROJECT_SUMMARY_UNAVAILABLE",
+      projectId: "vintage-tokyo",
+      kind: "invalid_json",
+    }]]);
   } finally {
+    console.error = originalError;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("project summaries classify absent project files without exposing their temporary path", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openreel-missing-project-summary-"));
+  await mkdir(join(root, "vintage-tokyo"), { recursive: true });
+  const gitStore = {
+    repoDir: root,
+    ensureSharedRepo: async () => undefined,
+    worktreePath: (id: string) => join(root, id),
+    withProjectTransaction: async (_projectId: string, operation: (transaction: unknown) => Promise<unknown>) => operation({}),
+  } as unknown as GitStore;
+  const originalError = console.error;
+  const logs: unknown[][] = [];
+  console.error = (...args: unknown[]) => { logs.push(args); };
+
+  try {
+    await assert.rejects(new ProjectStore(gitStore).listProjects(), (error: unknown) => {
+      assert.ok(error instanceof ProjectSummaryLoadError);
+      assert.equal(error.kind, "not_found");
+      assert.equal(error.message.includes(root), false);
+      return true;
+    });
+    assert.deepEqual(logs, [["[ProjectStore] project summary unavailable", {
+      code: "PROJECT_SUMMARY_UNAVAILABLE",
+      projectId: "vintage-tokyo",
+      kind: "not_found",
+    }]]);
+  } finally {
+    console.error = originalError;
     await rm(root, { recursive: true, force: true });
   }
 });

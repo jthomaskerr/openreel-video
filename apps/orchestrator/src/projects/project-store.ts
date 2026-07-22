@@ -39,15 +39,16 @@ export interface ProjectSummary {
   readonly representativeMediaId?: string;
 }
 
+export type ProjectSummaryErrorKind = "invalid_json" | "not_found" | "unavailable";
+
 export class ProjectSummaryLoadError extends Error {
   readonly code = "PROJECT_SUMMARY_UNAVAILABLE";
 
   constructor(
     readonly projectId: string,
-    message: string,
-    options?: ErrorOptions,
+    readonly kind: ProjectSummaryErrorKind,
   ) {
-    super(`Project ${projectId} summary is unavailable: ${message}`, options);
+    super(`Project ${projectId} summary is unavailable (${kind})`);
     this.name = "ProjectSummaryLoadError";
   }
 }
@@ -105,6 +106,12 @@ function uuidPattern(): RegExp {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function projectSummaryErrorKind(error: unknown): ProjectSummaryErrorKind {
+  if (error instanceof SyntaxError) return "invalid_json";
+  if (isRecord(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) return "not_found";
+  return "unavailable";
 }
 
 function requiredString(value: unknown, field: string): string {
@@ -209,13 +216,12 @@ export class ProjectStore {
           } catch (error) {
             const summaryError = new ProjectSummaryLoadError(
               dir.name,
-              error instanceof Error ? error.message : "unknown read error",
-              { cause: error },
+              projectSummaryErrorKind(error),
             );
             console.error("[ProjectStore] project summary unavailable", {
               code: summaryError.code,
               projectId: summaryError.projectId,
-              cause: error,
+              kind: summaryError.kind,
             });
             throw summaryError;
           }
