@@ -70,6 +70,19 @@ const readyPreview = {
   },
 };
 
+const completedImportResult = {
+  requestId: "123e4567-e89b-12d3-a456-426614174000",
+  status: "completed",
+  resolveVersion: "20.3.2",
+  resolveBuild: "20.3.2.0001",
+  projectName: "Vintage Tokyo",
+  trackCounts: { video: 1 },
+  clipCounts: { video: 3 },
+  offlineMediaIds: [],
+  saved: true,
+  artifactSha256: "a".repeat(64),
+};
+
 describe("Resolve bridge contracts", () => {
   it("rejects launch URLs containing project data or filesystem paths", () => {
     expect(() => ResolveExportJobSchema.parse({
@@ -79,20 +92,127 @@ describe("Resolve bridge contracts", () => {
   });
 
   it("defaults referenced media IDs in a completed import result", () => {
-    const result = ResolveImportResultSchema.parse({
-      requestId: "123e4567-e89b-12d3-a456-426614174000",
-      status: "completed",
-      resolveVersion: "20.3.2",
-      resolveBuild: "20.3.2.0001",
-      projectName: "Vintage Tokyo",
-      trackCounts: { video: 1 },
-      clipCounts: { video: 3 },
-      offlineMediaIds: [],
-      saved: true,
-      artifactSha256: "a".repeat(64),
-    });
+    const result = ResolveImportResultSchema.parse(completedImportResult);
 
     expect(result.referencedMediaIds).toEqual([]);
+  });
+
+  it("rejects unknown keys in every top-level bridge payload", () => {
+    expect(() => ResolveExportJobSchema.parse({ ...readyJob, unexpected: true })).toThrow();
+    expect(() => ResolveImportResultSchema.parse({ ...completedImportResult, unexpected: true })).toThrow();
+    expect(() => ResolvePreviewSchema.parse({ ...readyPreview, unexpected: true })).toThrow();
+  });
+
+  it.each([
+    ["an import failure", () => ResolveImportResultSchema.parse({
+      ...completedImportResult,
+      status: "failed",
+      failure: { code: "EXPORT_FAILED", message: "nope", unexpected: true },
+    })],
+    ["a render state", () => ResolvePreviewSchema.parse({
+      ...readyPreview,
+      render: { ...readyPreview.render, unexpected: true },
+    })],
+    ["the mini timeline", () => ResolvePreviewSchema.parse({
+      ...readyPreview,
+      miniTimeline: { ...readyPreview.miniTimeline, unexpected: true },
+    })],
+    ["a mini-timeline track", () => ResolvePreviewSchema.parse({
+      ...readyPreview,
+      miniTimeline: {
+        ...readyPreview.miniTimeline,
+        tracks: [{ ...readyPreview.miniTimeline.tracks[0], unexpected: true }],
+      },
+    })],
+    ["a mini-timeline clip", () => ResolvePreviewSchema.parse({
+      ...readyPreview,
+      miniTimeline: {
+        ...readyPreview.miniTimeline,
+        tracks: [{
+          ...readyPreview.miniTimeline.tracks[0],
+          clips: [{ ...readyPreview.miniTimeline.tracks[0].clips[0], unexpected: true }],
+        }],
+      },
+    })],
+    ["a clip group", () => ResolvePreviewSchema.parse({
+      ...readyPreview,
+      clipGroups: [{ ...readyPreview.clipGroups[0], unexpected: true }],
+    })],
+    ["the compatibility summary", () => ResolvePreviewSchema.parse({
+      ...readyPreview,
+      compatibility: { ...readyPreview.compatibility, unexpected: true },
+    })],
+  ])("rejects unknown keys inside %s", (_location, parse) => {
+    expect(parse).toThrow();
+  });
+
+  it.each([
+    ["missing", { status: "missing", reason: "unavailable", unexpected: true }],
+    ["video", { status: "ready", kind: "video", url: "/api/projects/vintage-tokyo/media/media-1", unexpected: true }],
+    ["audio", { status: "ready", kind: "audio", url: "/api/projects/vintage-tokyo/media/media-1", waveformUrl: "/api/projects/vintage-tokyo/media/media-1/waveform", unexpected: true }],
+    ["image", { status: "ready", kind: "image", url: "/api/projects/vintage-tokyo/media/media-1", unexpected: true }],
+  ])("rejects unknown keys inside the %s preview variant", (_kind, preview) => {
+    expect(() => ResolvePreviewSchema.parse({
+      ...readyPreview,
+      clipGroups: [{
+        ...readyPreview.clipGroups[0],
+        clips: [{ ...readyPreview.clipGroups[0].clips[0], preview }],
+      }],
+    })).toThrow();
+  });
+
+  it.each([
+    "/api/projects/vintage-tokyo/media/media-1?path=/Users/name/secret.mov",
+    "/api/projects/vintage-tokyo/media/media-1#fragment",
+    "/api/projects//tmp/secret",
+    "/api/projects/../media/secret",
+    "/api/projects/%2e%2e/media/secret",
+    "/api/projects/vintage-tokyo/media/%2Ftmp%2Fsecret",
+  ])("rejects unsafe project-media URL %s everywhere it can appear", (unsafeUrl) => {
+    expect(() => ResolvePreviewSchema.parse({
+      ...readyPreview,
+      render: { ...readyPreview.render, previewUrl: unsafeUrl },
+    })).toThrow();
+    expect(() => ResolvePreviewSchema.parse({
+      ...readyPreview,
+      clipGroups: [{
+        ...readyPreview.clipGroups[0],
+        clips: [{
+          ...readyPreview.clipGroups[0].clips[0],
+          preview: { status: "ready", kind: "video", url: unsafeUrl },
+        }],
+      }],
+    })).toThrow();
+    expect(() => ResolvePreviewSchema.parse({
+      ...readyPreview,
+      clipGroups: [{
+        ...readyPreview.clipGroups[0],
+        clips: [{
+          ...readyPreview.clipGroups[0].clips[0],
+          preview: {
+            status: "ready",
+            kind: "video",
+            url: "/api/projects/vintage-tokyo/media/media-1",
+            thumbnailUrl: unsafeUrl,
+          },
+        }],
+      }],
+    })).toThrow();
+    expect(() => ResolvePreviewSchema.parse({
+      ...readyPreview,
+      clipGroups: [{
+        ...readyPreview.clipGroups[0],
+        clips: [{
+          ...readyPreview.clipGroups[0].clips[0],
+          preview: {
+            status: "ready",
+            kind: "audio",
+            url: "/api/projects/vintage-tokyo/media/media-1",
+            waveformUrl: unsafeUrl,
+          },
+        }],
+      }],
+    })).toThrow();
   });
 
   it.each([

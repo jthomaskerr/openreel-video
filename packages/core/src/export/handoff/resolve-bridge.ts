@@ -1,6 +1,8 @@
 import { z } from "zod";
 
-const ProjectMediaUrlSchema = z.string().startsWith("/api/projects/");
+const ProjectMediaUrlSchema = z.string().regex(
+  /^\/api\/projects\/[A-Za-z0-9](?:[A-Za-z0-9._~-]{0,126}[A-Za-z0-9])?\/media\/[A-Za-z0-9](?:[A-Za-z0-9._~-]{0,126}[A-Za-z0-9])?(?:\/(?:thumbnail|waveform))?$/,
+);
 const NonnegativeFrameSchema = z.number().int().nonnegative();
 
 export const ResolveBridgeErrorCodeSchema = z.enum([
@@ -30,8 +32,8 @@ export const ResolveImportResultSchema = z.object({
   failure: z.object({
     code: ResolveBridgeErrorCodeSchema,
     message: z.string(),
-  }).optional(),
-});
+  }).strict().optional(),
+}).strict();
 
 export type ResolveImportResult = z.infer<typeof ResolveImportResultSchema>;
 
@@ -49,7 +51,7 @@ export const ResolveExportJobSchema = z.object({
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
   bridgeLaunchUrl: z.string().regex(/^openreel-resolve:\/\/import\/[0-9a-f-]{36}$/).optional(),
-});
+}).strict();
 
 export type ResolveExportJob = z.infer<typeof ResolveExportJobSchema>;
 
@@ -66,7 +68,7 @@ export const ResolvePreviewRenderSchema = z.discriminatedUnion("status", [
     previewUrl: ProjectMediaUrlSchema,
     updatedAt: z.number(),
     stale: z.literal(false),
-  }),
+  }).strict(),
   z.object({
     status: z.literal("stale"),
     mediaId: z.string().min(1),
@@ -74,34 +76,34 @@ export const ResolvePreviewRenderSchema = z.discriminatedUnion("status", [
     updatedAt: z.number(),
     stale: z.literal(true),
     reason: z.string().min(1),
-  }),
+  }).strict(),
   z.object({
     status: z.literal("missing"),
     reason: z.string().min(1),
-  }),
+  }).strict(),
 ]);
 
 export type ResolvePreviewRender = z.infer<typeof ResolvePreviewRenderSchema>;
 
 export const ResolvePreviewMediaPreviewSchema = z.union([
-  z.object({ status: z.literal("missing"), reason: z.string().min(1) }),
+  z.object({ status: z.literal("missing"), reason: z.string().min(1) }).strict(),
   z.object({
     status: z.literal("ready"),
     kind: z.literal("video"),
     url: ProjectMediaUrlSchema,
     thumbnailUrl: ProjectMediaUrlSchema.optional(),
-  }),
+  }).strict(),
   z.object({
     status: z.literal("ready"),
     kind: z.literal("audio"),
     url: ProjectMediaUrlSchema,
     waveformUrl: ProjectMediaUrlSchema,
-  }),
+  }).strict(),
   z.object({
     status: z.literal("ready"),
     kind: z.literal("image"),
     url: ProjectMediaUrlSchema,
-  }),
+  }).strict(),
 ]);
 
 export type ResolvePreviewMediaPreview = z.infer<typeof ResolvePreviewMediaPreviewSchema>;
@@ -112,7 +114,7 @@ export const ResolvePreviewMiniTimelineClipSchema = z.object({
   label: z.string(),
   startFrame: NonnegativeFrameSchema,
   endFrame: NonnegativeFrameSchema,
-}).refine((clip) => clip.endFrame >= clip.startFrame, {
+}).strict().refine((clip) => clip.endFrame >= clip.startFrame, {
   message: "endFrame must be greater than or equal to startFrame",
   path: ["endFrame"],
 });
@@ -124,14 +126,14 @@ export const ResolvePreviewMiniTimelineTrackSchema = z.object({
   index: NonnegativeFrameSchema,
   type: ResolvePreviewClipTypeSchema,
   clips: z.array(ResolvePreviewMiniTimelineClipSchema),
-});
+}).strict();
 
 export type ResolvePreviewMiniTimelineTrack = z.infer<typeof ResolvePreviewMiniTimelineTrackSchema>;
 
 export const ResolvePreviewMiniTimelineSchema = z.object({
   durationFrames: NonnegativeFrameSchema,
   tracks: z.array(ResolvePreviewMiniTimelineTrackSchema),
-});
+}).strict();
 
 export type ResolvePreviewMiniTimeline = z.infer<typeof ResolvePreviewMiniTimelineSchema>;
 
@@ -142,7 +144,7 @@ export const ResolvePreviewClipSchema = z.object({
   startFrame: NonnegativeFrameSchema,
   endFrame: NonnegativeFrameSchema,
   preview: ResolvePreviewMediaPreviewSchema,
-}).refine((clip) => clip.endFrame >= clip.startFrame, {
+}).strict().refine((clip) => clip.endFrame >= clip.startFrame, {
   message: "endFrame must be greater than or equal to startFrame",
   path: ["endFrame"],
 });
@@ -152,7 +154,7 @@ export type ResolvePreviewClip = z.infer<typeof ResolvePreviewClipSchema>;
 export const ResolvePreviewClipGroupSchema = z.object({
   type: ResolvePreviewClipTypeSchema,
   clips: z.array(ResolvePreviewClipSchema),
-});
+}).strict();
 
 export type ResolvePreviewClipGroup = z.infer<typeof ResolvePreviewClipGroupSchema>;
 
@@ -160,7 +162,7 @@ export const ResolvePreviewCompatibilitySchema = z.object({
   status: z.enum(["ready", "degraded", "blocked"]),
   blockingIssueCount: NonnegativeFrameSchema,
   warningCount: NonnegativeFrameSchema,
-});
+}).strict();
 
 export type ResolvePreviewCompatibility = z.infer<typeof ResolvePreviewCompatibilitySchema>;
 
@@ -180,6 +182,6 @@ export const ResolvePreviewSchema = z.object({
   miniTimeline: ResolvePreviewMiniTimelineSchema,
   clipGroups: z.array(ResolvePreviewClipGroupSchema),
   compatibility: ResolvePreviewCompatibilitySchema,
-});
+}).strict();
 
 export type ResolvePreview = z.infer<typeof ResolvePreviewSchema>;
