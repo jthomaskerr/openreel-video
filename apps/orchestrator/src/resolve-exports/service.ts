@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
-import { open, readFile, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   HANDOFF_TARGET_PROFILES,
   ResolveImportResultSchema,
@@ -16,6 +16,7 @@ import {
   type ResolvePreview,
 } from "@openreel/core";
 import type {
+  GitCommitLifecycleHooks,
   GitCommitReceipt,
   GitCommitTransaction,
   GitProjectTransaction,
@@ -26,6 +27,8 @@ import {
   ResolveExportJobStore,
   type PersistedResolveExportJob,
   type ResolveExportArtifact,
+  type ResolveTransactionJournal,
+  type ResolveTransactionKind,
 } from "./job-store";
 
 const TOKEN_TTL_MS = 5 * 60 * 1_000;
@@ -34,6 +37,7 @@ type BridgeErrorCode =
   | "PROJECT_NOT_FOUND"
   | "PROJECT_REVISION_UNAVAILABLE"
   | "STALE_PROJECT_REVISION"
+  | "WORKTREE_REVISION_MISMATCH"
   | "INVALID_HANDOFF_SELECTION"
   | "MEDIA_INCOMPLETE"
   | "EXPORT_BLOCKED"
@@ -43,9 +47,11 @@ type BridgeErrorCode =
   | "LAUNCH_TOKEN_EXPIRED"
   | "LAUNCH_TOKEN_USED"
   | "JOB_TERMINAL"
+  | "INVALID_JOB_TRANSITION"
   | "IMPORT_RESULT_CONFLICT"
   | "IMPORT_RESULT_INVALID"
-  | "IMPORT_RESULT_PERSIST_FAILED";
+  | "IMPORT_RESULT_PERSIST_FAILED"
+  | "RECOVERY_FAILED";
 
 export class ResolveExportServiceError extends Error {
   readonly projectId?: string;
@@ -77,6 +83,12 @@ interface ProjectStorePort {
 
 interface GitStorePort {
   readonly readConfirmedReceipt: (projectId: string) => Promise<GitCommitReceipt | null>;
+  readonly getProjectAtCommit: (projectId: string, sha: string) => Promise<Project | null>;
+  readonly readFileAtCommit: (
+    projectId: string,
+    sha: string,
+    relativePath: string,
+  ) => Promise<string | null>;
   readonly commit: (
     projectId: string,
     message: string,
@@ -94,6 +106,29 @@ export interface ResolveExportServiceOptions {
   readonly jobs: ResolveExportJobStore;
   readonly now?: () => number;
   readonly randomUUID?: () => string;
+  readonly onTransactionPoint?: (point: ResolveTransactionPoint) => void | Promise<void>;
+}
+
+export type ResolveTransactionPoint =
+  | `after-publish:${string}`
+  | "after-git-stage"
+  | "after-git-tree"
+  | "before-ref-update"
+  | "after-ref-update";
+
+export class ResolveSimulatedProcessCrash extends Error {
+  constructor(readonly point: ResolveTransactionPoint) {
+    super(`Simulated process crash at ${point}`);
+    this.name = "ResolveSimulatedProcessCrash";
+  }
+}
+
+export interface ResolveRecoveryDiagnostic {
+  readonly transactionId: string;
+  readonly projectId: string;
+  readonly jobId: string;
+  readonly action: "rolled-back" | "rolled-forward";
+  readonly recoveredAt: string;
 }
 
 export interface ResolveLaunchPayload {
@@ -105,6 +140,16 @@ export interface ResolveLaunchPayload {
 
 function sha256(value: string): string {
   return crypto.createHash("sha256").update(value, "utf8").digest("hex");
+}
+
+function sameSha256(left: string, right: string): boolean {
+  if (!/^[a-f0-9]{64}$/u.test(left) || !/^[a-f0-9]{64}$/u.test(right)) return false;
+  return crypto.timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
+}
+
+function gitBlobSha(bytes: Buffer): string {
+  const header = Buffer.from(`blob ${bytes.byteLength}\0`, "utf8");
+  return crypto.createHash("sha1").update(header).update(bytes).digest("hex");
 }
 
 function iso(timestamp: number): string {
@@ -207,39 +252,174 @@ function reportFor(
   };
 }
 
-async function atomicReplace(path: string, bytes: Buffer): Promise<void> {
-  const temporary = join(dirname(path), `.${crypto.randomUUID()}.tmp`);
-  let handle;
-  try {
-    handle = await open(temporary, "wx", 0o600);
-    await handle.writeFile(bytes);
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    await rename(temporary, path);
-    const directory = await open(dirname(path), "r");
-    try {
-      await directory.sync();
-    } finally {
-      await directory.close();
-    }
-  } finally {
-    await handle?.close().catch(() => undefined);
-    await rm(temporary, { force: true }).catch(() => undefined);
-  }
-}
-
 function sameResult(left: ResolveImportResult, right: ResolveImportResult): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
+}
+
+type ResolveLifecycleEvent = "redeem" | "cancel" | "result-completed" | "result-failed";
+
+const RESOLVE_LIFECYCLE: Readonly<Record<ResolveLifecycleEvent, Readonly<Record<string, string>>>> = {
+  redeem: { ready: "importing" },
+  cancel: { ready: "cancelled" },
+  "result-completed": { importing: "completed" },
+  "result-failed": { importing: "failed" },
+};
+
+function lifecyclePhase(
+  record: PersistedResolveExportJob,
+  event: ResolveLifecycleEvent,
+): ResolveExportJob["phase"] {
+  const next = RESOLVE_LIFECYCLE[event][record.job.phase] as ResolveExportJob["phase"] | undefined;
+  if (!next) {
+    throw new ResolveExportServiceError(
+      "INVALID_JOB_TRANSITION",
+      "Resolve job lifecycle transition is not permitted",
+      { projectId: record.job.projectId, jobId: record.job.id },
+    );
+  }
+  return next;
 }
 
 export class ResolveExportService {
   readonly #now: () => number;
   readonly #randomUUID: () => string;
+  readonly #onTransactionPoint?: ResolveExportServiceOptions["onTransactionPoint"];
+  #recoveryPromise: Promise<void> | null = null;
+  readonly #recoveryDiagnostics: ResolveRecoveryDiagnostic[] = [];
 
   constructor(private readonly options: ResolveExportServiceOptions) {
     this.#now = options.now ?? Date.now;
     this.#randomUUID = options.randomUUID ?? crypto.randomUUID;
+    this.#onTransactionPoint = options.onTransactionPoint;
+  }
+
+  async #ensureRecovered(): Promise<void> {
+    this.#recoveryPromise ??= this.#recoverTransactions();
+    return this.#recoveryPromise;
+  }
+
+  async #transactionPoint(point: ResolveTransactionPoint): Promise<void> {
+    await this.#onTransactionPoint?.(point);
+  }
+
+  #commitHooks(): GitCommitLifecycleHooks {
+    return {
+      afterStage: () => this.#transactionPoint("after-git-stage"),
+      afterTree: () => this.#transactionPoint("after-git-tree"),
+      beforeRefUpdate: () => this.#transactionPoint("before-ref-update"),
+      afterRefUpdate: () => this.#transactionPoint("after-ref-update"),
+    };
+  }
+
+  async #latestJournal(journal: ResolveTransactionJournal): Promise<ResolveTransactionJournal> {
+    return (await this.options.jobs.listTransactions())
+      .find((candidate) => candidate.transactionId === journal.transactionId)
+      ?? journal;
+  }
+
+  async #reconcileJournal(
+    journalInput: ResolveTransactionJournal,
+    transaction: GitProjectTransaction,
+  ): Promise<ResolveRecoveryDiagnostic> {
+    const journal = await this.#latestJournal(journalInput);
+    const receipt = await this.options.git.readConfirmedReceipt(journal.projectId);
+    let committed = Boolean(receipt?.commitSha);
+    if (committed) {
+      for (const write of journal.writes) {
+        const committedText = await this.options.git.readFileAtCommit(
+          journal.projectId,
+          receipt!.commitSha!,
+          write.path,
+        );
+        if (
+          committedText === null
+          || crypto.createHash("sha256").update(Buffer.from(committedText, "utf8")).digest("hex")
+            !== write.afterSha256
+        ) {
+          committed = false;
+          break;
+        }
+      }
+    }
+    const paths = journal.writes.map((write) => write.path);
+    await transaction.unstage(paths);
+    await this.options.jobs.restoreTransaction(journal, committed ? "after" : "before");
+    await this.options.jobs.completeTransaction(journal);
+    const diagnostic: ResolveRecoveryDiagnostic = {
+      transactionId: journal.transactionId,
+      projectId: journal.projectId,
+      jobId: journal.jobId,
+      action: committed ? "rolled-forward" : "rolled-back",
+      recoveredAt: iso(this.#now()),
+    };
+    this.#recoveryDiagnostics.push(diagnostic);
+    return diagnostic;
+  }
+
+  async #recoverTransactions(): Promise<void> {
+    try {
+      for (const journal of await this.options.jobs.listTransactions()) {
+        await this.options.git.withProjectTransaction(journal.projectId, (transaction) =>
+          this.#reconcileJournal(journal, transaction));
+      }
+    } catch (error) {
+      throw new ResolveExportServiceError(
+        "RECOVERY_FAILED",
+        "Resolve transaction recovery failed",
+      );
+    }
+  }
+
+  async recoveryDiagnostics(): Promise<readonly ResolveRecoveryDiagnostic[]> {
+    await this.#ensureRecovered();
+    return [...this.#recoveryDiagnostics];
+  }
+
+  async #runJournaledTransaction(input: {
+    readonly kind: ResolveTransactionKind;
+    readonly projectId: string;
+    readonly jobId: string;
+    readonly baseCommitSha: string;
+    readonly writes: readonly { readonly path: string; readonly bytes: Uint8Array }[];
+    readonly message: string;
+    readonly expectedEntries: readonly { readonly status: "A" | "M"; readonly path: string }[];
+    readonly transaction: GitProjectTransaction;
+  }): Promise<void> {
+    let journal = await this.options.jobs.prepareTransaction({
+      transactionId: crypto.randomUUID(),
+      kind: input.kind,
+      projectId: input.projectId,
+      jobId: input.jobId,
+      baseCommitSha: input.baseCommitSha,
+      writes: input.writes,
+    });
+    try {
+      journal = await this.options.jobs.publishTransaction(
+        journal,
+        (path) => this.#transactionPoint(`after-publish:${path}`),
+      );
+      await input.transaction.commit(input.message, {
+        allowlist: input.expectedEntries.map((entry) => entry.path).sort(),
+        expectedEntries: [...input.expectedEntries].sort((left, right) =>
+          left.path < right.path ? -1 : left.path > right.path ? 1 : 0),
+        hooks: this.#commitHooks(),
+      });
+      await this.options.jobs.completeTransaction(journal);
+    } catch (error) {
+      if (error instanceof ResolveSimulatedProcessCrash) throw error;
+      let diagnostic: ResolveRecoveryDiagnostic;
+      try {
+        diagnostic = await this.#reconcileJournal(journal, input.transaction);
+      } catch {
+        throw new ResolveExportServiceError(
+          "RECOVERY_FAILED",
+          "Resolve transaction recovery failed",
+          { projectId: input.projectId, jobId: input.jobId },
+        );
+      }
+      if (diagnostic.action === "rolled-forward") return;
+      throw error;
+    }
   }
 
   async #loadProject(projectId: string): Promise<Project> {
@@ -261,6 +441,10 @@ export class ResolveExportService {
   }
 
   async #confirmedRevision(projectId: string): Promise<string> {
+    return (await this.#confirmedReceipt(projectId)).commitSha!;
+  }
+
+  async #confirmedReceipt(projectId: string): Promise<GitCommitReceipt> {
     const receipt = await this.options.git.readConfirmedReceipt(projectId);
     if (!receipt?.commitSha) {
       throw new ResolveExportServiceError(
@@ -269,26 +453,25 @@ export class ResolveExportService {
         { projectId },
       );
     }
-    return receipt.commitSha;
+    return receipt;
   }
 
   async #commitJobTransition(
     found: PersistedResolveExportJob,
+    kind: Extract<ResolveTransactionKind, "cancel" | "redeem">,
     message: string,
     updater: (current: PersistedResolveExportJob) => PersistedResolveExportJob | Promise<PersistedResolveExportJob>,
   ): Promise<PersistedResolveExportJob> {
     const projectId = found.job.projectId;
     const jobId = found.job.id;
     return this.options.git.withProjectTransaction(projectId, async (transaction) => {
-      const jobPath = this.options.jobs.artifactPath(projectId, jobId, "job.json");
-      const previousBytes = await readFile(jobPath);
       const before = await this.options.jobs.load(projectId, jobId);
       if (!before) {
         throw new ResolveExportServiceError("RESOLVE_JOB_NOT_FOUND", "Resolve job does not exist", { projectId, jobId });
       }
       let updated: PersistedResolveExportJob;
       try {
-        updated = await this.options.jobs.update(projectId, jobId, updater);
+        updated = await updater(before);
       } catch (error) {
         if (error instanceof ResolveExportServiceError) throw error;
         throw new ResolveExportServiceError(
@@ -301,14 +484,19 @@ export class ResolveExportService {
 
       const relativePath = `exports/resolve/${jobId}/job.json`;
       try {
-        await transaction.commit(message, {
-          allowlist: [relativePath],
+        await this.#runJournaledTransaction({
+          kind,
+          projectId,
+          jobId,
+          baseCommitSha: await this.#confirmedRevision(projectId),
+          writes: [{ path: relativePath, bytes: this.options.jobs.recordBytes(updated) }],
+          message,
           expectedEntries: [{ status: "M", path: relativePath }],
+          transaction,
         });
         return updated;
-      } catch {
-        await transaction.unstage([relativePath]).catch(() => undefined);
-        await atomicReplace(jobPath, previousBytes).catch(() => undefined);
+      } catch (error) {
+        if (error instanceof ResolveSimulatedProcessCrash || error instanceof ResolveExportServiceError) throw error;
         throw new ResolveExportServiceError(
           "EXPORT_PERSIST_FAILED",
           "Resolve job transition could not be committed",
@@ -319,6 +507,7 @@ export class ResolveExportService {
   }
 
   async preview(projectId: string): Promise<ResolvePreview> {
+    await this.#ensureRecovered();
     const project = await this.#loadProject(projectId);
     const revision = await this.#confirmedRevision(projectId);
     const audit = await this.options.projects.auditSnapshot(project);
@@ -330,6 +519,7 @@ export class ResolveExportService {
     revision: string,
     selection: HandoffSelection,
   ): Promise<ResolveExportJob> {
+    await this.#ensureRecovered();
     await this.#loadProject(projectId);
     if (selection.projectId !== projectId || selection.target !== "resolve") {
       throw new ResolveExportServiceError(
@@ -340,15 +530,32 @@ export class ResolveExportService {
     }
 
     return this.options.git.withProjectTransaction(projectId, async (transaction) => {
-      const confirmed = await this.#confirmedRevision(projectId);
-      if (revision !== confirmed) {
+      const confirmed = await this.#confirmedReceipt(projectId);
+      if (revision !== confirmed.commitSha) {
         throw new ResolveExportServiceError(
           "STALE_PROJECT_REVISION",
           "Requested project revision is not current",
           { projectId },
         );
       }
-      const project = await this.#readAuthoritativeProject(projectId);
+      const worktreeBytes = await readFile(
+        join(this.options.projects.projectDir(projectId), "project.json"),
+      );
+      if (!confirmed.projectBlobSha || gitBlobSha(worktreeBytes) !== confirmed.projectBlobSha) {
+        throw new ResolveExportServiceError(
+          "WORKTREE_REVISION_MISMATCH",
+          "Project worktree does not match the confirmed revision",
+          { projectId },
+        );
+      }
+      const project = await this.options.git.getProjectAtCommit(projectId, revision);
+      if (!project) {
+        throw new ResolveExportServiceError(
+          "PROJECT_REVISION_UNAVAILABLE",
+          "Confirmed project snapshot cannot be read",
+          { projectId },
+        );
+      }
       if (selection.projectModifiedAt !== project.modifiedAt) {
         throw new ResolveExportServiceError(
           "STALE_PROJECT_REVISION",
@@ -401,14 +608,10 @@ export class ResolveExportService {
         bridgeLaunchUrl: `openreel-resolve://import/${launchToken}`,
       };
 
-      let exportPaths: string[] = [];
       try {
-        const fcpxml = await this.options.jobs.writeArtifact(
-          projectId,
-          jobId,
-          `${projectName}.fcpxml`,
-          serializeResolveFcpxml(plan),
-        );
+        const fcpxmlName = `${projectName}.fcpxml`;
+        const fcpxmlBytes = Buffer.from(serializeResolveFcpxml(plan), "utf8");
+        const fcpxml = this.options.jobs.describeArtifact(jobId, fcpxmlName, fcpxmlBytes);
         const manifestPayload = {
           schemaVersion: "1.0",
           jobId,
@@ -426,18 +629,13 @@ export class ResolveExportService {
           })),
           artifacts: [{ path: fcpxml.path, byteLength: fcpxml.byteLength, sha256: fcpxml.sha256 }],
         };
-        const manifest = await this.options.jobs.writeArtifact(
-          projectId,
-          jobId,
-          "manifest.json",
-          `${JSON.stringify(manifestPayload, null, 2)}\n`,
-        );
-        const report = await this.options.jobs.writeArtifact(
-          projectId,
-          jobId,
-          "compatibility-report.md",
+        const manifestBytes = Buffer.from(`${JSON.stringify(manifestPayload, null, 2)}\n`, "utf8");
+        const manifest = this.options.jobs.describeArtifact(jobId, "manifest.json", manifestBytes);
+        const reportBytes = Buffer.from(
           renderCompatibilityReport(reportFor(project, plan, [fcpxml, manifest], createdAt)),
+          "utf8",
         );
+        const report = this.options.jobs.describeArtifact(jobId, "compatibility-report.md", reportBytes);
         const persisted: PersistedResolveExportJob = {
           version: 1,
           job,
@@ -449,18 +647,27 @@ export class ResolveExportService {
           },
           artifacts: [fcpxml, manifest, report],
         };
-        await this.options.jobs.save(persisted);
-
-        exportPaths = [fcpxml.path, manifest.path, report.path, `exports/resolve/${jobId}/job.json`].sort();
-        await transaction.commit(
-          `feat(resolve): persist export ${jobId}`,
-          { allowlist: exportPaths, expectedEntries: exactEntries(exportPaths, "A") },
-        );
+        const jobPath = `exports/resolve/${jobId}/job.json`;
+        const writes = [
+          { path: fcpxml.path, bytes: fcpxmlBytes },
+          { path: manifest.path, bytes: manifestBytes },
+          { path: report.path, bytes: reportBytes },
+          { path: jobPath, bytes: this.options.jobs.recordBytes(persisted) },
+        ];
+        const exportPaths = writes.map((write) => write.path).sort();
+        await this.#runJournaledTransaction({
+          kind: "start",
+          projectId,
+          jobId,
+          baseCommitSha: revision,
+          writes,
+          message: `feat(resolve): persist export ${jobId}`,
+          expectedEntries: exactEntries(exportPaths, "A"),
+          transaction,
+        });
         return job;
       } catch (error) {
-        await transaction.unstage(exportPaths).catch(() => undefined);
-        await this.options.jobs.removeJob(projectId, jobId).catch(() => undefined);
-        if (error instanceof ResolveExportServiceError) throw error;
+        if (error instanceof ResolveSimulatedProcessCrash || error instanceof ResolveExportServiceError) throw error;
         throw new ResolveExportServiceError(
           "EXPORT_PERSIST_FAILED",
           "Resolve export artifacts could not be persisted",
@@ -471,6 +678,7 @@ export class ResolveExportService {
   }
 
   async status(jobId: string): Promise<ResolveExportJob> {
+    await this.#ensureRecovered();
     const record = await this.options.jobs.find(jobId);
     if (!record) {
       throw new ResolveExportServiceError("RESOLVE_JOB_NOT_FOUND", "Resolve job does not exist", { jobId });
@@ -479,27 +687,24 @@ export class ResolveExportService {
   }
 
   async cancel(jobId: string): Promise<ResolveExportJob> {
+    await this.#ensureRecovered();
     const found = await this.options.jobs.find(jobId);
     if (!found) {
       throw new ResolveExportServiceError("RESOLVE_JOB_NOT_FOUND", "Resolve job does not exist", { jobId });
     }
-    const updated = await this.#commitJobTransition(found, `chore(resolve): cancel export ${jobId}`, async (current) => {
+    const updated = await this.#commitJobTransition(found, "cancel", `chore(resolve): cancel export ${jobId}`, async (current) => {
       if (current.job.phase === "cancelled") return current;
-      if (["completed", "failed"].includes(current.job.phase)) {
-        throw new ResolveExportServiceError("JOB_TERMINAL", "Terminal Resolve job cannot be cancelled", {
-          projectId: current.job.projectId,
-          jobId,
-        });
-      }
+      const phase = lifecyclePhase(current, "cancel");
       return {
         ...current,
-        job: { ...current.job, phase: "cancelled", updatedAt: iso(this.#now()) },
+        job: { ...current.job, phase, updatedAt: iso(this.#now()) },
       };
     });
     return updated.job;
   }
 
   async redeem(launchToken: string): Promise<ResolveLaunchPayload> {
+    await this.#ensureRecovered();
     const tokenHash = sha256(launchToken);
     const found = await this.options.jobs.findByTokenHash(tokenHash);
     if (!found) {
@@ -507,9 +712,10 @@ export class ResolveExportService {
     }
     const updated = await this.#commitJobTransition(
       found,
+      "redeem",
       `chore(resolve): redeem export ${found.job.id}`,
       async (current) => {
-      if (current.launchToken.sha256 !== tokenHash) {
+      if (!sameSha256(current.launchToken.sha256, tokenHash)) {
         throw new ResolveExportServiceError("LAUNCH_TOKEN_INVALID", "Resolve launch token is invalid");
       }
       if (current.launchToken.redeemedAt) {
@@ -524,11 +730,12 @@ export class ResolveExportService {
           jobId: current.job.id,
         });
       }
+      const phase = lifecyclePhase(current, "redeem");
       const redeemedAt = iso(this.#now());
       return {
         ...current,
         launchToken: { ...current.launchToken, redeemedAt },
-        job: { ...current.job, phase: "importing", updatedAt: redeemedAt },
+        job: { ...current.job, phase, updatedAt: redeemedAt },
       };
       },
     );
@@ -541,6 +748,7 @@ export class ResolveExportService {
   }
 
   async recordImportResult(jobId: string, input: ResolveImportResult): Promise<ResolveImportResult> {
+    await this.#ensureRecovered();
     let result: ResolveImportResult;
     try {
       result = ResolveImportResultSchema.parse(input);
@@ -579,13 +787,13 @@ export class ResolveExportService {
           jobId,
         });
       }
+      const terminalPhase = lifecyclePhase(
+        current,
+        result.status === "completed" ? "result-completed" : "result-failed",
+      );
 
-      const projectPath = join(this.options.projects.projectDir(current.job.projectId), "project.json");
-      const resultPath = this.options.jobs.artifactPath(current.job.projectId, jobId, "result.json");
-      const jobPath = this.options.jobs.artifactPath(current.job.projectId, jobId, "job.json");
-      const previousProject = await readFile(projectPath);
-      const previousJob = await readFile(jobPath);
-      const project = JSON.parse(previousProject.toString("utf8")) as Project;
+      const baseCommitSha = await this.#confirmedRevision(current.job.projectId);
+      const project = await this.#readAuthoritativeProject(current.job.projectId);
       const mediaById = new Map(project.mediaLibrary.items.map((item) => [item.id, item]));
       const referencedIds = [...new Set(result.referencedMediaIds)].sort();
       const unknown = referencedIds.filter((mediaId) => !mediaById.has(mediaId));
@@ -613,37 +821,39 @@ export class ResolveExportService {
         result,
         job: {
           ...current.job,
-          phase: result.status === "completed" ? "completed" : "failed",
+          phase: terminalPhase,
           updatedAt: terminalAt,
         },
       };
       const resultBytes = Buffer.from(`${JSON.stringify(result, null, 2)}\n`, "utf8");
-      const paths = [
-        `exports/resolve/${jobId}/job.json`,
-        `exports/resolve/${jobId}/result.json`,
-        ...(projectChanged ? ["project.json"] : []),
-      ].sort();
+      const jobPath = `exports/resolve/${jobId}/job.json`;
+      const resultPath = `exports/resolve/${jobId}/result.json`;
+      const writes = [
+        { path: jobPath, bytes: this.options.jobs.recordBytes(updatedRecord) },
+        { path: resultPath, bytes: resultBytes },
+        ...(projectChanged
+          ? [{ path: "project.json", bytes: Buffer.from(JSON.stringify(updatedProject, null, 2), "utf8") }]
+          : []),
+      ];
+      const expectedEntries = [
+        { status: "M" as const, path: jobPath },
+        { status: "A" as const, path: resultPath },
+        ...(projectChanged ? [{ status: "M" as const, path: "project.json" }] : []),
+      ].sort((left, right) => left.path.localeCompare(right.path));
       try {
-        if (projectChanged) {
-          await atomicReplace(projectPath, Buffer.from(JSON.stringify(updatedProject, null, 2), "utf8"));
-        }
-        await this.options.jobs.writeArtifact(current.job.projectId, jobId, "result.json", resultBytes);
-        await this.options.jobs.save(updatedRecord);
-        const expectedEntries = [
-          { status: "M" as const, path: `exports/resolve/${jobId}/job.json` },
-          { status: "A" as const, path: `exports/resolve/${jobId}/result.json` },
-          ...(projectChanged ? [{ status: "M" as const, path: "project.json" }] : []),
-        ].sort((left, right) => left.path.localeCompare(right.path));
-        await transaction.commit(
-          `feat(resolve): record import result ${jobId}`,
-          { allowlist: paths, expectedEntries },
-        );
+        await this.#runJournaledTransaction({
+          kind: "import-result",
+          projectId: current.job.projectId,
+          jobId,
+          baseCommitSha,
+          writes,
+          message: `feat(resolve): record import result ${jobId}`,
+          expectedEntries,
+          transaction,
+        });
         return result;
-      } catch {
-        await transaction.unstage(paths).catch(() => undefined);
-        await atomicReplace(projectPath, previousProject).catch(() => undefined);
-        await atomicReplace(jobPath, previousJob).catch(() => undefined);
-        await rm(resultPath, { force: true }).catch(() => undefined);
+      } catch (error) {
+        if (error instanceof ResolveSimulatedProcessCrash || error instanceof ResolveExportServiceError) throw error;
         throw new ResolveExportServiceError(
           "IMPORT_RESULT_PERSIST_FAILED",
           "Resolve import result could not be persisted",
