@@ -129,8 +129,8 @@ Repeated identical completion is accepted. A conflicting second result is reject
 3. The user selects **Open in Resolve**.
 4. The orchestrator locks the selected persisted revision, validates media, generates FCPXML plus a manifest, verifies hashes and expectations, and records progress.
 5. The web app remains open, displays real phases, and offers cancellation until launch begins.
-6. When ready, OpenReel opens `openreel-resolve://import/<job-id>` with a short-lived request token. The URL contains no project data or filesystem paths.
-7. Swift validates the request against the configured localhost orchestrator and acquires a per-user import lock.
+6. When ready, OpenReel opens `openreel-resolve://import/{launch-token}`. The opaque UUID token is short-lived, single-use, and maps to the backend job only after loopback redemption; the URL contains no job ID, project data, or filesystem paths.
+7. Swift redeems the token against the configured localhost orchestrator and acquires a per-user import lock.
 8. Swift starts or focuses Resolve. If Accessibility permission is missing, macOS prompts once and the job remains retryable.
 9. Swift navigates to Project Manager if necessary and creates one uniquely named provisional project: `OpenReel Import <request-id>`.
 10. Swift invokes **Workspace > Scripts > OpenReel Bridge** inside that project.
