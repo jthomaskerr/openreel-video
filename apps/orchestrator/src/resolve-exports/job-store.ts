@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
+import { constants } from "node:fs";
 import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, rmdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import {
   ResolveExportJobSchema,
   ResolveImportResultSchema,
@@ -813,6 +814,66 @@ export class ResolveExportJobStore {
     // recorded digest proves the bytes consumers will actually receive.
     const payload = await readFile(path);
     return this.describeArtifact(jobId, name, payload);
+  }
+
+  async readVerifiedArtifact(
+    projectId: string,
+    jobId: string,
+    name: string,
+    expected: ResolveExportArtifact,
+  ): Promise<Buffer> {
+    const identifiers = { projectId, jobId };
+    try {
+      validateArtifactName(name);
+      validateJobId(jobId);
+      assertValidProjectId(projectId);
+      const expectedPath = `exports/resolve/${jobId}/${name}`;
+      if (
+        expected.path !== expectedPath
+        || isAbsolute(expected.path)
+        || expected.path.split("/").some((component) => component === ".." || component === ".")
+        || !Number.isSafeInteger(expected.byteLength)
+        || expected.byteLength < 0
+        || !SHA256.test(expected.sha256)
+      ) throw new Error("invalid artifact metadata");
+
+      const directory = await this.#safeJobDirectory(projectId, jobId, false);
+      if (!directory) throw new Error("missing job directory");
+      const resolvedDirectory = await realpath(directory);
+      const target = join(directory, name);
+      const targetStats = await lstat(target);
+      if (targetStats.isSymbolicLink() || !targetStats.isFile()) throw new Error("unsafe artifact target");
+      const resolvedTarget = await realpath(target);
+      const confinedRelative = relative(resolvedDirectory, resolvedTarget);
+      if (
+        confinedRelative !== name
+        || isAbsolute(confinedRelative)
+        || confinedRelative === ".."
+        || confinedRelative.startsWith(`..${sep}`)
+      ) throw new Error("artifact escaped job directory");
+
+      const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+      const handle = await open(target, constants.O_RDONLY | noFollow);
+      let bytes: Buffer;
+      try {
+        const openedStats = await handle.stat();
+        if (!openedStats.isFile()) throw new Error("artifact is not a regular file");
+        bytes = await handle.readFile();
+      } finally {
+        await handle.close();
+      }
+      if (bytes.byteLength !== expected.byteLength || !sameSha256(
+        crypto.createHash("sha256").update(bytes).digest("hex"),
+        expected.sha256,
+      )) throw new Error("artifact bytes do not match metadata");
+      return bytes;
+    } catch {
+      throw new ResolveJobStoreError(
+        "RESOLVE_JOB_CORRUPT",
+        "Resolve artifact failed integrity verification",
+        identifiers,
+      );
+    }
   }
 
   async removeArtifact(projectId: string, jobId: string, name: string): Promise<void> {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HandoffSelection, Project, ResolveImportResult } from "@openreel/core";
@@ -307,6 +307,8 @@ async function fixture(options: FixtureOptions = {}) {
   const uuids = [
     "11111111-1111-4111-8111-111111111111",
     "22222222-2222-4222-8222-222222222222",
+    "44444444-4444-4444-8444-444444444444",
+    "55555555-5555-4555-8555-555555555555",
   ];
   let now = Date.parse("2026-07-22T00:00:00.000Z");
   let crashAt: ResolveTransactionPoint | null = options.crashAt ?? null;
@@ -735,5 +737,141 @@ describe("ResolveExportService", () => {
       outcome.status === "rejected" && outcome.reason?.code === "INVALID_JOB_TRANSITION"))
       .toHaveLength(1);
     expect(["cancelled", "importing"]).toContain((await f.service.status(f.job.id)).phase);
+  });
+
+  test("serves only hash-matching artifact bytes for the redeemed job capability", async () => {
+    const f = await startReady();
+    const payload = await f.service.redeem(f.token);
+    const artifact = payload.artifacts.find((candidate) => candidate.path.endsWith(".fcpxml"))!;
+    const name = artifact.path.split("/").at(-1)!;
+
+    const delivered = await f.service.readArtifact(
+      payload.projectId,
+      payload.jobId,
+      name,
+      payload.artifactAccessToken,
+    );
+
+    expect(delivered.mediaType).toBe(artifact.mediaType);
+    expect(delivered.bytes).toHaveLength(artifact.byteLength);
+    expect(createHash("sha256").update(delivered.bytes).digest("hex")).toBe(artifact.sha256);
+    await expect(f.service.readArtifact(
+      payload.projectId,
+      payload.jobId,
+      name,
+      "wrong-capability",
+    )).rejects.toMatchObject({ code: "ARTIFACT_CAPABILITY_EXPIRED" });
+    await expect(f.service.readArtifact(
+      "another-project",
+      payload.jobId,
+      name,
+      payload.artifactAccessToken,
+    )).rejects.toMatchObject({ code: "ARTIFACT_CAPABILITY_EXPIRED" });
+    await expect(f.service.readArtifact(
+      payload.projectId,
+      "99999999-9999-4999-8999-999999999999",
+      name,
+      payload.artifactAccessToken,
+    )).rejects.toMatchObject({ code: "ARTIFACT_CAPABILITY_EXPIRED" });
+  });
+
+  test("rejects traversal artifact metadata with a sanitized integrity error", async () => {
+    const f = await startReady();
+    const payload = await f.service.redeem(f.token);
+    const jobFile = join(f.projectDir, jobPath("job.json"));
+    const record = JSON.parse(await readFile(jobFile, "utf8")) as {
+      artifacts: Array<{ path: string }>;
+    };
+    record.artifacts[0]!.path = `exports/resolve/${FIXED_JOB_ID}/../project.json`;
+    await writeFile(jobFile, `${JSON.stringify(record, null, 2)}\n`);
+
+    await expect(f.service.readArtifact(
+      payload.projectId,
+      payload.jobId,
+      "job.json",
+      payload.artifactAccessToken,
+    )).rejects.toMatchObject({
+      code: "ARTIFACT_INTEGRITY_FAILED",
+      message: "Resolve artifact failed integrity verification",
+      projectId: payload.projectId,
+      jobId: payload.jobId,
+    });
+  });
+
+  test("rejects symlink artifact targets and symlink job-directory components", async () => {
+    const targetFixture = await startReady();
+    const targetPayload = await targetFixture.service.redeem(targetFixture.token);
+    const artifact = targetPayload.artifacts.find((candidate) => candidate.path.endsWith(".fcpxml"))!;
+    const name = artifact.path.split("/").at(-1)!;
+    const target = join(targetFixture.projectDir, artifact.path);
+    const outside = join(targetFixture.root, "outside.fcpxml");
+    await writeFile(outside, "outside");
+    await rm(target);
+    await symlink(outside, target);
+    await expect(targetFixture.service.readArtifact(
+      targetPayload.projectId,
+      targetPayload.jobId,
+      name,
+      targetPayload.artifactAccessToken,
+    )).rejects.toMatchObject({ code: "ARTIFACT_INTEGRITY_FAILED" });
+
+    const componentFixture = await startReady();
+    const componentPayload = await componentFixture.service.redeem(componentFixture.token);
+    const jobDirectory = join(componentFixture.projectDir, "exports", "resolve", componentPayload.jobId);
+    const movedDirectory = join(componentFixture.root, "moved-job");
+    await rename(jobDirectory, movedDirectory);
+    await symlink(movedDirectory, jobDirectory);
+    await expect(componentFixture.service.readArtifact(
+      componentPayload.projectId,
+      componentPayload.jobId,
+      componentPayload.artifacts[0]!.path.split("/").at(-1)!,
+      componentPayload.artifactAccessToken,
+    )).rejects.toMatchObject({ code: "ARTIFACT_INTEGRITY_FAILED" });
+  });
+
+  test("rejects post-export artifact length and hash replacement", async () => {
+    const lengthFixture = await startReady();
+    const lengthPayload = await lengthFixture.service.redeem(lengthFixture.token);
+    const lengthArtifact = lengthPayload.artifacts.find((candidate) => candidate.path.endsWith(".fcpxml"))!;
+    await writeFile(join(lengthFixture.projectDir, lengthArtifact.path), "short");
+    await expect(lengthFixture.service.readArtifact(
+      lengthPayload.projectId,
+      lengthPayload.jobId,
+      lengthArtifact.path.split("/").at(-1)!,
+      lengthPayload.artifactAccessToken,
+    )).rejects.toMatchObject({ code: "ARTIFACT_INTEGRITY_FAILED" });
+
+    const hashFixture = await startReady();
+    const hashPayload = await hashFixture.service.redeem(hashFixture.token);
+    const hashArtifact = hashPayload.artifacts.find((candidate) => candidate.path.endsWith(".fcpxml"))!;
+    await writeFile(join(hashFixture.projectDir, hashArtifact.path), Buffer.alloc(hashArtifact.byteLength, 0x78));
+    await expect(hashFixture.service.readArtifact(
+      hashPayload.projectId,
+      hashPayload.jobId,
+      hashArtifact.path.split("/").at(-1)!,
+      hashPayload.artifactAccessToken,
+    )).rejects.toMatchObject({ code: "ARTIFACT_INTEGRITY_FAILED" });
+  });
+
+  test("expires capabilities and replaces the prior capability for the same job", async () => {
+    const f = await startReady();
+    const first = await f.service.redeem(f.token);
+    const artifact = first.artifacts[0]!;
+    const name = artifact.path.split("/").at(-1)!;
+    f.setNow(Date.parse("2026-07-22T00:05:00.000Z"));
+    await expect(f.service.readArtifact(first.projectId, first.jobId, name, first.artifactAccessToken))
+      .rejects.toMatchObject({ code: "ARTIFACT_CAPABILITY_EXPIRED" });
+
+    await f.jobs.update(first.projectId, first.jobId, (record) => ({
+      ...record,
+      job: { ...record.job, phase: "ready" },
+      launchToken: { ...record.launchToken, redeemedAt: null },
+    }));
+    f.setNow(Date.parse("2026-07-22T00:04:59.000Z"));
+    const replacement = await f.service.redeem(f.token);
+    await expect(f.service.readArtifact(first.projectId, first.jobId, name, first.artifactAccessToken))
+      .rejects.toMatchObject({ code: "ARTIFACT_CAPABILITY_EXPIRED" });
+    await expect(f.service.readArtifact(first.projectId, first.jobId, name, replacement.artifactAccessToken))
+      .resolves.toMatchObject({ mediaType: artifact.mediaType });
   });
 });

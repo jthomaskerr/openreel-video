@@ -50,6 +50,7 @@ type BridgeErrorCode =
   | "LAUNCH_TOKEN_EXPIRED"
   | "LAUNCH_TOKEN_USED"
   | "ARTIFACT_CAPABILITY_EXPIRED"
+  | "ARTIFACT_INTEGRITY_FAILED"
   | "JOB_TERMINAL"
   | "INVALID_JOB_TRANSITION"
   | "IMPORT_RESULT_CONFLICT"
@@ -298,12 +299,27 @@ export class ResolveExportService {
   readonly #onTransactionPoint?: ResolveExportServiceOptions["onTransactionPoint"];
   #recoveryPromise: Promise<void> | null = null;
   readonly #recoveryDiagnostics: ResolveRecoveryDiagnostic[] = [];
-  #artifactCapabilities = new Map<string, { readonly jobId: string; readonly projectId: string; readonly expiresAt: number }>();
+  #artifactCapabilities = new Map<string, {
+    readonly tokenSha256: string;
+    readonly jobId: string;
+    readonly projectId: string;
+    readonly expiresAt: number;
+  }>();
 
   constructor(private readonly options: ResolveExportServiceOptions) {
     this.#now = options.now ?? Date.now;
     this.#randomUUID = options.randomUUID ?? crypto.randomUUID;
     this.#onTransactionPoint = options.onTransactionPoint;
+  }
+
+  #artifactCapabilityKey(projectId: string, jobId: string): string {
+    return JSON.stringify([projectId, jobId]);
+  }
+
+  #purgeExpiredArtifactCapabilities(now: number): void {
+    for (const [key, capability] of this.#artifactCapabilities) {
+      if (now >= capability.expiresAt) this.#artifactCapabilities.delete(key);
+    }
   }
 
   async #ensureRecovered(): Promise<void> {
@@ -774,10 +790,13 @@ export class ResolveExportService {
       },
     );
     const artifactAccessToken = this.#randomUUID();
-    this.#artifactCapabilities.set(sha256(artifactAccessToken), {
+    const capabilityNow = this.#now();
+    this.#purgeExpiredArtifactCapabilities(capabilityNow);
+    this.#artifactCapabilities.set(this.#artifactCapabilityKey(updated.job.projectId, updated.job.id), {
+      tokenSha256: sha256(artifactAccessToken),
       jobId: updated.job.id,
       projectId: updated.job.projectId,
-      expiresAt: this.#now() + TOKEN_TTL_MS,
+      expiresAt: capabilityNow + TOKEN_TTL_MS,
     });
     return {
       jobId: updated.job.id,
@@ -790,16 +809,35 @@ export class ResolveExportService {
 
   async readArtifact(projectId: string, jobId: string, name: string, artifactAccessToken: string): Promise<{ readonly mediaType: string; readonly bytes: Buffer }> {
     await this.#ensureRecovered();
+    const capabilityNow = this.#now();
+    this.#purgeExpiredArtifactCapabilities(capabilityNow);
     const requestedHash = sha256(artifactAccessToken);
-    const capability = [...this.#artifactCapabilities.entries()].find(([storedHash]) => crypto.timingSafeEqual(Buffer.from(storedHash), Buffer.from(requestedHash)))?.[1];
-    if (!capability || capability.projectId !== projectId || capability.jobId !== jobId || this.#now() >= capability.expiresAt) {
+    const capability = this.#artifactCapabilities.get(this.#artifactCapabilityKey(projectId, jobId));
+    if (
+      !capability
+      || capability.projectId !== projectId
+      || capability.jobId !== jobId
+      || !crypto.timingSafeEqual(Buffer.from(capability.tokenSha256, "hex"), Buffer.from(requestedHash, "hex"))
+    ) {
       throw new ResolveExportServiceError("ARTIFACT_CAPABILITY_EXPIRED", "Resolve artifact capability expired; start a new export job", { projectId, jobId });
     }
-    const record = await this.options.jobs.find(jobId);
-    if (!record || record.job.projectId !== projectId) throw new ResolveExportServiceError("RESOLVE_JOB_NOT_FOUND", "Resolve job does not exist", { projectId, jobId });
-    const artifact = record.artifacts.find((candidate) => basename(candidate.path) === name);
-    if (!artifact || basename(name) !== name) throw new ResolveExportServiceError("RESOLVE_JOB_NOT_FOUND", "Resolve artifact does not exist", { projectId, jobId });
-    return { mediaType: artifact.mediaType, bytes: await readFile(join(this.options.projects.projectDir(projectId), artifact.path)) };
+    try {
+      const record = await this.options.jobs.find(jobId);
+      if (!record || record.job.projectId !== projectId) throw new ResolveExportServiceError("RESOLVE_JOB_NOT_FOUND", "Resolve job does not exist", { projectId, jobId });
+      const artifact = record.artifacts.find((candidate) => basename(candidate.path) === name);
+      if (!artifact || basename(name) !== name) throw new ResolveExportServiceError("RESOLVE_JOB_NOT_FOUND", "Resolve artifact does not exist", { projectId, jobId });
+      return {
+        mediaType: artifact.mediaType,
+        bytes: await this.options.jobs.readVerifiedArtifact(projectId, jobId, name, artifact),
+      };
+    } catch (error) {
+      if (error instanceof ResolveExportServiceError) throw error;
+      throw new ResolveExportServiceError(
+        "ARTIFACT_INTEGRITY_FAILED",
+        "Resolve artifact failed integrity verification",
+        { projectId, jobId },
+      );
+    }
   }
 
   async recordImportResult(jobId: string, input: ResolveImportResult): Promise<ResolveImportResult> {
