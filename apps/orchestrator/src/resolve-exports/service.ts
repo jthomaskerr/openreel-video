@@ -160,6 +160,44 @@ function sameSha256(left: string, right: string): boolean {
   return crypto.timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
 }
 
+export const RESOLVE_ARTIFACT_CAPABILITY_LIMIT = 1_024;
+
+interface ResolveArtifactCapability {
+  readonly tokenSha256: string;
+  readonly expiresAt: number;
+}
+
+/** @internal Exported for deterministic security-boundary tests. */
+export class ResolveArtifactCapabilityStore {
+  readonly #entries = new Map<string, ResolveArtifactCapability>();
+
+  #key(projectId: string, jobId: string): string {
+    return JSON.stringify([projectId, jobId]);
+  }
+
+  issue(projectId: string, jobId: string, tokenSha256: string, expiresAt: number): void {
+    const key = this.#key(projectId, jobId);
+    if (this.#entries.has(key)) {
+      this.#entries.delete(key);
+    } else if (this.#entries.size >= RESOLVE_ARTIFACT_CAPABILITY_LIMIT) {
+      const oldest = this.#entries.keys().next().value as string | undefined;
+      if (oldest !== undefined) this.#entries.delete(oldest);
+    }
+    this.#entries.set(key, { tokenSha256, expiresAt });
+  }
+
+  authorize(projectId: string, jobId: string, tokenSha256: string, now: number): boolean {
+    const key = this.#key(projectId, jobId);
+    const capability = this.#entries.get(key);
+    if (!capability) return false;
+    if (now >= capability.expiresAt) {
+      this.#entries.delete(key);
+      return false;
+    }
+    return sameSha256(capability.tokenSha256, tokenSha256);
+  }
+}
+
 function gitBlobSha(bytes: Buffer): string {
   const header = Buffer.from(`blob ${bytes.byteLength}\0`, "utf8");
   return crypto.createHash("sha1").update(header).update(bytes).digest("hex");
@@ -299,27 +337,12 @@ export class ResolveExportService {
   readonly #onTransactionPoint?: ResolveExportServiceOptions["onTransactionPoint"];
   #recoveryPromise: Promise<void> | null = null;
   readonly #recoveryDiagnostics: ResolveRecoveryDiagnostic[] = [];
-  #artifactCapabilities = new Map<string, {
-    readonly tokenSha256: string;
-    readonly jobId: string;
-    readonly projectId: string;
-    readonly expiresAt: number;
-  }>();
+  #artifactCapabilities = new ResolveArtifactCapabilityStore();
 
   constructor(private readonly options: ResolveExportServiceOptions) {
     this.#now = options.now ?? Date.now;
     this.#randomUUID = options.randomUUID ?? crypto.randomUUID;
     this.#onTransactionPoint = options.onTransactionPoint;
-  }
-
-  #artifactCapabilityKey(projectId: string, jobId: string): string {
-    return JSON.stringify([projectId, jobId]);
-  }
-
-  #purgeExpiredArtifactCapabilities(now: number): void {
-    for (const [key, capability] of this.#artifactCapabilities) {
-      if (now >= capability.expiresAt) this.#artifactCapabilities.delete(key);
-    }
   }
 
   async #ensureRecovered(): Promise<void> {
@@ -791,13 +814,12 @@ export class ResolveExportService {
     );
     const artifactAccessToken = this.#randomUUID();
     const capabilityNow = this.#now();
-    this.#purgeExpiredArtifactCapabilities(capabilityNow);
-    this.#artifactCapabilities.set(this.#artifactCapabilityKey(updated.job.projectId, updated.job.id), {
-      tokenSha256: sha256(artifactAccessToken),
-      jobId: updated.job.id,
-      projectId: updated.job.projectId,
-      expiresAt: capabilityNow + TOKEN_TTL_MS,
-    });
+    this.#artifactCapabilities.issue(
+      updated.job.projectId,
+      updated.job.id,
+      sha256(artifactAccessToken),
+      capabilityNow + TOKEN_TTL_MS,
+    );
     return {
       jobId: updated.job.id,
       projectId: updated.job.projectId,
@@ -810,15 +832,8 @@ export class ResolveExportService {
   async readArtifact(projectId: string, jobId: string, name: string, artifactAccessToken: string): Promise<{ readonly mediaType: string; readonly bytes: Buffer }> {
     await this.#ensureRecovered();
     const capabilityNow = this.#now();
-    this.#purgeExpiredArtifactCapabilities(capabilityNow);
     const requestedHash = sha256(artifactAccessToken);
-    const capability = this.#artifactCapabilities.get(this.#artifactCapabilityKey(projectId, jobId));
-    if (
-      !capability
-      || capability.projectId !== projectId
-      || capability.jobId !== jobId
-      || !crypto.timingSafeEqual(Buffer.from(capability.tokenSha256, "hex"), Buffer.from(requestedHash, "hex"))
-    ) {
+    if (!this.#artifactCapabilities.authorize(projectId, jobId, requestedHash, capabilityNow)) {
       throw new ResolveExportServiceError("ARTIFACT_CAPABILITY_EXPIRED", "Resolve artifact capability expired; start a new export job", { projectId, jobId });
     }
     try {

@@ -9,6 +9,8 @@ import type { ProjectMediaManifestSnapshot } from "../projects/media-manifest";
 import { ResolveExportJobStore } from "./job-store";
 import {
   ResolveExportService,
+  ResolveArtifactCapabilityStore,
+  RESOLVE_ARTIFACT_CAPABILITY_LIMIT,
   ResolveSimulatedProcessCrash,
   type ResolveTransactionPoint,
 } from "./service";
@@ -407,6 +409,38 @@ async function expectSanitizedRecoveryFailure(service: ResolveExportService): Pr
 }
 
 describe("ResolveExportService", () => {
+  test("bounds job capabilities and evicts only the oldest entry at capacity", () => {
+    const store = new ResolveArtifactCapabilityStore();
+    const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+    for (let index = 0; index < RESOLVE_ARTIFACT_CAPABILITY_LIMIT; index += 1) {
+      store.issue("vintage-tokyo", `job-${index}`, digest(`token-${index}`), 10_000);
+    }
+
+    store.issue(
+      "vintage-tokyo",
+      `job-${RESOLVE_ARTIFACT_CAPABILITY_LIMIT - 1}`,
+      digest("replacement"),
+      10_000,
+    );
+    store.issue("vintage-tokyo", "new-job", digest("new-token"), 10_000);
+
+    expect(store.authorize("vintage-tokyo", "job-0", digest("token-0"), 0)).toBe(false);
+    expect(store.authorize("vintage-tokyo", "job-1", digest("token-1"), 0)).toBe(true);
+    expect(store.authorize(
+      "vintage-tokyo",
+      `job-${RESOLVE_ARTIFACT_CAPABILITY_LIMIT - 1}`,
+      digest(`token-${RESOLVE_ARTIFACT_CAPABILITY_LIMIT - 1}`),
+      0,
+    )).toBe(false);
+    expect(store.authorize(
+      "vintage-tokyo",
+      `job-${RESOLVE_ARTIFACT_CAPABILITY_LIMIT - 1}`,
+      digest("replacement"),
+      0,
+    )).toBe(true);
+    expect(store.authorize("vintage-tokyo", "new-job", digest("new-token"), 0)).toBe(true);
+  });
+
   test("locks the requested confirmed revision and rejects a stale revision before artifact writes", async () => {
     const f = await fixture();
     await expect(f.service.start("vintage-tokyo", "stale", selection))
