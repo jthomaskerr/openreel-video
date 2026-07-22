@@ -1,0 +1,321 @@
+openapi: 3.1.0
+info:
+  title: OpenReel Runtime Logging API
+  version: 1.0.0
+  description: >-
+    Local diagnostic logging contract. Authentication uses the existing
+    orchestrator bearer-token policy and is injected by the Vite /api proxy;
+    browser code must never receive the token.
+servers:
+  - url: http://localhost:4041
+    description: Local orchestrator
+paths:
+  /api/logs/config:
+    get:
+      operationId: getRuntimeLoggingConfig
+      summary: Return non-secret browser logging controls
+      responses:
+        "200":
+          description: Current public logging configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeLoggingPublicConfigV1"
+        "500":
+          $ref: "#/components/responses/InternalError"
+  /api/logs:
+    post:
+      operationId: ingestRuntimeLog
+      summary: Accept one normalized frontend or interaction log entry
+      description: >-
+        One request represents one captured event. The id remains stable across
+        retries. Authentication is required when ORCHESTRATOR_AUTH_TOKEN is
+        configured; local tokenless mode accepts the empty security alternative.
+      security:
+        - bearerAuth: []
+        - {}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RuntimeLogIngressEntryV1"
+      responses:
+        "202":
+          description: Entry accepted and persisted for the first time
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeLogAppendResultV1"
+              examples:
+                accepted:
+                  value:
+                    accepted: true
+                    duplicate: false
+                    id: 11111111-1111-4111-8111-111111111111
+                    sequence: 42
+        "200":
+          description: Retry matched an already persisted entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeLogAppendResultV1"
+        "400":
+          description: Invalid JSON or malformed request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeLogErrorV1"
+        "401":
+          description: Bearer authentication was configured and missing or invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeLogErrorV1"
+        "413":
+          description: Encoded request exceeded maxEntryBytes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeLogErrorV1"
+        "415":
+          description: Content type or content encoding is unsupported
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeLogErrorV1"
+        "422":
+          description: JSON parsed but failed schema or semantic validation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeLogErrorV1"
+        "503":
+          description: Runtime logging is disabled or persistence is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeLogErrorV1"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque local token
+  responses:
+    InternalError:
+      description: Non-sensitive internal failure
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/RuntimeLogErrorV1"
+  schemas:
+    RuntimeLoggingPublicConfigV1:
+      type: object
+      additionalProperties: false
+      required:
+        - schemaVersion
+        - enabled
+        - captureInteractions
+        - maxEntryBytes
+        - serializationDepth
+        - queueMaxEntries
+        - queueMaxBytes
+        - allowedInteractionTypes
+      properties:
+        schemaVersion:
+          const: 1
+        enabled:
+          type: boolean
+        captureInteractions:
+          type: boolean
+          default: false
+        maxEntryBytes:
+          type: integer
+          minimum: 4096
+          maximum: 1048576
+          default: 262144
+        serializationDepth:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 8
+        queueMaxEntries:
+          type: integer
+          minimum: 10
+          maximum: 5000
+          default: 500
+        queueMaxBytes:
+          type: integer
+          minimum: 4096
+          maximum: 16777216
+          default: 1048576
+        allowedInteractionTypes:
+          type: array
+          uniqueItems: true
+          maxItems: 32
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+    RuntimeLogIngressEntryV1:
+      type: object
+      additionalProperties: false
+      required:
+        - schemaVersion
+        - id
+        - source
+        - eventType
+        - level
+        - occurredAt
+        - sessionId
+        - arguments
+        - metadata
+      properties:
+        schemaVersion:
+          const: 1
+        id:
+          type: string
+          format: uuid
+          maxLength: 64
+        source:
+          type: string
+          enum: [frontend, interaction]
+        eventType:
+          type: string
+          enum: [console, interaction]
+        level:
+          $ref: "#/components/schemas/RuntimeLogLevel"
+        occurredAt:
+          type: string
+          format: date-time
+        sessionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._:-]+$"
+        correlationId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: "^[A-Za-z0-9._:-]+$"
+        arguments:
+          $ref: "#/components/schemas/RuntimeLogArgumentMap"
+        metadata:
+          $ref: "#/components/schemas/RuntimeLogMetadataV1"
+    RuntimeLogAppendResultV1:
+      type: object
+      additionalProperties: false
+      required: [accepted, duplicate, id, sequence]
+      properties:
+        accepted:
+          const: true
+        duplicate:
+          type: boolean
+        id:
+          type: string
+          format: uuid
+        sequence:
+          type: integer
+          minimum: 0
+    RuntimeLogErrorV1:
+      type: object
+      additionalProperties: false
+      required: [accepted, code, message]
+      properties:
+        accepted:
+          const: false
+        code:
+          type: string
+          enum:
+            - invalid_json
+            - invalid_content_type
+            - payload_too_large
+            - unauthorized
+            - unsupported_schema_version
+            - invalid_entry
+            - runtime_logging_disabled
+            - persistence_unavailable
+            - internal_error
+        message:
+          type: string
+          maxLength: 256
+        entryId:
+          type: string
+          format: uuid
+    RuntimeLogLevel:
+      type: string
+      enum: [debug, log, info, warn, error]
+    RuntimeLogArgumentMap:
+      type: object
+      propertyNames:
+        pattern: "^arg(0|[1-9][0-9]*)$"
+      additionalProperties:
+        $ref: "#/components/schemas/RuntimeLogValue"
+    RuntimeLogValue:
+      oneOf:
+        - type: "null"
+        - type: boolean
+        - type: number
+        - type: string
+        - type: array
+          items:
+            $ref: "#/components/schemas/RuntimeLogValue"
+        - type: object
+          additionalProperties:
+            $ref: "#/components/schemas/RuntimeLogValue"
+    RuntimeLogMetadataV1:
+      type: object
+      additionalProperties: false
+      properties:
+        pagePath:
+          type: string
+          maxLength: 512
+          pattern: "^[^?#]*$"
+        userAgentFamily:
+          type: string
+          maxLength: 64
+        interactionType:
+          type: string
+          maxLength: 64
+        target:
+          $ref: "#/components/schemas/InteractionTargetV1"
+        modifiers:
+          type: object
+          additionalProperties: false
+          properties:
+            alt: { type: boolean }
+            ctrl: { type: boolean }
+            meta: { type: boolean }
+            shift: { type: boolean }
+    InteractionTargetV1:
+      type: object
+      additionalProperties: false
+      required: [tag, path]
+      properties:
+        tag:
+          type: string
+          pattern: "^[a-z][a-z0-9-]*$"
+          maxLength: 64
+        role:
+          type: string
+          maxLength: 64
+        safeId:
+          type: string
+          maxLength: 64
+          pattern: "^[A-Za-z0-9._:-]+$"
+        path:
+          type: array
+          maxItems: 12
+          items:
+            type: object
+            additionalProperties: false
+            required: [tag, index]
+            properties:
+              tag:
+                type: string
+                pattern: "^[a-z][a-z0-9-]*$"
+                maxLength: 64
+              index:
+                type: integer
+                minimum: 0
