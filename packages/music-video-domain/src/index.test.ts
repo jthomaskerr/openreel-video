@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test } from "vitest";
 import { generation } from "./index.js";
 
 test("root exposes the authoritative V2 generation namespace without legacy name collisions", () => {
