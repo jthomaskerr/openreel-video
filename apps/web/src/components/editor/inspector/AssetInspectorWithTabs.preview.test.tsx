@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { MediaItem } from "@openreel/core";
 import { AssetInspectorWithTabs } from "./AssetInspectorWithTabs";
 import { mediaAvailabilityRuntime } from "../../../services/media-verification";
@@ -37,6 +37,25 @@ describe("AssetInspectorWithTabs preview", () => {
 
     const img = screen.getByRole("img", { name: /shot\.mp4/ });
     expect(img).toHaveAttribute("src", "data:image/jpeg,persisted");
+  });
+
+  it("previews video from the main inspector thumbnail controls", async () => {
+    const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined);
+    render(<AssetInspectorWithTabs item={makeVideoItem({
+      originalUrl: "https://cdn.example.test/shot.mp4",
+      thumbnailUrl: "data:image/jpeg,persisted",
+    })} />);
+
+    const video = screen.getByLabelText("Video preview for shot.mp4");
+    expect(video).toHaveAttribute("src", "https://cdn.example.test/shot.mp4");
+    expect(video).toHaveAttribute("poster", "data:image/jpeg,persisted");
+
+    fireEvent.click(screen.getByRole("button", { name: "Play video preview" }));
+    expect(play).toHaveBeenCalled();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Pause video preview" }));
+    expect(pause).toHaveBeenCalled();
   });
 
   it("shows the missing-file placeholder when thumbnailUrl is absent", () => {

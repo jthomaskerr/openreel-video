@@ -1,6 +1,6 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { WaveformPreview } from "./WaveformPreview";
-import { AlertTriangle, Film, Music, ImageIcon, FileText, Layers, Sparkles, GitBranch, Link2, RefreshCw, Trash2, Download, X as XIcon } from "lucide-react";
+import { AlertTriangle, Film, Music, ImageIcon, FileText, Layers, Sparkles, GitBranch, Link2, RefreshCw, Trash2, Download, Pause, Play, X as XIcon } from "lucide-react";
 import type { MediaItem } from "@openreel/core";
 import { useProjectStore } from "../../../stores/project-store";
 import { useUIStore } from "../../../stores/ui-store";
@@ -124,6 +124,117 @@ function statusColor(status: string | undefined): string {
 
 // ── Preview ────────────────────────────────────────────────────────
 
+function VideoAssetPreview({
+  item,
+  thumbnailUrl,
+}: {
+  item: MediaItem;
+  thumbnailUrl: string | null;
+}) {
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(item.metadata?.duration ?? 0);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(item.metadata?.duration ?? 0);
+    setPreviewError(null);
+    if (!item.blob || item.blob.size <= 0 || typeof URL.createObjectURL !== "function") {
+      setBlobUrl(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(item.blob);
+    setBlobUrl(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [item.blob, item.id, item.metadata?.duration]);
+
+  const sourceUrl = blobUrl ?? item.remoteUrl ?? item.originalUrl ?? null;
+  if (!sourceUrl) {
+    return thumbnailUrl ? (
+      <img
+        src={thumbnailUrl}
+        alt={item.title ?? item.name}
+        className="w-full aspect-video object-cover"
+      />
+    ) : (
+      <div className="w-full aspect-video flex items-center justify-center bg-background-tertiary">
+        <Film size={32} className="text-text-muted/30" />
+      </div>
+    );
+  }
+
+  const handlePlayPause = async () => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (isPlaying) {
+      video.pause();
+      setIsPlaying(false);
+      return;
+    }
+    try {
+      await video.play();
+      setIsPlaying(true);
+    } catch (error) {
+      console.warn("[AssetPreview] Failed to play video preview", {
+        mediaId: item.id,
+        error,
+      });
+      setPreviewError("Video preview unavailable");
+    }
+  };
+
+  return (
+    <div className="bg-black">
+      <video
+        ref={videoRef}
+        src={sourceUrl}
+        poster={thumbnailUrl ?? undefined}
+        preload="metadata"
+        playsInline
+        aria-label={`Video preview for ${item.title ?? item.name}`}
+        className="w-full aspect-video object-contain"
+        onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
+        onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
+        onPlay={() => setIsPlaying(true)}
+        onPause={() => setIsPlaying(false)}
+        onEnded={() => setIsPlaying(false)}
+        onError={() => setPreviewError("Video preview unavailable")}
+      />
+      <div className="flex items-center gap-2 px-2 py-1.5 border-t border-border bg-background-secondary">
+        <button
+          type="button"
+          onClick={() => void handlePlayPause()}
+          aria-label={isPlaying ? "Pause video preview" : "Play video preview"}
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-white hover:bg-accent/90 transition-colors"
+        >
+          {isPlaying ? <Pause size={14} /> : <Play size={14} />}
+        </button>
+        <input
+          type="range"
+          min={0}
+          max={Math.max(duration, 0.01)}
+          step="any"
+          value={Math.min(currentTime, Math.max(duration, 0.01))}
+          aria-label="Seek video preview"
+          onChange={(event) => {
+            const time = Number(event.currentTarget.value);
+            if (videoRef.current) videoRef.current.currentTime = time;
+            setCurrentTime(time);
+          }}
+          className="min-w-0 flex-1 accent-accent"
+        />
+        <span className="shrink-0 font-mono text-[10px] text-text-secondary">
+          {previewError ?? `${formatDuration(currentTime)} / ${formatDuration(duration)}`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function AssetPreview({ item }: { item: MediaItem }) {
   const projectId = useProjectStore((state) => state.project.id);
   const availability = useMediaAvailabilityView(projectId, item);
@@ -149,6 +260,19 @@ function AssetPreview({ item }: { item: MediaItem }) {
         <div className="p-3">
           <WaveformPreview item={item} />
         </div>
+        {availability.status !== "available" && (
+          <div className="flex items-center gap-1 px-3 py-1 bg-amber-500/10 border-t border-amber-500/20" title={availability.description}>
+            <AlertTriangle size={10} className="text-amber-300" />
+            <span className="text-[10px] text-amber-300 font-medium">{availability.label}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (item.type === "video") {
+    return (
+      <div className="mx-4 mt-3 rounded-lg border border-border bg-background-secondary overflow-hidden">
+        <VideoAssetPreview item={item} thumbnailUrl={effectiveThumbnailUrl} />
         {availability.status !== "available" && (
           <div className="flex items-center gap-1 px-3 py-1 bg-amber-500/10 border-t border-amber-500/20" title={availability.description}>
             <AlertTriangle size={10} className="text-amber-300" />
