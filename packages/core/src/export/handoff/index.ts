@@ -7,3 +7,4 @@ export * from "./target-profiles";
 export * from "./fcpxml";
 export * from "./imovie-profile";
 export * from "./report";
+export * from "./resolve-bridge";

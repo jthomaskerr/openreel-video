@@ -127,6 +127,59 @@ const definition = {
 };
 
 describe("ProjectSerializer imported unresolved media", () => {
+  it("accepts legacy projects without a description", () => {
+    const serializer = new ProjectSerializer(new MemoryStorage());
+    const result = serializer.importFromJsonWithValidation(JSON.stringify({
+      version: SCHEMA_VERSION,
+      project: {
+        ...projectWithMissingClip(),
+        mediaLibrary: { items: [importedImage] },
+      },
+    }));
+
+    expect(result.project?.description).toBeUndefined();
+  });
+
+  it("accepts legacy media without an external-reference marker", () => {
+    const serializer = new ProjectSerializer(new MemoryStorage());
+    const result = serializer.importFromJsonWithValidation(JSON.stringify({
+      version: SCHEMA_VERSION,
+      project: {
+        ...projectWithMissingClip(),
+        mediaLibrary: { items: [importedImage] },
+      },
+    }));
+
+    expect(result.project?.mediaLibrary.items[0]?.externallyReferenced).toBeUndefined();
+  });
+
+  it("normalizes an empty project description on export", () => {
+    const serializer = new ProjectSerializer(new MemoryStorage());
+    const project: Project = {
+      ...projectWithMissingClip(),
+      description: "",
+      generatedImageDefinitions: [],
+    };
+
+    const exported = JSON.parse(serializer.exportToJson(project)) as { project: Project };
+
+    expect(exported.project.description).toBeUndefined();
+  });
+
+  it("normalizes an empty project description before saving", async () => {
+    const storage = new MemoryStorage();
+    const serializer = new ProjectSerializer(storage);
+    const project: Project = {
+      ...projectWithMissingClip(),
+      description: "",
+      generatedImageDefinitions: [],
+    };
+
+    await serializer.saveProject(project);
+
+    expect(storage.projects.get(project.id)?.description).toBeUndefined();
+  });
+
   it("migrates a legacy project to an empty generated image definition list", () => {
     const serializer = new ProjectSerializer(new MemoryStorage());
     const json = JSON.stringify({ version: SCHEMA_VERSION, project: projectWithMissingClip() });

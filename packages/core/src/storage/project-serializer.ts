@@ -22,6 +22,7 @@ export class ProjectSerializer {
     const projectToSave: Project = {
       ...project,
       modifiedAt: Date.now(),
+      description: project.description === "" ? undefined : project.description,
     };
 
     await this.storage.saveProject(projectToSave);
@@ -439,6 +440,7 @@ export class ProjectSerializer {
 
     return {
       ...project,
+      description: project.description === "" ? undefined : project.description,
       mediaLibrary: {
         items: strippedItems,
       },

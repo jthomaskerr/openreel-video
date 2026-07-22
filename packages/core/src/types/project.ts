@@ -51,6 +51,7 @@ export interface ProjectSettings {
 export interface Project {
   readonly id: string;
   readonly name: string;
+  readonly description?: string;
   readonly createdAt: number;
   readonly modifiedAt: number;
   readonly settings: ProjectSettings;
@@ -111,6 +112,8 @@ export interface MediaItem {
   readonly group?: string;
   /** Backend URL where this media version's binary is stored. Populated on load from backend; stripped before saving back. */
   readonly remoteUrl?: string;
+  /** True after a confirmed external editor import references this media item. */
+  readonly externallyReferenced?: boolean;
 }
 
 /** Thumbnail for filmstrip display in timeline */
