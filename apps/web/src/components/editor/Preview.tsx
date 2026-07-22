@@ -1288,6 +1288,7 @@ export const Preview: React.FC = () => {
 
   useEffect(() => {
     getMasterClock().setLoop(
+      loopEnabled,
       loopStart,
       loopEnd,
     );
