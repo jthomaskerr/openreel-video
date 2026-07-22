@@ -12,6 +12,9 @@
 
 - Preserve compatibility with persisted projects that do not yet contain `description`.
 - Never expose arbitrary filesystem paths from API responses.
+- Store FCPXML, manifests, reports, job state, and import results under `exports/resolve/{jobId}/` inside the backend project store and commit them to the project Git history.
+- Do not copy media binaries; Resolve references the canonical project-store files.
+- `MediaItem.externallyReferenced` is sticky once true. The record and canonical file may be updated but not deleted.
 - Only loopback clients may redeem bridge launch tokens.
 - Tokens are single-use, expire after five minutes, and are redacted from logs.
 - Compatibility is advertised only for Resolve 21.0.3 build 21.0.30007 after live acceptance.
@@ -31,6 +34,7 @@
 **Interfaces:**
 - Produces: `ResolvePreviewSchema`, `ResolveExportJobSchema`, `ResolveImportResultSchema`, `ResolveBridgeErrorCodeSchema`, and their inferred TypeScript types.
 - Produces: optional `Project.description?: string` with empty-string normalization on new writes and absent-field compatibility on reads.
+- Produces: optional `MediaItem.externallyReferenced?: boolean`, absent/false for legacy records and permanently true after a confirmed external import.
 
 - [ ] **Step 1: Write failing contract tests**
 
@@ -58,6 +62,11 @@ it("rejects launch URLs containing project data or filesystem paths", () => {
 it("accepts legacy projects without a description", () => {
   const result = serializer.importFromJsonWithValidation(JSON.stringify(projectFixture));
   expect(result.project?.description).toBeUndefined();
+});
+
+it("accepts legacy media without an external-reference marker", () => {
+  const result = serializer.importFromJsonWithValidation(JSON.stringify(projectFixture));
+  expect(result.project?.mediaLibrary.items[0].externallyReferenced).toBeUndefined();
 });
 ```
 
@@ -111,7 +120,7 @@ export const ResolveExportJobSchema = z.object({
 });
 ```
 
-Add `readonly description?: string` to `Project` and export all bridge contracts from the handoff index.
+Add `readonly description?: string` to `Project`, `readonly externallyReferenced?: boolean` to `MediaItem`, and export all bridge contracts from the handoff index. Add `referencedMediaIds: z.array(z.string()).default([])` to `ResolveImportResultSchema` so the backend marks only media actually linked by Resolve.
 
 - [ ] **Step 4: Run tests and typecheck**
 
@@ -130,7 +139,75 @@ rtk git add packages/core/src/export/handoff packages/core/src/types/project.ts 
 rtk git commit -m "feat(core): define Resolve bridge contracts"
 ```
 
-### Task 2: Backend preview builder
+### Task 2: Externally referenced media invariant
+
+**Files:**
+- Modify: `packages/core/src/actions/action-executor.ts`
+- Modify: `packages/core/src/actions/action-executor.test.ts`
+- Modify: `apps/orchestrator/src/projects/project-store.ts`
+- Modify: `apps/orchestrator/src/projects/project-store.test.ts`
+- Modify: `apps/orchestrator/src/projects/routes.ts`
+- Modify: `apps/orchestrator/src/projects/routes.test.ts`
+
+**Interfaces:**
+- Produces: `assertExternallyReferencedMediaPreserved(previous, next): void`.
+- Produces: stable `EXTERNAL_MEDIA_DELETE_BLOCKED` action/API error.
+- Existing metadata and binary update paths remain permitted while the same media ID and canonical path remain present.
+
+- [ ] **Step 1: Write failing deletion and update tests**
+
+```ts
+it("blocks deletion of media referenced by Resolve", async () => {
+  const project = projectWithMedia({ externallyReferenced: true });
+  const result = await executor.execute({ type: "media/delete", params: { mediaId: "media-1" } }, project);
+  expect(result).toMatchObject({ success: false, error: { code: "EXTERNAL_MEDIA_DELETE_BLOCKED" } });
+});
+
+test("backend rejects a saved project that omits externally referenced media", async () => {
+  await store.saveProject(projectWithMedia({ externallyReferenced: true }));
+  await expect(store.saveProject(projectWithout("media-1")))
+    .rejects.toMatchObject({ code: "EXTERNAL_MEDIA_DELETE_BLOCKED", mediaId: "media-1" });
+});
+
+test("backend permits updates to externally referenced media", async () => {
+  const original = projectWithMedia({ externallyReferenced: true, title: "Original" });
+  await store.saveProject(original);
+  await expect(store.saveProject(updateMedia(original, "media-1", { title: "Updated" }))).resolves.toBeDefined();
+});
+```
+
+- [ ] **Step 2: Run tests and verify RED**
+
+Run: `rtk pnpm --filter @openreel/core exec vitest run src/actions/action-executor.test.ts && rtk pnpm --filter @openreel/orchestrator exec vitest run src/projects/project-store.test.ts src/projects/routes.test.ts`
+
+Expected: FAIL because external references are not protected.
+
+- [ ] **Step 3: Implement the invariant in both trust boundaries**
+
+```ts
+export function assertExternallyReferencedMediaPreserved(previous: Project, next: Project): void {
+  const nextIds = new Set(next.mediaLibrary.items.map(item => item.id));
+  const removed = previous.mediaLibrary.items.find(item => item.externallyReferenced === true && !nextIds.has(item.id));
+  if (removed) throw new ExternalMediaDeleteBlockedError(removed.id);
+}
+```
+
+Check the marker in the core `media/delete` action before mutation. In `ProjectStore.saveProject`, load the prior persisted project when present and call the invariant before writing. Map the backend error to HTTP 409 with its stable code and media ID.
+
+- [ ] **Step 4: Run focused tests and typechecks**
+
+Run: `rtk pnpm --filter @openreel/core exec vitest run src/actions/action-executor.test.ts && rtk pnpm --filter @openreel/orchestrator exec vitest run src/projects/project-store.test.ts src/projects/routes.test.ts`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+rtk git add packages/core/src/actions apps/orchestrator/src/projects
+rtk git commit -m "feat(media): protect externally referenced files"
+```
+
+### Task 3: Backend preview builder
 
 **Files:**
 - Create: `apps/orchestrator/src/resolve-exports/preview.ts`
@@ -200,7 +277,7 @@ rtk git add apps/orchestrator/src/resolve-exports/preview.ts apps/orchestrator/s
 rtk git commit -m "feat(orchestrator): build rich Resolve project previews"
 ```
 
-### Task 3: Durable export job and artifact service
+### Task 4: Durable export job and artifact service
 
 **Files:**
 - Create: `apps/orchestrator/src/resolve-exports/job-store.ts`
@@ -248,7 +325,9 @@ export class ResolveExportService {
 }
 ```
 
-Write job JSON via temporary file plus rename. Store artifacts under `ProjectStore.projectDir(projectId)/exports/resolve/{jobId}/`. Hash every artifact after close. Issue an opaque UUID launch token, persist only its SHA-256 hash, and expire it after five minutes.
+Write job JSON via temporary file plus rename. Store FCPXML, manifest, report, job state, and final result under `ProjectStore.projectDir(projectId)/exports/resolve/{jobId}/`. Do not copy media binaries. Hash every artifact after close and commit the export directory through `GitStore.commit(projectId, message, transaction)` with an exact allowlist. Issue an opaque UUID launch token, persist only its SHA-256 hash, and expire it after five minutes.
+
+When an idempotent completed import result arrives, mark every listed `referencedMediaId` as `externallyReferenced: true`, persist the project, write the result file, and commit both changes in one exact Git transaction. A failed result marks only IDs explicitly reported as linked; an empty list changes no media records.
 
 - [ ] **Step 4: Run lifecycle tests**
 
@@ -263,7 +342,7 @@ rtk git add apps/orchestrator/src/resolve-exports/job-store.ts apps/orchestrator
 rtk git commit -m "feat(orchestrator): persist verified Resolve export jobs"
 ```
 
-### Task 4: Resolve preview and export routes
+### Task 5: Resolve preview and export routes
 
 **Files:**
 - Create: `apps/orchestrator/src/resolve-exports/routes.ts`

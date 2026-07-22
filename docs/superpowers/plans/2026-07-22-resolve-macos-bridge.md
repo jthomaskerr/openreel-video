@@ -15,6 +15,7 @@
 - Create exactly one new Resolve project per accepted request and populate that same project.
 - Accessibility automation is limited to launching/focusing Resolve, creating the project, and invoking the internal script.
 - Python contains no OpenReel project parsing or FCPXML generation logic.
+- Python reports exact `referencedMediaIds`; media remains in the canonical backend project store and is never copied into the bridge app.
 - Do not commit app bundles, generated binaries, credentials, tokens, or import artifacts.
 
 ---
@@ -39,6 +40,7 @@ def test_imports_into_current_project_and_renames_same_project(self):
     self.assertEqual(resolve.created_projects, [])
     self.assertEqual(resolve.renames, [("OpenReel Import 123", "Vintage Tokyo")])
     self.assertEqual(result["offlineMediaIds"], [])
+    self.assertEqual(result["referencedMediaIds"], ["media-1", "media-2"])
     self.assertTrue(result["saved"])
 ```
 

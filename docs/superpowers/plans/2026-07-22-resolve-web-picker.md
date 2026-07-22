@@ -16,6 +16,7 @@
 - Missing data remains visible with an actionable explanation.
 - All controls are keyboard-operable, screen-reader named, and usable at 200% zoom.
 - Do not remove the iMovie path while replacing the Resolve path.
+- Media marked `externallyReferenced: true` remains editable but its delete action is disabled with a specific Resolve-reference explanation.
 
 ---
 
@@ -282,3 +283,47 @@ rtk git add apps/web/e2e/resolve-project-picker.spec.ts
 rtk git commit -m "test(web): cover Resolve project picker workflow"
 ```
 
+### Task 6: Externally referenced media deletion feedback
+
+**Files:**
+- Modify: `apps/web/src/stores/project-store.test.ts`
+- Modify: `apps/web/src/components/editor/inspector/AssetInspectorWithTabs.tsx`
+- Modify: `apps/web/src/components/editor/inspector/AssetInspectorWithTabs.test.tsx`
+
+**Interfaces:**
+- Consumes: `MediaItem.externallyReferenced` and the core `EXTERNAL_MEDIA_DELETE_BLOCKED` result.
+- Produces: visible, non-color-only deletion protection while leaving metadata and replacement/update actions enabled.
+
+- [ ] **Step 1: Write failing UI tests**
+
+```tsx
+it("explains why Resolve-referenced media cannot be deleted", () => {
+  renderInspector(mediaFixture({ externallyReferenced: true }));
+  expect(screen.getByRole("button", { name: /delete asset/i })).toBeDisabled();
+  expect(screen.getByText(/referenced by an external resolve project/i)).toBeVisible();
+  expect(screen.getByRole("button", { name: /replace media/i })).toBeEnabled();
+});
+```
+
+- [ ] **Step 2: Run and verify RED**
+
+Run: `rtk pnpm --filter @openreel/web exec vitest run src/components/editor/inspector/AssetInspectorWithTabs.test.tsx src/stores/project-store.test.ts`
+
+Expected: FAIL because the marker is not rendered or enforced in the web action path.
+
+- [ ] **Step 3: Implement explicit feedback**
+
+Disable only deletion for externally referenced media. Add visible helper copy and a tooltip using existing accessible UI primitives. Preserve rename, metadata, version, and replacement controls.
+
+- [ ] **Step 4: Run focused tests**
+
+Run: `rtk pnpm --filter @openreel/web exec vitest run src/components/editor/inspector/AssetInspectorWithTabs.test.tsx src/stores/project-store.test.ts`
+
+Expected: PASS.
+
+- [ ] **Step 5: Commit**
+
+```bash
+rtk git add apps/web/src/components/editor/inspector/AssetInspectorWithTabs.tsx apps/web/src/components/editor/inspector/AssetInspectorWithTabs.test.tsx apps/web/src/stores/project-store.test.ts
+rtk git commit -m "feat(web): explain protected external media"
+```

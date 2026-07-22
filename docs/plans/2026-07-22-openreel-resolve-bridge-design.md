@@ -26,7 +26,7 @@ The existing Resolve handoff control opens a master-detail project picker. The p
 
 ### Orchestrator export API
 
-The orchestrator owns the export lifecycle. It loads a confirmed persisted project revision, resolves media through existing project media endpoints/storage, runs the core compatibility and FCPXML pipeline, records artifact hashes and expectations, and exposes progress and results.
+The orchestrator owns the export lifecycle. It loads a confirmed persisted project revision, resolves media through existing project media endpoints/storage, runs the core compatibility and FCPXML pipeline, records artifact hashes and expectations, commits the small export records into the project's Git worktree, and exposes progress and results. Media files are not duplicated; FCPXML references the canonical media already managed by the project store.
 
 ### OpenReel Bridge.app
 
@@ -148,6 +148,10 @@ If import fails, the provisional project remains for diagnosis with its unique r
 - Launch tokens are short-lived, single-use, scoped to one job, and never logged.
 - Manifest paths are relative, normalized, and rejected on traversal or symlink escape.
 - Artifact and media hashes are checked before import.
+- FCPXML, manifests, compatibility reports, job state, and import results are stored under `exports/resolve/{jobId}/` in the backend project store and committed to that project's Git history.
+- Media binaries are not copied into the export directory.
+- After a confirmed Resolve import, every referenced `MediaItem` is permanently marked `externallyReferenced: true` in the OpenReel project and that mutation is committed.
+- Externally referenced media records and their canonical files may be updated in place but cannot be deleted. Backend persistence enforces this invariant even if a client omits the record; the OpenReel UI explains the blocked deletion before attempting it.
 - Only one bridge import can run per user at a time.
 - Resolve project names are collision-safe. No existing project is overwritten or deleted.
 - Raw media, project documents, prompts, tokens, and arbitrary paths are excluded from diagnostic logs.
@@ -180,6 +184,8 @@ Retries reuse safe completed stages. Retrying launch/import does not regenerate 
 ### Deterministic tests
 
 - Core schemas, state transitions, redaction, compatibility report, request/result idempotency, and artifact hashing.
+- Core and backend deletion guards proving externally referenced media can be updated but cannot be removed.
+- Import-result persistence proving exact referenced media IDs are marked and committed once.
 - Orchestrator preview/export/result routes with fake project/media stores and temporary artifact storage.
 - Web picker loading, search, selection, metadata, playback states, clip expanders, keyboard operation, progress, cancellation, launch, and recovery.
 - Swift manifest/request validation and Accessibility state machine against a fake AX driver.
