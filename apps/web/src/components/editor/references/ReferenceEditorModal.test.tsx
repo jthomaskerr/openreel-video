@@ -7,7 +7,7 @@ import {
   rememberReferenceInvoker,
   type ReferenceEditorRoute,
 } from "../../../features/references/navigation";
-import { ReferenceEditorContent, ReferenceEditorModal } from "./ReferenceEditorModal";
+import { ReferenceEditorModal } from "./ReferenceEditorModal";
 
 let projectState: {
   project: {
@@ -37,20 +37,6 @@ vi.mock("../../../stores/project-store", () => ({
 vi.mock("../inspector/AssetInspectorWithTabs", () => ({
   AssetInspectorWithTabs: ({ item }: { item: MediaItem }) => (
     <div data-testid="asset-inspector-route">{item.id}</div>
-  ),
-}));
-
-vi.mock("../generate/ProjectGeneratedImageEditor", () => ({
-  ProjectGeneratedImageEditor: ({
-    definitionId,
-    placement,
-  }: {
-    definitionId: string;
-    placement: "modal" | "inspector";
-  }) => (
-    <div data-testid="generated-image-editor-route" data-placement={placement}>
-      {definitionId}
-    </div>
   ),
 }));
 
@@ -199,7 +185,7 @@ describe("ReferenceEditorModal", () => {
     );
   });
 
-  it("renders the asset inspector for imported image routes and the shared editor for generated images", () => {
+  it("renders the asset inspector for imported and generated image routes", () => {
     const { rerender } = render(
       <ReferenceEditorModal
         open
@@ -224,30 +210,8 @@ describe("ReferenceEditorModal", () => {
     expect(
       screen.getByRole("heading", { name: "Generated image editor" }),
     ).toBeInTheDocument();
-    expect(screen.queryByTestId("asset-inspector-route")).toBeNull();
-    expect(screen.getByTestId("generated-image-editor-route")).toHaveTextContent(
-      "definition-1",
-    );
-    expect(screen.getByTestId("generated-image-editor-route")).toHaveAttribute(
-      "data-placement",
-      "modal",
-    );
-  });
-
-  it("renders the same generated-image editor in the inspector placement", () => {
-    render(
-      <ReferenceEditorContent
-        route={route("generated-image")}
-        placement="inspector"
-      />,
-    );
-
-    expect(screen.getByTestId("generated-image-editor-route")).toHaveTextContent(
-      "definition-1",
-    );
-    expect(screen.getByTestId("generated-image-editor-route")).toHaveAttribute(
-      "data-placement",
-      "inspector",
+    expect(screen.getByTestId("asset-inspector-route")).toHaveTextContent(
+      "media-generated-1",
     );
   });
 
