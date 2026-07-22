@@ -1,11 +1,11 @@
 import {
   validateWaveSpeedProviderInputs as validateSharedWaveSpeedProviderInputs,
   type WaveSpeedProviderInputError,
+  type WaveSpeedRequestSchema,
 } from "@openreel/core/generation/wavespeed";
-import type { WavespeedModel } from "../index";
 import type { GenerationModelCapability } from "../model-capabilities";
 
-type RequestSchema = WavespeedModel["api_schema"]["api_schemas"][number]["request_schema"];
+type RequestSchema = WaveSpeedRequestSchema;
 
 export interface ResolvedProviderMedia {
   tokenId: string;

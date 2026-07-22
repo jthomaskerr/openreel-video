@@ -1,4 +1,14 @@
-import type { GenerationContext, GenerationTarget } from "@openreel/music-video-domain/generation";
+import { z } from "zod";
+import type {
+  GenerationContext,
+  GenerationError,
+  GenerationTarget,
+} from "@openreel/music-video-domain/generation";
+import {
+  GenerationContextSchema,
+  GenerationReferenceCommandSchema,
+  ResolvedGenerationReferenceSchema,
+} from "@openreel/music-video-domain/generation";
 import type { GenerationDraft } from "../submit-generation";
 
 function stableValue(value: unknown): string {
@@ -83,6 +93,50 @@ const TRANSIENT_TRANSPORT_FIELD_NAMES = new Set([
   "uploaduri",
 ]);
 
+const PROVIDER_SECRET_FIELD_NAMES = new Set([
+  "accesskeyid",
+  "accesskeysecret",
+  "accesstoken",
+  "apikey",
+  "apisecret",
+  "apitoken",
+  "authorization",
+  "authorizationheader",
+  "authtoken",
+  "awsaccesskeyid",
+  "awssecretaccesskey",
+  "awssessiontoken",
+  "bearertoken",
+  "clientsecret",
+  "consumerkey",
+  "consumersecret",
+  "credential",
+  "credentials",
+  "googleapikey",
+  "passphrase",
+  "password",
+  "privatekey",
+  "proxyauthorization",
+  "refreshtoken",
+  "secret",
+  "secretaccesskey",
+  "secretkey",
+  "sessiontoken",
+  "xapikey",
+  "xgoogapikey",
+]);
+
+const PROVIDER_SECRET_FIELD_SUFFIXES = [
+  "accesskey",
+  "apikey",
+  "authorization",
+  "credential",
+  "credentials",
+  "password",
+  "secret",
+  "token",
+] as const;
+
 export class ProviderNeutralInputError extends TypeError {
   constructor(readonly path: string, reason: string) {
     super(`${reason} at ${path}`);
@@ -102,7 +156,13 @@ function isExpiringTransportUrl(value: string): boolean {
 }
 
 function isTransientTransportFieldName(key: string): boolean {
-  return TRANSIENT_TRANSPORT_FIELD_NAMES.has(key.replace(/[-_]/g, "").toLowerCase());
+  return TRANSIENT_TRANSPORT_FIELD_NAMES.has(key.replace(/[^a-z0-9]/gi, "").toLowerCase());
+}
+
+function isProviderSecretFieldName(key: string): boolean {
+  const normalized = key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return PROVIDER_SECRET_FIELD_NAMES.has(normalized)
+    || PROVIDER_SECRET_FIELD_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
 }
 
 function normalizeProviderNeutralValue(
@@ -146,6 +206,9 @@ function normalizeProviderNeutralValue(
     const normalized: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value)) {
       const entryPath = `${path}.${key}`;
+      if (isProviderSecretFieldName(key)) {
+        throw new ProviderNeutralInputError(entryPath, "Provider-neutral inputs cannot include credential fields");
+      }
       if (entry !== undefined && entry !== null && isTransientTransportFieldName(key)) {
         throw new ProviderNeutralInputError(entryPath, "Provider-neutral inputs cannot include transport fields");
       }
@@ -167,6 +230,8 @@ export function normalizeProviderNeutralInputs(
 export function generationSubmissionDraftKey(input: {
   projectId: string;
   provider: string;
+  providerInstanceId: string;
+  routing: import("@openreel/music-video-domain/generation").GenerationRouteIdentity;
   modelId: string;
   modelSchemaVersion: string;
   target: GenerationTarget;
@@ -183,6 +248,8 @@ export function generationSubmissionDraftKey(input: {
   return input.idempotencyKey ?? stableSubmissionStringify({
     projectId: input.projectId,
     provider: input.provider,
+    providerInstanceId: input.providerInstanceId,
+    routing: input.routing,
     modelId: input.modelId,
     modelSchemaVersion: input.modelSchemaVersion,
     target: input.target,
@@ -209,6 +276,7 @@ function normalizeSubmissionReferences(
     ...(reference.canonicalTokens ? { canonicalTokens: reference.canonicalTokens } : {}),
     status: reference.status ?? "active",
     ...(reference.reason ? { reason: reference.reason } : {}),
+    ...(reference.uploadLeaseId ? { uploadLeaseId: reference.uploadLeaseId } : {}),
   }))
     .slice()
     .sort((left, right) => (left.order ?? 0) - (right.order ?? 0) || left.key.localeCompare(right.key));
@@ -250,43 +318,359 @@ function required<T>(value: T | undefined, field: string): T {
 
 export function buildGenerationSubmissionContext(input: {
   draft: GenerationDraft;
-  target: GenerationTarget;
   referenceTokens: readonly { tokenId: string }[];
   audioToken?: { tokenId: string };
+  preparationStatus?: "preparing" | "ready";
 }): GenerationContext {
+  const preparationStatus = input.preparationStatus ?? "preparing";
   const references = (input.draft.references ?? []).map((reference, index) => {
     const token = required(input.referenceTokens[index]?.tokenId, `references[${index}]`);
+    const versionId = reference.mediaVersionId ?? reference.versionId;
     return {
+      id: reference.key ?? (versionId ? `${reference.mediaId}:${versionId}` : reference.mediaId),
+      order: index + 1,
       mediaId: reference.mediaId,
-      ...(reference.mediaVersionId ?? reference.versionId
-        ? { versionId: reference.mediaVersionId ?? reference.versionId }
-        : {}),
-      origins: reference.origins ? [...reference.origins] : ["user" as const],
-      remoteInput: { kind: "upload-token" as const, value: token },
+      ...(versionId ? { versionId } : {}),
+      origins: reference.origins ?? ["user" as const],
+      state: "active" as const,
+      preparationStatus,
+      errorHistory: [],
+      uploadLeaseId: token,
     };
   });
-  const audio = input.draft.audio && input.audioToken
-    ? {
-        sourceMediaId: required(input.draft.audio.sourceMediaId, "sourceMediaId"),
-        sourceVersionId: required(input.draft.audio.sourceVersionId, "sourceVersionId"),
-        sourceClipId: required(input.draft.audio.sourceClipId, "sourceClipId"),
-        projectStartSeconds: required(input.draft.audio.projectStartSeconds, "projectStartSeconds"),
-        projectEndSeconds: required(input.draft.audio.projectEndSeconds, "projectEndSeconds"),
-        sourceStartSeconds: required(input.draft.audio.sourceStartSeconds, "sourceStartSeconds"),
-        sourceEndSeconds: required(input.draft.audio.sourceEndSeconds, "sourceEndSeconds"),
-        mimeType: required(input.draft.audio.mimeType, "mimeType"),
-        sha256: required(input.draft.audio.sha256, "sha256"),
-        remoteInput: { kind: "upload-token" as const, value: input.audioToken.tokenId },
-      }
-    : undefined;
-  return {
+
+  return GenerationContextSchema.parse({
+    ...input.draft.context,
     projectId: input.draft.projectId,
-    shotId: input.draft.context.shotId,
-    clipId: input.draft.context.clipId,
-    target: input.target,
-    timing: input.draft.context.timing,
     references,
-    ...(audio ? { audio } : {}),
     placementPolicy: input.draft.placementPolicy ?? input.draft.context.placementPolicy,
+  }) as GenerationContext;
+}
+
+export interface GenerationReferenceRecoveryDraft {
+  id: string;
+  mediaId: string;
+  versionId?: string;
+  origins?: GenerationReferenceOrigin[];
+  value?: unknown;
+}
+
+export type GenerationReferenceOrigin = "source" | "character" | "shot" | "user";
+
+export type GenerationReferenceCanonical = z.output<typeof ResolvedGenerationReferenceSchema>;
+
+export type GenerationReferenceRecoveryReference = GenerationReferenceCanonical;
+
+export type GenerationReferenceCommand = z.infer<typeof GenerationReferenceCommandSchema>;
+
+export interface GenerationReferenceRecoveryState {
+  projectId: string;
+  jobId: string;
+  references: readonly GenerationReferenceRecoveryReference[];
+  drafts: readonly GenerationReferenceRecoveryDraft[];
+  providerReferences: readonly GenerationReferenceCanonical[];
+}
+
+export interface GenerationReferenceRecoveryPorts {
+  retryReference(input: GenerationReferenceRecoveryDraft): Promise<{ tokenId: string }>;
+  releaseUploadLease(input: { tokenId: string }): Promise<void>;
+  referenceMinimum?: number;
+}
+
+export class GenerationReferenceRecoveryScopeError extends Error {
+  readonly code = "generation-reference-recovery-scope-mismatch";
+
+  constructor(readonly projectId: string, readonly jobId: string) {
+    super(`Reference recovery command is scoped to ${projectId}/${jobId}`);
+    this.name = "GenerationReferenceRecoveryScopeError";
+  }
+}
+
+export class GenerationReferenceRecoveryValidationError extends Error {
+  readonly code = "generation-reference-required";
+  readonly field: string;
+  readonly referenceId: string;
+  readonly origin: GenerationReferenceOrigin | undefined;
+  readonly origins: readonly GenerationReferenceOrigin[];
+  readonly retryable = false;
+  readonly state: GenerationReferenceRecoveryState;
+
+  constructor(
+    reference: Pick<GenerationReferenceRecoveryReference, "id" | "origins">,
+    state: GenerationReferenceRecoveryState,
+    origin?: GenerationReferenceOrigin,
+  ) {
+    super("generation-reference-required");
+    this.name = "GenerationReferenceRecoveryValidationError";
+    this.field = `references.${reference.id}.active`;
+    this.referenceId = reference.id;
+    this.origin = origin ?? reference.origins[0];
+    this.origins = reference.origins;
+    this.state = state;
+  }
+}
+
+export class GenerationReferenceRecoveryError extends Error {
+  readonly code: "generation-reference-release-failed" | "generation-reference-release-cleanup-failed";
+  readonly field: string;
+  readonly referenceId: string;
+  readonly state: GenerationReferenceRecoveryState;
+  readonly oldLeaseId: string;
+  readonly newLeaseId: string;
+
+  constructor(
+    referenceId: string,
+    oldLeaseId: string,
+    newLeaseId: string,
+    state: GenerationReferenceRecoveryState,
+    cause: unknown,
+    code: GenerationReferenceRecoveryError["code"] = "generation-reference-release-failed",
+  ) {
+    super(cause instanceof Error ? cause.message : String(cause));
+    this.name = "GenerationReferenceRecoveryError";
+    this.field = `references.${referenceId}.uploadLeaseId`;
+    this.referenceId = referenceId;
+    this.state = state;
+    this.oldLeaseId = oldLeaseId;
+    this.newLeaseId = newLeaseId;
+    this.code = code;
+  }
+}
+
+const generationReferenceCollectionSchema = z.array(ResolvedGenerationReferenceSchema);
+
+export function parseGenerationReferenceCommand(value: unknown): GenerationReferenceCommand {
+  return GenerationReferenceCommandSchema.parse(value) as GenerationReferenceCommand;
+}
+
+export function parseGenerationReferencePreparation(value: unknown): GenerationReferenceCanonical[] {
+  return generationReferenceCollectionSchema.parse(value);
+}
+
+function requiredReferenceOrigins(
+  references: readonly GenerationReferenceRecoveryReference[],
+): readonly GenerationReferenceOrigin[] {
+  return references.some((reference) => reference.origins.includes("source")) ? ["source"] : [];
+}
+
+export function validateGenerationReferenceMinimum<T extends {
+  active: boolean;
+  origins: readonly GenerationReferenceOrigin[];
+  state: "active" | "failed";
+  preparationStatus: "preparing" | "ready" | "failed";
+}>(
+  references: readonly T[],
+  minimum: number | undefined,
+  affected: {
+    reference: Pick<GenerationReferenceRecoveryReference, "id" | "origins">;
+    state: GenerationReferenceRecoveryState;
+  },
+  requiredOrigins: readonly GenerationReferenceOrigin[] = [],
+): void {
+  const available = references.filter((reference) =>
+    reference.active && reference.state === "active" && reference.preparationStatus === "ready");
+  const missingOrigin = requiredOrigins.find((origin) =>
+    !available.some((reference) => reference.origins.includes(origin)));
+  if ((minimum !== undefined && available.length < minimum) || missingOrigin) {
+    throw new GenerationReferenceRecoveryValidationError(
+      affected.reference,
+      affected.state,
+      missingOrigin,
+    );
+  }
+}
+
+function providerReferences(
+  references: readonly GenerationReferenceRecoveryReference[],
+): GenerationReferenceCanonical[] {
+  return references
+    .filter((reference) =>
+      reference.active && reference.state === "active" && reference.preparationStatus === "ready")
+    .map((reference, index) => ({ ...reference, order: index + 1 }));
+}
+
+function withProviderReferences(
+  references: readonly GenerationReferenceRecoveryReference[],
+  drafts: readonly GenerationReferenceRecoveryDraft[],
+  scope: Pick<GenerationReferenceRecoveryState, "projectId" | "jobId">,
+): GenerationReferenceRecoveryState {
+  return {
+    projectId: scope.projectId,
+    jobId: scope.jobId,
+    references,
+    drafts,
+    providerReferences: providerReferences(references),
   };
+}
+
+export function createGenerationReferenceRecoveryState(input: {
+  projectId: string;
+  jobId: string;
+  references: readonly (Omit<GenerationReferenceRecoveryReference, "active"> & { active?: boolean })[];
+  drafts: readonly GenerationReferenceRecoveryDraft[];
+}): GenerationReferenceRecoveryState {
+  const references = input.references.map((reference) => ({
+    ...reference,
+    active: reference.active ?? true,
+  }));
+  return withProviderReferences(references, input.drafts, input);
+}
+
+function recoveryError(
+  cause: unknown,
+  field: string,
+  code = "generation-reference-retry-failed",
+): GenerationError {
+  return {
+    code,
+    message: cause instanceof Error ? cause.message : String(cause),
+    field,
+    retryable: true,
+  };
+}
+
+function leaseIsReferenced(
+  references: readonly GenerationReferenceRecoveryReference[],
+  tokenId: string,
+  exceptId?: string,
+): boolean {
+  return references.some((reference) =>
+    reference.id !== exceptId && reference.uploadLeaseId === tokenId);
+}
+
+export async function applyGenerationReferenceCommand(
+  state: GenerationReferenceRecoveryState,
+  commandInput: unknown,
+  ports: GenerationReferenceRecoveryPorts,
+): Promise<GenerationReferenceRecoveryState> {
+  const command = parseGenerationReferenceCommand(commandInput);
+  if (command.projectId !== state.projectId || command.jobId !== state.jobId) {
+    throw new GenerationReferenceRecoveryScopeError(command.projectId, command.jobId);
+  }
+  const index = state.references.findIndex((reference) => reference.id === command.referenceId);
+  if (index < 0) throw new Error("generation-reference-not-found");
+  const reference = state.references[index];
+
+  if (command.action === "remove") {
+    const references = state.references.filter((candidate) => candidate.id !== command.referenceId);
+    validateGenerationReferenceMinimum(
+      references,
+      ports.referenceMinimum,
+      { reference, state },
+      requiredReferenceOrigins(state.references),
+    );
+    if (reference.uploadLeaseId && !leaseIsReferenced(references, reference.uploadLeaseId)) {
+      await ports.releaseUploadLease({ tokenId: reference.uploadLeaseId });
+    }
+    return withProviderReferences(
+      references,
+      state.drafts.filter((draft) => draft.id !== command.referenceId),
+      state,
+    );
+  }
+
+  if (command.action === "deactivate") {
+    const references = state.references.map((candidate) =>
+      candidate.id === command.referenceId ? { ...candidate, active: false } : candidate);
+    validateGenerationReferenceMinimum(
+      references,
+      ports.referenceMinimum,
+      { reference, state },
+      requiredReferenceOrigins(state.references),
+    );
+    return withProviderReferences(references, state.drafts, state);
+  }
+
+  if (reference.active && reference.state === "active" && reference.preparationStatus === "ready") {
+    return state;
+  }
+
+  const draft = state.drafts.find((candidate) => candidate.id === command.referenceId);
+  if (!draft) throw new Error("generation-reference-draft-not-found");
+
+  let uploaded: { tokenId: string };
+  try {
+    uploaded = await ports.retryReference(draft);
+  } catch (cause) {
+    const error = recoveryError(cause, `references.${command.referenceId}.value`);
+    const references = state.references.map((candidate) =>
+      candidate.id === command.referenceId
+        ? {
+            ...candidate,
+            state: "failed" as const,
+            preparationStatus: "failed" as const,
+            errorHistory: [...candidate.errorHistory, error],
+          }
+        : candidate);
+    return withProviderReferences(references, state.drafts, state);
+  }
+
+  const references = state.references.map((candidate) =>
+    candidate.id === command.referenceId
+      ? {
+          ...candidate,
+          active: true,
+          state: "active" as const,
+          preparationStatus: "ready" as const,
+          uploadLeaseId: uploaded.tokenId,
+        }
+      : candidate);
+  if (
+    reference.uploadLeaseId
+    && reference.uploadLeaseId !== uploaded.tokenId
+    && !leaseIsReferenced(references, reference.uploadLeaseId, command.referenceId)
+  ) {
+    try {
+      await ports.releaseUploadLease({ tokenId: reference.uploadLeaseId });
+    } catch (cause) {
+      try {
+        await ports.releaseUploadLease({ tokenId: uploaded.tokenId });
+      } catch (cleanupCause) {
+        const releaseError = recoveryError(
+          cause,
+          `references.${command.referenceId}.uploadLeaseId`,
+          "generation-reference-release-failed",
+        );
+        const cleanupError = recoveryError(
+          cleanupCause,
+          `references.${command.referenceId}.uploadLeaseId`,
+          "generation-reference-release-cleanup-failed",
+        );
+        const failedReferences = state.references.map((candidate) =>
+          candidate.id === command.referenceId
+            ? {
+                ...candidate,
+                state: "failed" as const,
+                preparationStatus: "failed" as const,
+                errorHistory: [...candidate.errorHistory, releaseError, cleanupError],
+              }
+            : candidate);
+        throw new GenerationReferenceRecoveryError(
+          command.referenceId,
+          reference.uploadLeaseId,
+          uploaded.tokenId,
+          withProviderReferences(failedReferences, state.drafts, state),
+          cleanupCause,
+          "generation-reference-release-cleanup-failed",
+        );
+      }
+      const error = recoveryError(
+        cause,
+        `references.${command.referenceId}.uploadLeaseId`,
+        "generation-reference-release-failed",
+      );
+      const retainedReferences = state.references.map((candidate) =>
+        candidate.id === command.referenceId
+          ? { ...candidate, errorHistory: [...candidate.errorHistory, error] }
+          : candidate);
+      throw new GenerationReferenceRecoveryError(
+        command.referenceId,
+        reference.uploadLeaseId,
+        uploaded.tokenId,
+        withProviderReferences(retainedReferences, state.drafts, state),
+        cause,
+      );
+    }
+  }
+  return withProviderReferences(references, state.drafts, state);
 }
