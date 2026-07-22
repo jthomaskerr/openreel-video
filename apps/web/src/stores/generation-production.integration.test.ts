@@ -579,6 +579,26 @@ test("server response text cannot escape the authenticated boundary", async () =
   );
 });
 
+test("server stable generation errors remain actionable without exposing response text", async () => {
+  const current = serverJob();
+  const runtime = createProductionGenerationRuntime({
+    baseUrl: "http://orchestrator/api/generate/wavespeed",
+    fetch: async () => Response.json({
+      error: "generation-provider-input-invalid",
+      detail: "failed at /Users/operator/secrets.json?token=signed-secret",
+    }, { status: 400 }),
+  });
+
+  await assert.rejects(
+    runtime.command("cancel", current),
+    (error: unknown) => {
+      assert.equal((error as Error).message, "generation-provider-input-invalid:400");
+      assert.doesNotMatch((error as Error).message, /operator|secret|token/i);
+      return true;
+    },
+  );
+});
+
 test("authoritative recovery commands hydrate the full returned job and use the logical ID", async () => {
   useGenerationJobStore.setState({ records: [], jobs: [], legacyAttention: [] });
   const recovered = serverJob({ status: "succeeded", output: { mediaId: "media-1", versionId: "version-1", mimeType: "image/png", byteLength: 3, sha256: "abc" } });

@@ -650,4 +650,43 @@ describe("scene generation request fixture", () => {
       }).context.placementPolicy,
     ).toBe("replace-selected-clip-media");
   });
+
+  it("serializes exact timing when linked placement is requested for an unlinked range", () => {
+    const entryContext = {
+      kind: "unlinked-range" as const,
+      rangeId: "range-1",
+      destinationTrackId: "track-1",
+      startTime: 7,
+      endTime: 11,
+    };
+    const resolved = resolveGenerationEntryContext({
+      ...entryContext,
+      placementPolicy: "create-linked-clip",
+    });
+
+    const request = buildSceneGenerationRequest({
+      id: "request-unlinked-range",
+      projectId: "project-1",
+      entryContext,
+      mode: "text-to-image",
+      prompt: "A scene",
+      selection: {
+        status: "ready",
+        includeAudio: false,
+        timing: resolved.timing,
+      },
+      target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
+      placementPolicy: "create-linked-clip",
+      modelId: "provider/model",
+      modelSchemaVersion: "schema-v1",
+      providerInputs: {},
+    });
+
+    expect(request.context.timing).toEqual({
+      source: "manual",
+      startSeconds: 7,
+      endSeconds: 11,
+      durationSeconds: 4,
+    });
+  });
 });

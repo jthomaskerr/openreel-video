@@ -479,6 +479,7 @@ export function buildSceneGenerationRequest(input: {
           audioRange: { startTime: input.audio.projectStartSeconds, endTime: input.audio.projectEndSeconds },
         }
       : {}),
+    ...(input.selection.timing ? { timing: input.selection.timing } : {}),
     placementPolicy: input.placementPolicy,
   };
 

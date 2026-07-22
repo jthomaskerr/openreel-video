@@ -319,7 +319,10 @@ export const AIGenTab: React.FC = () => {
             activeBg="bg-emerald-500/10"
             activeRing="ring-emerald-500/30"
             isActive={generateOpen}
-            onClick={() => setGenerateOpen(true)}
+            onClick={() => {
+              setGenerateClipId(undefined);
+              setGenerateOpen(true);
+            }}
           />
           <FeatureCard
             icon={Briefcase}

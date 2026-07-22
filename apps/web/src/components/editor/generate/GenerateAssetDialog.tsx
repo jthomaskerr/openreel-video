@@ -29,7 +29,14 @@ import { QwenForm } from "../kieai/forms/QwenForm";
 
 // ── WaveSpeed ────────────────────────────────────────────────────────────────
 import type { WavespeedModel } from "../../../services/wavespeed/index";
-import { selectSceneGenerationContext } from "../../../features/generation/context/scene-generation";
+import {
+  resolveGenerationEntryContext,
+  selectSceneGenerationContext,
+} from "../../../features/generation/context/scene-generation";
+import {
+  prepareProjectWaveSpeedSubmission,
+  type ProjectGenerationFormSubmission,
+} from "../../../features/generation/prepare-project-submission";
 import { resolveProjectGenerationReferences } from "../../../features/generation/references/project-resolution";
 import { canonicalMediaToken } from "../../../features/generation/references/resolve";
 import {
@@ -37,6 +44,7 @@ import {
   type GenerationDraftScope,
 } from "../../../features/generation/drafts";
 import { GenerateReferenceSection } from "../inspector/tabs/generation/GenerateTabSections";
+import { GenerateTab } from "../inspector/tabs/generation/GenerateTab";
 import { SchemaForm } from "./SchemaForm";
 
 import { uploadFileStream } from "../../../services/kieai/file-upload";
@@ -168,11 +176,329 @@ export interface GenerateAssetDialogProps {
   clipId?: string;
 }
 
+export function GenerateAssetDialog({
+  open,
+  onClose,
+  sourceMediaId,
+  asset,
+  shot,
+  clipId,
+}: GenerateAssetDialogProps) {
+  const project = useProjectStore((state) => state.project);
+  const [generationRuntime] = useState(getProductionGenerationRuntime);
+  const [routes, setRoutes] = useState<WaveSpeedRouteCapability[]>([]);
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [capabilityError, setCapabilityError] = useState<string>();
+  const [releaseEnabled, setReleaseEnabled] = useState(true);
+
+  const selectedClip = useMemo(
+    () => clipId
+      ? project.timeline.tracks.flatMap((track) => track.clips).find((clip) => clip.id === clipId)
+      : undefined,
+    [clipId, project.timeline.tracks],
+  );
+  const effectiveShot = useMemo<StoryboardShot | undefined>(() => {
+    if (!selectedClip) return shot;
+    const payload = selectedClip.metadata
+      && typeof selectedClip.metadata.payload === "object"
+      && selectedClip.metadata.payload !== null
+      ? (selectedClip.metadata.payload as Record<string, unknown>)
+      : (selectedClip.metadata as Record<string, unknown>) ?? {};
+    const prompt = typeof payload.prompt === "string"
+      ? payload.prompt
+      : typeof payload.text === "string"
+        ? payload.text
+        : typeof payload.videoPrompt === "string"
+          ? payload.videoPrompt
+          : shot?.prompt ?? "";
+    if (!prompt && !shot) return undefined;
+    if (shot) return { ...shot, prompt };
+    const metadata = normalizeSceneProjectionMetadata(selectedClip.metadata)
+      ?? normalizeSceneProjectionMetadata(
+        selectedClip.metadata && typeof selectedClip.metadata.payload === "object"
+          ? selectedClip.metadata.payload
+          : undefined,
+      );
+    const referenceAssetIds = Array.isArray(payload.referenceAssetIds)
+      ? payload.referenceAssetIds.filter(
+        (referenceId): referenceId is string => typeof referenceId === "string",
+      )
+      : [];
+    return {
+      id: metadata?.shotId ?? selectedClip.id,
+      index: 0,
+      label: "",
+      prompt,
+      model: "",
+      resolution: "",
+      aspectRatio: "16:9",
+      includeMainAudio: false,
+      referenceAssetIds,
+      generatedAssetIds: [],
+      validation: { valid: true, warnings: [], errors: [] },
+      outputs: [],
+      selected: false,
+    };
+  }, [selectedClip, shot]);
+  const effectiveSceneId = useMemo(() => {
+    if (shot?.id) return shot.id;
+    if (!selectedClip) return undefined;
+    return (
+      normalizeSceneProjectionMetadata(selectedClip.metadata)
+      ?? normalizeSceneProjectionMetadata(
+        selectedClip.metadata && typeof selectedClip.metadata.payload === "object"
+          ? selectedClip.metadata.payload
+          : undefined,
+      )
+    )?.shotId;
+  }, [selectedClip, shot?.id]);
+  const sceneGenerationSelection = useMemo(() => {
+    if (!effectiveSceneId || !effectiveShot) return undefined;
+    const projections = project.timeline.tracks.flatMap((track) =>
+      track.clips.flatMap((clip) => {
+        const metadata = normalizeSceneProjectionMetadata(clip.metadata)
+          ?? normalizeSceneProjectionMetadata(
+            clip.metadata && typeof clip.metadata.payload === "object"
+              ? clip.metadata.payload
+              : undefined,
+          );
+        return metadata
+          ? [{
+              clipId: clip.id,
+              linkedShotId: metadata.shotId,
+              startTime: clip.startTime,
+              duration: clip.duration,
+              inPoint: clip.inPoint,
+              outPoint: clip.outPoint,
+            }]
+          : [];
+      }),
+    );
+    return selectSceneGenerationContext({
+      shotId: effectiveSceneId,
+      includeAudio: effectiveShot.includeMainAudio,
+      projectionClipId: clipId,
+      projections,
+    });
+  }, [clipId, effectiveSceneId, effectiveShot, project.timeline.tracks]);
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setLoading(true);
+    setCapabilityError(undefined);
+    void generationRuntime.readCapabilities()
+      .then((capabilities) => {
+        if (!active) return;
+        if (!capabilities.configured) throw new Error("provider-not-configured");
+        setReleaseEnabled(capabilities.generationV2ReleaseEnabled);
+        setRoutes(capabilities.routes);
+        setSelectedModelId((current) =>
+          capabilities.routes.some((route) => waveSpeedRouteKey(route) === current)
+            ? current
+            : (capabilities.routes[0] ? waveSpeedRouteKey(capabilities.routes[0]) : ""),
+        );
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        console.error("generation-capabilities-load-failed", { projectId: project.id, error });
+        setRoutes([]);
+        setCapabilityError(
+          error instanceof Error ? error.message : "Generation capabilities could not be loaded.",
+        );
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [generationRuntime, open, project.id]);
+
+  const selectedRoute = routes.find((route) => waveSpeedRouteKey(route) === selectedModelId);
+  const entryContext = sceneGenerationSelection?.status === "ready"
+    && sceneGenerationSelection.projection
+    && effectiveSceneId
+    ? {
+        kind: "linked-projection" as const,
+        shotId: effectiveSceneId,
+        clipId: sceneGenerationSelection.projection.clipId,
+        startTime: sceneGenerationSelection.projection.startTime,
+        endTime:
+          sceneGenerationSelection.projection.startTime
+          + sceneGenerationSelection.projection.duration,
+      }
+    : effectiveSceneId
+      ? { kind: "unplaced-shot" as const, shotId: effectiveSceneId }
+      : selectedClip
+        ? {
+            kind: "unlinked-range" as const,
+            rangeId: selectedClip.id,
+            destinationTrackId: selectedClip.trackId,
+            startTime: selectedClip.startTime,
+            endTime: selectedClip.startTime + selectedClip.duration,
+          }
+        : { kind: "new-asset" as const };
+  const entryContextResult = entryContext.kind === "linked-projection"
+    ? resolveGenerationEntryContext({
+        ...entryContext,
+        supportsAudio: selectedRoute?.supportsAudio ?? false,
+      })
+    : resolveGenerationEntryContext(entryContext);
+  const selectedClipMedia = selectedClip?.mediaId
+    ? project.mediaLibrary.items.find((item) => item.id === selectedClip.mediaId)
+    : undefined;
+  const effectiveSourceMediaId = sourceMediaId
+    ?? (selectedClipMedia?.type === "image" ? selectedClipMedia.id : undefined);
+  const referenceResolutionInput = useMemo(() => {
+    const sourceItem = effectiveSourceMediaId
+      ? project.mediaLibrary.items.find((item) => item.id === effectiveSourceMediaId)
+      : undefined;
+    const sourceDefinition = sourceItem
+      ? project.generatedImageDefinitions.find((definition) =>
+          definition.currentMediaVersionId === sourceItem.id
+          || definition.assetGroupId === (sourceItem.assetGroupId ?? sourceItem.id))
+      : undefined;
+    return {
+      mediaItems: project.mediaLibrary.items,
+      generatedImageDefinitions: project.generatedImageDefinitions,
+      tracks: project.timeline.tracks,
+      ...(effectiveSourceMediaId
+        ? { source: { mediaVersionId: effectiveSourceMediaId, defaultRole: "source" as const } }
+        : {}),
+      shotReferences: (effectiveShot?.referenceAssetIds ?? []).map((mediaVersionId) => ({
+        mediaVersionId,
+        defaultRole: "reference-image" as const,
+      })),
+      roleByReferenceKey: sourceDefinition?.draft.roleByReferenceKey ?? {},
+    };
+  }, [
+    effectiveShot?.referenceAssetIds,
+    project.generatedImageDefinitions,
+    project.mediaLibrary.items,
+    project.timeline.tracks,
+    effectiveSourceMediaId,
+  ]);
+  const models = releaseEnabled
+    ? routes.map((route) => ({
+        id: waveSpeedRouteKey(route),
+        label: `${route.providerModelId} · ${route.requestedMode}`,
+        provider: "wavespeed",
+        modes: [route.output],
+      }))
+    : [];
+  const audioPresentation = !selectedRoute
+    ? ({ kind: "pending" } as const)
+    : !selectedRoute.supportsAudio
+      ? ({ kind: "unsupported" } as const)
+      : !entryContextResult.audioEligible
+        ? ({
+            kind: "zero-work",
+            reason: "Audio preparation only runs for a selected linked projection.",
+          } as const)
+        : ({ kind: "pending" } as const);
+  const promptErrors = {
+    ...(sceneGenerationSelection?.status === "disabled"
+      ? { context: sceneGenerationSelection.reason }
+      : {}),
+    ...(!releaseEnabled
+      ? { release: "generation-v2-rollback-active" }
+      : capabilityError
+        ? { capabilities: capabilityError }
+        : {}),
+  };
+  const initialPrompt = asset?.prompt
+    ?? effectiveShot?.videoPrompt
+    ?? effectiveShot?.prompt
+    ?? "";
+
+  const handleSubmit = useCallback(async (
+    form: ProjectGenerationFormSubmission & { modelId?: string },
+  ) => {
+    const route = routes.find((candidate) => waveSpeedRouteKey(candidate) === form.modelId);
+    if (!route) throw new Error("generation-route-unavailable");
+    if (!releaseEnabled) throw new Error("generation-v2-rollback-active");
+    if (sceneGenerationSelection?.status === "disabled") {
+      throw new Error(sceneGenerationSelection.reason);
+    }
+    if (entryContextResult.errors.length > 0) {
+      throw new Error(entryContextResult.errors[0]?.code ?? "generation-entry-context-invalid");
+    }
+    setSubmitting(true);
+    try {
+      const prepared = await prepareProjectWaveSpeedSubmission({
+        project,
+        route,
+        entryContext: entryContextResult.entryContext,
+        form,
+      });
+      await generationRuntime.controller.submit(prepared);
+      onClose();
+    } finally {
+      setSubmitting(false);
+    }
+  }, [
+    entryContextResult,
+    generationRuntime,
+    onClose,
+    project,
+    releaseEnabled,
+    routes,
+    sceneGenerationSelection,
+  ]);
+
+  return (
+    <Dialog open={open} onOpenChange={(nextOpen: boolean) => { if (!nextOpen) onClose(); }}>
+      <DialogContent
+        aria-describedby={undefined}
+        className="max-w-lg h-[85vh] flex min-w-0 flex-col overflow-hidden"
+      >
+        <DialogHeader className="shrink-0">
+          <DialogTitle>Generate Image/Video</DialogTitle>
+        </DialogHeader>
+        {loading ? (
+          <p role="status" className="px-3 py-2 text-sm text-text-secondary">
+            Loading generation models…
+          </p>
+        ) : null}
+        {capabilityError ? (
+          <p role="alert" className="px-3 py-2 text-sm text-red-300">
+            {capabilityError}
+          </p>
+        ) : null}
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          <GenerateTab
+            projectId={project.id}
+            shotId={effectiveSceneId}
+            draftId={effectiveSceneId ? undefined : selectedClip?.id ?? "new-asset"}
+            context={effectiveSceneId ? "shot" : selectedClip ? "clip" : "asset"}
+            mode={selectedRoute?.output ?? "image"}
+            models={models}
+            modelId={selectedModelId}
+            onModelChange={setSelectedModelId}
+            prompt={initialPrompt}
+            promptErrors={promptErrors}
+            entryContextResult={entryContextResult}
+            destination={entryContextResult.placementPolicy}
+            placementDefault={entryContextResult.defaultPlacementPolicy}
+            audioPresentation={audioPresentation}
+            referenceResolutionInput={referenceResolutionInput}
+            submitting={submitting}
+            onSubmit={handleSubmit}
+          />
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 type Step = "pick" | "form" | "submitting" | "error";
 
-export function GenerateAssetDialog({ open, onClose, sourceFile, previewUrl, sourceMediaId, asset, shot, clipId }: GenerateAssetDialogProps) {
+export function LegacyGenerateAssetDialog({ open, onClose, sourceFile, previewUrl, sourceMediaId, asset, shot, clipId }: GenerateAssetDialogProps) {
   const [step, setStep] = useState<Step>("pick");
   const [search, setSearch] = useState("");
   const [model, setModel] = useState<UnifiedModel | null>(null);

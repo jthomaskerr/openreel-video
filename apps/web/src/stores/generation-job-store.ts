@@ -703,8 +703,13 @@ function stripWaveSpeedMediaInputs(
 }
 
 async function responseJob(response: Response): Promise<DurableGenerationJob> {
-  const body = await response.json().catch(() => ({})) as { job?: unknown };
-  if (!response.ok) throw new Error(`generation-request-failed:${response.status}`);
+  const body = await response.json().catch(() => ({})) as { error?: unknown; job?: unknown };
+  if (!response.ok) {
+    const code = typeof body.error === "string" && /^generation-[a-z0-9-]+$/.test(body.error)
+      ? body.error
+      : "generation-request-failed";
+    throw new Error(`${code}:${response.status}`);
+  }
   return parseGenerationJob(body.job);
 }
 

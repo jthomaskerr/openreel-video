@@ -139,7 +139,7 @@ describe("GenerateAssetDialog project reference integration", () => {
       />,
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: /wavespeed\/model/i }));
+    fireEvent.click(await screen.findByRole("option", { name: /wavespeed\/model/i }));
 
     await waitFor(() => {
       expect(useGenerationDraftStore.getState().getDraft({
@@ -170,8 +170,9 @@ describe("GenerateAssetDialog project reference integration", () => {
       },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    fireEvent.click(screen.getByRole("button", { name: "media-added.png" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Prompt" }), {
+      target: { value: `${prompt} ${canonicalMediaToken("media-added")}` },
+    });
     await waitFor(() => {
       expect(useGenerationDraftStore.getState().getDraft({
         kind: "shot",
@@ -280,8 +281,13 @@ describe("GenerateAssetDialog project reference integration", () => {
         shotId: "shot-from-clip",
       })).toMatchObject({
         prompt,
-        referenceIds: ["reference:media-mentioned", "reference:media-shot"],
+        referenceIds: [
+          "reference:media-source",
+          "reference:media-mentioned",
+          "reference:media-shot",
+        ],
         referenceTargets: {
+          "reference:media-source": { kind: "generated-image", definitionId: "definition-source" },
           "reference:media-mentioned": { kind: "imported-image", mediaId: "media-mentioned" },
           "reference:media-shot": { kind: "imported-image", mediaId: "media-shot" },
         },

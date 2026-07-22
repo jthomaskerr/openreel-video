@@ -8,6 +8,7 @@ import { createEmptyProject } from "../../stores/project/project-helpers";
 import { useProjectStore } from "../../stores/project-store";
 import { useUIStore } from "../../stores/ui-store";
 import { InspectorPanel } from "./InspectorPanel";
+import { GenerateAssetDialog } from "./generate/GenerateAssetDialog";
 
 const productionRuntime = vi.hoisted(() => ({
   readCapabilities: vi.fn(),
@@ -199,5 +200,76 @@ describe("InspectorPanel generation reference integration", () => {
         target: { kind: "imported-image", mediaId: "media-mentioned" },
       },
     });
+  });
+
+  it("uses the same shared form and canonical controller request in the inspector and dialog", async () => {
+    const inspector = render(<InspectorPanel />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Generate/ }));
+    expect(await screen.findByTestId("generate-tab")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(productionRuntime.submit).toHaveBeenCalledTimes(1));
+    const inspectorRequest = productionRuntime.submit.mock.calls[0]?.[0];
+
+    inspector.unmount();
+    useUIStore.getState().closeModal();
+    render(<GenerateAssetDialog open onClose={vi.fn()} clipId="clip-image" />);
+
+    expect(await screen.findByTestId("generate-tab")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Back to models" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(productionRuntime.submit).toHaveBeenCalledTimes(2));
+    const dialogRequest = productionRuntime.submit.mock.calls[1]?.[0];
+
+    expect(dialogRequest).toEqual(inspectorRequest);
+  });
+
+  it("keeps an unlinked-range dialog request identical to the inspector request", async () => {
+    const current = useProjectStore.getState().project;
+    useProjectStore.setState({
+      project: {
+        ...current,
+        mediaLibrary: {
+          items: current.mediaLibrary.items.map((item) => item.id === "media-source"
+            ? { ...item, type: "video" as const }
+            : item),
+        },
+        timeline: {
+          ...current.timeline,
+          tracks: current.timeline.tracks.map((track) => ({
+            ...track,
+            clips: track.clips.map((clip) => clip.id === "clip-image"
+              ? { ...clip, metadata: {} }
+              : clip),
+          })),
+        },
+      },
+    });
+
+    const inspector = render(<InspectorPanel />);
+    fireEvent.click(await screen.findByRole("tab", { name: /Generate/ }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Prompt" }), {
+      target: { value: "unlinked range parity" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(productionRuntime.submit).toHaveBeenCalledTimes(1));
+    const inspectorRequest = productionRuntime.submit.mock.calls[0]?.[0];
+
+    inspector.unmount();
+    render(<GenerateAssetDialog open onClose={vi.fn()} clipId="clip-image" />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Prompt" }), {
+      target: { value: "unlinked range parity" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Generate" }));
+    await waitFor(() => expect(productionRuntime.submit).toHaveBeenCalledTimes(2));
+    const dialogRequest = productionRuntime.submit.mock.calls[1]?.[0];
+
+    expect(dialogRequest?.context.entryContext).toEqual({
+      kind: "unlinked-range",
+      rangeId: "clip-image",
+      startTime: 0,
+      endTime: 4,
+      destinationTrackId: "track-image",
+    });
+    expect(dialogRequest).toEqual(inspectorRequest);
   });
 });

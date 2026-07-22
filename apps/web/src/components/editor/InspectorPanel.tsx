@@ -63,6 +63,7 @@ import { AiTab } from "./inspector/tabs/AiTab";
 import { GenerateTab } from "./inspector/tabs/generation/GenerateTab";
 import type { GenerateAudioPresentation } from "./inspector/tabs/generation/GenerateTabSections";
 import { resolveGenerationEntryContext } from "../../features/generation/context/scene-generation";
+import { prepareProjectWaveSpeedSubmission } from "../../features/generation/prepare-project-submission";
 import type { ProjectGenerationReferenceResolution } from "../../features/generation/references/project-resolution";
 import {
   applyGenerationReferenceCommand,
@@ -80,8 +81,6 @@ import {
 } from "../../features/generation/recovery/state-machine";
 import {
   getProductionGenerationRuntime,
-  prepareWaveSpeedGenerationDraft,
-  prepareWaveSpeedProjectionAudio,
   useGenerationJobStore,
   waveSpeedRouteKey,
   type WaveSpeedGenerationCapabilities,
@@ -479,70 +478,13 @@ export const InspectorPanel: React.FC = () => {
 
     setGenerationSubmitting(true);
     try {
-      if (!draft.referenceResolution) {
-        throw new Error("generation-reference-resolution-missing");
-      }
-      if (Object.values(draft.referenceResolution.referenceTargets).some(
-        (target) => target.kind === "missing",
-      )) {
-        throw new Error("generation-reference-target-missing");
-      }
-      const preparedAudio = await prepareWaveSpeedProjectionAudio({
-        projectId: project.id,
-        supportsAudio: route.supportsAudio ?? false,
-        entryContext: generationEntryContextResult.entryContext,
-        tracks: project.timeline.tracks,
-        media: project.mediaLibrary.items,
-      });
-      if (preparedAudio.kind === "error") {
-        throw new Error(preparedAudio.code);
-      }
-      const generationAudio = preparedAudio.kind === "ready"
-        ? preparedAudio.audio
-        : undefined;
-      const references = draft.referenceResolution.submissionReferences.map((reference) => {
-        const source = project.mediaLibrary.items.find(
-          (candidate) => candidate.id === reference.mediaVersionId,
-        );
-        if (!source) {
-          throw new Error(`generation-reference-media-missing:${reference.mediaVersionId}`);
-        }
-        const remoteUrl = source.remoteUrl ?? source.originalUrl;
-        if (!source.blob && !remoteUrl) {
-          throw new Error(`generation-reference-content-missing:${reference.mediaVersionId}`);
-        }
-        return {
-          ...reference,
-          value: {
-            projectId: project.id,
-            ...(source.blob
-              ? {
-                  body: source.blob,
-                  mimeType: source.blob.type || source.metadata.codec || "application/octet-stream",
-                }
-              : {
-                  url: remoteUrl,
-                  mimeType: source.metadata.codec || undefined,
-                }),
-          },
-        };
-      });
-      const prepared = prepareWaveSpeedGenerationDraft({
-        projectId: project.id,
+      const prepared = await prepareProjectWaveSpeedSubmission({
+        project,
         route,
         entryContext: generationEntryContextResult.entryContext,
-        prompt: draft.prompt,
-        placementPolicy: draft.placementPolicy,
-        target: { kind: "new-asset" },
-        providerInputs: {
-          ...draft.providerInputs,
-          prompt: draft.prompt,
-        },
-        references,
-        audio: generationAudio,
-        idempotencyKey: draft.key,
+        form: draft,
       });
-      await generationRuntime.controller.submit(prepared.draft);
+      await generationRuntime.controller.submit(prepared);
     } catch (error) {
       console.error("inspector-generation-submit-failed", {
         projectId: project.id,
@@ -560,9 +502,7 @@ export const InspectorPanel: React.FC = () => {
     generationCapabilities,
     generationEntryContextResult,
     generationRuntime,
-    project.id,
-    project.mediaLibrary.items,
-    project.timeline.tracks,
+    project,
     selectedTimelineClip?.id,
   ]);
 
@@ -1467,6 +1407,7 @@ export const InspectorPanel: React.FC = () => {
                 <InspectorTabPanel tab="generate" active={activeTab}>
                   <GenerateTab
                     projectId={project.id}
+                    shotId={generationShotId}
                     draftId={selectedClip?.id}
                     context="clip"
                     mode={generationRoute?.output ?? "image"}
