@@ -742,6 +742,62 @@ export const Timeline: React.FC = () => {
     [moveClip, allShapeClips, graphicsEngine, setActiveTrack],
   );
 
+  useEffect(() => {
+    const handleTimelineKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)) return;
+
+      const commandKey = event.metaKey || event.ctrlKey;
+      if (commandKey && (event.key === "+" || event.key === "=")) {
+        event.preventDefault();
+        event.stopPropagation();
+        zoomIn();
+        return;
+      }
+      if (commandKey && event.key === "-") {
+        event.preventDefault();
+        event.stopPropagation();
+        zoomOut();
+        return;
+      }
+      if (!event.altKey || commandKey ||
+        (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+
+      const direction = event.key === "ArrowLeft" ? -1 : 1;
+      const frameDuration = 1 / Math.max(1, project.settings.frameRate);
+      const clips = project.timeline.tracks.flatMap((track) => track.clips);
+      const selected = clips.filter((clip) => selectedClipIds.includes(clip.id));
+      if (selected.length === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      for (const clip of selected) {
+        void handleMoveClip(
+          clip.id,
+          Math.max(0, clip.startTime + direction * frameDuration),
+          clip.trackId,
+        );
+      }
+    };
+
+    window.addEventListener("keydown", handleTimelineKeyDown, true);
+    return () => window.removeEventListener("keydown", handleTimelineKeyDown, true);
+  }, [handleMoveClip, project.settings.frameRate, project.timeline.tracks, selectedClipIds, zoomIn, zoomOut]);
+
+  useEffect(() => {
+    const timeline = containerRef.current;
+    if (!timeline) return;
+    const handleCommandWheel = (event: WheelEvent) => {
+      if (!event.metaKey && !event.ctrlKey) return;
+      event.preventDefault();
+      if (event.deltaY < 0) zoomIn();
+      else if (event.deltaY > 0) zoomOut();
+    };
+    timeline.addEventListener("wheel", handleCommandWheel, { passive: false });
+    return () => timeline.removeEventListener("wheel", handleCommandWheel);
+  }, [zoomIn, zoomOut]);
+
   const [snapIndicatorTime, setSnapIndicatorTime] = React.useState<
     number | null
   >(null);

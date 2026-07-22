@@ -192,4 +192,35 @@ describe("Timeline clip selection", () => {
       });
     });
   });
+
+  it("intercepts command key and command wheel timeline zoom", () => {
+    render(<Timeline />);
+
+    expect(fireEvent.keyDown(window, { key: "+", metaKey: true })).toBe(false);
+    expect(useTimelineStore.getState().pixelsPerSecond).toBe(30);
+
+    const scroller = screen.getByTestId("timeline-scroll-container");
+    expect(fireEvent.wheel(scroller, { deltaY: -100, metaKey: true })).toBe(false);
+    expect(useTimelineStore.getState().pixelsPerSecond).toBe(45);
+
+    expect(fireEvent.keyDown(window, { key: "-", metaKey: true })).toBe(false);
+    expect(useTimelineStore.getState().pixelsPerSecond).toBe(30);
+  });
+
+  it("nudges the selected clip by one project frame with alt arrow", async () => {
+    useUIStore.getState().select({ type: "clip", id: "clip-1", trackId: "track-1" });
+    render(<Timeline />);
+
+    expect(fireEvent.keyDown(window, { key: "ArrowRight", altKey: true })).toBe(false);
+    await waitFor(() => {
+      const clip = useProjectStore.getState().project.timeline.tracks[0]?.clips[0];
+      expect(clip?.startTime).toBeCloseTo(1 / 30);
+    });
+
+    expect(fireEvent.keyDown(window, { key: "ArrowLeft", altKey: true })).toBe(false);
+    await waitFor(() => {
+      const clip = useProjectStore.getState().project.timeline.tracks[0]?.clips[0];
+      expect(clip?.startTime).toBeCloseTo(0);
+    });
+  });
 });
