@@ -558,6 +558,59 @@ test("PUT confirms persistence only after the Git commit succeeds", async () => 
   });
 });
 
+test("PUT maps externally referenced media deletion to a structured 409", async () => {
+  const base = projectFixture("vintage-tokyo", "Vintage Tokyo");
+  const previous: Project = {
+    ...base,
+    mediaLibrary: {
+      items: [{
+        id: "media-1",
+        name: "interview.mp4",
+        type: "video",
+        fileHandle: null,
+        blob: null,
+        thumbnailUrl: null,
+        externallyReferenced: true,
+        metadata: {
+          duration: 1,
+          width: 1920,
+          height: 1080,
+          frameRate: 30,
+          codec: "h264",
+          sampleRate: 0,
+          channels: 0,
+          fileSize: 42,
+        },
+      }],
+    },
+  };
+  const incoming = {
+    ...previous,
+    modifiedAt: previous.modifiedAt + 1,
+    mediaLibrary: { ...previous.mediaLibrary, items: [] },
+  };
+  const store: Partial<ProjectStore> & { testInitialProject?: Project } = {
+    testInitialProject: previous,
+    loadProject: async () => previous,
+  };
+
+  await withProjectRouter(store, { commit: async () => commitReceipt() }, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/projects/vintage-tokyo`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(saveRequest(incoming)),
+    });
+    const body = await response.json();
+
+    assert.equal(response.status, 409);
+    assert.deepEqual(body, {
+      saved: false,
+      code: "EXTERNAL_MEDIA_DELETE_BLOCKED",
+      mediaId: "media-1",
+    });
+  });
+});
+
 
 test("PUT writes modifiedAt-only changes without advancing the confirmed Git revision", async () => {
   const previous = projectFixture("vintage-tokyo", "Vintage Tokyo");

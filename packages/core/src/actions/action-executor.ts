@@ -1,5 +1,7 @@
 import type {
   Action,
+  ActionError,
+  ActionErrorCode,
   ActionResult,
   TimelineAction,
   TrackAction,
@@ -34,6 +36,35 @@ import type {
 import { ActionValidator } from "./action-validator";
 import { ActionHistory } from "./action-history";
 import { InverseActionGenerator } from "./inverse-action-generator";
+
+class ExternalMediaDeleteBlockedActionError extends Error {
+  readonly mediaId: string;
+
+  constructor(mediaId: string) {
+    super(`Media ${mediaId} cannot be deleted because it is referenced by an external editor`);
+    this.name = "ExternalMediaDeleteBlockedActionError";
+    this.mediaId = mediaId;
+  }
+}
+
+function toActionError(
+  error: unknown,
+  fallbackCode: ActionErrorCode,
+  fallbackMessage: string,
+): ActionError {
+  if (error instanceof ExternalMediaDeleteBlockedActionError) {
+    return {
+      code: "EXTERNAL_MEDIA_DELETE_BLOCKED",
+      message: error.message,
+      details: { mediaId: error.mediaId },
+    };
+  }
+
+  return {
+    code: fallbackCode,
+    message: error instanceof Error ? error.message : fallbackMessage,
+  };
+}
 
 export class ActionExecutor {
   private validator: ActionValidator;
@@ -76,11 +107,7 @@ export class ActionExecutor {
     } catch (error) {
       return {
         success: false,
-        error: {
-          code: "ACTION_FAILED",
-          message:
-            error instanceof Error ? error.message : "Unknown error occurred",
-        },
+        error: toActionError(error, "ACTION_FAILED", "Unknown error occurred"),
       };
     }
   }
@@ -108,10 +135,7 @@ export class ActionExecutor {
     } catch (error) {
       return {
         success: false,
-        error: {
-          code: "ACTION_FAILED",
-          message: error instanceof Error ? error.message : "Unknown error occurred",
-        },
+        error: toActionError(error, "ACTION_FAILED", "Unknown error occurred"),
       };
     } finally {
       this.lastAddedIds = previousLastAddedIds;
@@ -166,10 +190,7 @@ export class ActionExecutor {
     } catch (error) {
       return {
         success: false,
-        error: {
-          code: "INVALID_PARAMS",
-          message: error instanceof Error ? error.message : "Undo failed",
-        },
+        error: toActionError(error, "INVALID_PARAMS", "Undo failed"),
       };
     }
   }
@@ -204,10 +225,7 @@ export class ActionExecutor {
     } catch (error) {
       return {
         success: false,
-        error: {
-          code: "INVALID_PARAMS",
-          message: error instanceof Error ? error.message : "Redo failed",
-        },
+        error: toActionError(error, "INVALID_PARAMS", "Redo failed"),
       };
     }
   }
@@ -332,6 +350,12 @@ export class ActionExecutor {
 
       case "media/delete": {
         const params = action.params as { mediaId: string };
+        const item = mediaLibrary.items.find(
+          (candidate: MediaItem) => candidate.id === params.mediaId,
+        );
+        if (item?.externallyReferenced === true) {
+          throw new ExternalMediaDeleteBlockedActionError(params.mediaId);
+        }
         mediaLibrary.items = mediaLibrary.items.filter(
           (item: MediaItem) => item.id !== params.mediaId,
         );

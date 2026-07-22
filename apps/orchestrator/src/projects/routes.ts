@@ -13,7 +13,10 @@ import type {
   ProjectSaveRequest,
   ProjectSaveReceipt,
 } from "@openreel/core";
-import { ProjectStore } from "./project-store";
+import {
+  ExternalMediaDeleteBlockedError,
+  ProjectStore,
+} from "./project-store";
 import {
   GitStore,
   type GitCommitTransaction,
@@ -324,6 +327,14 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       });
       res.json(receipt);
     } catch (err) {
+      if (err instanceof ExternalMediaDeleteBlockedError) {
+        res.status(409).json({
+          saved: false,
+          code: err.code,
+          mediaId: err.mediaId,
+        });
+        return;
+      }
       if (err instanceof SaveTransactionError) {
         res.status(err.status).json(err.body);
         return;

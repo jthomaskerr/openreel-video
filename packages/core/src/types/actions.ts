@@ -34,6 +34,7 @@ export type ActionErrorCode =
   | "OVERLAP_DETECTED" // Clip placement would cause overlap
   | "INSUFFICIENT_HANDLES" // Not enough frames for transition
   | "MEDIA_NOT_FOUND" // Referenced media doesn't exist
+  | "EXTERNAL_MEDIA_DELETE_BLOCKED" // Resolve or another external editor still references this media
   | "UNSUPPORTED_FORMAT" // Media format not supported
   | "STORAGE_FULL" // IndexedDB quota exceeded
   | "DECODE_ERROR" // Failed to decode media

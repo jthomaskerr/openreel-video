@@ -22,6 +22,7 @@ import {
   authorizeDestructiveChange,
   type ServerRemovalManifest,
 } from "./destructive-change";
+import { assertExternallyReferencedMediaPreserved } from "./external-media";
 
 type SaveConflictBody = ProjectSaveConflictResponse
   | ProjectSaveDestructiveChangeRequiresIntentResponse
@@ -233,6 +234,8 @@ export async function executeSaveTransaction(
         currentBaseRevision,
       });
     }
+
+    assertExternallyReferencedMediaPreserved(currentProject, request.project as Project);
 
     const destructiveChange = assessDestructiveChange(currentProject, request.project as Project);
     if (!authorizeDestructiveChange(destructiveChange, {

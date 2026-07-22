@@ -16,6 +16,12 @@ import {
   isValidMediaId,
   isValidProjectId,
 } from "./storage-validation";
+import { assertExternallyReferencedMediaPreserved } from "./external-media";
+
+export {
+  assertExternallyReferencedMediaPreserved,
+  ExternalMediaDeleteBlockedError,
+} from "./external-media";
 
 export interface ProjectSummary {
   readonly id: string;
@@ -163,6 +169,10 @@ export class ProjectStore {
 
     try {
       await this.ensureProjectDir(project.id);
+      const previous = existsSync(this.projectJsonPath(project.id))
+        ? await this.loadProject(project.id)
+        : null;
+      if (previous) assertExternallyReferencedMediaPreserved(previous, project);
       const updated: Project = { ...project, modifiedAt: Date.now() };
       const finalPath = this.projectJsonPath(project.id);
       const tmpPath = `${finalPath}.${crypto.randomUUID()}.tmp`;
