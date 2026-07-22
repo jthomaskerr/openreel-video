@@ -86,6 +86,7 @@ import {
   isImagePlaybackClip,
 } from "./preview/media-image-source";
 import { paintPlaybackBackground } from "./preview/playback-canvas";
+import { resolvePlaybackCleanupPosition } from "./preview/playback-lifecycle";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 import {
   getPersonSegmentationEngine,
@@ -3483,7 +3484,14 @@ export const Preview: React.FC = () => {
 
     let isActive = true;
     let nativeCleanup: (() => void) | null = null;
+    let playbackCompleted = false;
     const playbackStartPosition = startPositionRef.current;
+    const completePlayback = () => {
+      playbackCompleted = true;
+      setPlayheadPosition(0);
+      startPositionRef.current = 0;
+      pause();
+    };
 
     const findAllClipsAtTime = (time: number) => {
       const tracks = timelineTracksRef.current;
@@ -3655,9 +3663,7 @@ export const Preview: React.FC = () => {
                     clipEndTime,
                   );
                 } else if (!isScrubbingRef.current) {
-                  setPlayheadPosition(0);
-                  startPositionRef.current = 0;
-                  pause();
+                  completePlayback();
                 }
                 return;
               }
@@ -3707,9 +3713,7 @@ export const Preview: React.FC = () => {
 
               if (currentPlayhead >= actualEndTime) {
                 if (!isScrubbingRef.current) {
-                  setPlayheadPosition(0);
-                  startPositionRef.current = 0;
-                  pause();
+                  completePlayback();
                 }
                 input[Symbol.dispose]?.();
                 return;
@@ -4040,9 +4044,7 @@ export const Preview: React.FC = () => {
           setPlayheadPosition(t);
           if (t >= actualEndTime) {
             if (!isScrubbingRef.current) {
-              setPlayheadPosition(0);
-              startPositionRef.current = 0;
-              pause();
+              completePlayback();
             }
             return;
           }
@@ -4114,9 +4116,7 @@ export const Preview: React.FC = () => {
             cleanupPlaybackResources();
             cleanupAudioResources();
             masterClock.stop();
-            setPlayheadPosition(0);
-            startPositionRef.current = 0;
-            pause();
+            completePlayback();
             return;
           }
 
@@ -4195,9 +4195,7 @@ export const Preview: React.FC = () => {
               cleanupAudioResources();
               if (!isScrubbingRef.current) {
                 masterClock.stop();
-                setPlayheadPosition(0);
-                startPositionRef.current = 0;
-                pause();
+                completePlayback();
               }
               return;
             }
@@ -4969,7 +4967,7 @@ export const Preview: React.FC = () => {
             nativeCheck.clips,
             nativeCheck.imageClips || [],
             playbackStartPosition,
-            () => pause(),
+            completePlayback,
           );
           return nativeCleanup;
         } catch (error) {
@@ -4990,9 +4988,12 @@ export const Preview: React.FC = () => {
       isActive = false;
       nativePlaybackActiveRef.current = false;
       const masterClock = getMasterClock();
-      if (masterClock.isPlaying || masterClock.isPaused) {
-        startPositionRef.current = masterClock.currentTime;
-      }
+      startPositionRef.current = resolvePlaybackCleanupPosition({
+        completed: playbackCompleted,
+        startPosition: startPositionRef.current,
+        clockIsActive: masterClock.isPlaying || masterClock.isPaused,
+        clockPosition: masterClock.currentTime,
+      });
       if (nativeCleanup) {
         nativeCleanup();
         nativeCleanup = null;

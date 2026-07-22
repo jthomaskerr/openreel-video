@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Project, ProjectSaveReceipt } from "@openreel/core";
+import type { Project, ProjectSaveReceipt, ProjectSaveRequest } from "@openreel/core";
 import { generateThumbnailFromBlob, generateThumbnailFromUrl } from "../utils/media-recovery";
 import { backendSaveService } from "./backend-save";
 import { useNotificationStore } from "../stores/notification-store";
@@ -613,6 +613,65 @@ describe("backendSaveService.save", () => {
       "http://localhost:4041/api/projects/vintage-tokyo",
       expect.objectContaining({ method: "PUT" }),
     );
+  });
+
+  it("rebases a queued local save after the prior save confirms", async () => {
+    vi.useFakeTimers();
+    const requests: ProjectSaveRequest[] = [];
+    const confirmedBase = {
+      commitSha: "1111111111111111111111111111111111111111",
+      treeSha: "2222222222222222222222222222222222222222",
+      projectBlobSha: "3333333333333333333333333333333333333333",
+      sourceModifiedAt: 2,
+    };
+    let resolveFirstSave!: (response: {
+      ok: true;
+      json: () => Promise<unknown>;
+    }) => void;
+    const firstSave = new Promise<{
+      ok: true;
+      json: () => Promise<unknown>;
+    }>((resolve) => {
+      resolveFirstSave = resolve;
+    });
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as ProjectSaveRequest;
+      requests.push(request);
+      if (requests.length === 1) return firstSave;
+      return {
+        ok: true,
+        json: async () => ({
+          project: { ...makeSaveProject(), modifiedAt: request.project.modifiedAt },
+          ...makeReceipt({
+            sourceModifiedAt: request.project.modifiedAt,
+            commitSha: "4444444444444444444444444444444444444444",
+            treeSha: "5555555555555555555555555555555555555555",
+            projectBlobSha: "6666666666666666666666666666666666666666",
+          }),
+        }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    backendSaveService.scheduleSave({ ...makeSaveProject(), modifiedAt: 2 }, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requests).toHaveLength(1);
+
+    backendSaveService.scheduleSave({ ...makeSaveProject(), modifiedAt: 3 }, 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(requests).toHaveLength(1);
+
+    resolveFirstSave({
+      ok: true,
+      json: async () => ({
+        project: { ...makeSaveProject(), modifiedAt: 2 },
+        ...makeReceipt(confirmedBase),
+      }),
+    });
+    await vi.runAllTimersAsync();
+
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.baseRevision).toEqual(confirmedBase);
   });
 
   it("fails visibly if a queued save exceeds its deadline", async () => {

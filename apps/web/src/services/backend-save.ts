@@ -164,6 +164,10 @@ class BackendSaveService {
   /** In-flight media uploads keyed by project/media id so saves can await them. */
   private uploadPromises = new Map<string, Promise<void>>();
   private scheduledSaves = new Map<string, ScheduledSaveState>();
+  private confirmedBaseRevisions = new Map<
+    string,
+    NonNullable<ProjectSaveRequest["baseRevision"]>
+  >();
   private persistencePollTimer: ReturnType<typeof setTimeout> | null = null;
   private persistencePollGeneration = 0;
   private saveChain: Promise<void> = Promise.resolve();
@@ -179,6 +183,7 @@ class BackendSaveService {
         if (scheduled.deadlineTimer) clearTimeout(scheduled.deadlineTimer);
       }
       this.scheduledSaves.clear();
+      this.confirmedBaseRevisions.clear();
     }
     this.persistencePollGeneration += 1;
     if (this.persistencePollTimer) {
@@ -189,7 +194,23 @@ class BackendSaveService {
     const hasMatchingConfirmedBase = preserveReceiptForProjectId != null
       && status.projectId === preserveReceiptForProjectId
       && status.baseRevision != null;
+    if (hasMatchingConfirmedBase) {
+      this.confirmedBaseRevisions.set(preserveReceiptForProjectId, status.baseRevision!);
+    }
     if (!hasMatchingConfirmedBase) status.reset();
+  }
+
+  private rememberConfirmedBaseRevision(
+    projectId: string,
+    receipt: ProjectSaveReceipt,
+  ): void {
+    if (!receipt.commitSha || !receipt.treeSha || !receipt.projectBlobSha) return;
+    this.confirmedBaseRevisions.set(projectId, {
+      commitSha: receipt.commitSha,
+      treeSha: receipt.treeSha,
+      projectBlobSha: receipt.projectBlobSha,
+      sourceModifiedAt: receipt.sourceModifiedAt,
+    });
   }
 
   private schedulePersistenceConfirmation(
@@ -222,6 +243,7 @@ class BackendSaveService {
             projectId,
             receipt.sourceModifiedAt,
           );
+          this.rememberConfirmedBaseRevision(projectId, confirmed);
           usePersistenceStatusStore.getState().markPersisted(projectId, confirmed);
           this.persistencePollTimer = null;
           return;
@@ -258,6 +280,9 @@ class BackendSaveService {
     console.debug("[Persistence] queued", { projectId: project.id, delayMs, modifiedAt: project.modifiedAt });
     const status = usePersistenceStatusStore.getState();
     if (status.projectId === project.id) status.markPending(project.id);
+    if (status.projectId === project.id && status.baseRevision) {
+      this.confirmedBaseRevisions.set(project.id, status.baseRevision);
+    }
 
     const now = Date.now();
     let scheduled = this.scheduledSaves.get(project.id);
@@ -317,7 +342,11 @@ class BackendSaveService {
         .catch((previousError) => {
           console.debug("[Persistence] continuing after reported save failure", previousError);
         })
-        .then(() => this.save(pending.project, "autosave", pending.baseRevision));
+        .then(() => this.save(
+          pending.project,
+          "autosave",
+          this.confirmedBaseRevisions.get(pending.project.id) ?? pending.baseRevision,
+        ));
       this.saveChain = run;
       void run.catch((error) => {
         if (error instanceof TerminalPersistenceError) return;
@@ -458,6 +487,7 @@ class BackendSaveService {
       response.project?.id ?? "",
       response.project?.modifiedAt ?? Number.NaN,
     );
+    this.rememberConfirmedBaseRevision(response.project.id, receipt);
     usePersistenceStatusStore.getState().confirmReceipt(response.project.id, receipt);
     return response.project;
   }
@@ -636,6 +666,7 @@ class BackendSaveService {
         const response = await res.json() as BackendSaveResponse;
         if (response.committed === false) {
           const receipt = validateSaveResponse(response, project.id, snapshot.modifiedAt);
+          this.rememberConfirmedBaseRevision(project.id, receipt);
           this.applyCanonicalFilenames(project, response.project);
           const currentStatus = usePersistenceStatusStore.getState();
           if (currentStatus.projectId === project.id) {
@@ -650,6 +681,7 @@ class BackendSaveService {
         }
 
         const receipt = validateSaveResponse(response, project.id, snapshot.modifiedAt);
+        this.rememberConfirmedBaseRevision(project.id, receipt);
         this.applyCanonicalFilenames(project, response.project);
         const currentStatus = usePersistenceStatusStore.getState();
         if (currentStatus.projectId === project.id) {
@@ -736,6 +768,7 @@ class BackendSaveService {
       const response = await res.json() as BackendProjectResponse;
       const { project, mediaFiles } = response;
       const receipt = validateSaveResponse(response, projectId, project.modifiedAt);
+      this.rememberConfirmedBaseRevision(projectId, receipt);
       if (receipt.committed === false) {
         usePersistenceStatusStore.getState().markDeferred(projectId, receipt);
         this.schedulePersistenceConfirmation(projectId, receipt);
