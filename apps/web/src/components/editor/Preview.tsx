@@ -105,6 +105,7 @@ import {
   paintPlaybackBackground,
   shouldDrawLastGoodFrame,
 } from "./preview/playback-canvas";
+import { refreshActivePlaybackAfterWarmup } from "./preview/playback-session";
 import { ProcessingOverlay } from "./ProcessingOverlay";
 import {
   getPersonSegmentationEngine,
@@ -115,6 +116,7 @@ import {
 import type { MotionPathConfig, GSAPMotionPathPoint, MediaItem } from "@openreel/core";
 import { selectMediaAvailabilityView } from "../../services/media-availability-view";
 import { mediaAvailabilityRuntime } from "../../services/media-verification";
+import { getOrLoadCachedAudioBuffer } from "../../utils/load-audio-buffer";
 
 function getPreviewMediaAvailability(mediaItem: MediaItem | undefined, mediaId: string) {
   const projectId = useProjectStore.getState().project.id;
@@ -321,7 +323,7 @@ const renderFrameWithGPU = async (
       texture,
       transform: gpuTransform,
       effects: [],
-      opacity: transform.opacity,
+      opacity: 1,
       borderRadius: transform.borderRadius || 0
     });
 
@@ -380,7 +382,7 @@ const renderAllLayersWithGPU = async (
         texture,
         transform: gpuTransform,
         effects: [],
-        opacity: layer.transform.opacity,
+        opacity: 1,
         borderRadius: layer.transform.borderRadius || 0
       });
     }
@@ -509,7 +511,10 @@ export const Preview: React.FC = () => {
   const audioGraphRef = useRef<ReturnType<typeof getRealtimeAudioGraph> | null>(
     null,
   );
-  const audioBufferCacheRef = useRef<Map<string, AudioBuffer>>(new Map());
+  const audioBufferCacheRef = useRef<Map<string, AudioBuffer | null>>(new Map());
+  const audioBufferLoadPromisesRef = useRef<
+    Map<string, Promise<AudioBuffer | null>>
+  >(new Map());
   const processedAudioBufferCacheRef = useRef<Map<string, AudioBuffer>>(new Map());
 
   const getAudioBufferCacheKey = (mediaId: string, audioTrackIndex?: number): string =>
@@ -1503,19 +1508,20 @@ export const Preview: React.FC = () => {
           audioClip.audioTrackIndex,
         );
         let audioBuffer = audioBufferCacheRef.current.get(audioCacheKey);
-        if (!audioBuffer) {
+        if (!audioBuffer && !audioBufferCacheRef.current.has(audioCacheKey)) {
           try {
             const audioContext = audioGraph.getAudioContext();
-            const loaded = await loadAudioBuffer(
-              audioContext,
-              getMediaSourceBlob(mediaItem)!,
-              audioClip.audioTrackIndex ?? 0,
+            audioBuffer = await getOrLoadCachedAudioBuffer(
+            audioBufferCacheRef.current,
+            audioBufferLoadPromisesRef.current,
+            audioCacheKey,
+              () =>
+                loadAudioBuffer(
+                  audioContext,
+                  getMediaSourceBlob(mediaItem)!,
+                  audioClip.audioTrackIndex ?? 0,
+                ),
             );
-            if (!loaded) {
-              continue;
-            }
-            audioBuffer = loaded;
-            audioBufferCacheRef.current.set(audioCacheKey, audioBuffer);
           } catch (error) {
             console.warn(
               `[Preview] Failed to decode audio for clip ${audioClip.id}:`,
@@ -1523,6 +1529,10 @@ export const Preview: React.FC = () => {
             );
             continue;
           }
+        }
+
+        if (!audioBuffer) {
+          continue;
         }
 
         const audioEffects = getResolvedClipAudioEffects(audioClip);
@@ -1606,16 +1616,19 @@ export const Preview: React.FC = () => {
             continue;
           }
 
-          try {
-            audioBuffer = await loadAudioBuffer(
-              audioContext,
-              getMediaSourceBlob(mediaItem)!,
-              clip.audioTrackIndex ?? 0,
-            );
-            if (audioBuffer) {
-              audioBufferCacheRef.current.set(cacheKey, audioBuffer);
-            }
-          } catch {
+        try {
+          audioBuffer = await getOrLoadCachedAudioBuffer(
+            audioBufferCacheRef.current,
+            audioBufferLoadPromisesRef.current,
+            cacheKey,
+            () =>
+              loadAudioBuffer(
+                audioContext,
+                getMediaSourceBlob(mediaItem)!,
+                clip.audioTrackIndex ?? 0,
+              ),
+          );
+        } catch {
             audioBuffer = null;
           }
         }
@@ -4100,6 +4113,10 @@ export const Preview: React.FC = () => {
         }
       }
 
+      if (!isActive) {
+        return;
+      }
+
       const hasTextOrShapeContent =
         activeTextClips.length > 0 || activeShapeClips.length > 0;
       if (
@@ -4112,9 +4129,28 @@ export const Preview: React.FC = () => {
         return;
       }
 
-      startPlaybackAudioWarmup(preDecodeAllAudioBuffers, (error) => {
+      // FIXME: sneaking suspicion refreshActive replaced this
+      /*startPlaybackAudioWarmup(preDecodeAllAudioBuffers, (error) => {
         console.warn("[Preview] Audio warmup failed:", error);
-      });
+      });*/
+
+      refreshActivePlaybackAfterWarmup(
+        preDecodeAllAudioBuffers,
+        () => isActive,
+        () => {
+          const masterClock = getMasterClock();
+          const audioGraph = audioGraphRef.current;
+          if (!audioGraph || !masterClock.isPlaying) {
+            return;
+          }
+          audioGraph.stopScheduler();
+          audioGraph.seekTo(masterClock.currentTime);
+          audioGraph.startScheduler(getAudioClipsForScheduler);
+        },
+        (error) => {
+          console.warn("[Preview] Audio warmup failed:", error);
+        },
+      );
 
       if (!audioGraphRef.current) {
         audioGraphRef.current = getRealtimeAudioGraph();
@@ -4136,12 +4172,12 @@ export const Preview: React.FC = () => {
         });
       }
 
-      startPlaybackAudioResume(
-        () => audioGraph.resume(),
-        (error) => {
-          console.warn("[Preview] Audio context resume failed:", error);
-        },
-      );
+      void audioGraph.resume().catch((error) => {
+        console.warn("[Preview] Audio graph resume failed:", error);
+      });
+      if (!isActive) {
+        return;
+      }
 
       // Audio-only path: skip canvas entirely when there is nothing to render visually.
       // The WebGPU renderer owns the canvas context, so canvas.getContext("2d") always
@@ -4159,6 +4195,9 @@ export const Preview: React.FC = () => {
         audioGraph.seekTo(playbackStartPosition);
         audioGraph.setPlaybackRate(rateRef.current);
         await masterClock.play();
+        if (!isActive) {
+          return;
+        }
         audioGraph.startScheduler(getAudioClipsForScheduler);
 
         const audioOnlyLoop = () => {
@@ -4219,6 +4258,9 @@ export const Preview: React.FC = () => {
       audioGraph.seekTo(playbackStartPosition);
       audioGraph.setPlaybackRate(rateRef.current);
       await masterClock.play();
+      if (!isActive) {
+        return;
+      }
       audioGraph.startScheduler(getAudioClipsForScheduler);
 
       const frameDuration = 1000 / 30;
