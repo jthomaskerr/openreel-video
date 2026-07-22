@@ -45,6 +45,9 @@ import {
   type TimeEstimate,
 } from "@openreel/core";
 import { ExportDialog } from "./ExportDialog";
+import { HandoffExportDialog } from "./HandoffExportDialog";
+import { createBrowserHandoffDependencies } from "../../services/browser-export-handoff";
+import { startHandoff } from "../../services/export-handoff";
 import { ScreenRecorder } from "./ScreenRecorder";
 import { HistoryPanel } from "./inspector/HistoryPanel";
 import { ProjectSwitcher } from "./ProjectSwitcher";
@@ -116,6 +119,7 @@ export const Toolbar: React.FC = () => {
   const { navigate } = useRouter();
   const { openSettings } = useSettingsStore();
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  const [isHandoffDialogOpen, setIsHandoffDialogOpen] = useState(false);
   const [isRecorderOpen, setIsRecorderOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const { importMedia } = useProjectStore();
@@ -1018,6 +1022,23 @@ export const Toolbar: React.FC = () => {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="flex items-start gap-2 rounded-md px-2 py-2 cursor-pointer hover:bg-hover focus:bg-hover"
+                    onClick={() => setIsHandoffDialogOpen(true)}
+                  >
+                    <div className="shrink-0 p-1 bg-primary/15 rounded-md text-primary">
+                      <Film size={16} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-sm font-medium text-fg leading-tight">
+                        Continue editing…
+                      </div>
+                      <div className="text-[11px] text-fg-muted mt-0.5 leading-snug">
+                        DaVinci Resolve or iMovie handoff
+                      </div>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    className="flex items-start gap-2 rounded-md px-2 py-2 cursor-pointer hover:bg-hover focus:bg-hover"
                     onClick={() => setIsExportDialogOpen(true)}
                   >
                     <div className="shrink-0 p-1 bg-accent-soft rounded-md text-accent">
@@ -1071,6 +1092,20 @@ export const Toolbar: React.FC = () => {
         duration={project.timeline?.duration ?? 0}
         projectWidth={project.settings?.width ?? 1920}
         projectHeight={project.settings?.height ?? 1080}
+      />
+
+      <HandoffExportDialog
+        isOpen={isHandoffDialogOpen}
+        onClose={() => setIsHandoffDialogOpen(false)}
+        project={project}
+        onStart={(selection, options) =>
+          startHandoff(
+            project,
+            selection,
+            createBrowserHandoffDependencies(project.id),
+            options,
+          )
+        }
       />
 
       <ScreenRecorder

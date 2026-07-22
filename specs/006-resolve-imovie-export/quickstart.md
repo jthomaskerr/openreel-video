@@ -63,7 +63,8 @@ Run the recorded performance gate on Apple M4, 16 GiB RAM, macOS, and Node.js 26
 
 ```bash
 pnpm --filter @openreel/web test:run -- src/services/export-handoff.test.ts src/components/editor/HandoffExportDialog.test.tsx src/components/editor/Toolbar.test.tsx
-pnpm --filter @openreel/web test:run -- src/test/export-handoff.integration.test.ts src/test/export-integration.test.ts
+pnpm --filter @openreel/web exec vitest run --config vitest.handoff-integration.config.ts
+pnpm --filter @openreel/web test:run -- src/test/export-integration.test.ts
 ```
 
 Expected:

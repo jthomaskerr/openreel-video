@@ -309,6 +309,10 @@ vi.mock("../../stores/persistence-status-store", () => ({
 }));
 
 vi.mock("./ExportDialog", () => ({ ExportDialog: () => null }));
+vi.mock("./HandoffExportDialog", () => ({
+  HandoffExportDialog: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div role="dialog" aria-label="Continue editing handoff" /> : null,
+}));
 vi.mock("./ScreenRecorder", () => ({ ScreenRecorder: () => null }));
 vi.mock("./ProjectSwitcher", () => ({ ProjectSwitcher: () => null }));
 vi.mock("./settings/SettingsDialog", () => ({ SettingsDialog: () => null }));
@@ -385,6 +389,7 @@ describe("Toolbar editor header layout and menu", () => {
     expect((submenu as HTMLElement).style.marginLeft).toBe("calc(-100% - var(--radix-popper-anchor-width) - 8px)");
     expect(within(submenu as HTMLElement).getByRole("menuitem", { name: /^MP4 Standard/ })).toBeInTheDocument();
     expect(within(submenu as HTMLElement).getByRole("menuitem", { name: /^Custom export…/ })).toBeInTheDocument();
+    expect(within(submenu as HTMLElement).getByRole("menuitem", { name: /^Continue editing…/ })).toBeInTheDocument();
 
     expect(exportItem.querySelectorAll("svg")).toHaveLength(1);
 
@@ -394,5 +399,15 @@ describe("Toolbar editor header layout and menu", () => {
     fireEvent.click(menuTrigger);
     fireEvent.click(screen.getByRole("menuitem", { name: "Import Neural Frames" }));
     expect(toolbarMocks.openFilePicker).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens the handoff dialog without changing the existing custom export entry", () => {
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Open editor menu" }));
+
+    expect(screen.getByRole("menuitem", { name: /^Custom export…/ })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("menuitem", { name: /^Continue editing…/ }));
+
+    expect(screen.getByRole("dialog", { name: "Continue editing handoff" })).toBeInTheDocument();
   });
 });

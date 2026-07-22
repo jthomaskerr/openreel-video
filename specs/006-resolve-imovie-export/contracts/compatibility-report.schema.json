@@ -179,6 +179,14 @@
         "label": {
           "type": "string",
           "minLength": 1
+        },
+        "trackIndex": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "timelineFrame": {
+          "type": ["integer", "null"],
+          "minimum": 0
         }
       }
     },
@@ -191,7 +199,8 @@
         "entity",
         "message",
         "action",
-        "retryable"
+        "retryable",
+        "details"
       ],
       "properties": {
         "code": {
@@ -218,6 +227,12 @@
         },
         "retryable": {
           "type": "boolean"
+        },
+        "details": {
+          "type": "object",
+          "additionalProperties": {
+            "type": ["string", "number", "boolean", "null"]
+          }
         }
       }
     },
