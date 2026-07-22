@@ -41,3 +41,12 @@ Implemented reusable, read-only Resolve picker preview components for backend re
 ## Scope note
 
 This task creates the approved reusable components only. The following picker-composition task mounts them into `ProjectMetadata`; browser verification belongs to that mounted integration task.
+
+## Review follow-up: unique disclosure IDs
+
+- Fixed `ClipGroups` disclosures so every component instance derives a sanitized React `useId()` prefix and appends the group type. Each button's `aria-controls` now resolves to its own panel even when multiple project previews are mounted together.
+- Regression coverage renders two `ClipGroups` instances, asserts their unsupported-group panel IDs are distinct, verifies each target exists, and confirms collapsing one removes only its own panel.
+- RED: the new regression assertion failed against the previous `resolve-clip-group-unsupported` ID collision.
+- GREEN: `rtk pnpm --filter @openreel/web exec vitest run src/components/editor/resolve-picker/preview-components.test.tsx` passed 8/8 tests.
+- Typecheck: `rtk pnpm --dir apps/web exec tsc --noEmit` exited 0.
+- `rtk git diff --check` exited 0.

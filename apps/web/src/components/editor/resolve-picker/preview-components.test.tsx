@@ -160,19 +160,33 @@ describe("ClipGroups", () => {
       },
     ];
 
-    render(<ClipGroups groups={groups} />);
+    render(
+      <>
+        <ClipGroups groups={groups} />
+        <ClipGroups groups={groups} />
+      </>,
+    );
 
-    expect(screen.getByRole("button", { name: "Video, 1 clip" })).toHaveAttribute("aria-expanded", "true");
-    expect(screen.getByRole("button", { name: "Audio, 1 clip" })).toHaveAttribute("aria-expanded", "true");
-    const unsupported = screen.getByRole("button", { name: "Unsupported, 1 clip" });
-    expect(unsupported).toHaveAttribute("aria-controls", "resolve-clip-group-unsupported");
-    expect(screen.getByText("Adjustment layers cannot be previewed before export.")).toBeVisible();
+    expect(screen.getAllByRole("button", { name: "Video, 1 clip" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Audio, 1 clip" })).toHaveLength(2);
+    const unsupportedButtons = screen.getAllByRole("button", { name: "Unsupported, 1 clip" });
+    const unsupportedPanelIds = unsupportedButtons.map((button) => button.getAttribute("aria-controls"));
+    expect(unsupportedPanelIds).toHaveLength(2);
+    expect(new Set(unsupportedPanelIds).size).toBe(2);
+    for (const panelId of unsupportedPanelIds) {
+      expect(panelId).toBeTruthy();
+      expect(document.getElementById(panelId!)).toBeInTheDocument();
+    }
+    const unsupported = unsupportedButtons[0];
+    expect(document.getElementById(unsupportedPanelIds[0]!)).toHaveTextContent(
+      "Adjustment layers cannot be previewed before export.",
+    );
 
     unsupported.focus();
     fireEvent.click(unsupported);
     expect(unsupported).toHaveFocus();
     expect(unsupported).toHaveAttribute("aria-expanded", "false");
-    expect(screen.queryByText("Adjustment layers cannot be previewed before export.")).not.toBeInTheDocument();
+    expect(document.getElementById(unsupportedPanelIds[0]!)).not.toBeInTheDocument();
     fireEvent.click(unsupported);
     expect(unsupported).toHaveAttribute("aria-expanded", "true");
   });

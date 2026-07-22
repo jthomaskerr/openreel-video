@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type {
   ResolvePreviewClipGroup,
   ResolvePreviewClipType,
@@ -20,6 +20,7 @@ const GROUP_LABELS: Record<ResolvePreviewClipType, string> = {
 
 export function ClipGroups({ groups }: ClipGroupsProps) {
   const [collapsed, setCollapsed] = useState<Partial<Record<ResolvePreviewClipType, boolean>>>({});
+  const instanceId = useId().replace(/:/g, "");
 
   if (groups.length === 0) {
     return <p className="text-sm text-muted-foreground">This project has no clips to preview.</p>;
@@ -30,7 +31,7 @@ export function ClipGroups({ groups }: ClipGroupsProps) {
       {groups.map((group) => {
         const label = GROUP_LABELS[group.type];
         const isExpanded = !collapsed[group.type];
-        const panelId = `resolve-clip-group-${group.type}`;
+        const panelId = `resolve-clip-group-${instanceId}-${group.type}`;
         const countLabel = `${group.clips.length.toLocaleString("en-GB")} ${group.clips.length === 1 ? "clip" : "clips"}`;
 
         return (
