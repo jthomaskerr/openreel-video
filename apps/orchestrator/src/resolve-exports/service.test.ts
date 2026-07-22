@@ -130,6 +130,7 @@ const selection: HandoffSelection = {
 };
 
 const FIXED_JOB_ID = "11111111-1111-4111-8111-111111111111";
+const CONFIRMED_REVISION = "a".repeat(40);
 
 function jobPath(name: string): string {
   return `exports/resolve/${FIXED_JOB_ID}/${name}`;
@@ -190,9 +191,10 @@ async function fixture(options: FixtureOptions = {}) {
   await writeFile(join(projectDir, "media", "street.mov"), "canonical-media");
   const commits: Array<{ message: string; transaction: GitCommitTransaction }> = [];
   const snapshots = new Map<string, Map<string, string>>([
-    ["confirmed-revision", new Map([["project.json", confirmedProjectBytes.toString("utf8")]])],
+    [CONFIRMED_REVISION, new Map([["project.json", confirmedProjectBytes.toString("utf8")]])],
   ]);
-  let head = "confirmed-revision";
+  const parents = new Map<string, string | null>([[CONFIRMED_REVISION, null]]);
+  let head = CONFIRMED_REVISION;
   let commitCount = 0;
   const commit = vi.fn(async (message: string, transaction: GitCommitTransaction) => {
     commits.push({ message, transaction });
@@ -203,12 +205,13 @@ async function fixture(options: FixtureOptions = {}) {
     await transaction.hooks?.afterStage?.();
     await transaction.hooks?.afterTree?.();
     await transaction.hooks?.beforeRefUpdate?.();
-    const nextSha = `commit-${commitCount}`;
+    const nextSha = commitCount.toString(16).padStart(40, "0");
     const nextSnapshot = new Map(snapshots.get(head));
     for (const path of transaction.allowlist) {
       nextSnapshot.set(path, await readFile(join(projectDir, path), "utf8"));
     }
     snapshots.set(nextSha, nextSnapshot);
+    parents.set(nextSha, head);
     head = nextSha;
     await transaction.hooks?.afterRefUpdate?.();
     const projectBytes = Buffer.from(nextSnapshot.get("project.json")!, "utf8");
@@ -229,26 +232,44 @@ async function fixture(options: FixtureOptions = {}) {
     unstage: vi.fn(async () => undefined),
   };
   let transactionTail = Promise.resolve();
+  const currentReceipt = async () => {
+    const projectBytes = Buffer.from(snapshots.get(head)!.get("project.json")!, "utf8");
+    const projectBlobSha = createHash("sha1")
+      .update(Buffer.from(`blob ${projectBytes.byteLength}\0`, "utf8"))
+      .update(projectBytes)
+      .digest("hex");
+    return {
+      commitSha: head,
+      treeSha: `tree-${head}`,
+      projectBlobSha,
+      mediaManifestDigest: "manifest-digest",
+    };
+  };
+  const isAncestor = (ancestor: string, descendant: string): boolean => {
+    let cursor: string | null | undefined = descendant;
+    while (cursor) {
+      if (cursor === ancestor) return true;
+      cursor = parents.get(cursor);
+    }
+    return false;
+  };
   const git = {
-    readConfirmedReceipt: vi.fn(async () => {
-      const projectBytes = Buffer.from(snapshots.get(head)!.get("project.json")!, "utf8");
-      const projectBlobSha = createHash("sha1")
-        .update(Buffer.from(`blob ${projectBytes.byteLength}\0`, "utf8"))
-        .update(projectBytes)
-        .digest("hex");
-      return {
-        commitSha: head,
-        treeSha: `tree-${head}`,
-        projectBlobSha,
-        mediaManifestDigest: "manifest-digest",
-      };
-    }),
+    readConfirmedReceipt: vi.fn(currentReceipt),
+    readConfirmedReceiptStrict: vi.fn(async () => ({ status: "present" as const, value: await currentReceipt() })),
     getProjectAtCommit: vi.fn(async (_projectId: string, sha: string) => {
       const bytes = snapshots.get(sha)?.get("project.json");
       return bytes ? JSON.parse(bytes) as Project : null;
     }),
     readFileAtCommit: vi.fn(async (_projectId: string, sha: string, path: string) =>
       snapshots.get(sha)?.get(path) ?? null),
+    readFileAtCommitStrict: vi.fn(async (_projectId: string, sha: string, path: string) => {
+      const value = snapshots.get(sha)?.get(path);
+      return value === undefined
+        ? { status: "absent" as const }
+        : { status: "present" as const, value };
+    }),
+    isCommitAncestor: vi.fn(async (_projectId: string, ancestor: string, descendant: string) =>
+      isAncestor(ancestor, descendant)),
     commit: vi.fn(async (_projectId: string, message: string, transaction: GitCommitTransaction) =>
       commit(message, transaction)),
     withProjectTransaction: async <T>(
@@ -307,8 +328,17 @@ async function fixture(options: FixtureOptions = {}) {
     git,
     gitTransaction,
     commits,
+    jobs,
     service,
     newService: () => createService(),
+    advanceConflictingHead: (path: string, value: string) => {
+      const nextSha = (commitCount + 1_000).toString(16).padStart(40, "0");
+      const nextSnapshot = new Map(snapshots.get(head));
+      nextSnapshot.set(path, value);
+      snapshots.set(nextSha, nextSnapshot);
+      parents.set(nextSha, head);
+      head = nextSha;
+    },
     setCrashAt: (point: ResolveTransactionPoint | null) => { crashAt = point; },
     setNow: (value: number) => { now = value; },
   };
@@ -316,7 +346,7 @@ async function fixture(options: FixtureOptions = {}) {
 
 async function startReady(input?: Awaited<ReturnType<typeof fixture>>) {
   const f = input ?? await fixture();
-  const job = await f.service.start("vintage-tokyo", "confirmed-revision", selection);
+  const job = await f.service.start("vintage-tokyo", CONFIRMED_REVISION, selection);
   const persisted = JSON.parse(await readFile(
     join(f.projectDir, "exports", "resolve", job.id, "job.json"),
     "utf8",
@@ -329,6 +359,49 @@ async function startImporting(input?: Awaited<ReturnType<typeof fixture>>) {
   const ready = await startReady(input);
   await ready.service.redeem(ready.token);
   return ready;
+}
+
+type ServiceFixture = Awaited<ReturnType<typeof fixture>>;
+
+async function pendingRecoveryState(f: ServiceFixture) {
+  const transactionsDirectory = join(f.projectDir, jobPath(".transactions"));
+  const [journalName] = await readdir(transactionsDirectory);
+  if (!journalName) throw new Error("pending recovery journal is missing");
+  const journalPath = join(transactionsDirectory, journalName);
+  return {
+    journalPath,
+    journalBytes: await readFile(journalPath, "utf8"),
+    jobBytes: await readFile(join(f.projectDir, jobPath("job.json")), "utf8"),
+    projectBytes: await readFile(join(f.projectDir, "project.json"), "utf8"),
+    unstageCalls: vi.mocked(f.gitTransaction.unstage).mock.calls.length,
+  };
+}
+
+async function expectRecoveryStateUnchanged(
+  f: ServiceFixture,
+  before: Awaited<ReturnType<typeof pendingRecoveryState>>,
+): Promise<void> {
+  expect(await readFile(before.journalPath, "utf8")).toBe(before.journalBytes);
+  expect(await readFile(join(f.projectDir, jobPath("job.json")), "utf8")).toBe(before.jobBytes);
+  expect(await readFile(join(f.projectDir, "project.json"), "utf8")).toBe(before.projectBytes);
+  expect(vi.mocked(f.gitTransaction.unstage)).toHaveBeenCalledTimes(before.unstageCalls);
+}
+
+async function expectSanitizedRecoveryFailure(service: ResolveExportService): Promise<void> {
+  let caught: unknown;
+  try {
+    await service.recoveryDiagnostics();
+  } catch (error) {
+    caught = error;
+  }
+  expect(caught).toMatchObject({
+    code: "RECOVERY_FAILED",
+    projectId: "vintage-tokyo",
+    jobId: FIXED_JOB_ID,
+    message: "Resolve transaction recovery failed",
+  });
+  expect(JSON.stringify(caught)).not.toContain("sensitive-token");
+  expect(JSON.stringify(caught)).not.toContain("/private/secret");
 }
 
 describe("ResolveExportService", () => {
@@ -344,13 +417,13 @@ describe("ResolveExportService", () => {
     const dirty = { ...projectFixture(), name: "Dirty Worktree", modifiedAt: selection.projectModifiedAt };
     await writeFile(join(f.projectDir, "project.json"), JSON.stringify(dirty, null, 2));
 
-    await expect(f.service.start("vintage-tokyo", "confirmed-revision", selection))
+    await expect(f.service.start("vintage-tokyo", CONFIRMED_REVISION, selection))
       .rejects.toMatchObject({ code: "WORKTREE_REVISION_MISMATCH", projectId: "vintage-tokyo" });
   });
 
   test("rejects incomplete required media with stable identifiers", async () => {
     const f = await fixture({ complete: false });
-    await expect(f.service.start("vintage-tokyo", "confirmed-revision", selection))
+    await expect(f.service.start("vintage-tokyo", CONFIRMED_REVISION, selection))
       .rejects.toMatchObject({ code: "MEDIA_INCOMPLETE", projectId: "vintage-tokyo", mediaIds: ["media-1"] });
   });
 
@@ -486,6 +559,63 @@ describe("ResolveExportService", () => {
   });
 
   test.each([
+    ["confirmed-ref receipt failure", async (f: ServiceFixture) => {
+      f.git.readConfirmedReceiptStrict.mockRejectedValueOnce(
+        new Error("sensitive-token receipt failure at /private/secret"),
+      );
+    }],
+    ["committed-file read failure", async (f: ServiceFixture) => {
+      f.git.readFileAtCommitStrict.mockRejectedValueOnce(
+        new Error("sensitive-token git show failure at /private/secret"),
+      );
+    }],
+    ["invalid current ref SHA", async (f: ServiceFixture) => {
+      const receipt = await f.git.readConfirmedReceipt();
+      f.git.readConfirmedReceiptStrict.mockResolvedValueOnce({
+        status: "present",
+        value: { ...receipt, commitSha: "invalid-sha" },
+      });
+    }],
+    ["ancestry read failure", async (f: ServiceFixture) => {
+      f.git.isCommitAncestor.mockRejectedValueOnce(
+        new Error("sensitive-token merge-base failure at /private/secret"),
+      );
+    }],
+    ["conflicting descendant", async (f: ServiceFixture) => {
+      f.advanceConflictingHead(jobPath("job.json"), "conflicting descendant bytes");
+    }],
+  ] as const)("fails closed without mutation on %s", async (_label, inject) => {
+    const f = await fixture({ crashAt: "after-ref-update" });
+    await expect(f.service.start("vintage-tokyo", CONFIRMED_REVISION, selection))
+      .rejects.toMatchObject({ point: "after-ref-update" });
+    f.setCrashAt(null);
+    await inject(f);
+    const before = await pendingRecoveryState(f);
+
+    await expectSanitizedRecoveryFailure(f.newService());
+    await expectRecoveryStateUnchanged(f, before);
+  });
+
+  test("fails closed without mutation when a pending journal image is corrupt", async () => {
+    const f = await fixture({ crashAt: "after-ref-update" });
+    await expect(f.service.start("vintage-tokyo", CONFIRMED_REVISION, selection))
+      .rejects.toMatchObject({ point: "after-ref-update" });
+    f.setCrashAt(null);
+    const pending = await pendingRecoveryState(f);
+    const raw = JSON.parse(pending.journalBytes) as {
+      writes: Array<{ path: string; afterBase64: string }>;
+    };
+    const jobWrite = raw.writes.find((write) => write.path === jobPath("job.json"));
+    if (!jobWrite) throw new Error("pending job write is missing");
+    jobWrite.afterBase64 = Buffer.from("tampered job bytes").toString("base64");
+    await writeFile(pending.journalPath, `${JSON.stringify(raw, null, 2)}\n`, "utf8");
+    const before = await pendingRecoveryState(f);
+
+    await expectSanitizedRecoveryFailure(f.newService());
+    await expectRecoveryStateUnchanged(f, before);
+  });
+
+  test.each([
     `after-publish:${jobPath("Vintage Tokyo.fcpxml")}`,
     `after-publish:${jobPath("manifest.json")}`,
     `after-publish:${jobPath("compatibility-report.md")}`,
@@ -496,7 +626,7 @@ describe("ResolveExportService", () => {
     "after-ref-update",
   ] satisfies readonly ResolveTransactionPoint[])("recovers a start crash at %s", async (point) => {
     const f = await fixture({ crashAt: point });
-    await expect(f.service.start("vintage-tokyo", "confirmed-revision", selection))
+    await expect(f.service.start("vintage-tokyo", CONFIRMED_REVISION, selection))
       .rejects.toMatchObject({ point });
     f.setCrashAt(null);
 

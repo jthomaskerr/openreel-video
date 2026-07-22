@@ -71,3 +71,23 @@ Implemented the durable Resolve export job and artifact service in one backend-o
 - Orchestrator TypeScript: `tsc -p apps/orchestrator/tsconfig.json --noEmit` exited 0.
 - Serena diagnostics: no warnings or errors in all six changed source/test files.
 - `git diff --check` exited 0.
+
+## Fix Round 2
+
+### RED evidence
+
+- Thirteen corrupt-journal cases exposed eleven integrity failures: tampered before/after images, malformed or duplicate writes, invalid published paths, noncanonical base64, unknown keys, invalid kind/timestamp/base SHA, an empty write set, and physical job/transaction rebinding.
+- Six recovery cases proved the classifier trusted ambiguous Git reads: receipt failure, committed-file read failure, invalid current SHA, ancestry failure, a conflicting descendant, and a corrupt pending image all proceeded instead of failing closed.
+
+### Corrective implementation
+
+- Transaction journals now require an exact schema, full base commit SHA, canonical timestamps and base64, matching before/after SHA-256 digests, a nonempty unique confined write set, and project/job/transaction identities bound to the physical journal location. The complete journal is validated and every image decoded before any publish, restore, or deletion mutation.
+- Git recovery reads now distinguish proven absence from operational failure, validate full commit identities, prove committed-path presence before reading, and classify ancestry with `merge-base --is-ancestor`.
+- Recovery rolls back only when the authoritative ref exactly equals the journal base. Roll-forward requires a descendant ref and exact after-image hashes for every committed path. Missing, invalid, conflicting, or unreadable Git state returns sanitized `RECOVERY_FAILED` with safe project/job identifiers before any unstage, file restore, or journal deletion.
+
+### GREEN evidence
+
+- Journal suite: 27 passed, 0 failed, including all thirteen corrupt-journal regressions.
+- Resolve service suite: 48 passed, 0 failed, including all six fail-closed recovery regressions and the existing 25-point crash matrix.
+- Real Git-store allowlist and concurrency suites: 9 passed, 0 failed, including strict present/absent reads, invalid revision rejection, and both ancestry outcomes.
+- Orchestrator TypeScript: `tsc -p apps/orchestrator/tsconfig.json --noEmit` exited 0 with no output.

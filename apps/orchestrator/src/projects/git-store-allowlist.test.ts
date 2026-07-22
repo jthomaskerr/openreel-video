@@ -85,6 +85,38 @@ test("commit lifecycle hooks bracket the ref update and committed files remain r
   }
 });
 
+test("strict recovery reads distinguish absence, invalid revisions, and ancestry", async () => {
+  const { fixtureRoot, gitStore, projectStore } = await makeStore();
+  try {
+    const project = await projectStore.createProject("Strict Recovery Reads");
+    const base = await gitStore.commit(project.id, "test: create recovery base", {
+      allowlist: ["project.json"],
+      expectedEntries: [{ status: "A", path: "project.json" }],
+    });
+    assert.ok(base.commitSha);
+
+    await projectStore.saveProject({ ...project, name: "Strict Recovery Reads Updated" });
+    const descendant = await gitStore.commit(project.id, "test: create recovery descendant", {
+      allowlist: ["project.json"],
+      expectedEntries: [{ status: "M", path: "project.json" }],
+    });
+    assert.ok(descendant.commitSha);
+
+    const receipt = await gitStore.readConfirmedReceiptStrict(project.id);
+    assert.equal(receipt.status, "present");
+    if (receipt.status === "present") assert.equal(receipt.value.commitSha, descendant.commitSha);
+    assert.equal((await gitStore.readFileAtCommitStrict(project.id, descendant.commitSha, "missing.json")).status, "absent");
+    await assert.rejects(
+      gitStore.readFileAtCommitStrict(project.id, "invalid-sha", "project.json"),
+      { code: "GIT_READ_FAILED", message: "Authoritative Git state could not be read" },
+    );
+    assert.equal(await gitStore.isCommitAncestor(project.id, base.commitSha, descendant.commitSha), true);
+    assert.equal(await gitStore.isCommitAncestor(project.id, descendant.commitSha, base.commitSha), false);
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});
+
 test("expected cached entries are order-independent", async () => {
   const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
   try {

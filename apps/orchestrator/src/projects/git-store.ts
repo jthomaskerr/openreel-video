@@ -10,6 +10,7 @@ import type { Project } from "@openreel/core";
 import { assertValidProjectId } from "./storage-validation";
 
 const execFileAsync = promisify(execFile);
+const FULL_COMMIT_SHA = /^[0-9a-f]{40}$/i;
 
 const SYSTEM_GIT_CANDIDATES = process.platform === "win32"
   ? []
@@ -44,6 +45,19 @@ export interface GitCommitReceipt {
   treeSha: string | null;
   projectBlobSha: string | null;
   mediaManifestDigest: string | null;
+}
+
+export type GitReadResult<T> =
+  | { readonly status: "present"; readonly value: T }
+  | { readonly status: "absent" };
+
+export class GitStoreReadError extends Error {
+  readonly code = "GIT_READ_FAILED";
+
+  constructor(readonly projectId: string) {
+    super("Authoritative Git state could not be read");
+    this.name = "GitStoreReadError";
+  }
 }
 
 export interface GitCommitTransaction {
@@ -264,6 +278,36 @@ export class GitStore {
       return await this.#resolveReceiptFromCommit(projectId, commitSha, mediaManifestDigest);
     } catch {
       return null;
+    }
+  }
+
+  async readConfirmedReceiptStrict(projectId: string): Promise<GitReadResult<GitCommitReceipt>> {
+    assertValidProjectId(projectId);
+    const wtPath = this.worktreePath(projectId);
+    if (!existsSync(join(wtPath, ".git"))) return { status: "absent" };
+
+    let commitSha: string;
+    try {
+      const { stdout } = await this.git(["rev-parse", "--verify", "--quiet", "HEAD^{commit}"], wtPath);
+      commitSha = stdout.trim();
+    } catch (error) {
+      if ((error as ExecException).code === 1) return { status: "absent" };
+      throw new GitStoreReadError(projectId);
+    }
+    if (!FULL_COMMIT_SHA.test(commitSha)) throw new GitStoreReadError(projectId);
+
+    try {
+      const { stdout } = await this.git(
+        ["diff-tree", "--root", "--no-commit-id", "--name-status", "-z", "-r", commitSha],
+        wtPath,
+      );
+      const mediaManifestDigest = digestEntries(normalizeExpectedEntries(parseCachedNameStatus(stdout)));
+      return {
+        status: "present",
+        value: await this.#resolveReceiptFromCommit(projectId, commitSha, mediaManifestDigest),
+      };
+    } catch {
+      throw new GitStoreReadError(projectId);
     }
   }
 
@@ -745,6 +789,50 @@ export class GitStore {
       return (await this.git(["show", `${sha}:${normalizedPath}`], wtPath)).stdout;
     } catch {
       return null;
+    }
+  }
+
+  async readFileAtCommitStrict(
+    projectId: string,
+    sha: string,
+    relativePath: string,
+  ): Promise<GitReadResult<string>> {
+    assertValidProjectId(projectId);
+    if (!FULL_COMMIT_SHA.test(sha)) throw new GitStoreReadError(projectId);
+    const normalizedPath = normalizeCommitPath(relativePath);
+    const wtPath = this.worktreePath(projectId);
+    if (!existsSync(join(wtPath, ".git"))) throw new GitStoreReadError(projectId);
+
+    try {
+      await this.git(["cat-file", "-e", `${sha}^{commit}`], wtPath);
+      const { stdout: paths } = await this.git(
+        ["ls-tree", "--full-tree", "--name-only", "-z", sha, "--", normalizedPath],
+        wtPath,
+      );
+      const exists = paths.split("\0").some((path) => path === normalizedPath);
+      if (!exists) return { status: "absent" };
+      return {
+        status: "present",
+        value: (await this.git(["show", `${sha}:${normalizedPath}`], wtPath)).stdout,
+      };
+    } catch {
+      throw new GitStoreReadError(projectId);
+    }
+  }
+
+  async isCommitAncestor(projectId: string, ancestor: string, descendant: string): Promise<boolean> {
+    assertValidProjectId(projectId);
+    if (!FULL_COMMIT_SHA.test(ancestor) || !FULL_COMMIT_SHA.test(descendant)) {
+      throw new GitStoreReadError(projectId);
+    }
+    const wtPath = this.worktreePath(projectId);
+    if (!existsSync(join(wtPath, ".git"))) throw new GitStoreReadError(projectId);
+    try {
+      await this.git(["merge-base", "--is-ancestor", ancestor, descendant], wtPath);
+      return true;
+    } catch (error) {
+      if ((error as ExecException).code === 1) return false;
+      throw new GitStoreReadError(projectId);
     }
   }
 

@@ -20,11 +20,13 @@ import type {
   GitCommitReceipt,
   GitCommitTransaction,
   GitProjectTransaction,
+  GitReadResult,
 } from "../projects/git-store";
 import type { ProjectMediaManifestSnapshot } from "../projects/media-manifest";
 import { buildResolvePreview, type PreviewMediaAvailability } from "./preview";
 import {
   ResolveExportJobStore,
+  ResolveJobStoreError,
   type PersistedResolveExportJob,
   type ResolveExportArtifact,
   type ResolveTransactionJournal,
@@ -32,6 +34,7 @@ import {
 } from "./job-store";
 
 const TOKEN_TTL_MS = 5 * 60 * 1_000;
+const FULL_COMMIT_SHA = /^[0-9a-f]{40}$/i;
 
 type BridgeErrorCode =
   | "PROJECT_NOT_FOUND"
@@ -83,12 +86,19 @@ interface ProjectStorePort {
 
 interface GitStorePort {
   readonly readConfirmedReceipt: (projectId: string) => Promise<GitCommitReceipt | null>;
+  readonly readConfirmedReceiptStrict: (projectId: string) => Promise<GitReadResult<GitCommitReceipt>>;
   readonly getProjectAtCommit: (projectId: string, sha: string) => Promise<Project | null>;
   readonly readFileAtCommit: (
     projectId: string,
     sha: string,
     relativePath: string,
   ) => Promise<string | null>;
+  readonly readFileAtCommitStrict: (
+    projectId: string,
+    sha: string,
+    relativePath: string,
+  ) => Promise<GitReadResult<string>>;
+  readonly isCommitAncestor: (projectId: string, ancestor: string, descendant: string) => Promise<boolean>;
   readonly commit: (
     projectId: string,
     message: string,
@@ -312,9 +322,16 @@ export class ResolveExportService {
   }
 
   async #latestJournal(journal: ResolveTransactionJournal): Promise<ResolveTransactionJournal> {
-    return (await this.options.jobs.listTransactions())
-      .find((candidate) => candidate.transactionId === journal.transactionId)
-      ?? journal;
+    const current = (await this.options.jobs.listTransactions())
+      .find((candidate) => candidate.transactionId === journal.transactionId);
+    if (!current) {
+      throw new ResolveJobStoreError(
+        "RESOLVE_JOB_CORRUPT",
+        "Resolve transaction journal is missing",
+        { projectId: journal.projectId, jobId: journal.jobId },
+      );
+    }
+    return current;
   }
 
   async #reconcileJournal(
@@ -322,22 +339,28 @@ export class ResolveExportService {
     transaction: GitProjectTransaction,
   ): Promise<ResolveRecoveryDiagnostic> {
     const journal = await this.#latestJournal(journalInput);
-    const receipt = await this.options.git.readConfirmedReceipt(journal.projectId);
-    let committed = Boolean(receipt?.commitSha);
+    const receipt = await this.options.git.readConfirmedReceiptStrict(journal.projectId);
+    if (receipt.status !== "present" || !receipt.value.commitSha || !FULL_COMMIT_SHA.test(receipt.value.commitSha)) {
+      throw new Error("Authoritative Resolve recovery ref is unavailable");
+    }
+    const currentCommitSha = receipt.value.commitSha;
+    const committed = currentCommitSha !== journal.baseCommitSha;
     if (committed) {
+      if (!await this.options.git.isCommitAncestor(journal.projectId, journal.baseCommitSha, currentCommitSha)) {
+        throw new Error("Resolve recovery ref does not descend from the transaction base");
+      }
       for (const write of journal.writes) {
-        const committedText = await this.options.git.readFileAtCommit(
+        const committedFile = await this.options.git.readFileAtCommitStrict(
           journal.projectId,
-          receipt!.commitSha!,
+          currentCommitSha,
           write.path,
         );
         if (
-          committedText === null
-          || crypto.createHash("sha256").update(Buffer.from(committedText, "utf8")).digest("hex")
+          committedFile.status !== "present"
+          || crypto.createHash("sha256").update(Buffer.from(committedFile.value, "utf8")).digest("hex")
             !== write.afterSha256
         ) {
-          committed = false;
-          break;
+          throw new Error("Resolve recovery commit does not contain the transaction image");
         }
       }
     }
@@ -357,15 +380,23 @@ export class ResolveExportService {
   }
 
   async #recoverTransactions(): Promise<void> {
+    let recovering: ResolveTransactionJournal | undefined;
     try {
       for (const journal of await this.options.jobs.listTransactions()) {
+        recovering = journal;
         await this.options.git.withProjectTransaction(journal.projectId, (transaction) =>
           this.#reconcileJournal(journal, transaction));
       }
     } catch (error) {
+      const identifiers = error instanceof ResolveJobStoreError
+        ? error.identifiers
+        : recovering
+          ? { projectId: recovering.projectId, jobId: recovering.jobId }
+          : {};
       throw new ResolveExportServiceError(
         "RECOVERY_FAILED",
         "Resolve transaction recovery failed",
+        identifiers,
       );
     }
   }
