@@ -38,6 +38,20 @@ The application therefore keeps both `applicationVersions` lists empty. Candidat
 
 Automated contract evidence does not replace importing the artifacts into the exact target-editor build.
 
+## Resolve live acceptance
+
+The deterministic verifier is available at `apps/resolve-bridge/scripts/live-acceptance.py`. It checks committed backend export evidence for Vintage Tokyo against Resolve 21.0.3 build 21.0.30007, including 38 clips across 4 tracks, a 7,980-frame FCPXML duration, zero offline media, saved status, Git revision consistency, and artifact SHA-256 values. Its output is sanitized and excludes local paths and credentials.
+
+| Evidence | Status |
+|---|---|
+| First live Vintage Tokyo import | Pending live run |
+| Repeat import with collision-safe project naming | Pending second live run |
+| First-run artifact and result immutability | Pending second live run |
+| Direct Resolve project save timestamp | Pending live observation; not present in the current backend result contract |
+| Actual job IDs, project names, revisions, and artifact hashes | Pending; no values recorded until observed from a live run |
+
+The first successful verification intentionally reports `pending-second-run`. A subsequent verification reports `pass` only when the new job and Resolve project names are distinct and the persisted first-run baseline is unchanged. These pending fields do not advertise Resolve support or change the exact-build matrix result.
+
 ## Promotion procedure
 
 1. Generate the maintained fixture artifacts with an unchanged target contract.
