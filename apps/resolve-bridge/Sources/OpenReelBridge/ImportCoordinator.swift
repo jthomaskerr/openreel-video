@@ -20,7 +20,7 @@ public enum ImportCoordinatorError: Error, Equatable, CustomStringConvertible, S
     }
 }
 
-public actor ImportCoordinator {
+public actor ImportCoordinator: BridgeImportRunning {
     private let backend: any BackendServing
     private let resolve: any ResolveAutomating
     private let terminalTimeout: Duration
@@ -39,18 +39,30 @@ public actor ImportCoordinator {
     var isRunning: Bool { running }
 
     public func run(launchToken: UUID) async throws {
+        try await run(launchToken: launchToken) { _ in }
+    }
+
+    public func run(
+        launchToken: UUID,
+        progress: @Sendable (ImportProgress) async -> Void
+    ) async throws {
         guard !running else { throw ImportCoordinatorError.requestAlreadyRunning }
         running = true
         defer { running = false }
 
+        await progress(.connecting)
         let jobID = try await backend.redeem(launchToken: launchToken).jobID
         try Task.checkCancellation()
+        await progress(.openingResolve)
         try await resolve.ensureRunning()
         try Task.checkCancellation()
+        await progress(.creatingProject)
         try await resolve.createProject(named: "OpenReel Import \(jobID.uuidString.lowercased())")
         try Task.checkCancellation()
+        await progress(.runningImporter)
         try await resolve.invokeBridgeScript()
         try Task.checkCancellation()
+        await progress(.validating)
         let terminal = try await backend.waitForTerminalResult(
             jobID: jobID,
             timeout: terminalTimeout
