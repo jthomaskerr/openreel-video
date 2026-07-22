@@ -83,3 +83,4 @@ generated-assets/
 output/
 apps/web/test-results
 node_modules
+apps/resolve-bridge/.build/
