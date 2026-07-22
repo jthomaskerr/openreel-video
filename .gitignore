@@ -43,6 +43,7 @@ coverage/
 .worktrees/
 .temp/
 .docs/
+.superpowers/
 
 # OrchID working files
 orchid-wt-*/
