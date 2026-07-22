@@ -116,14 +116,14 @@ function previewForMedia(
         status: "ready" as const,
         kind: "video" as const,
         url,
-        thumbnailUrl: projectMediaUrl(projectId, mediaId, "/thumbnail"),
+        thumbnailUrl: url,
       };
     case "audio":
       return {
         status: "ready" as const,
         kind: "audio" as const,
         url,
-        waveformUrl: projectMediaUrl(projectId, mediaId, "/waveform"),
+        waveformUrl: url,
       };
     case "image":
       return { status: "ready" as const, kind: "image" as const, url };
@@ -132,7 +132,7 @@ function previewForMedia(
   }
 }
 
-function buildMiniTimeline(project: Project) {
+function buildMiniTimeline(project: Project, mediaById: ReadonlyMap<string, MediaItem>) {
   const frameRate = project.settings.frameRate;
   const tracks = project.timeline.tracks.map((track, index) => ({
     id: track.id,
@@ -141,7 +141,7 @@ function buildMiniTimeline(project: Project) {
     clips: track.clips.map((clip) => ({
       id: clip.id,
       ...(clip.mediaId ? { mediaId: clip.mediaId } : {}),
-      label: labelForClip(clipType(clip.type), project.mediaLibrary.items.find((media) => media.id === clip.mediaId)),
+      label: labelForClip(clipType(clip.type), mediaById.get(clip.mediaId)),
       startFrame: secondsToFrames(clip.startTime, frameRate),
       endFrame: secondsToFrames(clip.startTime + clip.duration, frameRate),
     })),
@@ -249,17 +249,16 @@ function resolveLatestRender(
   };
 }
 
-function compatibilityForPreview(
-  project: Project,
-  groups: ReturnType<typeof buildClipGroups>,
-) {
-  const mediaById = new Map(project.mediaLibrary.items.map((media) => [media.id, media]));
+function compatibilityForPreview(groups: ReturnType<typeof buildClipGroups>) {
   let blockingIssueCount = 0;
   let warningCount = 0;
   for (const group of groups) {
     if (group.type === "unsupported") warningCount += group.clips.length;
     for (const clip of group.clips) {
-      if (clip.mediaId && clip.preview.status === "missing" && mediaById.has(clip.mediaId)) {
+      const requiresMedia = group.type === "video"
+        || group.type === "audio"
+        || (group.type === "graphics" && Boolean(clip.mediaId));
+      if (requiresMedia && clip.preview.status === "missing") {
         blockingIssueCount += 1;
       }
     }
@@ -276,7 +275,8 @@ export function buildResolvePreview(
   revision: string,
   availability: ReadonlyMap<string, PreviewMediaAvailability>,
 ): ResolvePreview {
-  const miniTimeline = buildMiniTimeline(project);
+  const mediaById = new Map(project.mediaLibrary.items.map((media) => [media.id, media]));
+  const miniTimeline = buildMiniTimeline(project, mediaById);
   const clipGroups = buildClipGroups(project, availability);
   return ResolvePreviewSchema.parse({
     projectId: project.id,
@@ -287,12 +287,12 @@ export function buildResolvePreview(
     modifiedAt: project.modifiedAt,
     durationFrames: secondsToFrames(project.timeline.duration, project.settings.frameRate),
     frameRate: project.settings.frameRate,
-    trackCount: miniTimeline.tracks.length,
+    trackCount: project.timeline.tracks.length,
     clipCount: clipGroups.reduce((count, group) => count + group.clips.length, 0),
     mediaCount: project.mediaLibrary.items.length,
     render: resolveLatestRender(project, revision, availability),
     miniTimeline,
     clipGroups,
-    compatibility: compatibilityForPreview(project, clipGroups),
+    compatibility: compatibilityForPreview(clipGroups),
   });
 }

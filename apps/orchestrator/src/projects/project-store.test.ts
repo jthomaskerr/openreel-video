@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "@openreel/core";
 import type { GitStore } from "./git-store";
-import { ProjectStore } from "./project-store";
+import { ProjectStore, ProjectSummaryLoadError } from "./project-store";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;
@@ -83,7 +83,7 @@ test("project summaries expose picker metadata from persisted projects", async (
     timeline: {
       duration: 3,
       markers: [],
-      subtitles: [],
+      subtitles: [{ id: "subtitle-1", text: "Tokyo", startTime: 1, endTime: 2 }],
       tracks: [{
         id: "video-track",
         name: "Video",
@@ -119,9 +119,58 @@ test("project summaries expose picker metadata from persisted projects", async (
       duration: 3,
       frameRate: 30,
       trackCount: 1,
-      clipCount: 2,
+      clipCount: 3,
       representativeMediaId: "media-1",
     }]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("project summaries normalize a compatible legacy project shape", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openreel-legacy-project-summary-"));
+  const project = projectWithMedia();
+  const legacy = JSON.parse(JSON.stringify(project)) as Record<string, unknown>;
+  delete legacy.description;
+  delete (legacy.timeline as Record<string, unknown>).subtitles;
+  await mkdir(join(root, project.id), { recursive: true });
+  await writeFile(join(root, project.id, "project.json"), JSON.stringify(legacy));
+  const gitStore = {
+    repoDir: root,
+    ensureSharedRepo: async () => undefined,
+    worktreePath: (id: string) => join(root, id),
+    withProjectTransaction: async (_projectId: string, operation: (transaction: unknown) => Promise<unknown>) => operation({}),
+  } as unknown as GitStore;
+
+  try {
+    const [summary] = await new ProjectStore(gitStore).listProjects();
+
+    assert.equal(summary!.description, "");
+    assert.equal(summary!.duration, 0);
+    assert.equal(summary!.clipCount, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("project summaries surface malformed persisted projects with their project ID", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openreel-malformed-project-summary-"));
+  await mkdir(join(root, "vintage-tokyo"), { recursive: true });
+  await writeFile(join(root, "vintage-tokyo", "project.json"), "{not-json");
+  const gitStore = {
+    repoDir: root,
+    ensureSharedRepo: async () => undefined,
+    worktreePath: (id: string) => join(root, id),
+    withProjectTransaction: async (_projectId: string, operation: (transaction: unknown) => Promise<unknown>) => operation({}),
+  } as unknown as GitStore;
+
+  try {
+    await assert.rejects(new ProjectStore(gitStore).listProjects(), (error: unknown) => {
+      assert.ok(error instanceof ProjectSummaryLoadError);
+      assert.equal(error.code, "PROJECT_SUMMARY_UNAVAILABLE");
+      assert.equal(error.projectId, "vintage-tokyo");
+      return true;
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

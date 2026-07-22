@@ -39,6 +39,19 @@ export interface ProjectSummary {
   readonly representativeMediaId?: string;
 }
 
+export class ProjectSummaryLoadError extends Error {
+  readonly code = "PROJECT_SUMMARY_UNAVAILABLE";
+
+  constructor(
+    readonly projectId: string,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(`Project ${projectId} summary is unavailable: ${message}`, options);
+    this.name = "ProjectSummaryLoadError";
+  }
+}
+
 export interface ProjectMediaAuditOptions {
   /** Defaults to true; false is reserved for lower-level manifest-only checks. */
   readonly verifyLfs?: boolean;
@@ -90,6 +103,63 @@ function uuidPattern(): RegExp {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function requiredString(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.length === 0) throw new Error(`${field} must be a non-empty string`);
+  return value;
+}
+
+function requiredFiniteNumber(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error(`${field} must be a finite number`);
+  return value;
+}
+
+function summarizePersistedProject(value: unknown, directoryId: string): ProjectSummary {
+  if (!isRecord(value)) throw new Error("project.json must contain an object");
+  const id = requiredString(value.id, "id");
+  if (!isValidProjectId(id) || id !== directoryId) throw new Error("id must match the project directory");
+  const name = requiredString(value.name, "name");
+  const createdAt = requiredFiniteNumber(value.createdAt, "createdAt");
+  const modifiedAt = requiredFiniteNumber(value.modifiedAt, "modifiedAt");
+  if (value.description !== undefined && typeof value.description !== "string") {
+    throw new Error("description must be a string when present");
+  }
+  if (!isRecord(value.settings)) throw new Error("settings must be an object");
+  const frameRate = requiredFiniteNumber(value.settings.frameRate, "settings.frameRate");
+  if (frameRate <= 0) throw new Error("settings.frameRate must be positive");
+  if (!isRecord(value.timeline)) throw new Error("timeline must be an object");
+  const duration = requiredFiniteNumber(value.timeline.duration, "timeline.duration");
+  if (duration < 0) throw new Error("timeline.duration must be non-negative");
+  if (!Array.isArray(value.timeline.tracks)) throw new Error("timeline.tracks must be an array");
+  const subtitles = value.timeline.subtitles === undefined ? [] : value.timeline.subtitles;
+  if (!Array.isArray(subtitles)) throw new Error("timeline.subtitles must be an array when present");
+  if (!isRecord(value.mediaLibrary) || !Array.isArray(value.mediaLibrary.items)) {
+    throw new Error("mediaLibrary.items must be an array");
+  }
+  const clipCount = value.timeline.tracks.reduce((count, track, index) => {
+    if (!isRecord(track) || !Array.isArray(track.clips)) throw new Error(`timeline.tracks[${index}].clips must be an array`);
+    return count + track.clips.length;
+  }, 0) + subtitles.length;
+  const representativeMediaId = value.mediaLibrary.items.find((media) => isRecord(media)
+    && typeof media.id === "string"
+    && (media.type === "video" || media.type === "image" || media.type === "audio")) as Record<string, unknown> | undefined;
+  return {
+    id,
+    name,
+    description: value.description ?? "",
+    createdAt,
+    modifiedAt,
+    duration,
+    frameRate,
+    trackCount: value.timeline.tracks.length,
+    clipCount,
+    representativeMediaId: typeof representativeMediaId?.id === "string" ? representativeMediaId.id : undefined,
+  };
+}
+
 export class ProjectStore {
   constructor(private readonly gitStore: GitStore) {}
 
@@ -131,31 +201,23 @@ export class ProjectStore {
       await Promise.all(
         dirs.map(async (dir) => {
           if (!isValidProjectId(dir.name)) return null;
-          await recoverInterruptedSave(this, this.gitStore, dir.name);
-          const jsonPath = join(this.gitStore["repoDir"], dir.name, "project.json");
           try {
+            await recoverInterruptedSave(this, this.gitStore, dir.name);
+            const jsonPath = join(this.gitStore["repoDir"], dir.name, "project.json");
             const raw = await readFile(jsonPath, "utf-8");
-            const project = JSON.parse(raw) as Project;
-            if (!isValidProjectId(project.id)) return null;
-            return {
-              id: project.id,
-              name: project.name,
-              description: project.description ?? "",
-              createdAt: project.createdAt,
-              modifiedAt: project.modifiedAt,
-              duration: project.timeline.duration,
-              frameRate: project.settings.frameRate,
-              trackCount: project.timeline.tracks.length,
-              clipCount: project.timeline.tracks.reduce(
-                (count, track) => count + track.clips.length,
-                0,
-              ) + project.timeline.subtitles.length,
-              representativeMediaId: project.mediaLibrary.items.find(
-                (media) => media.type === "video" || media.type === "image" || media.type === "audio",
-              )?.id,
-            } as ProjectSummary;
-          } catch {
-            return null;
+            return summarizePersistedProject(JSON.parse(raw), dir.name);
+          } catch (error) {
+            const summaryError = new ProjectSummaryLoadError(
+              dir.name,
+              error instanceof Error ? error.message : "unknown read error",
+              { cause: error },
+            );
+            console.error("[ProjectStore] project summary unavailable", {
+              code: summaryError.code,
+              projectId: summaryError.projectId,
+              cause: error,
+            });
+            throw summaryError;
           }
         }),
       )

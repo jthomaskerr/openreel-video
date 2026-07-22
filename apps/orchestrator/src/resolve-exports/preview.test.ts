@@ -108,6 +108,16 @@ describe("buildResolvePreview", () => {
       updatedAt: 3,
       stale: false,
     });
+    expect(preview.trackCount).toBe(3);
+    expect(preview.miniTimeline.tracks).toHaveLength(4);
+    expect(preview.clipGroups.find((group) => group.type === "video")!.clips[0]!.preview).toMatchObject({
+      url: "/api/projects/vintage-tokyo/media/video-1",
+      thumbnailUrl: "/api/projects/vintage-tokyo/media/video-1",
+    });
+    expect(preview.clipGroups.find((group) => group.type === "audio")!.clips[0]!.preview).toMatchObject({
+      url: "/api/projects/vintage-tokyo/media/audio-1",
+      waveformUrl: "/api/projects/vintage-tokyo/media/audio-1",
+    });
   });
 
   test("reports unavailable media and stale renders without exposing file paths", () => {
@@ -129,6 +139,61 @@ describe("buildResolvePreview", () => {
       stale: true,
       reason: "Render belongs to revision older-revision, not rev-123",
     });
+    expect(preview.compatibility).toEqual({ status: "blocked", blockingIssueCount: 1, warningCount: 0 });
     expect(JSON.stringify(preview)).not.toContain("/Volumes/");
+  });
+
+  test("retains graphics and unsupported clips while converting fractional times to frames", () => {
+    const project = projectFixture();
+    (project.timeline.tracks as unknown as object[]).push(
+      track("graphics-track", "graphics", [clip("graphic-1", "shape", "", 1 / 60, 1 / 20)]),
+      track("metadata-track", "metadata", [clip("unknown-1", "metadata", "", 2 / 30, 1 / 30)]),
+    );
+
+    const preview = buildResolvePreview(project, "rev-123", availabilityFixture());
+
+    expect(preview.clipGroups.find((group) => group.type === "graphics")!.clips).toHaveLength(1);
+    expect(preview.clipGroups.find((group) => group.type === "unsupported")!.clips).toHaveLength(1);
+    expect(preview.miniTimeline.tracks[3]!.clips[0]).toMatchObject({ startFrame: 1, endFrame: 2 });
+    expect(preview.miniTimeline.tracks[4]!.clips[0]).toMatchObject({ startFrame: 2, endFrame: 3 });
+    expect(preview.compatibility).toEqual({ status: "degraded", blockingIssueCount: 0, warningCount: 1 });
+  });
+
+  test("blocks supported clips with missing, dangling, or absent media IDs", () => {
+    const project = projectFixture();
+    (project.timeline.tracks[0]!.clips as unknown as object[]).push(
+      clip("no-media", "video", "", 0, 1),
+      clip("dangling-media", "video", "absent-media", 1, 1),
+    );
+
+    const preview = buildResolvePreview(project, "rev-123", availabilityFixture());
+
+    expect(preview.clipGroups.find((group) => group.type === "video")!.clips.slice(-2).map((clip) => clip.preview.status)).toEqual([
+      "missing",
+      "missing",
+    ]);
+    expect(preview.compatibility).toEqual({ status: "blocked", blockingIssueCount: 2, warningCount: 0 });
+  });
+
+  test.each([
+    ["no render", new Map<string, PreviewMediaAvailability>(), { status: "missing", reason: "No rendered output is available" }],
+    ["missing render", new Map<string, PreviewMediaAvailability>([["render-1", { status: "missing", renderedAt: 3, reason: "Rendered output is unavailable" }]]), { status: "missing", reason: "Rendered output is unavailable" }],
+    ["unknown render revision", new Map<string, PreviewMediaAvailability>([["render-1", { status: "ready", renderedAt: 3 }]]), { status: "stale", reason: "Render revision is unavailable" }],
+  ])("reports %s explicitly", (_name, availability, expected) => {
+    const preview = buildResolvePreview(projectFixture(), "rev-123", availability);
+
+    expect(preview.render).toMatchObject(expected);
+  });
+
+  test("emits only canonical project-media URLs", () => {
+    const preview = buildResolvePreview(projectFixture(), "rev-123", availabilityFixture());
+    const urls = preview.clipGroups.flatMap((group) => group.clips.flatMap((clip) => {
+      if (clip.preview.status !== "ready") return [];
+      return [clip.preview.url, ...(clip.preview.kind === "video" && clip.preview.thumbnailUrl ? [clip.preview.thumbnailUrl] : []), ...(clip.preview.kind === "audio" ? [clip.preview.waveformUrl] : [])];
+    }));
+
+    const previewUrls = [preview.render.status === "missing" ? undefined : preview.render.previewUrl, ...urls]
+      .filter((url): url is string => Boolean(url));
+    expect(previewUrls.every((url) => /^\/api\/projects\/vintage-tokyo\/media\/[A-Za-z0-9-]+$/.test(url))).toBe(true);
   });
 });
