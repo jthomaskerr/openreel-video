@@ -4,7 +4,10 @@ import { join } from "node:path";
 import crypto from "node:crypto";
 import type { Project, ProjectSettings } from "@openreel/core";
 import type { GitStore } from "./git-store";
-import { recoverInterruptedSave } from "./save-transaction";
+import {
+  recoverInterruptedSave,
+  recoverInterruptedSaveUnderLock,
+} from "./save-transaction";
 import type { LfsRemoteObjectCheck } from "./lfs-integrity";
 import {
   auditProjectMediaManifest,
@@ -169,16 +172,24 @@ export class ProjectStore {
 
     try {
       await this.ensureProjectDir(project.id);
-      const previous = existsSync(this.projectJsonPath(project.id))
-        ? await this.loadProject(project.id)
-        : null;
-      if (previous) assertExternallyReferencedMediaPreserved(previous, project);
-      const updated: Project = { ...project, modifiedAt: Date.now() };
-      const finalPath = this.projectJsonPath(project.id);
-      const tmpPath = `${finalPath}.${crypto.randomUUID()}.tmp`;
-      await writeFile(tmpPath, JSON.stringify(updated, null, 2), "utf-8");
-      await rename(tmpPath, finalPath);
-      return updated;
+      return await this.gitStore.withProjectTransaction(project.id, async (transaction) => {
+        await recoverInterruptedSaveUnderLock(
+          this,
+          this.gitStore,
+          project.id,
+          transaction,
+        );
+        const finalPath = this.projectJsonPath(project.id);
+        const previous = existsSync(finalPath)
+          ? JSON.parse(await readFile(finalPath, "utf-8")) as Project
+          : null;
+        if (previous) assertExternallyReferencedMediaPreserved(previous, project);
+        const updated: Project = { ...project, modifiedAt: Date.now() };
+        const tmpPath = `${finalPath}.${crypto.randomUUID()}.tmp`;
+        await writeFile(tmpPath, JSON.stringify(updated, null, 2), "utf-8");
+        await rename(tmpPath, finalPath);
+        return updated;
+      });
     } catch (err) {
       // Roll back the worktree if we created it and project.json was never written.
       if (worktreeWasNew && !existsSync(this.projectJsonPath(project.id))) {

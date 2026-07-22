@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import type { Project } from "@openreel/core";
 import type { GitStore } from "./git-store";
 import { ProjectStore } from "./project-store";
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
 
 function projectWithMedia(overrides: Record<string, unknown> = {}): Project {
   return {
@@ -122,4 +130,76 @@ test("backend rejects changing the canonical path of externally referenced media
       { code: "EXTERNAL_MEDIA_DELETE_BLOCKED", mediaId: "media-1" },
     );
   });
+});
+
+test("concurrent stale deletion rechecks external references inside the project lock", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openreel-external-media-race-"));
+  const projectDir = join(root, "vintage-tokyo");
+  await mkdir(projectDir, { recursive: true });
+
+  const firstEntered = deferred();
+  const resumeFirst = deferred();
+  const secondQueued = deferred();
+  let transactionCalls = 0;
+  let transactionTail = Promise.resolve();
+  const gitStore = {
+    worktreePath: () => projectDir,
+    ensureWorktree: async () => undefined,
+    deleteWorktree: async () => undefined,
+    withProjectTransaction: async (
+      _projectId: string,
+      operation: (transaction: unknown) => Promise<unknown>,
+    ) => {
+      const call = ++transactionCalls;
+      if (call === 2) secondQueued.resolve();
+      const predecessor = transactionTail;
+      let release!: () => void;
+      transactionTail = new Promise<void>((complete) => {
+        release = complete;
+      });
+      await predecessor;
+      if (call === 1) {
+        firstEntered.resolve();
+        await resumeFirst.promise;
+      }
+      try {
+        return await operation({});
+      } finally {
+        release();
+      }
+    },
+  } as unknown as GitStore;
+
+  try {
+    const original = projectWithMedia({ externallyReferenced: false });
+    await writeFile(join(projectDir, "project.json"), JSON.stringify(original, null, 2));
+    const store = new ProjectStore(gitStore);
+    const protectedByA = projectWithMedia({ externallyReferenced: true, title: "Protected by A" });
+    const staleDeletionByB = {
+      ...original,
+      mediaLibrary: { ...original.mediaLibrary, items: [] },
+    };
+
+    const saveA = store.saveProject(protectedByA);
+    await firstEntered.promise;
+    const saveB = store.saveProject(staleDeletionByB);
+    await secondQueued.promise;
+    resumeFirst.resolve();
+
+    const [resultA, resultB] = await Promise.allSettled([saveA, saveB]);
+
+    assert.equal(resultA.status, "fulfilled");
+    assert.equal(resultB.status, "rejected");
+    if (resultB.status === "rejected") {
+      assert.equal(resultB.reason.code, "EXTERNAL_MEDIA_DELETE_BLOCKED");
+      assert.equal(resultB.reason.mediaId, "media-1");
+    }
+    const persisted = JSON.parse(await readFile(join(projectDir, "project.json"), "utf8")) as Project;
+    assert.equal(persisted.mediaLibrary.items[0]!.id, "media-1");
+    assert.equal(persisted.mediaLibrary.items[0]!.externallyReferenced, true);
+    assert.equal(persisted.mediaLibrary.items[0]!.title, "Protected by A");
+  } finally {
+    resumeFirst.resolve();
+    await rm(root, { recursive: true, force: true });
+  }
 });

@@ -112,7 +112,7 @@ async function replaceBytes(target: string, temp: string, bytes: Buffer): Promis
   await syncDirectory(dirname(target));
 }
 
-async function recoverUnderLock(
+export async function recoverInterruptedSaveUnderLock(
   store: ProjectStore,
   gitStore: GitStore,
   projectId: string,
@@ -162,7 +162,7 @@ export async function recoverInterruptedSave(
   projectId: string,
 ): Promise<void> {
   await gitStore.withProjectTransaction(projectId, (transaction) =>
-    recoverUnderLock(store, gitStore, projectId, transaction));
+    recoverInterruptedSaveUnderLock(store, gitStore, projectId, transaction));
 }
 
 function revisionMatches(submitted: ProjectBaseRevision, current: ProjectBaseRevision): boolean {
@@ -217,7 +217,7 @@ export async function executeSaveTransaction(
   }
 
   return gitStore.withProjectTransaction(request.projectId, async (gitTransaction) => {
-    await recoverUnderLock(store, gitStore, request.projectId, gitTransaction);
+    await recoverInterruptedSaveUnderLock(store, gitStore, request.projectId, gitTransaction);
     const projectPath = join(store.projectDir(request.projectId), "project.json");
     const previousBytes = await readFile(projectPath);
     const currentProject = JSON.parse(previousBytes.toString("utf8")) as Project;
