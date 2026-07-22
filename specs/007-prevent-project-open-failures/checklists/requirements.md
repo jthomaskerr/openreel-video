@@ -1,4 +1,4 @@
-# Specification Quality Checklist: Reliable Project Opening
+# Specification Quality Checklist: Authoritative Durable Identity
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2026-07-23
@@ -32,5 +32,5 @@
 ## Notes
 
 - Validation iteration 1 passed all checklist items.
-- The specification treats project identifiers as opaque identities and makes eligibility evidence-based, directly covering the current UUID-shape false positive.
-- No clarification markers are required because managed storage remains authoritative, deterministic supported-format upgrades are the established compatibility policy, and genuine unsupported or malformed content remains safely rejected.
+- The specification establishes one final durable identity per domain object, prohibits provisional IDs and UUID-format domain identities, requires a one-time manual migration of the sole real Git-backed project, and keeps infrastructure nonces outside the domain graph.
+- No clarification markers are required because Joseph confirmed that only one project exists and authorized manual migration after verifying its Git state.

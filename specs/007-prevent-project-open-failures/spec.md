@@ -1,4 +1,4 @@
-# Feature Specification: Reliable Project Opening
+# Feature Specification: Authoritative Durable Identity
 
 **Feature Branch**: `main`
 **Created**: 2026-07-23
@@ -9,7 +9,7 @@
 
 ### User Story 1 - Open Every Valid Durable Project (Priority: P1)
 
-An editor opens a project that exists in managed storage and resumes work, regardless of whether the project's stable identifier resembles an older client-created identifier or a newer managed identifier.
+An editor opens a project that exists in managed storage and resumes work using the managed identifier assigned by the backend.
 
 **Why this priority**: Incorrectly rejecting an existing project blocks the entire editing workflow and makes saved work appear lost.
 
@@ -17,8 +17,8 @@ An editor opens a project that exists in managed storage and resumes work, regar
 
 **Acceptance Scenarios**:
 
-1. **Given** a durable project exists and its identifier has a UUID form, **When** the user opens it, **Then** the system checks the authoritative project source and opens the returned project instead of rejecting it because of identifier shape.
-2. **Given** a durable project exists and its identifier has a managed slug form, **When** the user opens it, **Then** the editor activates the complete saved project.
+1. **Given** a durable project exists, **When** the user opens it, **Then** the editor uses its backend-managed identifier and activates the complete saved project.
+2. **Given** the user creates or imports a project, **When** creation succeeds, **Then** the active project receives the backend-managed identifier and no client-created project identifier is retained.
 3. **Given** the same valid project is selected from any supported open entry point, **When** loading completes, **Then** every entry point reaches the same successful project state.
 4. **Given** a valid project takes longer than 300 milliseconds to open, **When** loading is still in progress, **Then** the user sees a project-specific loading status and the editor does not appear frozen.
 
@@ -70,11 +70,28 @@ A maintainer can prove that every supported project identity, format version, op
 
 1. **Given** the supported compatibility fixture matrix, **When** the project-open regression suite runs, **Then** every valid fixture opens and every recoverable fixture reaches its documented recovery state.
 2. **Given** a new project field, identifier form, migration, or open entry point is introduced, **When** release validation runs, **Then** missing compatibility coverage fails the gate until an explicit fixture and expected outcome are added.
-3. **Given** a browser release candidate, **When** the exact UUID-backed durable-project workflow is exercised, **Then** the project opens from the chooser and direct link, survives reload, and remains editable and saveable.
+3. **Given** a browser release candidate, **When** the manually migrated managed project is exercised, **Then** the project opens from the chooser and direct link, survives reload, and remains editable and saveable without any UUID project identity appearing in the URL, project data, recovery state, or persistence requests.
+
+---
+
+### User Story 5 - Use Final Identities from First Creation (Priority: P1)
+
+An editor imports media, creates clips, tracks, effects, generated assets, or background jobs and can trust that the identity first attached to each object is its permanent identity for the object's entire lifetime.
+
+**Why this priority**: Provisional identifiers create two identities for one object, break references during reload or asynchronous completion, and make recovery ambiguous.
+
+**Independent Test**: Exercise every persisted object-creation workflow, interrupt or reload it at each asynchronous boundary, and verify that the first identity is durable, remains unchanged, and is never translated from a temporary UUID.
+
+**Acceptance Scenarios**:
+
+1. **Given** media is imported or generated, **When** the media first enters project state, **Then** it already has the durable identity used by uploads, clips, versions, jobs, saves, and recovery.
+2. **Given** a clip, track, effect, keyframe, transition, asset group, generated definition, job, or action receipt is created, **When** it becomes referencable, **Then** its first identity is final and no temporary identity mapping exists.
+3. **Given** an operation is cancelled or fails before a durable object exists, **When** cleanup completes, **Then** no placeholder domain object or temporary domain identifier remains in persisted state.
+4. **Given** internal atomic-write, lock-owner, or capability randomness is required, **When** it is used, **Then** it remains an explicitly typed non-domain nonce and can never enter project data or serve as an object identity.
 
 ### Edge Cases
 
-- A valid managed project has a UUID-shaped identifier that is indistinguishable by syntax from an older client-created identifier.
+- A stale browser URL, recent-project entry, or recovery record still contains the retired UUID project identity after the one-time manual migration.
 - The requested identifier is syntactically unusual but safely encodable and the authoritative source recognizes it.
 - The project exists, but the project summary list is unavailable or stale.
 - The project summary exists, but the full project read temporarily fails.
@@ -90,7 +107,7 @@ A maintainer can prove that every supported project identity, format version, op
 
 ### Functional Requirements
 
-- **FR-001**: The system MUST attempt authoritative retrieval for every safely representable requested project identifier; identifier syntax alone MUST NOT classify a project as unavailable, client-only, legacy, corrupt, or ineligible to open.
+- **FR-001**: Every active project MUST use a backend-managed project identifier; the web client MUST NOT generate UUIDs or any other provisional identity for projects.
 - **FR-002**: A project MUST be rejected only from evidence about that specific retrieval or its content, such as confirmed absence, denied access, malformed content, or an explicitly unsupported future format.
 - **FR-003**: Every supported project-opening entry point, including the recent-project chooser, project switcher, direct project link, reload restoration, portable project import, and recovery flow, MUST apply the same availability, compatibility, and activation rules.
 - **FR-004**: The system MUST validate and apply all supported project upgrades before project activation, including combinations of upgrades rather than only one missing field at a time.
@@ -105,20 +122,32 @@ A maintainer can prove that every supported project identity, format version, op
 - **FR-013**: Loading that exceeds 300 milliseconds MUST show a project-specific progress state, and every attempt MUST reach success, a recovery choice, cancellation, or an actionable failure state without leaving the editor indefinitely blocked.
 - **FR-014**: Every terminal failure MUST identify the affected project with a safe identifier, state the accurate failure category, preserve user work, and provide the applicable next actions such as retry, relink, request access, choose a recovery copy, or return to the chooser.
 - **FR-015**: Structured diagnostics MUST record the requested safe project identifier, open entry point, request outcome, failure category, and recovery decision while redacting credentials, signed URLs, native paths, blobs, and sensitive project content.
-- **FR-016**: The project-open compatibility contract MUST include explicit supported identifier forms, project format generations, upgrade expectations, open entry points, storage outcomes, recovery-copy states, and media-degradation states.
+- **FR-016**: The project-open compatibility contract MUST include the single backend-managed identifier form, project format generations, upgrade expectations, open entry points, storage outcomes, recovery-copy states, and media-degradation states.
 - **FR-017**: Any change to project identity, serialized project shape, compatibility rules, or a project-opening entry point MUST add or update a deterministic compatibility fixture before release.
-- **FR-018**: The current false-positive case, where an existing durable UUID-shaped project is rejected before authoritative retrieval, MUST be retained as a permanent regression fixture.
+- **FR-018**: Project creation, portable import, recovery, recent-project selection, direct-link restoration, and project switching MUST never introduce or reactivate a UUID project identity.
+- **FR-020**: The one existing Git-backed project MUST be snapshotted, confirmed fully committed, manually assigned its managed identifier, and verified before UUID project support is removed; no reusable runtime migration code is required.
+- **FR-021**: Stale client state that references the retired UUID project identity MUST be discarded or redirected to the managed project without presenting a false "cannot open project" terminal state.
+- **FR-022**: Persisted and cross-boundary domain objects MUST receive their final durable identity before they enter application state or become referencable.
+- **FR-023**: Media import, media generation, placeholder fulfillment, and asset versioning MUST use one durable media identity from creation through completion; no provisional media UUID or replacement mapping is permitted.
+- **FR-024**: Clips, tracks, effects, keyframes, transitions, generated-image definitions, asset groups, jobs, recovery records, actions, receipts, and other persisted domain entities MUST NOT use UUID-format identities.
+- **FR-025**: Failed or cancelled operations MUST represent pending work as operation state, not as fake projects, placeholder domain objects, or temporary domain identifiers.
+- **FR-026**: The initial editor state MUST represent the absence of an active project explicitly and MUST NOT fabricate an "unresolved" project or identifier.
+- **FR-027**: Random values used only for atomic filenames, lock ownership, security capabilities, or provider-issued identifiers MUST be typed and named as non-domain nonces or external identifiers and MUST be prevented from entering persisted OpenReel domain identity fields.
+- **FR-028**: A repository guard MUST fail when production domain code introduces UUID generation, temporary-domain-ID terminology, or an unapproved domain identifier generator.
+- **FR-029**: The one existing Git-backed project MUST have every UUID-format domain identity and reference rewritten consistently in one manual, snapshotted, validated commit before the new identity invariant is released.
 - **FR-019**: The project-open failure state MUST remain navigable and operable by keyboard and assistive technology, with focus placed on the failure heading or primary recovery action.
 
 ### Verification Requirements *(mandatory)*
 
-- **VR-001**: The UUID-shaped durable-project regression MUST be observed failing before implementation and passing afterward in a local deterministic test.
-- **VR-002**: A deterministic matrix MUST cover every combination required by FR-016, including valid UUID-backed and slug-backed projects, supported legacy omissions, combined migrations, temporary source failure, confirmed absence, denied access, malformed data, future format, missing media, cancellation, late responses, and same-project recovery copies.
+- **VR-001**: Regression tests MUST be observed failing before implementation because client-side project creation, import, or recovery can still introduce UUID project identities, and passing afterward when only backend-managed identities can become active.
+- **VR-002**: A deterministic matrix MUST cover every combination required by FR-016, including managed projects, retired UUID references in stale client state, supported legacy omissions, combined upgrades, temporary source failure, confirmed absence, denied access, malformed data, future format, missing media, cancellation, late responses, and same-project recovery copies.
 - **VR-003**: Store and service tests MUST prove that failed, cancelled, and superseded opens cannot mutate the active project or bind persistence work to the wrong project.
-- **VR-004**: Browser verification MUST open a real durable UUID-shaped project from the recent-project chooser and a direct link, reload it, edit it, save it, and reopen it; evidence MUST include the visible project identity and preserved representative content.
+- **VR-004**: Browser verification MUST open the manually migrated managed project from the recent-project chooser and a direct link, reload it, edit it, save it, and reopen it; evidence MUST prove that the retired UUID identity is absent and representative content is preserved.
 - **VR-005**: Browser verification MUST also exercise temporary unavailability and missing-media degradation, proving that retry or relink remains available and the editor is not trapped on a loading or generic failure screen.
 - **VR-006**: Diagnostics tests MUST prove stable failure categorization and redaction of credentials, signed URLs, native paths, blobs, and project content.
 - **VR-007**: No probabilistic behavior or LLM decision is involved in project eligibility, compatibility, recovery selection, or failure classification; these outcomes MUST remain deterministic and require no probabilistic eval.
+- **VR-008**: Identity graph tests MUST prove that every rewritten or newly created reference resolves to exactly one durable entity and that no UUID-format domain identifiers remain.
+- **VR-009**: Repository-level architecture tests MUST scan production domain sources and persisted fixtures for forbidden UUID or temporary-domain-ID generation, with an explicit allowlist limited to non-domain nonces and external provider identifiers.
 
 ### Key Entities
 
@@ -128,11 +157,13 @@ A maintainer can prove that every supported project identity, format version, op
 - **Compatibility Outcome**: The deterministic result of assessing project content: current, supported and upgraded, unsupported future format, or malformed.
 - **Recovery Copy**: A separately stored candidate tied to the same project identity and timestamp, offered only after its identity and compatibility are verified.
 - **Open Failure**: A terminal categorized outcome with safe diagnostics, preserved prior state, and one or more actionable next steps.
+- **Durable Domain Identity**: The single final path-safe identity assigned to an OpenReel object before it becomes referencable and retained unchanged for that object's lifetime.
+- **Non-Domain Nonce**: A random value used only for atomicity, lock ownership, capability security, or another bounded infrastructure purpose; it is not an object identity and cannot be persisted into the project graph.
 
 ### Assumptions
 
 - Managed storage remains the canonical durable source, while portable files and local recovery copies remain explicit alternate sources.
-- Existing UUID-shaped identifiers may refer to real durable projects and therefore cannot safely be classified from syntax alone.
+- Only one existing project requires identity conversion, and its Git history is the recovery source for a one-time manual migration rather than reusable application migration logic.
 - Supported older formats are those for which the product defines deterministic defaults or upgrades; unknown future formats remain blocked to prevent partial or destructive loading.
 - Media availability is separable from project-data validity, so missing media should not prevent access to the rest of a valid project.
 - The feature hardens existing project-opening behavior and does not add collaboration, sharing, deletion, or automatic content repair for malformed projects.
@@ -148,11 +179,13 @@ A maintainer can prove that every supported project identity, format version, op
 
 ### Measurable Outcomes
 
-- **SC-001**: Across the complete deterministic compatibility matrix, 100% of valid current and supported older project fixtures open successfully from every supported entry point, with zero identifier-shape false rejections.
+- **SC-001**: Across the complete deterministic compatibility matrix, 100% of valid current and supported older project fixtures open successfully from every supported entry point using only backend-managed project identities.
 - **SC-002**: Across all recoverable fixtures, 100% reach the correct recovery or degraded editing state without creating a replacement project or losing recognized project data.
 - **SC-003**: Across all failed, cancelled, superseded, and late-response cases, 100% preserve the previously active project's content, unsaved status, history, and pending persistence ownership.
 - **SC-004**: Under normal local verification conditions, a loading status appears within 300 milliseconds and every project-open attempt reaches a usable success, recovery, cancellation, or actionable failure state within 5 seconds after its final source response.
-- **SC-005**: In browser verification, a durable UUID-shaped project opens from both the chooser and direct link, survives reload, accepts an edit and save, and reopens with that edit preserved in 100% of 10 consecutive runs.
+- **SC-005**: In browser verification, the manually migrated managed project opens from both the chooser and direct link, survives reload, accepts an edit and save, and reopens with that edit preserved in 100% of 10 consecutive runs, with zero UUID project identities observed.
 - **SC-006**: In accessibility verification, all project-open progress, recovery, and failure outcomes expose a readable status and keyboard-operable next action with no keyboard trap.
 - **SC-007**: For every induced terminal failure, diagnostics contain the safe project identifier, entry point, and stable failure category, while 100% of tested sensitive values are absent.
 - **SC-008**: After release, supported-project false-rejection reports attributable to identifier classification or missing supported upgrades remain at zero.
+- **SC-009**: The migrated Vintage Tokyo project contains zero UUID-format values in OpenReel domain identity or reference fields, and 100% of its 53 media items and 42 clips retain valid referential links.
+- **SC-010**: Across all automated creation, cancellation, failure, reload, recovery, and completion cases, zero persisted domain objects change identity after first becoming referencable and zero temporary-domain-ID mappings are created.
