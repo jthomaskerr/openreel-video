@@ -1175,7 +1175,7 @@ export class ExportEngine {
     settings: VideoExportSettings | AudioExportSettings | ImageExportSettings,
   ): ExportPreset {
     return {
-      id: `custom-${Date.now()}`,
+      id: createDurableId("export-preset"),
       name,
       description: "Custom preset",
       settings,
@@ -1630,3 +1630,4 @@ export function downloadBlob(blob: Blob, filename: string): void {
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
+import { createDurableId } from "../identity";

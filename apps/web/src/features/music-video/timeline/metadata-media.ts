@@ -1,5 +1,4 @@
-import { v4 as uuidv4 } from "uuid";
-import type { MediaItem, MediaMetadata } from "@openreel/core";
+import { createDurableId, type MediaItem, type MediaMetadata } from "@openreel/core";
 
 /** Semantic label for a metadata clip section (e.g. "verse", "chorus", "beat"). */
 export type MetadataKind = string;
@@ -72,7 +71,7 @@ export function createMetadataMedia(
   const { kind, label, color, duration } = options;
 
   const blob = makeMinimalPngBlob();
-  const id = uuidv4();
+  const id = createDurableId("media");
 
   const metadata: MediaMetadata = {
     duration,

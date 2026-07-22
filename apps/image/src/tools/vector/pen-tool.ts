@@ -39,11 +39,9 @@ export const DEFAULT_PATH_STYLE = {
   strokeLineJoin: 'round' as CanvasLineJoin,
 };
 
-let pathIdCounter = 0;
-
 export function createPath(style?: Partial<typeof DEFAULT_PATH_STYLE>): VectorPath {
   return {
-    id: `path_${++pathIdCounter}_${Date.now()}`,
+    id: createDurableId('vector-path'),
     points: [],
     closed: false,
     ...DEFAULT_PATH_STYLE,
@@ -516,3 +514,4 @@ function perpendicularDistance(
 
   return Math.hypot(point.x - projX, point.y - projY);
 }
+import { createDurableId } from '@openreel/core/identity/durable-id';

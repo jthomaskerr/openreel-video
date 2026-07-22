@@ -92,6 +92,14 @@ def _artifact(request, suffix):
     return None
 
 
+def _request_id(request):
+    job_id = request.get("jobId")
+    prefix = "resolve-job-"
+    if isinstance(job_id, str) and job_id.startswith(prefix) and len(job_id) > len(prefix):
+        return f"resolve-request-{job_id[len(prefix):]}"
+    return "resolve-request-unknown"
+
+
 def _parse_fraction(value):
     if not isinstance(value, str) or not value.endswith("s"):
         raise BridgeFailure("FCPXML_REJECTED")
@@ -258,7 +266,7 @@ def _base_result(resolve, request):
     version, build = _version(resolve)
     fcpxml = _artifact(request, ".fcpxml") or {}
     return {
-        "requestId": request.get("jobId", "00000000-0000-4000-8000-000000000000"),
+        "requestId": _request_id(request),
         "status": "failed",
         "resolveVersion": version,
         "resolveBuild": build,

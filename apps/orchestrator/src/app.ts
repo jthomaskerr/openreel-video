@@ -150,9 +150,6 @@ export function createApp(options: CreateAppOptions = {}): Express {
       projectAction: projectActions,
     }),
   });
-  void projectStore.migrateUuidDirs().catch((err) => {
-    console.error("[ProjectStore] failed to migrate legacy project directories:", err);
-  });
   const app = express();
 
   app.use(cors());

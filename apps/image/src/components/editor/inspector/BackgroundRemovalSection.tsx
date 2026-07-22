@@ -43,7 +43,7 @@ export function BackgroundRemovalSection({ layer }: Props) {
         setProgress
       );
 
-      const newAssetId = `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+      const newAssetId = createDurableId('asset');
       addAsset({
         id: newAssetId,
         name: `${asset.name} (no bg)`,
@@ -167,3 +167,4 @@ export function BackgroundRemovalSection({ layer }: Props) {
     </div>
   );
 }
+import { createDurableId } from '@openreel/core/identity/durable-id';

@@ -628,7 +628,7 @@ export function createNoiseReductionEffect(
 ): Effect {
   const validated = validateNoiseReductionParams(params);
   return {
-    id: `noise-reduction-${Date.now()}`,
+    id: createDurableId("effect"),
     type: "noiseReduction",
     params: validated as unknown as Record<string, unknown>,
     enabled: true,
@@ -691,7 +691,7 @@ export function createSpeechEnhancementEffect(
   }
 
   return {
-    id: `speech-enhancement-${Date.now()}`,
+    id: createDurableId("effect"),
     type: "eq",
     params: { bands },
     enabled: true,
@@ -724,7 +724,7 @@ export function createNormalizationEffect(
   const threshold = validated.targetLoudness + 6; // Threshold above target
 
   return {
-    id: `normalization-${Date.now()}`,
+    id: createDurableId("effect"),
     type: "compressor",
     params: {
       threshold: Math.max(-60, Math.min(0, threshold)),
@@ -750,7 +750,7 @@ export function createNormalizationEffect(
 export function createEQEffect(params: Partial<EQParams> = {}): Effect {
   const validated = validateEQParams(params);
   return {
-    id: `eq-${Date.now()}`,
+    id: createDurableId("effect"),
     type: "eq",
     params: validated as unknown as Record<string, unknown>,
     enabled: true,
@@ -847,3 +847,4 @@ export function isAudioEnhancementEffect(effect: Effect): boolean {
 export function getClipAudioEnhancements(clip: Clip): Effect[] {
   return clip.effects.filter(isAudioEnhancementEffect);
 }
+import { createDurableId } from "@openreel/core";

@@ -63,7 +63,7 @@ export const useLogStore = create<LogState>((set, get) => ({
   entries: [],
 
   addEntry: (input: LogEntryInput): string => {
-    const id = `log-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const id = createDurableId("log");
     const entry: LogEntry = {
       id,
       kind: input.kind,
@@ -141,3 +141,4 @@ export const logBus = {
     return useLogStore.getState().addEntry(input);
   },
 };
+import { createDurableId } from "@openreel/core";

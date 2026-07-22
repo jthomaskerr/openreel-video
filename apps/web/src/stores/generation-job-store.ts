@@ -228,7 +228,7 @@ function deferred(): Deferred {
   let reject!: (error: GenerationError) => void;
   const promise = new Promise<DurableGenerationJob>((yes, no) => { resolve = yes; reject = no; });
   void promise.catch(() => undefined);
-  return { claimId: globalThis.crypto?.randomUUID?.() ?? `claim-${Date.now()}-${Math.random()}`, promise, resolve, reject };
+  return { claimId: createInfrastructureNonce(), promise, resolve, reject };
 }
 
 const submissionClaims = new Map<string, Deferred & { completed?: DurableGenerationJob }>();
@@ -718,7 +718,7 @@ export function createProductionGenerationRuntime(
 ): ProductionGenerationRuntime {
   const baseUrl = (options.baseUrl ?? "/api/generate/wavespeed").replace(/\/$/, "");
   const request = options.fetch ?? globalThis.fetch.bind(globalThis);
-  const id = options.nextId ?? (() => globalThis.crypto?.randomUUID?.() ?? `generation-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const id = options.nextId ?? (() => createDurableId("generation-job"));
   const now = options.now ?? Date.now;
   const authoritativeJobs = new Map<string, DurableGenerationJob>();
   const synchronizations = new Map<string, Promise<DurableGenerationJob>>();
@@ -951,3 +951,4 @@ export function getProductionGenerationRuntime(): ProductionGenerationRuntime {
 export function getProductionGenerationController(): GenerationController {
   return getProductionGenerationRuntime().controller;
 }
+import { createDurableId, createInfrastructureNonce } from "@openreel/core";

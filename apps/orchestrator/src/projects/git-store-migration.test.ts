@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { test } from "node:test";
-import type { Project } from "@openreel/core";
 import { config } from "../env";
 import { GitStore } from "./git-store";
 import { ProjectStore } from "./project-store";
@@ -18,26 +17,6 @@ process.env.GIT_AUTHOR_NAME ??= "OpenReel Tests";
 process.env.GIT_AUTHOR_EMAIL ??= "openreel-tests@example.com";
 process.env.GIT_COMMITTER_NAME ??= "OpenReel Tests";
 process.env.GIT_COMMITTER_EMAIL ??= "openreel-tests@example.com";
-
-function projectFixture(id: string, name: string): Project {
-  const now = Date.now();
-  return {
-    id,
-    name,
-    createdAt: now,
-    modifiedAt: now,
-    settings: {
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      sampleRate: 48000,
-      channels: 2,
-    },
-    mediaLibrary: { items: [] },
-    generatedImageDefinitions: [],
-    timeline: { tracks: [], subtitles: [], markers: [], duration: 0 },
-  };
-}
 
 async function makeStore(): Promise<{ fixtureRoot: string; repoDir: string; gitStore: GitStore; projectStore: ProjectStore }> {
   const fixtureRoot = await mkdtemp(join(tmpdir(), "openreel-git-store-test-"));
@@ -73,46 +52,6 @@ function commitAttributesTransaction() {
     expectedEntries: [{ status: "A", path: ".gitattributes" }],
   };
 }
-
-async function writeLegacyProject(repoDir: string, relativeDir: string, id: string, name: string): Promise<void> {
-  const projectDir = join(repoDir, relativeDir);
-  await mkdir(join(projectDir, "media"), { recursive: true });
-  await writeFile(join(projectDir, "project.json"), JSON.stringify(projectFixture(id, name), null, 2), "utf-8");
-  await writeFile(join(projectDir, "media", "media-1.txt"), "legacy media", "utf-8");
-}
-
-test("migrated root and nested UUID projects are promoted to commit-capable worktrees", async () => {
-  const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();
-  try {
-    const rootUuid = "11111111-1111-4111-8111-111111111111";
-    const nestedUuid = "22222222-2222-4222-8222-222222222222";
-    await writeLegacyProject(repoDir, rootUuid, rootUuid, "Legacy Root");
-    await writeLegacyProject(repoDir, join("projects", nestedUuid), nestedUuid, "Legacy Nested");
-
-    await projectStore.migrateUuidDirs();
-
-    for (const slug of ["legacy-root", "legacy-nested"]) {
-      const worktreeDir = join(repoDir, slug);
-      assert.equal(existsSync(join(worktreeDir, ".git")), true, `${slug} should be a git worktree`);
-      assert.equal(existsSync(join(worktreeDir, "media", "media-1.txt")), true, `${slug} media should be preserved`);
-
-      const project = await projectStore.loadProject(slug);
-      assert.ok(project, `${slug} project should load`);
-      assert.equal(project.id, slug);
-
-      await projectStore.saveProject({ ...project, name: `${project.name} Updated` });
-      await gitStore.commit(
-        slug,
-        `test: commit ${slug} after migration`,
-        commitProjectJsonTransaction(),
-      );
-      const { stdout } = await execFileAsync("git", ["log", "--oneline", "-1"], { cwd: worktreeDir });
-      assert.match(stdout, new RegExp(`commit ${slug} after migration`));
-    }
-  } finally {
-    await rm(fixtureRoot, { recursive: true, force: true });
-  }
-});
 
 test("missing registered slug worktrees are pruned and recreated", async () => {
   const { fixtureRoot, repoDir, gitStore, projectStore } = await makeStore();

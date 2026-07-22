@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from "uuid";
+import { createDurableId } from "../identity";
 import type { MediaItem, MediaMetadata } from "../types/project";
 import type {
   ProcessedMedia,
@@ -210,7 +210,7 @@ export class MediaImportService {
         }
       }
       const processedMedia: ProcessedMedia = {
-        id: uuidv4(),
+        id: createDurableId("media"),
         name: file.name,
         type: mediaType,
         blob: file,
@@ -328,7 +328,7 @@ export class MediaImportService {
     }
 
     const processedMedia: ProcessedMedia = {
-      id: uuidv4(),
+      id: createDurableId("media"),
       name: file.name,
       type: mediaType,
       blob: compatibleFile,

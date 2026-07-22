@@ -17,7 +17,7 @@ afterEach(async () => {
 
 function job(): ResolveExportJob {
   return {
-    id: "11111111-1111-4111-8111-111111111111",
+    id: "resolve-job-test-1",
     projectId: "vintage-tokyo",
     revision: "confirmed-revision",
     phase: "ready",
@@ -28,7 +28,7 @@ function job(): ResolveExportJob {
     createdAt: "2026-07-22T00:00:00.000Z",
     updatedAt: "2026-07-22T00:00:00.000Z",
     bridgeLaunchUrl:
-      "openreel-resolve://import/22222222-2222-4222-8222-222222222222",
+      "openreel-resolve://import/nonce-test-launch",
   };
 }
 
@@ -39,7 +39,7 @@ const selection: HandoffSelection = {
   range: { startTime: 0, endTime: 2 },
 };
 
-const TRANSACTION_ID = "55555555-5555-4555-8555-555555555555";
+const TRANSACTION_ID = "resolve-transaction-test-1";
 const BASE_COMMIT_SHA = "c".repeat(40);
 
 interface RawJournal extends Record<string, unknown> {
@@ -79,7 +79,7 @@ function record(): PersistedResolveExportJob {
     },
     artifacts: [
       {
-        path: "exports/resolve/11111111-1111-4111-8111-111111111111/Vintage-Tokyo.fcpxml",
+        path: "exports/resolve/resolve-job-test-1/Vintage-Tokyo.fcpxml",
         mediaType: "application/xml",
         byteLength: 42,
         sha256: "b".repeat(64),
@@ -119,7 +119,7 @@ describe("ResolveExportJobStore", () => {
 
   test("persists only the launch token hash, never the bearer token or launch URL", async () => {
     const { root, store } = await fixture();
-    const bearer = "22222222-2222-4222-8222-222222222222";
+    const bearer = "nonce-test-launch";
     await store.save(record());
 
     const bytes = await readFile(
@@ -142,7 +142,7 @@ describe("ResolveExportJobStore", () => {
     const second = store.update("vintage-tokyo", job().id, async (current) => ({
       ...current,
       result: {
-        requestId: "33333333-3333-4333-8333-333333333333",
+        requestId: "resolve-request-test-1",
         status: "failed",
         resolveVersion: "21.0.3",
         resolveBuild: "21.0.30007",
@@ -160,7 +160,7 @@ describe("ResolveExportJobStore", () => {
     await Promise.all([first, second]);
     const persisted = await store.load("vintage-tokyo", job().id);
     expect(persisted?.launchToken.redeemedAt).toBe("2026-07-22T00:01:00.000Z");
-    expect(persisted?.result?.requestId).toBe("33333333-3333-4333-8333-333333333333");
+    expect(persisted?.result?.requestId).toBe("resolve-request-test-1");
   });
 
   test.each([
@@ -181,7 +181,7 @@ describe("ResolveExportJobStore", () => {
       ...persisted,
       artifacts: persisted.artifacts.map((artifact) => ({
         ...artifact,
-        path: `exports/resolve/99999999-9999-4999-8999-999999999999/${artifact.path.split("/").at(-1)}`,
+        path: `exports/resolve/resolve-job-other/${artifact.path.split("/").at(-1)}`,
       })),
     }));
 
@@ -205,7 +205,7 @@ describe("ResolveExportJobStore", () => {
     await store.save(record());
     const path = join(root, "vintage-tokyo", "exports", "resolve", job().id, "job.json");
     const persisted = JSON.parse(await readFile(path, "utf8")) as PersistedResolveExportJob;
-    const otherJobId = "99999999-9999-4999-8999-999999999999";
+    const otherJobId = "resolve-job-other";
     const rebound = kind === "project"
       ? {
         ...persisted,
@@ -319,10 +319,10 @@ describe("ResolveExportJobStore", () => {
       raw.publishedPaths = [];
     }],
     ["physical job identity mismatch", (raw: RawJournal) => {
-      raw.jobId = "99999999-9999-4999-8999-999999999999";
+      raw.jobId = "resolve-job-other";
     }],
     ["physical transaction identity mismatch", (raw: RawJournal) => {
-      raw.transactionId = "99999999-9999-4999-8999-999999999999";
+      raw.transactionId = "resolve-transaction-other";
     }],
   ] as const)("rejects a %s without replaying or deleting the journal", async (_label, mutate) => {
     const { root, store } = await fixture();

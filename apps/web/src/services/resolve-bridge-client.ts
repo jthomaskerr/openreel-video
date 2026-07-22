@@ -8,7 +8,7 @@ import { z } from "zod";
 const DEFAULT_ORCHESTRATOR_URL =
   (import.meta.env["VITE_ORCHESTRATOR_URL"] as string | undefined) ??
   "http://localhost:4041";
-const BRIDGE_TOKEN_PATH = /^\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const BRIDGE_TOKEN_PATH = /^\/nonce-[A-Za-z0-9._~-]+$/;
 
 const ResolveProjectListItemSchema = z
   .object({
@@ -58,12 +58,12 @@ export const ResolvePublicExportJobSchema = ResolveExportJobSchema
   .omit({ bridgeLaunchUrl: true })
   .strict();
 const ResolveJobRouteSchema = z.string().regex(
-  /^\/api\/projects\/[^/?#]+\/exports\/resolve\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+  /^\/api\/projects\/[^/?#]+\/exports\/resolve\/resolve-job-[A-Za-z0-9._~-]+$/,
 );
 export const ResolveExportStartResponseSchema = z
   .object({
     job: ResolvePublicExportJobSchema,
-    jobId: z.string().uuid(),
+    jobId: ResolveExportJobSchema.shape.id,
     revision: z.string().min(1),
     phase: ResolvePublicExportJobSchema.shape.phase,
     statusUrl: ResolveJobRouteSchema,

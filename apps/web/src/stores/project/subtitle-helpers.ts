@@ -100,7 +100,7 @@ export function parseSRT(content: string): {
     const text = lines.slice(2).join("\n");
 
     subtitles.push({
-      id: `subtitle-${Date.now()}-${i}`,
+      id: createDurableId("subtitle"),
       text,
       startTime,
       endTime,
@@ -195,3 +195,4 @@ export function updateSubtitleInProject(
     modifiedAt: Date.now(),
   };
 }
+import { createDurableId } from "@openreel/core";

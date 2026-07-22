@@ -456,7 +456,7 @@ test("snapshot atomically attaches pending media with a collision-safe name and 
   });
 });
 
-test("project import canonicalizes client UUID ids to slug worktree ids", async () => {
+test("project import preserves an explicit authoritative project id", async () => {
   const savedProjects: Project[] = [];
   const committedProjectIds: string[] = [];
   const store: Partial<ProjectStore> = {
@@ -476,15 +476,15 @@ test("project import canonicalizes client UUID ids to slug worktree ids", async 
     const response = await fetch(`${baseUrl}/api/projects/import`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(projectFixture("14aec9eb-469f-4db6-9652-00dee0d243fc", "Vintage Tokyo")),
+      body: JSON.stringify(projectFixture("project-imported-vintage", "Vintage Tokyo")),
     });
 
     assert.equal(response.status, 201);
     const imported = (await response.json()) as Record<string, unknown> & { project: Project };
-    assert.equal(imported.project.id, "vintage-tokyo");
+    assert.equal(imported.project.id, "project-imported-vintage");
     assert.equal(imported.saved, true);
     assert.equal(imported.committed, true);
-    assert.equal(imported.projectId, "vintage-tokyo");
+    assert.equal(imported.projectId, "project-imported-vintage");
     assert.equal(imported.persistedAt, 1_234);
     assert.equal(imported.sourceModifiedAt, 999);
     assert.equal(imported.commitSha, commitReceipt().commitSha);
@@ -492,42 +492,34 @@ test("project import canonicalizes client UUID ids to slug worktree ids", async 
     assert.equal(imported.projectBlobSha, commitReceipt().projectBlobSha);
     assert.equal(imported.mediaManifestDigest, auditReceipt().mediaManifestDigest);
     assert.deepEqual(imported.lfsPayloads, auditReceipt().lfsPayloads);
-    assert.equal(savedProjects.at(-1)?.id, "vintage-tokyo");
-    assert.equal(committedProjectIds.at(-1), "vintage-tokyo");
+    assert.equal(savedProjects.at(-1)?.id, "project-imported-vintage");
+    assert.equal(committedProjectIds.at(-1), "project-imported-vintage");
   });
 });
 
-test("UUID PUT autosaves are rejected before any project worktree is touched", async () => {
-  let saveCalls = 0;
-  let commitCalls = 0;
-  const store: Partial<ProjectStore> = {
-    loadProject: async () => {
-      throw new Error("loadProject should not be called for UUID project ids");
-    },
-    saveProject: async (project: Project) => {
-      saveCalls += 1;
-      return project;
-    },
+test("UUID-shaped existing project ids remain opaque and autosave normally", async () => {
+  const uuid = "14aec9eb-469f-4db6-9652-00dee0d243fc";
+  const existing = projectFixture(uuid, "Vintage Tokyo");
+  const incoming = { ...existing, modifiedAt: existing.modifiedAt + 1 };
+  const store: Partial<ProjectStore> & { testInitialProject?: Project } = {
+    testInitialProject: existing,
+    loadProject: async () => existing,
+    saveProject: async (project: Project) => project,
+    auditSnapshot: async () => auditReceipt(),
   };
   const gitStore: Partial<GitStore> = {
-    commit: async (_projectId: string, _message: string, _transaction?: unknown) => {
-      commitCalls += 1;
-      return commitReceipt();
-    },
+    commit: async () => commitReceipt(),
   };
 
   await withProjectRouter(store, gitStore, async (baseUrl) => {
-    const uuid = "14aec9eb-469f-4db6-9652-00dee0d243fc";
     const response = await fetch(`${baseUrl}/api/projects/${uuid}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(saveRequest(projectFixture(uuid, "Vintage Tokyo"))),
+      body: JSON.stringify(saveRequest(incoming)),
     });
 
-    assert.equal(response.status, 400);
-    assert.match((await response.json()).error, /UUID project ids are not allowed/);
-    assert.equal(saveCalls, 0);
-    assert.equal(commitCalls, 0);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).committed, true);
   });
 });
 

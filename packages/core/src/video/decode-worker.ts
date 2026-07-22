@@ -23,7 +23,7 @@ export interface InitRequest {
 
 export interface InitResponse {
   type: "ready";
-  workerId: number;
+  workerNonce: number;
   mediabunnyAvailable?: boolean;
 }
 
@@ -38,7 +38,7 @@ interface CachedResource {
 }
 
 const resourceCache = new Map<string, CachedResource>();
-let workerId = 0;
+let workerNonce = 0;
 let mediabunnyModule: typeof import("mediabunny") | null = null;
 
 async function loadMediaBunny(): Promise<typeof import("mediabunny") | null> {
@@ -107,7 +107,7 @@ async function getOrCreateResources(
     return resource;
   } catch (error) {
     console.error(
-      `[DecodeWorker ${workerId}] Failed to create resources for ${clipId}:`,
+      `[DecodeWorker ${workerNonce}] Failed to create resources for ${clipId}:`,
       error,
     );
     return null;
@@ -207,9 +207,9 @@ if (workerSelf) {
 
     switch (request.type) {
       case "init":
-        workerId = Math.floor(Math.random() * 10000);
+        workerNonce = Math.floor(Math.random() * 10000);
         await loadMediaBunny();
-        const initResponse: InitResponse = { type: "ready", workerId };
+        const initResponse: InitResponse = { type: "ready", workerNonce };
         workerSelf.postMessage(initResponse);
         break;
 
@@ -227,7 +227,7 @@ if (workerSelf) {
 
 export const decodeWorkerCode = `
 const resourceCache = new Map();
-let workerId = 0;
+let workerNonce = 0;
 let mediabunnyModule = null;
 let mediabunnyAvailable = false;
 
@@ -359,9 +359,9 @@ self.onmessage = async (event) => {
 
  switch (request.type) {
  case "init":
- workerId = Math.floor(Math.random() * 10000);
+ workerNonce = Math.floor(Math.random() * 10000);
  await loadMediaBunny();
- self.postMessage({ type: "ready", workerId, mediabunnyAvailable });
+ self.postMessage({ type: "ready", workerNonce, mediabunnyAvailable });
  break;
 
  case "decode":

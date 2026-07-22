@@ -179,6 +179,7 @@ describe("generation recovery state machine", () => {
     expect(cleanupUploads).toHaveBeenCalledWith(expect.objectContaining({ status: "canceled" }));
     expect(save).toHaveBeenCalledTimes(1);
     expect(result.status).toBe("canceled");
+    expect(result.target).toEqual({ kind: "new-asset", placeholderMediaId: "pm" });
   });
 
   it("delegates needs-attention placement reconciliation without an optimistic local rewrite", async () => {

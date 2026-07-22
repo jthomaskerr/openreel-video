@@ -1,3 +1,4 @@
+import { createDurableId } from '@openreel/core/identity/durable-id';
 import { CanvasSize, CanvasBackground, Layer, TextLayer, ShapeLayer, DEFAULT_TRANSFORM, DEFAULT_BLEND_MODE, DEFAULT_SHADOW, DEFAULT_STROKE, DEFAULT_GLOW, DEFAULT_FILTER, DEFAULT_TEXT_STYLE, DEFAULT_SHAPE_STYLE } from '../types/project';
 
 export interface TemplateCategory {
@@ -16,7 +17,7 @@ export interface Template {
   layers: Partial<Layer>[];
 }
 
-const generateId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+const generateId = () => createDurableId('layer');
 
 const createTextLayer = (
   content: string,

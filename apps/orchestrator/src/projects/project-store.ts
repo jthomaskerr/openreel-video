@@ -1,8 +1,8 @@
 import { readFile, writeFile, readdir, rm, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import crypto from "node:crypto";
 import type { Project, ProjectSettings } from "@openreel/core";
+import { createInfrastructureNonce } from "@openreel/core/identity/durable-id";
 import type { GitStore } from "./git-store";
 import {
   recoverInterruptedSave,
@@ -98,10 +98,6 @@ function toSlug(name: string): string {
     .replace(/-+$/, "")
     .replace(/-{2,}/g, "-")
     || "untitled";
-}
-
-function uuidPattern(): RegExp {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -270,7 +266,7 @@ export class ProjectStore {
           : null;
         if (previous) assertExternallyReferencedMediaPreserved(previous, project);
         const updated: Project = { ...project, modifiedAt: Date.now() };
-        const tmpPath = `${finalPath}.${crypto.randomUUID()}.tmp`;
+        const tmpPath = `${finalPath}.${createInfrastructureNonce()}.tmp`;
         await writeFile(tmpPath, JSON.stringify(updated, null, 2), "utf-8");
         await rename(tmpPath, finalPath);
         return updated;
@@ -361,82 +357,6 @@ export class ProjectStore {
     }
     if (cleaned > 0) {
       console.log(`[ProjectStore] cleaned up ${cleaned} zombie worktree(s)`);
-    }
-  }
-
-  /**
-   * One-time migration: rename any UUID-named project dirs to slug names.
-   * Safe to call on every startup — skips already-migrated dirs.
-   * Also cleans up zombie worktrees (directories with a worktree but no
-   * project.json) left behind by a failed saveProject.
-   */
-  async migrateUuidDirs(): Promise<void> {
-    // Clean zombies first so they don't interfere with migration scanning.
-    await this.cleanupZombieWorktrees();
-
-    await this.gitStore.ensureSharedRepo();
-    const repoDir = this.gitStore["repoDir"];
-    const isUuid = uuidPattern();
-
-    const migrateCandidate = async (parentDir: string, oldName: string): Promise<void> => {
-      if (!isUuid.test(oldName)) return;
-
-      const oldDir = join(parentDir, oldName);
-      const jsonPath = join(oldDir, "project.json");
-      let raw: string;
-      try {
-        raw = await readFile(jsonPath, "utf-8");
-      } catch {
-        return;
-      }
-
-      let project: Project;
-      try {
-        project = JSON.parse(raw) as Project;
-      } catch {
-        return;
-      }
-
-      const newSlug = toSlug(project.name);
-      if (!isValidProjectId(newSlug)) return;
-      const newDir = join(repoDir, newSlug);
-      if (existsSync(newDir)) return; // already migrated (or slug clash)
-
-      // Update project id to the slug and promote nested legacy dirs into the
-      // root worktree layout used by the current backend.
-      project = { ...project, id: newSlug, modifiedAt: Date.now() };
-      await rename(oldDir, newDir);
-
-      // Rename the git branch.
-      try {
-        await this.gitStore["git"](["branch", "-m", `project/${oldName}`, `project/${newSlug}`], newDir);
-      } catch {
-        // branch rename is best-effort; old name may not exist
-      }
-
-      // Write updated project.json with new id, then promote the migrated
-      // directory into a real project worktree before any later save/media
-      // commit tries to operate on it.
-      await writeFile(join(newDir, "project.json"), JSON.stringify(project, null, 2), "utf-8");
-      await this.gitStore.ensureWorktree(newSlug);
-      await this.gitStore.commit(newSlug, "chore: migrate legacy project worktree", {
-        allowlist: ["project.json"],
-        expectedEntries: [{ status: "A", path: "project.json" }],
-      });
-    };
-
-    const entries = await readdir(repoDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      await migrateCandidate(repoDir, entry.name);
-    }
-
-    const nestedProjectsDir = join(repoDir, "projects");
-    if (!existsSync(nestedProjectsDir)) return;
-    const nestedEntries = await readdir(nestedProjectsDir, { withFileTypes: true });
-    for (const entry of nestedEntries) {
-      if (!entry.isDirectory()) continue;
-      await migrateCandidate(nestedProjectsDir, entry.name);
     }
   }
 

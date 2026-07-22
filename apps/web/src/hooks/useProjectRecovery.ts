@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { backendSaveService, isClientOnlyProjectId } from "../services/backend-save";
+import { backendSaveService } from "../services/backend-save";
 import { autoSaveManager, type AutoSaveMetadata } from "../services/auto-save";
 import { clearAllStorage } from "../services/media-storage";
 import { useProjectStore } from "../stores/project-store";
@@ -44,15 +44,6 @@ export function useProjectRecovery(autoRestoreProjectId?: string) {
         });
 
         if (autoRestoreProjectId) {
-          if (isClientOnlyProjectId(autoRestoreProjectId)) {
-            setState({
-              isChecking: false,
-              availableSaves: [],
-              showDialog: false,
-              error: `Legacy UUID project ${autoRestoreProjectId} is quarantined and cannot be loaded.`,
-            });
-            return;
-          }
           console.info("[ProjectRecovery] loading requested project from backend", {
             projectId: autoRestoreProjectId,
           });

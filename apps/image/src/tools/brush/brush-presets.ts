@@ -389,7 +389,7 @@ export class BrushPresetManager {
   }
 
   addCustomPreset(name: string, settings: BrushSettings): BrushPreset {
-    const id = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const id = createDurableId('brush-preset');
     const preset: BrushPreset = {
       id,
       name,
@@ -451,3 +451,4 @@ export class BrushPresetManager {
 }
 
 export const brushPresetManager = new BrushPresetManager();
+import { createDurableId } from '@openreel/core/identity/durable-id';

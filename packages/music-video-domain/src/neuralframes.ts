@@ -14,6 +14,7 @@ import {
   DEFAULT_RESOLUTION,
   DEFAULT_SHOT_MODEL,
 } from "./types.js";
+import { createMusicVideoDomainId } from "./identity.js";
 import type {
   MetadataBlock,
   MetadataTrack,
@@ -65,10 +66,6 @@ function parseMaybeJson(value: unknown): unknown {
   }
 }
 
-function uuid(): string {
-  return crypto.randomUUID();
-}
-
 const EMPTY_VALIDATION: ValidationState = { valid: true, warnings: [], errors: [] };
 
 export function importNeuralFrames(
@@ -99,7 +96,7 @@ export function importNeuralFrames(
   // scene_image_url is a reference preview image, NOT a generated output.
   const shots: StoryboardShot[] = scenes.map((scene, i) => {
     const shot: StoryboardShot = {
-      id: uuid(),
+      id: createMusicVideoDomainId("scene"),
       index: i,
       label: `Scene ${i + 1}`,
       startSeconds: scene.start_time,
@@ -126,7 +123,7 @@ export function importNeuralFrames(
   //    the character's ID appears in the scene prompt ────────────────────────
   const charTracks: MetadataTrack[] = rawCharacters
     .map((char) => {
-      const trackId = uuid();
+      const trackId = createMusicVideoDomainId("metadata-track");
       const imageJob = normalizeImageJob(char.image_job);
       const thumbnailUrl = imageJob?.assets[0]?.url;
 
@@ -138,7 +135,7 @@ export function importNeuralFrames(
       // Fall back to a single full-duration block if no scene mentions the character
       const blocks: MetadataBlock[] = mentionedScenes.length > 0
         ? mentionedScenes.map((scene) => ({
-            id: uuid(),
+            id: createMusicVideoDomainId("metadata-block"),
             trackId,
             label: char.name,
             kind: "continuity_note" as const,
@@ -153,7 +150,7 @@ export function importNeuralFrames(
             thumbnailUrl,
           }))
         : [{
-            id: uuid(),
+            id: createMusicVideoDomainId("metadata-block"),
             trackId,
             label: char.name,
             kind: "continuity_note" as const,
@@ -180,9 +177,9 @@ export function importNeuralFrames(
     .filter((t) => t.blocks.length > 0);
 
   // ── LoRAs → metadata track ─────────────────────────────────────────────────
-  const loraTrackId = uuid();
+  const loraTrackId = createMusicVideoDomainId("metadata-track");
   const loraBlocks: MetadataBlock[] = rawLoras.map((lora) => ({
-    id: uuid(),
+    id: createMusicVideoDomainId("metadata-block"),
     trackId: loraTrackId,
     label: lora.name,
     kind: "visual_motif" as const,
@@ -208,7 +205,7 @@ export function importNeuralFrames(
   };
 
   // ── Storyboard prompt → notes track ────────────────────────────────────────
-  const notesTrackId = uuid();
+  const notesTrackId = createMusicVideoDomainId("metadata-track");
   const notesTrack: MetadataTrack = {
     id: notesTrackId,
     label: "Director Notes",
@@ -217,7 +214,7 @@ export function importNeuralFrames(
     locked: false,
     blocks: [
       {
-        id: uuid(),
+        id: createMusicVideoDomainId("metadata-block"),
         trackId: notesTrackId,
         label: "Storyboard brief",
         kind: "note" as const,
@@ -251,7 +248,7 @@ export function importNeuralFrames(
 
   return {
     sourcePath,
-    storyboardId: uuid(),
+    storyboardId: createMusicVideoDomainId("storyboard"),
     title: props.title ?? audioMeta?.video_idea?.slice(0, 60) ?? sourcePath.split("/").pop() ?? "Neural Frames Import",
     scenesImported: scenes.length,
     charactersImported: rawCharacters.length,

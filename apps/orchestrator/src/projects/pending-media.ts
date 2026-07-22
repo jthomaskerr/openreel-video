@@ -1,4 +1,5 @@
-import crypto from "node:crypto";
+import { createInfrastructureNonce } from "@openreel/core/identity/durable-id";
+import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -31,7 +32,7 @@ interface StoredPendingMediaMetadata {
 export class PendingMediaConflictError extends Error {}
 
 async function fileDigest(path: string): Promise<string> {
-  const digest = crypto.createHash("sha256");
+  const digest = createHash("sha256");
   await pipeline(createReadStream(path), digest);
   return digest.digest("hex");
 }
@@ -90,7 +91,7 @@ export async function storePendingUpload(
     throw new PendingMediaConflictError(`Pending media ${mediaId} already exists with different upload data`);
   }
   await mkdir(pendingMediaRoot(projectDir), { recursive: true });
-  const replacement = join(pendingMediaRoot(projectDir), `.replacement-${mediaId}-${crypto.randomUUID()}`);
+  const replacement = join(pendingMediaRoot(projectDir), `.replacement-${mediaId}-${createInfrastructureNonce()}`);
   try {
     await mkdir(replacement);
     const contentPath = join(replacement, "content");

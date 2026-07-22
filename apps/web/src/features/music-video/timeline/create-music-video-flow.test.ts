@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { v4 as uuidv4 } from "uuid";
 import type { ActionResult, MediaItem, Project, Track } from "@openreel/core";
+import { createDurableId } from "@openreel/core/identity/durable-id";
 import {
   createMusicVideoFlow,
   MUSIC_VIDEO_TRACK_NAME,
@@ -46,7 +46,7 @@ function makeStore(initialProject = makeProject()) {
     },
 
     importMedia: vi.fn(async (file: File): Promise<ActionResult> => {
-      const mediaId = uuidv4();
+      const mediaId = createDurableId("media");
       const item: MediaItem = {
         id: mediaId,
         name: file.name,
@@ -296,7 +296,7 @@ describe("createMusicVideoFlow", () => {
     const store = makeStore();
     // Override importMedia to return a media item with duration=0
     vi.mocked(store.importMedia).mockImplementationOnce(async (file: File) => {
-      const mediaId = uuidv4();
+      const mediaId = createDurableId("media");
       const item: MediaItem = {
         id: mediaId,
         name: file.name,

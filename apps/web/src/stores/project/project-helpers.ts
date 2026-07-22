@@ -1,4 +1,3 @@
-import { v4 as uuidv4 } from "uuid";
 import type { Project, ProjectSettings, Timeline } from "@openreel/core";
 import { generateProjectName } from "../../utils/project-names";
 
@@ -20,13 +19,15 @@ export function createDefaultTimeline(): Timeline {
 }
 
 export function createEmptyProject(
+  id: string,
   name?: string,
   settings?: Partial<ProjectSettings>,
 ): Project {
+  if (!id.trim()) throw new Error("A backend-managed project identity is required");
   const now = Date.now();
   const projectName = name || generateProjectName();
   return {
-    id: uuidv4(),
+    id,
     name: projectName,
     createdAt: now,
     modifiedAt: now,
@@ -37,19 +38,15 @@ export function createEmptyProject(
   };
 }
 
-/** Non-editable startup value used until a backend project is confirmed. */
-export function createUnresolvedProject(): Project {
-  const now = Date.now();
-  return {
-    id: "unresolved",
-    name: "Unresolved project",
-    createdAt: now,
-    modifiedAt: now,
-    settings: { ...DEFAULT_PROJECT_SETTINGS },
-    mediaLibrary: { items: [] },
-    generatedImageDefinitions: [],
-    timeline: createDefaultTimeline(),
-  };
+export function createNoActiveProjectGuard(): Project {
+  return new Proxy(Object.create(null) as Project, {
+    get(_target, property) {
+      throw new Error(`No active project; attempted to read ${String(property)}`);
+    },
+    set() {
+      throw new Error("No active project; attempted to mutate project state");
+    },
+  });
 }
 
 export function calculateTimelineDuration(project: Project): number {

@@ -713,17 +713,42 @@ describe("backendSaveService.save", () => {
     consoleError.mockRestore();
   });
 
-  it("does not PUT client-only UUID project ids to the backend", async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    await backendSaveService.save({
-      ...makeProject(),
+  it("treats UUID-shaped project ids as opaque backend identities", async () => {
+    const uuidProject = {
+      ...makeSaveProject(),
       id: "14aec9eb-469f-4db6-9652-00dee0d243fc",
       name: "Vintage Tokyo",
-    });
+    };
+    usePersistenceStatusStore.getState().confirmReceipt(
+      uuidProject.id,
+      makeReceipt({
+        projectId: uuidProject.id,
+        sourceModifiedAt: 1,
+      }),
+    );
+    const fetchMock = vi.fn().mockImplementation(async (_url: string, init?: RequestInit) =>
+      init?.method === "HEAD"
+        ? {
+            ok: true,
+            status: 200,
+            headers: new Headers({ "content-length": "100", "content-type": "video/mp4" }),
+          }
+        : {
+            ok: true,
+            json: async () => ({
+              project: uuidProject,
+              ...makeReceipt({ projectId: uuidProject.id }),
+            }),
+          }
+    );
+    vi.stubGlobal("fetch", fetchMock);
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    await backendSaveService.save(uuidProject);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:4041/api/projects/14aec9eb-469f-4db6-9652-00dee0d243fc",
+      expect.objectContaining({ method: "PUT" }),
+    );
   });
 
   it("PUTs slug project ids to the backend", async () => {
@@ -887,8 +912,15 @@ describe("backendSaveService.save", () => {
 });
 
 describe("backendSaveService.uploadMediaAsync", () => {
-  it("does not upload media for client-only UUID project ids", () => {
-    const fetchMock = vi.fn();
+  it("uploads media for opaque UUID-shaped project ids", async () => {
+    backendSaveService.resetForProject("14aec9eb-469f-4db6-9652-00dee0d243fc");
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        pending: true,
+        mediaId: "media-1",
+      }),
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     backendSaveService.uploadMediaAsync(
@@ -898,7 +930,12 @@ describe("backendSaveService.uploadMediaAsync", () => {
       "clip.mp4",
     );
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://localhost:4041/api/projects/14aec9eb-469f-4db6-9652-00dee0d243fc/media/media-1",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
   });
 });
 

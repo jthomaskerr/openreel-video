@@ -91,7 +91,7 @@ interface CanvasActions {
   clearSmartGuides: () => void;
 }
 
-const generateId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+const generateId = () => createDurableId('guide');
 
 export const useCanvasStore = create<CanvasState & CanvasActions>()(
   subscribeWithSelector((set, get) => ({
@@ -246,3 +246,4 @@ export const useCanvasStore = create<CanvasState & CanvasActions>()(
     },
   }))
 );
+import { createDurableId } from '@openreel/core/identity/durable-id';

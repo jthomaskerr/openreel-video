@@ -344,7 +344,7 @@ export const EditorInterface: React.FC = () => {
       if (!targetClip) return;
       const newKeyframes = copiedKeyframes.map((kf) => ({
         ...kf,
-        id: `kf-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        id: createDurableId("keyframe"),
         time: kf.time + time
       }));
       updateClipKeyframes(clipId, [
@@ -654,3 +654,4 @@ export const EditorInterface: React.FC = () => {
 };
 
 export default EditorInterface;
+import { createDurableId } from "@openreel/core";

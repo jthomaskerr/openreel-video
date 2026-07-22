@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { v4 as uuidv4 } from "uuid";
+import { createDurableId } from "@openreel/core";
 import {
   Dialog,
   DialogContent,
@@ -170,7 +170,7 @@ export function KieAIImageDialog({ open, onClose, sourceFile, previewUrl }: Prop
       const ext = "png"; // optimistic; poller will use actual blob mime
       const base = sourceFile.name.replace(/\.[^.]+$/, "");
       const suggestedName = `${base}_kieai.${ext}`;
-      const mediaId = uuidv4();
+      const mediaId = createDurableId("media");
 
       const placeholder = {
         id: mediaId,

@@ -1,9 +1,18 @@
 import { z } from "zod";
+import { isDurableId } from "../../identity";
 
 const ProjectMediaUrlSchema = z.string().regex(
   /^\/api\/projects\/[A-Za-z0-9](?:[A-Za-z0-9._~-]{0,126}[A-Za-z0-9])?\/media\/[A-Za-z0-9](?:[A-Za-z0-9._~-]{0,126}[A-Za-z0-9])?(?:\/(?:thumbnail|waveform))?$/,
 );
 const NonnegativeFrameSchema = z.number().int().nonnegative();
+const ResolveJobIdSchema = z.string().refine(
+  (value) => isDurableId(value, "resolve-job"),
+  "Expected a durable Resolve job ID",
+);
+const ResolveRequestIdSchema = z.string().refine(
+  (value) => isDurableId(value, "resolve-request"),
+  "Expected a durable Resolve request ID",
+);
 
 export const ResolveBridgeErrorCodeSchema = z.enum([
   "STALE_PROJECT_REVISION", "MEDIA_INCOMPLETE", "EXPORT_FAILED",
@@ -16,7 +25,7 @@ export const ResolveBridgeErrorCodeSchema = z.enum([
 export type ResolveBridgeErrorCode = z.infer<typeof ResolveBridgeErrorCodeSchema>;
 
 export const ResolveImportResultSchema = z.object({
-  requestId: z.string().uuid(),
+  requestId: ResolveRequestIdSchema,
   status: z.enum(["completed", "failed"]),
   resolveVersion: z.string().min(1),
   resolveBuild: z.string().min(1),
@@ -38,7 +47,7 @@ export const ResolveImportResultSchema = z.object({
 export type ResolveImportResult = z.infer<typeof ResolveImportResultSchema>;
 
 export const ResolveExportJobSchema = z.object({
-  id: z.string().uuid(),
+  id: ResolveJobIdSchema,
   projectId: z.string().min(1),
   revision: z.string().min(1),
   phase: z.enum(["queued", "loading", "assessing", "resolving-media", "serializing",
@@ -50,7 +59,7 @@ export const ResolveExportJobSchema = z.object({
   warnings: z.array(z.string()),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
-  bridgeLaunchUrl: z.string().regex(/^openreel-resolve:\/\/import\/[0-9a-f-]{36}$/).optional(),
+  bridgeLaunchUrl: z.string().regex(/^openreel-resolve:\/\/import\/nonce-[A-Za-z0-9._~-]+$/).optional(),
 }).strict();
 
 export type ResolveExportJob = z.infer<typeof ResolveExportJobSchema>;

@@ -78,7 +78,7 @@ export const ParticleEffectsSection: React.FC<ParticleEffectsSectionProps> = ({
   const handleAddEffect = useCallback(() => {
     if (!selectedPreset) return;
 
-    const effectId = `particle-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+    const effectId = createDurableId("effect");
     const effect = createEffectFromPreset(selectedPreset, effectId, clipId, clipStartTime, clipDuration);
 
     if (effect) {
@@ -518,3 +518,4 @@ const ColorSwatch: React.FC<ColorSwatchProps> = ({ color, onChange, onRemove }) 
 };
 
 export default ParticleEffectsSection;
+import { createDurableId } from "@openreel/core";

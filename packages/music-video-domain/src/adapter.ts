@@ -1,4 +1,5 @@
 import { DEFAULT_IMAGE_MODEL } from "./types.js";
+import { createMusicVideoDomainId } from "./identity.js";
 import type {
   GeneratedAsset,
   MetadataBlock,
@@ -214,7 +215,7 @@ export function buildImportPlan(
     const name = displayFileName(url) || `${shot.label}.png`;
     referenceImages.push(
       buildReferenceMediaSpec({
-        id: uuid(),
+        id: createMusicVideoDomainId("media"),
         name,
         title: `Reference: ${shot.label}`,
         description: `Scene reference: ${shot.label}`,
@@ -241,7 +242,7 @@ export function buildImportPlan(
       const name = displayFileName(url) || `${character.name || "character"}.png`;
       orphanedAssets.push(
         buildGeneratedImageMediaSpec({
-          id: uuid(),
+          id: createMusicVideoDomainId("media"),
           name,
           title: character.name,
           description: character.description ?? character.physical_identity ?? `Character: ${character.name}`,
@@ -262,7 +263,7 @@ export function buildImportPlan(
       const name = displayFileName(url) || `${lora.name || "training"}.png`;
       referenceImages.push(
         buildReferenceMediaSpec({
-          id: uuid(),
+          id: createMusicVideoDomainId("media"),
           name,
           title: `Training: ${lora.name}`,
           description: lora.visual_style ?? `LoRA training: ${lora.name}`,
@@ -282,7 +283,7 @@ export function buildImportPlan(
     const name = displayFileName(url) || `${result.title || "artwork"}.png`;
     referenceImages.push(
       buildReferenceMediaSpec({
-        id: uuid(),
+        id: createMusicVideoDomainId("media"),
         name,
         title: "Artwork",
         description: "Primary audio artwork",
@@ -305,7 +306,7 @@ export function buildImportPlan(
         result.title,
         result.audio,
         name,
-        `audio-${uuid()}`,
+        `audio-${createMusicVideoDomainId("media")}`,
         localAudioUrl,
         result.audio.artworkUrl ? resolveUrl(result.audio.artworkUrl) : undefined,
       ),
@@ -475,7 +476,7 @@ function buildUnrealizedSceneMediaSpec(
   shot: StoryboardShot,
   thumbnailUrl: string | null,
 ): NeuralFramesMediaSpec {
-  const id = uuid();
+  const id = createMusicVideoDomainId("media");
   return {
     id,
     name: shot.label,
@@ -507,7 +508,7 @@ function buildCharacterMediaSpec(
   generationMeta: NeuralFramesGenerationMeta,
   character: NeuralFramesCharacter | undefined,
 ): NeuralFramesMediaSpec {
-  const id = uuid();
+  const id = createMusicVideoDomainId("media");
   return {
     id,
     name: `Character: ${characterName}`,
@@ -727,10 +728,6 @@ function mediaMetadata(duration = 0): NeuralFramesMediaSpec["metadata"] {
     channels: 0,
     fileSize: 0,
   };
-}
-
-function uuid(): string {
-  return crypto.randomUUID();
 }
 
 function displayFileName(path: string | undefined): string {

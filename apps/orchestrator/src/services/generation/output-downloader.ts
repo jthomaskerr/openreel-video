@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
+import { createInfrastructureNonce } from "@openreel/core/identity/durable-id";
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { GenerationRouteIdentity } from "@openreel/music-video-domain/generation";
@@ -58,7 +59,7 @@ function isMissingFile(cause: unknown): boolean {
 }
 
 async function atomicWrite(path: string, value: string | Uint8Array): Promise<void> {
-  const temporary = `${path}.${randomUUID()}.tmp`;
+    const temporary = `${path}.${createInfrastructureNonce()}.tmp`;
   const handle = await open(temporary, "w", 0o600);
   try {
     await handle.writeFile(value);

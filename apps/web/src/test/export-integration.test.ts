@@ -79,8 +79,7 @@ const createTestTrack = (overrides?: Partial<Track>): Track => ({
 describe("Export Readiness - Project Validation", () => {
   beforeEach(() => {
     useProjectStore.getState().loadProject({
-      ...createEmptyProject(),
-      id: "export-test-project",
+      ...createEmptyProject("export-test-project"),
     });
   });
 
@@ -146,12 +145,11 @@ describe("Export Readiness - Project Validation", () => {
 
   it("should apply custom project settings correctly", () => {
     useProjectStore.getState().loadProject({
-      ...createEmptyProject("4K Project", {
+      ...createEmptyProject("4k-project", "4K Project", {
         width: 3840,
         height: 2160,
         frameRate: 60,
       }),
-      id: "4k-project",
     });
 
     const { project } = useProjectStore.getState();
@@ -321,8 +319,7 @@ describe("Export Readiness - Subtitle Handling (consolidated into text clips)", 
 describe("Export Readiness - Marker Preservation", () => {
   beforeEach(() => {
     useProjectStore.getState().loadProject({
-      ...createEmptyProject(),
-      id: "marker-export-test-project",
+      ...createEmptyProject("marker-export-test-project"),
     });
   });
 

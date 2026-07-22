@@ -173,7 +173,7 @@ export class AdjustmentLayerEngine {
 
     const newEffect = {
       ...effect,
-      id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+      id: createDurableId("effect"),
     };
 
     this.layers.set(layerId, {
@@ -295,7 +295,7 @@ export class AdjustmentLayerEngine {
       name: `${original.name} (Copy)`,
       effects: original.effects.map((e) => ({
         ...e,
-        id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+        id: createDurableId("effect"),
       })),
     };
 
@@ -334,3 +334,4 @@ export function getAdjustmentLayerEngine(): AdjustmentLayerEngine {
 export function resetAdjustmentLayerEngine(): void {
   adjustmentLayerEngineInstance = null;
 }
+import { createDurableId } from "../identity";

@@ -100,8 +100,6 @@ interface HistoryActions {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const generateId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
@@ -143,7 +141,7 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
       const newProject = cmd.apply(currentProject);
 
       const record: CommandRecord = {
-        id: generateId(),
+        id: createDurableId('action'),
         timestamp: Date.now(),
         command: cmd,
       };
@@ -265,7 +263,7 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
     createSnapshot: (name, project, thumbnail) => {
       const { snapshots } = get();
       const snapshot: Snapshot = {
-        id: generateId(),
+        id: createDurableId('snapshot'),
         name,
         timestamp: Date.now(),
         state: JSON.stringify(project),
@@ -298,3 +296,4 @@ export const useHistoryStore = create<HistoryState & HistoryActions>()(
     getSnapshots: () => get().snapshots,
   }))
 );
+import { createDurableId } from '@openreel/core/identity/durable-id';

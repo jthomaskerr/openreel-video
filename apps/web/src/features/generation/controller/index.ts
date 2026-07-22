@@ -242,7 +242,7 @@ export function createGenerationController(
   ports: GenerationControllerPorts,
   options: GenerationControllerOptions = {},
 ): GenerationController {
-  const sessionId = options.sessionId ?? globalThis.crypto?.randomUUID?.() ?? `generation-session-${Math.random().toString(36).slice(2)}`;
+  const sessionId = options.sessionId ?? createDurableId("generation-session");
   const submissionInflight = new Map<string, Promise<GenerationJob>>();
   const reconciliationInflight = new Map<string, Promise<GenerationJob>>();
   const reconciledJobs = new Map<string, GenerationJob>();
@@ -363,3 +363,4 @@ export function createGenerationController(
 export function resetGenerationControllerState(): void {
   // Controller state is intentionally instance/session scoped. Kept as a compatibility no-op for old tests.
 }
+import { createDurableId } from "@openreel/core";

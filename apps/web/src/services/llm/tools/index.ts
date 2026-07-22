@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import type { Action, ActionResult, Clip, TimelineAction } from "@openreel/core";
+import { createDurableId, type Action, type ActionResult, type Clip, type TimelineAction } from "@openreel/core";
 import type { SelectionType } from "../../../stores/ui-store";
 import type { EditorStateSnapshot } from "../snapshot";
 import { buildEditorSnapshot } from "../snapshot";
@@ -99,7 +99,7 @@ function suggestActionType(input: string): string {
 function makeAction(type: EditorActionType, params: Record<string, unknown>): Action {
   return {
     type,
-    id: crypto.randomUUID(),
+    id: createDurableId("action"),
     timestamp: Date.now(),
     params,
   };

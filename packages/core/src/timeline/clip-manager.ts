@@ -90,7 +90,7 @@ export class ClipManager {
 
     const action: Action = {
       type: "clip/add",
-      id: `action-${Date.now()}`,
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: {
         trackId: params.trackId,
@@ -183,7 +183,7 @@ export class ClipManager {
 
     const action: Action = {
       type: "clip/move",
-      id: `action-${Date.now()}`,
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: {
         clipId: params.clipId,
@@ -474,7 +474,7 @@ export class ClipManager {
 
     const action: Action = {
       type: "clip/split",
-      id: `action-${Date.now()}`,
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: {
         clipId,
@@ -542,7 +542,7 @@ export class ClipManager {
 
     const action: Action = {
       type: "clip/trim",
-      id: `action-${Date.now()}`,
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: {
         clipId,
@@ -581,7 +581,7 @@ export class ClipManager {
 
     const action: Action = {
       type: "clip/remove",
-      id: `action-${Date.now()}`,
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: {
         clipId,
@@ -618,7 +618,7 @@ export class ClipManager {
 
     const action: Action = {
       type: "clip/rippleDelete",
-      id: `action-${Date.now()}`,
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: {
         clipId,
@@ -683,7 +683,7 @@ export function createClip(
   type: Clip["type"] = "video",
 ): Clip {
   return {
-    id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+        id: createDurableId("clip"),
     type,
     mediaId,
     trackId,
@@ -708,15 +708,15 @@ export function createClip(
 export function cloneClip(clip: Clip, newTrackId?: string): Clip {
   return {
     ...clip,
-    id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+        id: createDurableId("clip"),
     trackId: newTrackId ?? clip.trackId,
     effects: clip.effects.map((effect) => ({
       ...effect,
-      id: `effect-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+          id: createDurableId("effect"),
     })),
     keyframes: clip.keyframes.map((kf) => ({
       ...kf,
-      id: `keyframe-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+          id: createDurableId("keyframe"),
     })),
   };
 }
@@ -742,3 +742,4 @@ export function getGapBetweenClips(clipA: Clip, clipB: Clip): number {
     return clipA.startTime - bEnd;
   }
 }
+import { createDurableId } from "../identity";

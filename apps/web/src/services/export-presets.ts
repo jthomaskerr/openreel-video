@@ -834,7 +834,7 @@ class ExportPresetsManager {
   ): PlatformExportPreset {
     const newPreset: PlatformExportPreset = {
       ...preset,
-      id: `custom-${Date.now()}`,
+      id: createDurableId("export-preset"),
       category: "custom",
     };
     this.customPresets.push(newPreset);
@@ -896,3 +896,4 @@ class ExportPresetsManager {
 }
 
 export const exportPresetsManager = new ExportPresetsManager();
+import { createDurableId } from "@openreel/core";

@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from "uuid";
+import { createDurableId } from "@openreel/core";
 import type {
   Action,
   ActionResult,
@@ -14,7 +14,7 @@ export function createAction(
 ): Action {
   return {
     type,
-    id: uuidv4(),
+    id: createDurableId("action"),
     timestamp: Date.now(),
     params,
   };

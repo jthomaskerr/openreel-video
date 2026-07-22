@@ -8,10 +8,10 @@ import {
   type HandoffSelection,
   type ResolveExportJob,
   type ResolveImportResult,
-} from "@openreel/core";
+} from "@openreel/core/export/handoff/index";
+import { createInfrastructureNonce, isDurableId } from "@openreel/core/identity/durable-id";
 import { assertValidProjectId } from "../projects/storage-validation";
 
-const JOB_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256 = /^[a-f0-9]{64}$/;
 const FULL_COMMIT_SHA = /^[a-f0-9]{40}$/;
 const EARLIEST_JOURNAL_TIMESTAMP = Date.UTC(2000, 0, 1);
@@ -102,7 +102,7 @@ async function syncDirectory(path: string): Promise<void> {
 }
 
 function validateJobId(jobId: string): void {
-  if (!JOB_ID.test(jobId)) {
+  if (!isDurableId(jobId, "resolve-job")) {
     throw new ResolveJobStoreError(
       "INVALID_RESOLVE_JOB_PATH",
       "Resolve job identifier is invalid",
@@ -112,7 +112,7 @@ function validateJobId(jobId: string): void {
 }
 
 function validateTransactionId(transactionId: string): void {
-  if (!JOB_ID.test(transactionId)) {
+  if (!isDurableId(transactionId, "resolve-transaction")) {
     throw new ResolveJobStoreError(
       "INVALID_RESOLVE_JOB_PATH",
       "Resolve transaction identifier is invalid",
@@ -401,8 +401,8 @@ export class ResolveExportJobStore {
         || candidate.transactionId !== expected.transactionId
         || candidate.projectId !== expected.projectId
         || candidate.jobId !== expected.jobId
-        || !JOB_ID.test(expected.transactionId)
-        || !JOB_ID.test(expected.jobId)
+        || !isDurableId(expected.transactionId, "resolve-transaction")
+        || !isDurableId(expected.jobId, "resolve-job")
         || typeof candidate.kind !== "string"
         || !TRANSACTION_KINDS.has(candidate.kind as ResolveTransactionKind)
         || typeof candidate.baseCommitSha !== "string"
@@ -620,7 +620,7 @@ export class ResolveExportJobStore {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw error;
       }
-      for (const jobId of jobIds.filter((entry) => JOB_ID.test(entry)).sort()) {
+      for (const jobId of jobIds.filter((entry) => isDurableId(entry, "resolve-job")).sort()) {
         const directory = await this.#safeTransactionsDirectory(projectId, jobId, false);
         if (!directory) continue;
         for (const filename of (await readdir(directory)).filter((entry) => entry.endsWith(".json")).sort()) {
@@ -651,7 +651,7 @@ export class ResolveExportJobStore {
     await this.options.beforeWrite?.(path);
     const directory = dirname(path);
     await mkdir(directory, { recursive: true });
-    const temporary = join(directory, `.${crypto.randomUUID()}.tmp`);
+    const temporary = join(directory, `.${createInfrastructureNonce()}.tmp`);
     let handle;
     try {
       handle = await open(temporary, "wx", 0o600);
@@ -777,7 +777,7 @@ export class ResolveExportJobStore {
         if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw error;
       }
-      for (const jobId of names.filter((name) => JOB_ID.test(name)).sort()) {
+      for (const jobId of names.filter((name) => isDurableId(name, "resolve-job")).sort()) {
         const candidate = await this.load(projectId, jobId);
         if (candidate && sameSha256(candidate.launchToken.sha256, sha256)) return candidate;
       }

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createDurableId, createInfrastructureNonce } from "@openreel/core/identity/durable-id";
 import { mkdir, readFile, rename, rm, stat, open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { KeyedLock } from "./lock.js";
@@ -13,7 +13,7 @@ export class UploadRepository {
   private meta(id: string) { return join(this.directory, `${id}.json`); }
   private blob(id: string) { return join(this.directory, `${id}.bin`); }
   private async atomic(path: string, value: string | Uint8Array) {
-    const tmp = `${path}.${randomUUID()}.tmp`;
+    const tmp = `${path}.${createInfrastructureNonce()}.tmp`;
     const handle = await open(tmp, "w", 0o600);
     try { await handle.writeFile(value); await handle.sync(); } finally { await handle.close(); }
     await rename(tmp, path);
@@ -22,7 +22,7 @@ export class UploadRepository {
     if (input.bytes.byteLength === 0) throw new Error("upload-empty");
     if (!/^image\/(png|jpeg|webp)|^video\/(mp4|webm)|^audio\/(wav|mpeg|mp4|webm)$/.test(input.mimeType)) throw new Error("upload-invalid-mime");
     if (input.bytes.byteLength > this.maxBytes) throw new Error("upload-too-large");
-    await mkdir(this.directory, { recursive: true }); const id = `upl_${randomUUID()}`; const now = this.now();
+    await mkdir(this.directory, { recursive: true }); const id = createDurableId("upload"); const now = this.now();
     const record: UploadRecord = { id, ownerId: input.ownerId, projectId: input.projectId, mimeType: input.mimeType, byteLength: input.bytes.byteLength, createdAt: now, expiresAt: now + (input.ttlMs ?? 60 * 60 * 1000), references: 0 };
     try { await this.atomic(this.blob(id), input.bytes); await this.atomic(this.meta(id), JSON.stringify(record)); return record; }
     catch (cause) { await rm(this.blob(id), { force: true }); await rm(this.meta(id), { force: true }); throw cause; }
@@ -49,7 +49,7 @@ export class UploadRepository {
   }
   async lease(id: string, ownerId: string, projectId: string): Promise<UploadLease> {
     const record = await this.retain(id, ownerId, projectId);
-    const lease = { id: `lease_${randomUUID()}`, uploadId: id, ownerId, projectId, expiresAt: record.expiresAt };
+    const lease = { id: createDurableId("upload-lease"), uploadId: id, ownerId, projectId, expiresAt: record.expiresAt };
     this.leases.set(lease.id, lease);
     return lease;
   }

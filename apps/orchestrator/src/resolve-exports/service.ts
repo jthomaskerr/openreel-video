@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import type { Project } from "@openreel/core";
 import {
   HANDOFF_TARGET_PROFILES,
   ResolveImportResultSchema,
@@ -10,11 +11,15 @@ import {
   serializeResolveFcpxml,
   type CompatibilityReport,
   type HandoffSelection,
-  type Project,
   type ResolveExportJob,
   type ResolveImportResult,
   type ResolvePreview,
-} from "@openreel/core";
+} from "@openreel/core/export/handoff/index";
+import {
+  createDurableId,
+  createInfrastructureNonce,
+  type DurableEntityKind,
+} from "@openreel/core/identity/durable-id";
 import type {
   GitCommitLifecycleHooks,
   GitCommitReceipt,
@@ -117,7 +122,8 @@ export interface ResolveExportServiceOptions {
   readonly git: GitStorePort;
   readonly jobs: ResolveExportJobStore;
   readonly now?: () => number;
-  readonly randomUUID?: () => string;
+  readonly createDurableId?: (kind: DurableEntityKind) => string;
+  readonly createInfrastructureNonce?: () => string;
   readonly onTransactionPoint?: (point: ResolveTransactionPoint) => void | Promise<void>;
 }
 
@@ -333,7 +339,8 @@ function lifecyclePhase(
 
 export class ResolveExportService {
   readonly #now: () => number;
-  readonly #randomUUID: () => string;
+  readonly #createDurableId: (kind: DurableEntityKind) => string;
+  readonly #createInfrastructureNonce: () => string;
   readonly #onTransactionPoint?: ResolveExportServiceOptions["onTransactionPoint"];
   #recoveryPromise: Promise<void> | null = null;
   readonly #recoveryDiagnostics: ResolveRecoveryDiagnostic[] = [];
@@ -341,7 +348,8 @@ export class ResolveExportService {
 
   constructor(private readonly options: ResolveExportServiceOptions) {
     this.#now = options.now ?? Date.now;
-    this.#randomUUID = options.randomUUID ?? crypto.randomUUID;
+    this.#createDurableId = options.createDurableId ?? createDurableId;
+    this.#createInfrastructureNonce = options.createInfrastructureNonce ?? createInfrastructureNonce;
     this.#onTransactionPoint = options.onTransactionPoint;
   }
 
@@ -459,7 +467,7 @@ export class ResolveExportService {
     readonly transaction: GitProjectTransaction;
   }): Promise<void> {
     let journal = await this.options.jobs.prepareTransaction({
-      transactionId: crypto.randomUUID(),
+      transactionId: this.#createDurableId("resolve-transaction"),
       kind: input.kind,
       projectId: input.projectId,
       jobId: input.jobId,
@@ -664,8 +672,8 @@ export class ResolveExportService {
       const plan = createHandoffPlan(project, assessment, profile);
       const timestamp = this.#now();
       const createdAt = iso(timestamp);
-      const jobId = this.#randomUUID();
-      const launchToken = this.#randomUUID();
+      const jobId = this.#createDurableId("resolve-job");
+      const launchToken = this.#createInfrastructureNonce();
       const projectName = plan.project.name;
       const job: ResolveExportJob = {
         id: jobId,
@@ -812,7 +820,7 @@ export class ResolveExportService {
       };
       },
     );
-    const artifactAccessToken = this.#randomUUID();
+    const artifactAccessToken = this.#createInfrastructureNonce();
     const capabilityNow = this.#now();
     this.#artifactCapabilities.issue(
       updated.job.projectId,

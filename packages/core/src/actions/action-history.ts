@@ -1,4 +1,5 @@
 import type { Action } from "../types/actions";
+import { createDurableId } from "../identity";
 
 export interface HistoryEntry {
   readonly action: Action;
@@ -189,7 +190,7 @@ export class ActionHistory {
   }
 
   beginGroup(_description?: string): string {
-    this.currentGroupId = `group-${Date.now()}`;
+    this.currentGroupId = createDurableId("action-group");
     return this.currentGroupId;
   }
 
@@ -268,7 +269,7 @@ export class ActionHistory {
 
   createSnapshot(name: string): HistorySnapshot {
     const snapshot: HistorySnapshot = {
-      id: `snapshot-${Date.now()}`,
+      id: createDurableId("snapshot"),
       name,
       timestamp: Date.now(),
       stackIndex: this.undoStack.length,

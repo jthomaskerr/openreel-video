@@ -1,7 +1,6 @@
 import { Router } from "express";
 import type { NextFunction, Request, Response } from "express";
 import multer from "multer";
-import crypto from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { stat } from "node:fs/promises";
@@ -13,6 +12,7 @@ import type {
   ProjectSaveRequest,
   ProjectSaveReceipt,
 } from "@openreel/core";
+import { createInfrastructureNonce } from "@openreel/core/identity/durable-id";
 import {
   ExternalMediaDeleteBlockedError,
   ProjectStore,
@@ -39,11 +39,6 @@ import {
   assertValidProjectId,
   resolveContainedPath,
 } from "./storage-validation";
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function isUuid(value: string): boolean {
-  return UUID_RE.test(value);
-}
 
 function stagedEntry(
   status: GitStagedNameStatusEntry["status"],
@@ -158,7 +153,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
       filename: (req, _file, cb) => {
         try {
           assertValidMediaId(req.params.mediaId);
-          cb(null, `${req.params.mediaId}-${crypto.randomUUID()}.upload`);
+          cb(null, `${req.params.mediaId}-${createInfrastructureNonce()}.upload`);
         } catch (err) {
           cb(err as Error, "");
         }
@@ -263,7 +258,7 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
 
   function canonicalProjectId(project: Pick<Project, "id" | "name">): string {
     const id = project.id?.trim();
-    if (id && !isUuid(id)) return id;
+    if (id) return id;
     return toSlug(project.name.trim());
   }
 
@@ -305,11 +300,6 @@ export function createProjectRouter(store: ProjectStore, gitStore: GitStore): Ro
         || incoming.id !== req.params.id || !incoming.name?.trim()
         || !Array.isArray(request.requiredMediaManifest)) {
         res.status(400).json({ error: "Invalid project save request" });
-        return;
-      }
-
-      if (isUuid(incoming.id)) {
-        res.status(400).json({ error: "UUID project ids are not allowed — use the slug assigned by POST /api/projects" });
         return;
       }
 

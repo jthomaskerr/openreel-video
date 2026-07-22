@@ -33,7 +33,7 @@ export class TrackManager {
   ): Promise<TrackOperationResult> {
     const action: Action = {
       type: "track/add",
-      id: `action-${Date.now()}`,
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: {
         trackType: params.type,
@@ -66,7 +66,7 @@ export class TrackManager {
   ): Promise<TrackOperationResult> {
     const action: Action = {
       type: "track/remove",
-      id: `action-${Date.now()}`,
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: {
         trackId,
@@ -89,7 +89,7 @@ export class TrackManager {
   ): Promise<TrackOperationResult> {
     const action: Action = {
       type: "track/reorder",
-      id: `action-${Date.now()}`,
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: {
         trackId,
@@ -113,7 +113,7 @@ export class TrackManager {
   ): Promise<TrackOperationResult> {
     const action: Action = {
       type: "track/lock",
-      id: `action-${Date.now()}`,
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: {
         trackId,
@@ -137,7 +137,7 @@ export class TrackManager {
   ): Promise<TrackOperationResult> {
     const action: Action = {
       type: "track/hide",
-      id: `action-${Date.now()}`,
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: {
         trackId,
@@ -161,7 +161,7 @@ export class TrackManager {
   ): Promise<TrackOperationResult> {
     const action: Action = {
       type: "track/mute",
-      id: `action-${Date.now()}`,
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: {
         trackId,
@@ -185,7 +185,7 @@ export class TrackManager {
   ): Promise<TrackOperationResult> {
     const action: Action = {
       type: "track/solo",
-      id: `action-${Date.now()}`,
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: {
         trackId,
@@ -259,7 +259,7 @@ export function createTrack(
   name?: string,
 ): Track {
   return {
-    id: `track-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      id: createDurableId("track"),
     type,
     name: name || `${type.charAt(0).toUpperCase() + type.slice(1)} Track`,
     clips: [],
@@ -274,14 +274,14 @@ export function createTrack(
 export function cloneTrack(track: Track): Track {
   return {
     ...track,
-    id: `track-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      id: createDurableId("track"),
     clips: track.clips.map((clip) => ({
       ...clip,
-      id: `clip-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+          id: createDurableId("clip"),
     })),
     transitions: track.transitions.map((transition) => ({
       ...transition,
-      id: `transition-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+          id: createDurableId("transition"),
     })),
   };
 }
@@ -312,3 +312,4 @@ export function canAcceptMediaType(
   }
   return false;
 }
+import { createDurableId } from "../identity";

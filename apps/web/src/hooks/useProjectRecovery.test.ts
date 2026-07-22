@@ -34,7 +34,6 @@ const {
   mockSaveMediaBlob: vi.fn<unknown[], Promise<void>>().mockResolvedValue(undefined)
 }));
 vi.mock("../services/backend-save", () => ({
-  isClientOnlyProjectId: (projectId: string) => /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(projectId),
   backendSaveService: {
     load: (...args: unknown[]) => mockBackendLoad(...(args as [string])),
     create: vi.fn().mockResolvedValue({ id: "mock-backend-project", createdAt: 0, modifiedAt: 0 }),
@@ -213,17 +212,28 @@ describe("recoverFromAutoSave — store regression", () => {
     });
   });
 
-  it("quarantines legacy UUID autosaves without loading or saving", async () => {
-    mockAutoSaveRecover.mockResolvedValue({
+  it("recovers UUID-shaped project ids through the authoritative backend", async () => {
+    const recoveredProject = {
       ...makeProject(),
       id: "14aec9eb-469f-4db6-9652-00dee0d243fc",
-    });
+    };
+    mockAutoSaveRecover.mockResolvedValue(recoveredProject);
+    mockBackendLoad
+      .mockResolvedValueOnce({
+        ...makeProject({ name: "Backend Cut" }),
+        id: recoveredProject.id,
+      })
+      .mockResolvedValueOnce(recoveredProject);
+    confirmBaseRevision(recoveredProject.id);
 
-    await expect(useProjectStore.getState().recoverFromAutoSave("save-1")).resolves.toBe(false);
+    await expect(useProjectStore.getState().recoverFromAutoSave("save-1")).resolves.toBe(true);
 
-    expect(mockBackendLoad).not.toHaveBeenCalled();
-    expect(mockBackendSave).not.toHaveBeenCalled();
-    expect(useProjectStore.getState().error).toMatch(/UUID autosave is quarantined/i);
+    expect(mockBackendLoad).toHaveBeenCalledWith(recoveredProject.id);
+    expect(mockBackendSave).toHaveBeenCalledWith(
+      expect.objectContaining({ id: recoveredProject.id }),
+      "recovery",
+    );
+    expect(useProjectStore.getState().project.id).toBe(recoveredProject.id);
   });
 
   it("regression: recoverFromAutoSave propagates unhandled rejection when autoSaveManager.recover fails", async () => {

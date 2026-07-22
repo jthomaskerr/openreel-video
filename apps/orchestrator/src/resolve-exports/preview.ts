@@ -1,9 +1,8 @@
+import type { MediaItem, Project } from "@openreel/core";
 import {
   ResolvePreviewSchema,
-  type MediaItem,
-  type Project,
   type ResolvePreview,
-} from "@openreel/core";
+} from "@openreel/core/export/handoff/index";
 
 const previewClipTypes = [
   "video",

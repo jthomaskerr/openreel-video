@@ -9,7 +9,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { v4 as uuidv4 } from "uuid";
+import { createDurableId } from "@openreel/core";
 import type { Clip, MediaItem, Project } from "@openreel/core";
 import {
   createSceneProjectionMetadata,
@@ -175,7 +175,9 @@ function collisionSafeId(prefix: string, state: Pick<MusicVideoState, "projects"
     ...editor.timeline.tracks.flatMap((track) => [track.id, ...track.clips.map((clip) => clip.id)]),
   ]);
   let id: string;
-  do id = `${prefix}-${uuidv4()}`;
+  do id = prefix === "scene-placeholder"
+    ? createDurableId("media")
+    : createDurableId("scene");
   while (used.has(id));
   return id;
 }
@@ -280,7 +282,7 @@ function projectionsForScene(editor: Project, sceneId: string): Clip[] {
 }
 
 function publishSceneHistory(projectId: string, entry: SceneHistoryEntry): void {
-  const id = uuidv4();
+  const id = createDurableId("action");
   const action = {
     type: SCENE_HISTORY_ACTION,
     id,
@@ -301,7 +303,7 @@ async function addSceneClipWithoutHistory(
   const result = await editorState.actionExecutor.executeWithoutHistory(
     {
       type: "clip/add",
-      id: uuidv4(),
+      id: createDurableId("action"),
       timestamp: Date.now(),
       params: { trackId, mediaId, startTime, type: "video", metadata },
     },
@@ -326,7 +328,7 @@ export const useMusicVideoStore = create<MusicVideoState>()(
       createProject: (openreelProjectId, title) => {
         const now = new Date().toISOString();
         const project: MusicVideoProject = {
-          id: crypto.randomUUID(),
+          id: createDurableId("music-video"),
           title,
           openreelProjectId,
           audio: null,

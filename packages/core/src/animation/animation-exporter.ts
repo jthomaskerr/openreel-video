@@ -316,7 +316,7 @@ export class AnimationExporter {
     const animations = this.convertKeyframesToAnimations(clip.keyframes);
 
     return {
-      id: includeIds ? clip.id : `image-${Date.now()}`,
+        id: includeIds ? clip.id : createDurableId("clip"),
       type: "image",
       assetId: mediaItem.id,
       startTime: clip.startTime,
@@ -347,7 +347,7 @@ export class AnimationExporter {
     const animations = this.convertKeyframesToAnimations(clip.keyframes);
 
     return {
-      id: includeIds ? clip.id : `video-${Date.now()}`,
+        id: includeIds ? clip.id : createDurableId("clip"),
       type: "video",
       assetId: mediaItem.id,
       startTime: clip.startTime,
@@ -455,3 +455,4 @@ export function exportAnimationToJSON(
   });
   return result.json || "{}";
 }
+import { createDurableId } from "../identity";

@@ -28,7 +28,7 @@ import type {
   Transform,
   GraphicClip,
 } from "@openreel/core";
-import { v4 as uuid } from "uuid";
+import { createDurableId } from "@openreel/core";
 
 type MutableGraphicClip = {
   -readonly [K in keyof GraphicClip]: GraphicClip[K];
@@ -76,13 +76,6 @@ function generateKeyframesFromPreset(
 ): Keyframe[] {
   const keyframes: Keyframe[] = [];
   const presetDuration = customDuration || preset.duration;
-  const prefix =
-    category === "entrance"
-      ? "motion-in"
-      : category === "exit"
-        ? "motion-out"
-        : "motion-emphasis";
-
   let timeOffset = 0;
   if (category === "exit") {
     timeOffset = clipDuration - presetDuration;
@@ -139,7 +132,7 @@ function generateKeyframesFromPreset(
       }
 
       keyframes.push({
-        id: `${prefix}-${track.property}-${i}-${uuid().slice(0, 4)}`,
+        id: createDurableId("keyframe"),
         time,
         property: track.property as Keyframe["property"],
         value,

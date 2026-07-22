@@ -131,7 +131,7 @@ const selection: HandoffSelection = {
   range: { startTime: 0, endTime: 2 },
 };
 
-const FIXED_JOB_ID = "11111111-1111-4111-8111-111111111111";
+const FIXED_JOB_ID = "resolve-job-test-1";
 const CONFIRMED_REVISION = "a".repeat(40);
 
 function jobPath(name: string): string {
@@ -158,7 +158,7 @@ const IMPORT_RESULT_CRASH_POINTS = [
 
 function importResult(overrides: Partial<ResolveImportResult> = {}): ResolveImportResult {
   return {
-    requestId: "33333333-3333-4333-8333-333333333333",
+    requestId: "resolve-request-test-1",
     status: "completed",
     resolveVersion: "21.0.3",
     resolveBuild: "21.0.30007",
@@ -306,12 +306,9 @@ async function fixture(options: FixtureOptions = {}) {
       : undefined,
   });
   const jobs = createJobs();
-  const uuids = [
-    "11111111-1111-4111-8111-111111111111",
-    "22222222-2222-4222-8222-222222222222",
-    "44444444-4444-4444-8444-444444444444",
-    "55555555-5555-4555-8555-555555555555",
-  ];
+  let resolveJobSequence = 0;
+  let resolveTransactionSequence = 0;
+  let nonceSequence = 0;
   let now = Date.parse("2026-07-22T00:00:00.000Z");
   let crashAt: ResolveTransactionPoint | null = options.crashAt ?? null;
   const createService = (serviceJobs = createJobs()) => new ResolveExportService({
@@ -319,7 +316,10 @@ async function fixture(options: FixtureOptions = {}) {
     git,
     jobs: serviceJobs,
     now: () => now,
-    randomUUID: () => uuids.shift() ?? "44444444-4444-4444-8444-444444444444",
+    createDurableId: (kind) => kind === "resolve-job"
+      ? `resolve-job-test-${++resolveJobSequence}`
+      : `resolve-transaction-test-${++resolveTransactionSequence}`,
+    createInfrastructureNonce: () => `nonce-test-${++nonceSequence}`,
     onTransactionPoint: (point) => {
       if (point === crashAt) throw new ResolveSimulatedProcessCrash(point);
     },
@@ -803,7 +803,7 @@ describe("ResolveExportService", () => {
     )).rejects.toMatchObject({ code: "ARTIFACT_CAPABILITY_EXPIRED" });
     await expect(f.service.readArtifact(
       payload.projectId,
-      "99999999-9999-4999-8999-999999999999",
+      "resolve-job-other",
       name,
       payload.artifactAccessToken,
     )).rejects.toMatchObject({ code: "ARTIFACT_CAPABILITY_EXPIRED" });

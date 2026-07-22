@@ -36,12 +36,6 @@ interface ScheduledSaveState {
 const BASE_URL: string =
   (import.meta.env["VITE_ORCHESTRATOR_URL"] as string | undefined) ?? "http://localhost:4041";
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-export function isClientOnlyProjectId(projectId: string): boolean {
-  return UUID_RE.test(projectId);
-}
-
 /** Strip non-serialisable / engine-only fields before sending to backend. */
 function sanitize(project: Project): object {
   return {
@@ -421,8 +415,6 @@ class BackendSaveService {
     blob: Blob,
     filename: string,
   ): Promise<void> {
-    if (isClientOnlyProjectId(projectId)) return;
-
     const key = this.getUploadKey(projectId, mediaId);
     const existing = this.uploadPromises.get(key);
     if (existing) return existing;
@@ -568,11 +560,6 @@ class BackendSaveService {
     saveIntent: SaveIntent = "autosave",
     scheduledBaseRevision?: ProjectSaveRequest["baseRevision"] | null,
   ): Promise<void> {
-    if (isClientOnlyProjectId(project.id)) {
-      console.debug("[Persistence] skipped client-only project", { projectId: project.id });
-      return;
-    }
-
     const status = usePersistenceStatusStore.getState();
     const baseRevision = scheduledBaseRevision === undefined
       ? status.projectId === project.id ? status.baseRevision : null

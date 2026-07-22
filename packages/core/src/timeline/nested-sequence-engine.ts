@@ -154,7 +154,7 @@ export class NestedSequenceEngine {
     if (!compound) return null;
 
     const instance: CompoundClipInstance = {
-      id: `instance_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+      id: createDurableId("nested-sequence"),
       compoundClipId,
       trackId,
       startTime,
@@ -227,7 +227,7 @@ export class NestedSequenceEngine {
 
     const flattenedClips = compound.content.clips.map((clip) => ({
       ...clip,
-      id: `flat_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+      id: createDurableId("clip"),
       startTime: instance.startTime + clip.startTime,
       trackId: instance.trackId,
     }));
@@ -289,3 +289,4 @@ export function getNestedSequenceEngine(): NestedSequenceEngine {
 export function resetNestedSequenceEngine(): void {
   nestedSequenceEngineInstance = null;
 }
+import { createDurableId } from "../identity";

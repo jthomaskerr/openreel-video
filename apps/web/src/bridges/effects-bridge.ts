@@ -15,7 +15,7 @@ import {
   DEFAULT_HSL,
 } from "@openreel/core";
 import type { Effect } from "@openreel/core";
-import { v4 as uuidv4 } from "uuid";
+import { createDurableId } from "@openreel/core";
 
 export type EffectsChangeCallback = (clipId: string, effects: Effect[]) => void;
 
@@ -189,7 +189,7 @@ export class EffectsBridge {
 
     const effects = this.clipEffects.get(clipId) || [];
     const newEffect: VideoEffect = {
-      id: uuidv4(),
+      id: createDurableId("effect"),
       type: effectType,
       enabled: true,
       params: { ...this.getDefaultParams(effectType), ...params },

@@ -128,13 +128,13 @@ export const AutoEditPanel: React.FC<AutoEditPanelProps> = ({ onClose }) => {
     const videoTrackIndex = tracks.findIndex((t) => t.type === "video");
     if (videoTrackIndex === -1) return;
 
-    const newClips: Clip[] = preview.cuts.map((cut, index) => {
+    const newClips: Clip[] = preview.cuts.map((cut) => {
       const sourceClip = videoClips.find((c) => c.id === cut.sourceClipId);
       if (!sourceClip) return null;
 
       return {
         ...sourceClip,
-        id: `auto-edit-${Date.now()}-${index}`,
+        id: createDurableId("auto-edit"),
         startTime: cut.startTime,
         duration: cut.duration,
         inPoint: cut.inPoint,
@@ -307,3 +307,4 @@ export const AutoEditPanel: React.FC<AutoEditPanelProps> = ({ onClose }) => {
     </div>
   );
 };
+import { createDurableId } from "@openreel/core";

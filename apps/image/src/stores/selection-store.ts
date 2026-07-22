@@ -16,7 +16,7 @@ import {
   ColorRangeOptions,
 } from '../types/selection';
 
-const generateId = () => `sel-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+const generateId = () => createDurableId('selection');
 
 interface SelectionActions {
   startSelection: (type: SelectionType, point: { x: number; y: number }) => void;
@@ -425,3 +425,4 @@ function computeSelectionOutline(
 
   return outline;
 }
+import { createDurableId } from '@openreel/core/identity/durable-id';

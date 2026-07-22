@@ -43,8 +43,8 @@ import {
   getMediaStatus,
   MediaStatus,
   filenameToTitle,
+  createDurableId,
 } from "@openreel/core";
-import { v4 as uuidv4 } from "uuid";
 import type {
   VideoEffect,
   VideoEffectType,
@@ -63,7 +63,7 @@ import {
 import { useEngineStore } from "./engine-store";
 import { getMediaBridge, initializeMediaBridge } from "../bridges/media-bridge";
 import {
-  createUnresolvedProject,
+  createNoActiveProjectGuard,
   calculateTimelineDuration,
   type AudioDuckingSettings,
   type EditingTemplateApplicationState,
@@ -80,7 +80,7 @@ import {
   scanDirectoryRecursive,
 } from "../services/media-storage";
 import { parseImportableSRT, parseSRT } from "./project/subtitle-helpers";
-import { backendSaveService, isClientOnlyProjectId } from "../services/backend-save";
+import { backendSaveService } from "../services/backend-save";
 import { blobToDataUrl, restoreMediaItem } from "../utils/media-recovery";
 import { projectManager } from "../services/project-manager";
 import { reportRuntimeError, toast } from "./notification-store";
@@ -297,12 +297,6 @@ function ensureAutoSaveBindings(getProjectState: () => ProjectState): void {
       const state = getProjectState();
       if (!state.explicitlyCreated) return;
       autoSaveManager.markDirty();
-      if (isClientOnlyProjectId(state.project.id)) {
-        console.debug("[Persistence] client-only project is awaiting backend identity", {
-          projectId: state.project.id,
-        });
-        return;
-      }
       backendSaveService.scheduleSave(state.project, 0);
     },
   );
@@ -936,7 +930,7 @@ export const useProjectStore = create<ProjectState>()(
     const buildEditingTemplateTrack = (
       trackType: "text" | "graphics",
     ): Track => ({
-      id: `track-${uuidv4()}`,
+      id: createDurableId("track"),
       type: trackType,
       name: trackType === "text" ? "Recipe Text" : "Recipe Graphics",
       clips: [],
@@ -1190,7 +1184,7 @@ export const useProjectStore = create<ProjectState>()(
         overrides,
       );
 
-      const applicationId = options.applicationId || `editing-template-${uuidv4()}`;
+      const applicationId = options.applicationId || createDurableId("template-application");
       const appliedTemplate = buildAppliedEditingTemplate(
         resolvedTemplate,
         applicationId,
@@ -1739,8 +1733,8 @@ export const useProjectStore = create<ProjectState>()(
     };
 
     return {
-      // Startup is unresolved until a backend load or create confirms a receipt.
-      project: createUnresolvedProject(),
+      // This guard is not a project and carries no temporary identity.
+      project: createNoActiveProjectGuard(),
       photoProjects: new Map(),
       actionExecutor,
       actionHistory,
@@ -1761,7 +1755,10 @@ export const useProjectStore = create<ProjectState>()(
         name?: string,
         settings?: Partial<ProjectSettings>,
       ) => {
-        const previousProject = get().project;
+        const currentState = get();
+        const previousProject = currentState.explicitlyCreated
+          ? currentState.project
+          : undefined;
         const projectName = name?.trim() || generateProjectName();
         set({ isLoading: true, error: null, explicitlyCreated: false });
 
@@ -1803,13 +1800,6 @@ export const useProjectStore = create<ProjectState>()(
       },
 
       loadProject: (project: Project) => {
-        if (isClientOnlyProjectId(project.id)) {
-          set({
-            error: `Legacy UUID project ${project.id} is quarantined and cannot be activated.`,
-            explicitlyCreated: false,
-          });
-          return;
-        }
         backendSaveService.resetForProject(project.id);
         const previousProject = get().project;
         const titleEngine = useEngineStore.getState().getTitleEngine();
@@ -1929,7 +1919,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "project/rename",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { name },
         };
@@ -1945,7 +1935,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "project/updateSettings",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: settings,
         };
@@ -1962,11 +1952,10 @@ export const useProjectStore = create<ProjectState>()(
         await projectManager.deleteProject(project.id);
         await autoSaveManager.clearProjectSaves(project.id);
         stopAutoSave();
-        const nextProject = createUnresolvedProject();
         const newHistory = new ActionHistory();
         const newExecutor = new ActionExecutor(newHistory);
         set({
-          project: nextProject,
+          project: createNoActiveProjectGuard(),
           actionHistory: newHistory,
           actionExecutor: newExecutor,
           clipUndoStack: [],
@@ -2085,7 +2074,7 @@ export const useProjectStore = create<ProjectState>()(
                 ? subtitles[subtitles.length - 1].endTime
                 : 0;
 
-            const srtMediaId = existingSameFile?.id ?? uuidv4();
+            const srtMediaId = existingSameFile?.id ?? createDurableId("media");
             const newMediaItem: MediaItem = preserveUserMediaMetadata({
               id: srtMediaId,
               name: file.name,
@@ -2265,7 +2254,7 @@ export const useProjectStore = create<ProjectState>()(
           }
 
           const newMediaItem: MediaItem = {
-            id: uuidv4(),
+            id: createDurableId("media"),
             name: file.name,
             type: mediaType,
             fileHandle: null,
@@ -2391,7 +2380,7 @@ export const useProjectStore = create<ProjectState>()(
         }
         const action: Action = {
           type: "media/delete",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { mediaId },
         };
@@ -2594,7 +2583,7 @@ export const useProjectStore = create<ProjectState>()(
 
           return {
             success: true,
-            actionId: uuidv4(),
+            actionId: createDurableId("action"),
           };
         } catch (error) {
           return {
@@ -2618,7 +2607,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "media/rename",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { mediaId, name },
         };
@@ -2634,7 +2623,7 @@ export const useProjectStore = create<ProjectState>()(
         const normalizedPatch = normalizeMediaMetadataPatch(patch);
         const action: Action = {
           type: "media/updateMetadata" as Action["type"],
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { mediaId, patch: normalizedPatch },
         };
@@ -2712,7 +2701,7 @@ export const useProjectStore = create<ProjectState>()(
           },
         });
 
-        return { success: true, actionId: uuidv4() };
+        return { success: true, actionId: createDurableId("action") };
       },
 
       addAssetVersion: async (sourceMediaId: string, item: MediaItem, blob: Blob) => {
@@ -2783,7 +2772,7 @@ export const useProjectStore = create<ProjectState>()(
           },
         });
 
-        return { success: true, actionId: uuidv4() };
+        return { success: true, actionId: createDurableId("action") };
       },
 
       addAssetVersionFromFile: async (sourceMediaId: string, file: File, sourceFolder?: string) => {
@@ -2898,7 +2887,7 @@ export const useProjectStore = create<ProjectState>()(
           }
 
           const versionItem: MediaItem = {
-            id: uuidv4(),
+            id: createDurableId("media"),
             name: file.name,
             type: mediaType,
             fileHandle: null,
@@ -3033,7 +3022,7 @@ export const useProjectStore = create<ProjectState>()(
         const result = runCreateGeneratedImage(commandProject, {
           title: input.title,
           draft: createGeneratedImageDraft(input.title),
-          createId: () => uuidv4(),
+          createId: () => createDurableId("generated-image"),
           now: () => new Date().toISOString(),
         });
 
@@ -3058,7 +3047,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project } = get();
         const commandProject = buildGeneratedImageCommandProject(project);
         const result = runConvertImportedImageToGeneratedImage(commandProject, input.mediaId, {
-          createId: () => uuidv4(),
+          createId: () => createDurableId("generated-image"),
           now: () => new Date().toISOString(),
         });
 
@@ -3252,7 +3241,7 @@ export const useProjectStore = create<ProjectState>()(
 
         const action: Action = {
           type: "track/add",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { trackType, position },
         };
@@ -3272,7 +3261,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "track/remove",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { trackId },
         };
@@ -3311,7 +3300,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "track/reorder",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { trackId, newPosition },
         };
@@ -3326,7 +3315,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "track/lock",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { trackId, locked },
         };
@@ -3341,7 +3330,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "track/hide",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { trackId, hidden },
         };
@@ -3356,7 +3345,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "track/mute",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { trackId, muted },
         };
@@ -3371,7 +3360,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "track/solo",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { trackId, solo },
         };
@@ -3402,7 +3391,7 @@ export const useProjectStore = create<ProjectState>()(
         const projectCopy = structuredClone(project);
         const action: Action = {
           type: "clip/add",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { trackId, mediaId, startTime, ...options },
         };
@@ -3481,7 +3470,7 @@ export const useProjectStore = create<ProjectState>()(
               : (mediaItem.type === "srt" ? "video" : "video");
         const action: Action = {
           type: "clip/add",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: {
             trackId: newTrack.id,
@@ -3591,11 +3580,11 @@ export const useProjectStore = create<ProjectState>()(
 
         const newTrackIds: string[] = [];
         for (let i = existingAudioCount; i < audioTrackCount; i++) {
-          const newTrackId = uuidv4();
+          const newTrackId = createDurableId("track");
           newTrackIds.push(newTrackId);
           const trackAction: Action = {
             type: "track/add",
-            id: uuidv4(),
+            id: createDurableId("action"),
             timestamp: Date.now(),
             params: { trackType: "audio", trackId: newTrackId },
           };
@@ -3637,7 +3626,7 @@ export const useProjectStore = create<ProjectState>()(
 
           const action: Action = {
             type: "clip/add",
-            id: uuidv4(),
+            id: createDurableId("action"),
             timestamp: Date.now(),
             params: {
               trackId: targetTrack.id,
@@ -3680,7 +3669,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "clip/remove",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { clipId },
         };
@@ -3695,7 +3684,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "clip/move",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { clipId, startTime, trackId },
         };
@@ -3720,7 +3709,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "clip/closeGapBefore",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { clipId },
         };
@@ -3735,7 +3724,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "track/consolidate",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { trackId },
         };
@@ -3768,7 +3757,7 @@ export const useProjectStore = create<ProjectState>()(
             const { project } = get();
             const action: Action = {
               type: "clip/move",
-              id: uuidv4(),
+              id: createDurableId("action"),
               timestamp: Date.now(),
               params: {
                 clipId: move.clipId,
@@ -3790,7 +3779,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "clip/trim",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { clipId, inPoint, outPoint },
         };
@@ -3805,7 +3794,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "clip/split",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { clipId, time },
         };
@@ -3820,7 +3809,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "clip/rippleDelete",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { clipId },
         };
@@ -3835,7 +3824,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "audio/setMuted",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { clipId, muted },
         };
@@ -3850,7 +3839,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "clip/slip",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { clipId, delta },
         };
@@ -3899,7 +3888,7 @@ export const useProjectStore = create<ProjectState>()(
 
         const action: Action = {
           type: "clip/slide",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: {
             clipId,
@@ -3923,7 +3912,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "clip/roll",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { leftClipId, rightClipId, delta },
         };
@@ -3942,7 +3931,7 @@ export const useProjectStore = create<ProjectState>()(
         const { project, actionExecutor } = get();
         const action: Action = {
           type: "clip/trimToPlayhead",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: { clipId, playheadTime, trimStart },
         };
@@ -4161,7 +4150,7 @@ export const useProjectStore = create<ProjectState>()(
 
           const action: Action = {
             type: "clip/add",
-            id: uuidv4(),
+            id: createDurableId("action"),
             timestamp: Date.now(),
             params: {
               trackId,
@@ -4227,7 +4216,7 @@ export const useProjectStore = create<ProjectState>()(
         const projectCopy = structuredClone(project);
         const action: Action = {
           type: "clip/add",
-          id: uuidv4(),
+          id: createDurableId("action"),
           timestamp: Date.now(),
           params: {
             trackId: track.id,
@@ -4288,7 +4277,7 @@ export const useProjectStore = create<ProjectState>()(
         for (const effect of copiedEffects) {
           const action: Action = {
             type: "effect/add",
-            id: uuidv4(),
+            id: createDurableId("action"),
             timestamp: Date.now(),
             params: {
               clipId,
@@ -5351,13 +5340,6 @@ export const useProjectStore = create<ProjectState>()(
             set({ error: "No save record found for this ID." });
             return false;
           }
-          if (isClientOnlyProjectId(recoveredProject.id)) {
-            set({
-              error: "This legacy UUID autosave is quarantined and cannot create or replace a backend project.",
-            });
-            return false;
-          }
-
           // Establish the authoritative project and receipt before any upload
           // or persistence attempt.
           const authoritativeProject = await backendSaveService.load(recoveredProject.id);
@@ -6003,7 +5985,7 @@ export const useProjectStore = create<ProjectState>()(
 
       addMarker: (time, label = "Marker", color = "#3b82f6") => {
         const newMarker: import("@openreel/core").Marker = {
-          id: `marker-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+          id: createDurableId("marker"),
           time,
           label,
           color,

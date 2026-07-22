@@ -132,8 +132,6 @@ interface ProjectActions {
   markClean: () => void;
 }
 
-const generateId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
-
 // Helper to apply a command and update the project in one shot.
 function execCmd(
   project: Project,
@@ -155,9 +153,9 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
       // ── Project lifecycle ────────────────────────────────────────────────
 
       createProject: (name, size, background) => {
-        const artboardId = generateId();
+        const artboardId = createDurableId('artboard');
         const project = createProjectDocument({
-          id: generateId(),
+          id: createDurableId('photo-project'),
           artboardId,
           name,
           size,
@@ -233,7 +231,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
       addArtboard: (name, size, position) => {
         const { project } = get();
         if (!project) return '';
-        const id = generateId();
+        const id = createDurableId('artboard');
         const artboard: Artboard = {
           id,
           name,
@@ -293,7 +291,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
       // ── Layer add helpers ────────────────────────────────────────────────
 
       addImageLayer: (sourceId, transform) => {
-        const id = generateId();
+        const id = createDurableId('layer');
         const { project, selectedArtboardId } = get();
         if (!project || !selectedArtboardId) return id;
         const artboard = project.artboards.find((a) => a.id === selectedArtboardId);
@@ -344,7 +342,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
       },
 
       addTextLayer: (content, transform) => {
-        const id = generateId();
+        const id = createDurableId('layer');
         const { project, selectedArtboardId } = get();
         if (!project || !selectedArtboardId) return id;
         const artboard = project.artboards.find((a) => a.id === selectedArtboardId);
@@ -395,7 +393,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
       },
 
       addShapeLayer: (shapeType, transform) => {
-        const id = generateId();
+        const id = createDurableId('layer');
         const { project, selectedArtboardId } = get();
         if (!project || !selectedArtboardId) return id;
         const artboard = project.artboards.find((a) => a.id === selectedArtboardId);
@@ -445,7 +443,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
       },
 
       addPathLayer: (points, strokeColor, strokeWidth) => {
-        const id = generateId();
+        const id = createDurableId('layer');
         const { project, selectedArtboardId } = get();
         if (!project || !selectedArtboardId || points.length <= 1) return id;
         const artboard = project.artboards.find((a) => a.id === selectedArtboardId);
@@ -496,7 +494,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
       },
 
       addGroupLayer: (childIds) => {
-        const id = generateId();
+        const id = createDurableId('layer');
         const { project, selectedArtboardId } = get();
         if (!project || !selectedArtboardId || childIds.length === 0) return id;
         const artboard = project.artboards.find((a) => a.id === selectedArtboardId);
@@ -648,7 +646,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
       duplicateLayer: (layerId) => {
         const { project, selectedArtboardId } = get();
         if (!project || !selectedArtboardId) return null;
-        const newId = generateId();
+        const newId = createDurableId('layer');
         const duplicated = duplicateLayerInProject(project, selectedArtboardId, layerId, newId);
         if (!duplicated) return null;
         const artboard = project.artboards.find((a) => a.id === selectedArtboardId);
@@ -782,7 +780,7 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
         if (!artboard) return;
         const pastedLayers: Layer[] = copiedLayers.map((layer) => ({
           ...JSON.parse(JSON.stringify(layer)),
-          id: generateId(),
+          id: createDurableId('layer'),
           name: `${layer.name} copy`,
           transform: { ...layer.transform, x: layer.transform.x + 20, y: layer.transform.y + 20 },
         }));
@@ -906,3 +904,4 @@ export const useProjectStore = create<ProjectState & ProjectActions>()(
     }))
   )
 );
+import { createDurableId } from '@openreel/core/identity/durable-id';

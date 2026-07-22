@@ -16,7 +16,6 @@ import { useKieAIPoller } from "./hooks/useKieAIPoller";
 import { useGenerationJobPoller } from "./hooks/useGenerationJobPoller";
 import { SOCIAL_MEDIA_PRESETS, type SocialMediaCategory } from "@openreel/core";
 import { TooltipProvider } from "@openreel/ui";
-import { isClientOnlyProjectId } from "./services/backend-save";
 import { shouldSyncProjectIdToUrl } from "./services/project-url-identity";
 import { usePersistenceStatusStore } from "./stores/persistence-status-store";
 
@@ -118,7 +117,6 @@ function App() {
       currentProjectId: project.id,
       explicitlyCreated,
       recoveryIsChecking,
-      currentProjectIsClientOnly: isClientOnlyProjectId(project.id),
     })) {
       updateParams({ projectId: project.id });
     }

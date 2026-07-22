@@ -10,7 +10,7 @@ import {
   type NeuralFramesStoryboard,
   type SceneClipSpec,
 } from "@openreel/music-video-domain";
-import { v4 as uuidv4 } from "uuid";
+import { createDurableId } from "@openreel/core";
 import { addTimelineClip, type TimelineClipStore } from "./timeline/timeline-clips";
 import { createMetadataMedia, type MetadataKind } from "./timeline/metadata-media";
 import { useProjectStore, type ProjectState } from "../../stores/project-store";
@@ -383,7 +383,7 @@ export async function importNeuralFramesFile(
     const errors: ImportError[] =
       trackBlocksFailed > 0
         ? failedBlocks.map((entry) => ({
-            id: `nf-block-${uuidv4().slice(0, 8)}`,
+            id: createDurableId("music-video"),
             kind: "block_failed",
             message: entry,
             label: entry.split(" (")[0] ?? entry,

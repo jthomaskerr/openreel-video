@@ -1164,7 +1164,7 @@ export class TemplateEngine {
       tags?: string[];
     },
   ): Template {
-    const templateId = `template-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const templateId = createDurableId("template");
 
     const templateTimeline = this.convertToTemplateTimeline(
       project.timeline,
@@ -1256,7 +1256,7 @@ export class TemplateEngine {
       }
     }
 
-    const projectId = `project-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const projectId = createDurableId("project");
 
     const mediaItems = this.createMediaFromReplacements(
       effectiveReplacements,
@@ -1628,7 +1628,7 @@ export class TemplateEngine {
       }
     }
 
-    const projectId = `project-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const projectId = createDurableId("project");
 
     const timelineClone = JSON.parse(
       JSON.stringify(template.timeline),
@@ -1970,3 +1970,4 @@ export class TemplateEngine {
 export function createTemplateEngine(): TemplateEngine {
   return new TemplateEngine();
 }
+import { createDurableId } from "../identity";

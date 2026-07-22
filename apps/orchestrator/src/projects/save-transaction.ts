@@ -1,4 +1,4 @@
-import crypto, { createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import { mkdir, open, readFile, readdir, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type {
@@ -10,6 +10,7 @@ import type {
   ProjectSaveReceipt,
   ProjectSaveRequest,
 } from "@openreel/core";
+import { createInfrastructureNonce } from "@openreel/core/identity/durable-id";
 import { serializeRequiredMediaManifest } from "../../../../packages/core/src/project-persistence";
 import type { GitCommitReceipt, GitProjectTransaction, GitStore } from "./git-store";
 import { ProjectMediaManifestAuditError } from "./media-manifest";
@@ -253,7 +254,7 @@ export async function executeSaveTransaction(
       });
     }
 
-    const transactionId = crypto.randomUUID();
+    const transactionId = createInfrastructureNonce();
     const stagedPath = `${projectPath}.${transactionId}.save`;
     const restorePath = `${projectPath}.${transactionId}.restore`;
     const pendingEntries = await listPendingMedia(store.projectDir(request.projectId));

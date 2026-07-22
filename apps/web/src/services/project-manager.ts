@@ -1,5 +1,4 @@
 import type { Project, ProjectSettings } from "@openreel/core";
-import { v4 as uuidv4 } from "uuid";
 
 interface FilePickerAcceptType {
   description: string;
@@ -200,64 +199,6 @@ class ProjectManager {
         }
       };
     });
-  }
-
-  async createProject(
-    options: {
-      name?: string;
-      templateId?: string;
-      settings?: Partial<ProjectSettings>;
-    } = {},
-  ): Promise<Project> {
-    const template = options.templateId
-      ? DEFAULT_TEMPLATES.find((t) => t.id === options.templateId) ||
-        DEFAULT_TEMPLATES[0]
-      : DEFAULT_TEMPLATES[0];
-
-    const settings: ProjectSettings = {
-      width: 1920,
-      height: 1080,
-      frameRate: 30,
-      sampleRate: 48000,
-      channels: 2,
-      ...template.settings,
-      ...options.settings,
-    };
-
-    const tracks =
-      template.tracks?.map((t, i) => ({
-        id: `track-${Date.now()}-${i}`,
-        type: t.type as "video" | "audio" | "image" | "text" | "graphics",
-        name: t.name,
-        clips: [],
-        transitions: [],
-        locked: false,
-        hidden: false,
-        muted: false,
-        solo: false,
-      })) || [];
-
-    const project: Project = {
-      id: uuidv4(),
-      name: options.name || "Untitled Project",
-      createdAt: Date.now(),
-      modifiedAt: Date.now(),
-      settings,
-      timeline: {
-        duration: 0,
-        tracks,
-        markers: [],
-        subtitles: [],
-      },
-      mediaLibrary: {
-        items: [],
-      },
-      generatedImageDefinitions: [],
-    };
-
-    this.currentFileHandle = null;
-    this.emit("projectOpened", { project });
-    return project;
   }
 
   async saveProject(project: Project): Promise<boolean> {

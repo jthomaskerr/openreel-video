@@ -983,7 +983,7 @@ function UploadsPanel() {
         const img = new window.Image();
         img.onload = () => {
           addAsset({
-            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            id: createDurableId('asset'),
             name: file.name,
             type: 'image',
             mimeType: file.type,
@@ -1010,7 +1010,7 @@ function UploadsPanel() {
         const img = new window.Image();
         img.onload = () => {
           addAsset({
-            id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            id: createDurableId('asset'),
             name: file.name,
             type: 'image',
             mimeType: file.type,
@@ -1099,3 +1099,4 @@ function UploadsPanel() {
     </div>
   );
 }
+import { createDurableId } from '@openreel/core/identity/durable-id';

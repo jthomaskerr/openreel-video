@@ -8,21 +8,19 @@ describe("shouldSyncProjectIdToUrl", () => {
     currentProjectId: "11111111-1111-4111-8111-111111111111",
     explicitlyCreated: true,
     recoveryIsChecking: true,
-    currentProjectIsClientOnly: true,
   } as const;
 
-  it("preserves an explicit backend slug while its project is loading", () => {
+  it("preserves the requested backend id only while recovery is loading", () => {
     expect(shouldSyncProjectIdToUrl(base)).toBe(false);
-    expect(shouldSyncProjectIdToUrl({ ...base, recoveryIsChecking: false })).toBe(false);
+    expect(shouldSyncProjectIdToUrl({ ...base, recoveryIsChecking: false })).toBe(true);
   });
 
-  it("replaces a pending UUID only after reconciliation produces a canonical slug", () => {
+  it("syncs the authoritative project id after reconciliation", () => {
     expect(shouldSyncProjectIdToUrl({
       ...base,
       requestedProjectId: "11111111-1111-4111-8111-111111111111",
       currentProjectId: "my-project",
       recoveryIsChecking: false,
-      currentProjectIsClientOnly: false,
     })).toBe(true);
   });
 

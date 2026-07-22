@@ -226,7 +226,7 @@ export const AdjustmentLayerSection: React.FC<AdjustmentLayerSectionProps> = ({
       if (!preset) return;
 
       adjustmentLayerEngine.addEffect(layerId, {
-        id: `effect_${Date.now()}`,
+        id: createDurableId("effect"),
         ...preset.effect,
       });
 
@@ -483,3 +483,4 @@ export const AdjustmentLayerSection: React.FC<AdjustmentLayerSectionProps> = ({
 };
 
 export default AdjustmentLayerSection;
+import { createDurableId } from "@openreel/core";

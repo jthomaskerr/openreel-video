@@ -10,6 +10,10 @@
       "import": "./src/index.ts",
       "types": "./src/index.ts"
     },
+    "./identity": {
+      "import": "./src/identity/durable-id.ts",
+      "types": "./src/identity/durable-id.ts"
+    },
     "./*": {
       "import": "./src/*.ts",
       "types": "./src/*.ts"
@@ -26,7 +30,6 @@
     "build:wasm:beat": "asc src/wasm/beat-detection/assembly/index.ts -o src/wasm/beat-detection/build/beat.wasm --optimize --runtime stub"
   },
   "devDependencies": {
-    "@types/uuid": "^11.0.0",
     "ajv": "^8.17.1",
     "ajv-formats": "^3.0.1",
     "assemblyscript": "^0.27.0",
@@ -43,7 +46,6 @@
     "idb-keyval": "^6.2.2",
     "immer": "^11.0.1",
     "mediabunny": "^1.25.3",
-    "uuid": "^13.0.0",
     "zod": "^4.4.3"
   }
 }

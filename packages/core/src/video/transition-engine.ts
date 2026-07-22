@@ -555,7 +555,7 @@ export class TransitionEngine {
     const defaultParams = this.getDefaultParams(type);
 
     return {
-      id: `transition-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      id: createDurableId("transition"),
       clipAId: clipA.id,
       clipBId: clipB.id,
       type,
@@ -687,3 +687,4 @@ export function createTransitionEngine(
 ): TransitionEngine {
   return new TransitionEngine({ width, height });
 }
+import { createDurableId } from "../identity";

@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from "uuid";
+import { createDurableId } from "../identity";
 import type {
   AnimationSchema,
   LayerDefinition,
@@ -121,15 +121,13 @@ export class AnimationImporter {
     }
 
     try {
-      const projectId = options.generateIds
-        ? uuidv4()
-        : `project-${Date.now()}`;
+      const projectId = createDurableId("project");
       const mediaItems: MediaItem[] = [];
       const textClips: TextClip[] = [];
       const shapeClips: ShapeClip[] = [];
 
-      const videoTrackId = `track-video-${Date.now()}`;
-      const audioTrackId = `track-audio-${Date.now()}`;
+      const videoTrackId = createDurableId("track");
+      const audioTrackId = createDurableId("track");
 
       const videoTrack: Track = {
         id: videoTrackId,
@@ -222,7 +220,7 @@ export class AnimationImporter {
       if (processedSchema.audio?.tracks) {
         for (const audioConfig of processedSchema.audio.tracks) {
           const clip: Clip = {
-            id: `clip-audio-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+            id: createDurableId("clip"),
             type: "audio",
             mediaId: audioConfig.assetId,
             trackId: audioTrack.id,
@@ -359,7 +357,7 @@ export class AnimationImporter {
     const textClip: TextClip = {
       id:
         layer.id ||
-        `text-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+        createDurableId("text"),
       trackId,
       text: layer.content,
       startTime: layer.startTime ?? 0,
@@ -417,7 +415,7 @@ export class AnimationImporter {
     const shapeClip: ShapeClip = {
       id:
         layer.id ||
-        `shape-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+        createDurableId("graphic"),
       trackId,
       type: "shape",
       shapeType,
@@ -449,7 +447,7 @@ export class AnimationImporter {
     const clip: Clip = {
       id:
         layer.id ||
-        `clip-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+        createDurableId("clip"),
       type: "image",
       mediaId: layer.assetId,
       trackId: videoTrack.id,
@@ -491,7 +489,7 @@ export class AnimationImporter {
     const clip: Clip = {
       id:
         layer.id ||
-        `clip-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+        createDurableId("clip"),
       type: "video",
       mediaId: layer.assetId,
       trackId: videoTrack.id,
@@ -533,7 +531,7 @@ export class AnimationImporter {
     for (const animation of animations) {
       for (const kf of animation.keyframes) {
         keyframes.push({
-          id: `kf-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+          id: createDurableId("keyframe"),
           time: kf.time + (animation.delay || 0),
           property: animation.property,
           value: kf.value,

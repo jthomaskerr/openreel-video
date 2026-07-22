@@ -2,48 +2,22 @@ const BASE32 = "0123456789abcdefghjkmnpqrstvwxyz";
 const KIND_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 const DURABLE_ID_PATTERN = /^([a-z][a-z0-9]*(?:-[a-z0-9]+)*)-([a-z0-9]+)-([a-z0-9]+)$/;
 
-export type DurableEntityKind =
-  | "action"
-  | "adjustment-layer"
-  | "artboard"
-  | "asset-group"
-  | "chat"
-  | "chat-message"
-  | "clip"
-  | "compound-clip"
-  | "draft"
-  | "effect"
-  | "generated-image"
-  | "generation-job"
-  | "graphic"
-  | "keyframe"
-  | "layer"
-  | "mask"
-  | "media"
-  | "music-video"
-  | "palette"
-  | "photo-project"
-  | "recovery"
-  | "resolve-job"
-  | "selection"
-  | "snapshot"
-  | "subtitle"
-  | "template-application"
-  | "text"
-  | "track"
-  | "tracking-job"
-  | "tracking-result"
-  | "transition"
-  | "upload";
+const DURABLE_ENTITY_KIND_VALUES = [
+  "action", "action-group", "adjustment-layer", "artboard", "asset", "asset-group", "auto-edit",
+  "camera", "chat", "chat-message", "clip", "compound-clip", "draft", "effect",
+  "export-preset", "generated-image", "generation-job", "generation-session", "graphic",
+  "brush-preset", "guide", "keyframe", "layer", "llm-instance", "log", "marker", "mask", "media",
+  "metadata-block", "metadata-track", "motion-preset", "multicam", "multicam-angle",
+  "multicam-switch", "music-video", "nested-sequence", "palette", "photo-project",
+  "problem", "processing-task", "project", "recovery", "resolve-job", "resolve-request",
+  "resolve-transaction", "scene", "selection", "snapshot", "speed-keyframe", "sticker",
+  "storyboard", "subtitle", "template", "template-application", "text", "track",
+  "tracking-job", "tracking-result", "transcription-job", "transition", "upload", "upload-lease", "vector-path",
+] as const;
 
-const DURABLE_ENTITY_KINDS = new Set<DurableEntityKind>([
-  "action", "adjustment-layer", "artboard", "asset-group", "chat",
-  "chat-message", "clip", "compound-clip", "draft", "effect",
-  "generated-image", "generation-job", "graphic", "keyframe", "layer",
-  "mask", "media", "music-video", "palette", "photo-project", "recovery",
-  "resolve-job", "selection", "snapshot", "subtitle", "template-application",
-  "text", "track", "tracking-job", "tracking-result", "transition", "upload",
-]);
+export type DurableEntityKind = (typeof DURABLE_ENTITY_KIND_VALUES)[number];
+
+const DURABLE_ENTITY_KINDS = new Set<string>(DURABLE_ENTITY_KIND_VALUES);
 
 export interface DurableIdEntropy {
   now(): number;
@@ -112,4 +86,8 @@ export function createInfrastructureNonce(
   entropy: DurableIdEntropy = runtimeEntropy,
 ): InfrastructureNonce {
   return createIdentity("nonce", entropy) as InfrastructureNonce;
+}
+
+export function isInfrastructureNonce(value: string): value is InfrastructureNonce {
+  return /^nonce-[a-z0-9]+-[a-z0-9]+$/.test(value);
 }

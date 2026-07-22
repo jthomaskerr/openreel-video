@@ -615,7 +615,7 @@ export class GraphicsBridge {
       if (!emoji) {
         // Create a custom emoji item if not found in library
         const customEmoji: EmojiItem = {
-          id: `custom_${Date.now()}`,
+          id: createDurableId("graphic"),
           emoji: options.emoji,
           name: options.emoji,
           category: "custom",
@@ -964,3 +964,4 @@ export function disposeGraphicsBridge(): void {
     graphicsBridgeInstance = null;
   }
 }
+import { createDurableId } from "@openreel/core";

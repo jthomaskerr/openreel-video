@@ -8,7 +8,7 @@
  * Reference images can be picked from media library or uploaded inline.
  */
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { v4 as uuidv4 } from "uuid";
+import { createDurableId } from "@openreel/core";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, Button } from "@openreel/ui";
 import { ChevronLeft, Search } from "lucide-react";
 import {
@@ -607,7 +607,7 @@ export function LegacyGenerateAssetDialog({ open, onClose, sourceFile, previewUr
 // ── Reference images ──────────────────────────────────────────────────────
   const [refIds, setRefIds] = useState<string[]>([]);
   const [generateRefOpen, setGenerateRefOpen] = useState(false);
-  const [dialogDraftId] = useState(() => sourceMediaId ?? asset?.id ?? clipId ?? uuidv4());
+  const [dialogDraftId] = useState(() => sourceMediaId ?? asset?.id ?? clipId ?? createDurableId("draft"));
   const saveDraft = useGenerationDraftStore((state) => state.saveDraft);
   const draftScope = useMemo<GenerationDraftScope>(() => effectiveShot
     ? { kind: "shot", shotId: effectiveShot.id, projectId: project.id }
@@ -907,7 +907,7 @@ export function LegacyGenerateAssetDialog({ open, onClose, sourceFile, previewUr
         const taskId = await createImageTask(model.kieaiModel, kinputs as unknown as ImageModelInput);
         if (ac.signal.aborted) return;
 
-        const mediaId = uuidv4();
+        const mediaId = createDurableId("media");
         const name = `${(sourceFile?.name ?? "generated").replace(/\.[^.]+$/, "")}_kieai.png`;
         addPlaceholderMedia({
           id: mediaId, name, type: "image", fileHandle: null, blob: null,

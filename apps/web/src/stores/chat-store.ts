@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { createDurableId } from "@openreel/core";
 import { subscribeWithSelector } from "zustand/middleware";
 
 export interface ChatMessagePart {
@@ -56,7 +57,7 @@ export interface ChatState {
 const createSession = (title = "Untitled session"): ChatSession => {
   const now = Date.now();
   return {
-    id: crypto.randomUUID(),
+    id: createDurableId("chat"),
     title,
     messages: [],
     createdAt: now,
@@ -65,7 +66,7 @@ const createSession = (title = "Untitled session"): ChatSession => {
 };
 
 const createUserMessage = (text: string): ChatMessage => ({
-  id: crypto.randomUUID(),
+  id: createDurableId("chat-message"),
   role: "user",
   parts: [{ type: "text", text }],
   text,

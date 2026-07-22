@@ -1,4 +1,4 @@
-import { v4 as uuid } from "uuid";
+import { createDurableId } from "@openreel/core";
 
 export type PresetCategory = "entrance" | "exit" | "emphasis" | "transition";
 
@@ -801,7 +801,7 @@ export function createUserPreset(
   description?: string,
 ): MotionPreset {
   const preset: MotionPreset = {
-    id: uuid(),
+    id: createDurableId("motion-preset"),
     name,
     category,
     description,

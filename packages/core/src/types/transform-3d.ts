@@ -61,7 +61,7 @@ export const DEFAULT_CAMERA: Omit<Camera, "id"> = {
 };
 
 export function createCamera(overrides?: Partial<Omit<Camera, "id">>): Camera {
-  const id = `camera-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const id = createDurableId("camera");
   return {
     id,
     ...DEFAULT_CAMERA,
@@ -384,3 +384,4 @@ export function mergeTransform3D(
     opacity: partial.opacity !== undefined ? partial.opacity : base.opacity,
   };
 }
+import { createDurableId } from "../identity";

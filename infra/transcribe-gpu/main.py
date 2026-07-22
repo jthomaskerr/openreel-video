@@ -2,12 +2,12 @@ import os
 import tempfile
 import asyncio
 import time
-import uuid
 from typing import Optional
 from dataclasses import dataclass, field
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from identity import create_transcription_job_id
 from faster_whisper import WhisperModel
 import uvicorn
 from deep_translator import GoogleTranslator
@@ -191,7 +191,7 @@ async def transcribe(
         tmp.write(file_content)
         tmp_path = tmp.name
 
-    job_id = str(uuid.uuid4())
+    job_id = create_transcription_job_id()
     jobs[job_id] = TranscriptionJob(id=job_id)
 
     asyncio.get_event_loop().run_in_executor(

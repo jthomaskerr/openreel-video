@@ -288,7 +288,7 @@ export class StickerLibrary {
     duration: number,
   ): StickerClip {
     return {
-      id: `sticker_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+      id: createDurableId("sticker"),
       trackId,
       startTime,
       duration,
@@ -310,7 +310,7 @@ export class StickerLibrary {
     const imageUrl = this.emojiToDataUrl(emoji.emoji);
 
     return {
-      id: `emoji_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+      id: createDurableId("sticker"),
       trackId,
       startTime,
       duration,
@@ -356,7 +356,7 @@ export class StickerLibrary {
     const imageUrl = await this.fileToDataUrl(file);
 
     const sticker: StickerItem = {
-      id: `custom_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
+      id: createDurableId("sticker"),
       name,
       category,
       imageUrl,
@@ -386,3 +386,4 @@ export class StickerLibrary {
 }
 
 export const stickerLibrary = new StickerLibrary();
+import { createDurableId } from "../identity";

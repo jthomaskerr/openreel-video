@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { createDurableId } from "@openreel/core";
 import { subscribeWithSelector, persist } from "zustand/middleware";
 import { deleteSecret, onSessionLock } from "../services/secure-storage";
 import type { LlmInstance } from "../services/service-instances";
@@ -145,7 +146,7 @@ export const useSettingsStore = create<SettingsState>()(
           set({ defaultTtsProvider: provider }),
 
         addLlmInstance: (partial) => {
-          const id = crypto.randomUUID();
+          const id = createDurableId("llm-instance");
           const instance: LlmInstance = {
             ...partial,
             id,

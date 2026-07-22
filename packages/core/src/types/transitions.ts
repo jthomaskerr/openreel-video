@@ -383,7 +383,7 @@ export function createTransition<T extends ClipTransitionType>(
   type: T,
   overrides?: Partial<Transition>,
 ): Transition {
-  const id = `transition-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  const id = createDurableId("transition");
 
   const defaults: Record<ClipTransitionType, TransitionWithoutId> = {
     dissolve: { type: "dissolve", duration: 500, easing: "linear" },
@@ -456,3 +456,4 @@ export function getTransitionPresetsByCategory(
 ): TransitionPreset[] {
   return TRANSITION_PRESETS.filter((p) => p.category === category);
 }
+import { createDurableId } from "../identity";

@@ -15,6 +15,7 @@ import type {
   MediaAction,
   ProjectAction,
 } from "../types/actions";
+import { createDurableId } from "../identity";
 import type {
   Project,
   Track,
@@ -325,7 +326,7 @@ export class ActionExecutor {
       case "media/import": {
         const params = action.params as { file: File };
         const newMediaItem = {
-          id: `media-${Date.now()}`,
+          id: createDurableId("media"),
           name: params.file.name,
           type: this.inferMediaType(params.file),
           fileHandle: null,
@@ -421,7 +422,7 @@ export class ActionExecutor {
             (t: MutableTrack) => t.type === params.trackType,
           ).length + 1;
         const newTrack: MutableTrack = {
-          id: params.trackId ?? `track-${Date.now()}`,
+            id: params.trackId ?? createDurableId("track"),
           type: params.trackType as Track["type"],
           name: `${trackNames[params.trackType] || params.trackType} ${trackCount}`,
           clips: [],
@@ -589,7 +590,7 @@ export class ActionExecutor {
             ?? "video";
 
           const newClip = {
-            id: crypto.randomUUID(),
+            id: createDurableId("clip"),
             type: inferredType,
             mediaId: params.mediaId,
             trackId: params.trackId,
@@ -715,7 +716,7 @@ export class ActionExecutor {
 
           const clip2 = {
             ...clip,
-            id: crypto.randomUUID(),
+            id: createDurableId("clip"),
             startTime: splitTime,
             duration: clip.duration - splitOffset,
             inPoint: clip.inPoint + splitOffset,
@@ -1032,7 +1033,7 @@ export class ActionExecutor {
           params?: Record<string, unknown>;
         };
         const newEffect = {
-          id: `effect-${Date.now()}`,
+          id: createDurableId("effect"),
           type: params.effectType,
           params: params.params || {},
           enabled: true,
@@ -1174,7 +1175,7 @@ export class ActionExecutor {
           value: unknown;
         };
         const newKeyframe = {
-          id: `keyframe-${Date.now()}`,
+          id: createDurableId("keyframe"),
           time: params.time,
           property: params.property,
           value: params.value,
@@ -1278,7 +1279,7 @@ export class ActionExecutor {
           );
           if (track) {
             const newTransition: Transition = {
-              id: `transition-${Date.now()}`,
+          id: createDurableId("transition"),
               clipAId: params.clipAId,
               clipBId: params.clipBId,
               type: params.transitionType,
@@ -1449,7 +1450,7 @@ export class ActionExecutor {
           endTime: number;
         };
         const newSubtitle = {
-          id: `subtitle-${Date.now()}`,
+            id: createDurableId("subtitle"),
           text: params.text,
           startTime: params.startTime,
           endTime: params.endTime,
@@ -1525,7 +1526,7 @@ export class ActionExecutor {
           const text = match[4].trim();
 
           newSubtitles.push({
-            id: `subtitle-${Date.now()}-${match[1]}`,
+            id: createDurableId("subtitle"),
             text,
             startTime,
             endTime,

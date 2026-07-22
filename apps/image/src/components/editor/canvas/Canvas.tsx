@@ -1054,7 +1054,7 @@ export function Canvas() {
                         URL.revokeObjectURL(oldBlobUrl);
                       }
                       const newBlobUrl = URL.createObjectURL(blob);
-                      const newAssetId = `asset-${Date.now()}`;
+                      const newAssetId = createDurableId('asset');
                       useProjectStore.getState().addAsset({
                         id: newAssetId,
                         name: `filled-${imageLayer.name || 'image'}`,
@@ -1958,7 +1958,7 @@ export function Canvas() {
                 URL.revokeObjectURL(oldBlobUrl);
               }
               const newBlobUrl = URL.createObjectURL(blob);
-              const newAssetId = `asset-${Date.now()}`;
+              const newAssetId = createDurableId('asset');
               useProjectStore.getState().addAsset({
                 id: newAssetId,
                 name: `${activeTool}-edited`,
@@ -3137,3 +3137,4 @@ function renderShapeLayerInternal(ctx: RenderContext, layer: ShapeLayer) {
     ctx.restore();
   }
 }
+import { createDurableId } from '@openreel/core/identity/durable-id';

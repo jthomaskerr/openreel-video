@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createInfrastructureNonce } from "@openreel/core/identity/durable-id";
 import { lstat, mkdir, open, readFile, readdir, rename, rm, rmdir, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { parseGenerationJob, serializeGenerationJob, type GenerationCheckpointName, type GenerationCheckpointState, type GenerationJob } from "@openreel/music-video-domain/generation";
@@ -111,7 +111,7 @@ function assertFilesystemKey(value: string): void {
 
 /** Filesystem repository with durable CAS claims and rebuildable provider index. */
 export class FileGenerationJobRepository implements GenerationJobRepository {
-  private readonly processToken = randomUUID();
+  private readonly processToken = createInfrastructureNonce();
   readonly lockTtlMs: number;
   readonly placementLeaseTtlMs: number;
   readonly now: () => number;
@@ -142,7 +142,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
   private async init() { await mkdir(this.directory, { recursive: true }); await mkdir(this.locksDir(), { recursive: true }); }
 
   private async atomic(path: string, value: unknown) {
-    const tmp = `${path}.${randomUUID()}.tmp`;
+    const tmp = `${path}.${createInfrastructureNonce()}.tmp`;
     const handle = await open(tmp, "w", 0o600);
     try { await handle.writeFile(typeof value === "string" ? value : JSON.stringify(value)); await handle.sync(); } finally { await handle.close(); }
     await rename(tmp, path);
@@ -270,7 +270,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
     await this.init();
     const path = join(this.locksDir(), `${key}.lock`);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      const lockToken = randomUUID();
+      const lockToken = createInfrastructureNonce();
       if (await this.publishFileLock(path, lockToken)) {
         try { return await task(); } finally { await this.removeLockIfOwned(path, lockToken); }
       }
@@ -395,7 +395,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
     const path = this.submissionFile(jobId, attemptNumber);
     const existing = await this.readClaim(path);
     if (existing) return { claim: existing, acquired: false };
-    const claim: FileClaim = { jobId, attemptNumber, idempotencyKey, state: "claimed", claimedAt: this.now(), ownerToken: randomUUID() };
+    const claim: FileClaim = { jobId, attemptNumber, idempotencyKey, state: "claimed", claimedAt: this.now(), ownerToken: createInfrastructureNonce() };
     try { const handle = await open(path, "wx", 0o600); try { await handle.writeFile(JSON.stringify(claim)); await handle.sync(); } finally { await handle.close(); } }
     catch (cause) { if (cause && typeof cause === "object" && "code" in cause && cause.code === "EEXIST") return { claim: (await this.readClaim(path))!, acquired: false }; throw cause; }
     return { claim, acquired: true };
@@ -432,7 +432,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
       if (existing && existing.outputIdentity !== outputIdentity) throw new GenerationRepositoryError("generation-output-identity-conflict");
       if (existing?.state === "completed") return { claim: existing, acquired: false };
       if (existing?.state === "claimed") return { claim: existing, acquired: false };
-      const claim: FinalizationClaim = { ...input, providerInstanceId, outputIdentity, state: "claimed", ownerToken: randomUUID(), claimedAt: this.now() };
+      const claim: FinalizationClaim = { ...input, providerInstanceId, outputIdentity, state: "claimed", ownerToken: createInfrastructureNonce(), claimedAt: this.now() };
       await this.atomic(path, claim);
       return { claim, acquired: true };
     });
@@ -469,7 +469,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
       if (existing && existing.idempotencyKey !== idempotencyKey) throw new GenerationRepositoryError("generation-placement-claim-mismatch");
       if (existing?.state === "claimed" || existing?.state === "completed" || existing?.state === "needs-attention" || existing?.state === "failed" && existing.replaySafe === false) return { claim: existing, acquired: false };
       const now = this.now();
-      const claim: PlacementClaim = { schemaVersion: 2, jobId, idempotencyKey, state: "claimed", outcome: "pending", ownerToken: randomUUID(), ownerEpoch: (existing?.ownerEpoch ?? 0) + 1, phase: "reserved", claimedAt: now, lastRenewedAt: now, leaseExpiresAt: now + this.placementLeaseTtlMs };
+      const claim: PlacementClaim = { schemaVersion: 2, jobId, idempotencyKey, state: "claimed", outcome: "pending", ownerToken: createInfrastructureNonce(), ownerEpoch: (existing?.ownerEpoch ?? 0) + 1, phase: "reserved", claimedAt: now, lastRenewedAt: now, leaseExpiresAt: now + this.placementLeaseTtlMs };
       await this.atomic(path, claim);
       return { claim, acquired: true };
     });
@@ -521,7 +521,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
       if (claim.phase === "terminal") {
         if (claim.outcome === "unknown" || claim.outcome === "not-applied" && claim.replaySafe === false) {
           const now = this.now();
-          const reconciling: PlacementClaim = { ...claim, state: "claimed", outcome: "pending", ownerToken: randomUUID(), ownerEpoch: claim.ownerEpoch + 1, phase: "reconciling", claimedAt: now, lastRenewedAt: now, leaseExpiresAt: now + this.placementLeaseTtlMs, replaySafe: false, terminalAt: undefined };
+          const reconciling: PlacementClaim = { ...claim, state: "claimed", outcome: "pending", ownerToken: createInfrastructureNonce(), ownerEpoch: claim.ownerEpoch + 1, phase: "reconciling", claimedAt: now, lastRenewedAt: now, leaseExpiresAt: now + this.placementLeaseTtlMs, replaySafe: false, terminalAt: undefined };
           await this.atomic(path, reconciling);
           return { kind: "reconcile", claim: reconciling };
         }
@@ -534,7 +534,7 @@ export class FileGenerationJobRepository implements GenerationJobRepository {
         await this.atomic(path, retryable);
         return { kind: "safe-retry", claim: retryable };
       }
-      const reconciling: PlacementClaim = { ...claim, ownerToken: randomUUID(), ownerEpoch: claim.ownerEpoch + 1, phase: "reconciling", claimedAt: now, lastRenewedAt: now, leaseExpiresAt: now + this.placementLeaseTtlMs, replaySafe: false };
+      const reconciling: PlacementClaim = { ...claim, ownerToken: createInfrastructureNonce(), ownerEpoch: claim.ownerEpoch + 1, phase: "reconciling", claimedAt: now, lastRenewedAt: now, leaseExpiresAt: now + this.placementLeaseTtlMs, replaySafe: false };
       await this.atomic(path, reconciling);
       return { kind: "reconcile", claim: reconciling };
     });

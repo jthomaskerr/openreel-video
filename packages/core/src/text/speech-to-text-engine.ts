@@ -404,8 +404,8 @@ export class SpeechToTextEngine {
       ...style,
     };
 
-    return segments.map((segment, index) => ({
-      id: `auto-caption-${Date.now()}-${index}`,
+    return segments.map((segment) => ({
+      id: createDurableId("subtitle"),
       text: segment.text,
       startTime: segment.startTime,
       endTime: segment.endTime,
@@ -447,3 +447,4 @@ export class SpeechToTextEngine {
 export const createSpeechToTextEngine = (): SpeechToTextEngine => {
   return new SpeechToTextEngine();
 };
+import { createDurableId } from "../identity";

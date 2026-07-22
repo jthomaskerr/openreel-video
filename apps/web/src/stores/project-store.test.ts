@@ -361,7 +361,7 @@ describe("ProjectStore", () => {
       );
     });
 
-    it("quarantines a recovered UUID instead of reconciling or saving it", () => {
+    it("loads a UUID-shaped recovered project as an opaque authoritative id", () => {
       const initialProject = useProjectStore.getState().project;
       const recovered = {
         ...initialProject,
@@ -378,8 +378,9 @@ describe("ProjectStore", () => {
 
       useProjectStore.getState().loadProject(recovered);
 
-      expect(useProjectStore.getState().project).toBe(initialProject);
-      expect(useProjectStore.getState().error).toMatch(/UUID project .* quarantined/i);
+      expect(useProjectStore.getState().project).not.toBe(initialProject);
+      expect(useProjectStore.getState().project.id).toBe(recovered.id);
+      expect(useProjectStore.getState().error).toBeNull();
       expect(listSpy).not.toHaveBeenCalled();
       expect(loadSpy).not.toHaveBeenCalled();
       expect(scheduleSaveSpy).not.toHaveBeenCalled();
@@ -738,6 +739,8 @@ describe("ProjectStore", () => {
       expect(items).toHaveLength(2);
       expect(items[0]?.id).toBe("existing-media");
       expect(items[1]?.id).not.toBe("existing-media");
+      expect(result.actionId).toBe(items[1]?.id);
+      expect(items[1]?.id).toMatch(/^media-[a-z0-9]+-[a-z0-9]+$/);
       expect(items[1]?.name).toBe("test-video.mp4");
     });
   });

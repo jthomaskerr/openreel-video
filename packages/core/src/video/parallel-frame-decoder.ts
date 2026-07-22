@@ -29,7 +29,7 @@ interface PendingRequest {
 
 interface WorkerState {
   worker: Worker;
-  workerId: number;
+  workerNonce: number;
   busy: boolean;
   pendingRequests: Map<string, PendingRequest>;
   totalDecodes: number;
@@ -104,7 +104,7 @@ export class ParallelFrameDecoder {
 
       const state: WorkerState = {
         worker,
-        workerId: index,
+        workerNonce: index,
         busy: false,
         pendingRequests: new Map(),
         totalDecodes: 0,
@@ -121,7 +121,7 @@ export class ParallelFrameDecoder {
 
         if (response.type === "ready") {
           clearTimeout(initTimeout);
-          state.workerId = response.workerId;
+          state.workerNonce = response.workerNonce;
           state.mediabunnyAvailable = response.mediabunnyAvailable ?? false;
           if (state.mediabunnyAvailable) {
           } else {

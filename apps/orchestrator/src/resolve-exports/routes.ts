@@ -5,7 +5,8 @@ import {
   type ResolveExportJob,
   type ResolveImportResult,
   type ResolvePreview,
-} from "@openreel/core";
+} from "@openreel/core/export/handoff/index";
+import { isDurableId, isInfrastructureNonce } from "@openreel/core/identity/durable-id";
 import { ResolveExportServiceError, type ResolveLaunchPayload } from "./service";
 
 export interface ResolveExportRouteService {
@@ -18,7 +19,6 @@ export interface ResolveExportRouteService {
   readArtifact(projectId: string, jobId: string, name: string, artifactAccessToken: string): Promise<{ readonly mediaType: string; readonly bytes: Buffer }>;
 }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const PROJECT_ID = /^[A-Za-z0-9](?:[A-Za-z0-9._~-]{0,126}[A-Za-z0-9])?$/;
 const COMMIT_SHA = /^[a-f0-9]{40}$/i;
 
@@ -110,7 +110,7 @@ async function projectJob(
   projectId: string,
   jobId: string,
 ): Promise<ResolveExportJob> {
-  if (!UUID.test(jobId)) throw new ResolveExportServiceError("RESOLVE_JOB_NOT_FOUND", "Resolve job does not exist");
+  if (!isDurableId(jobId, "resolve-job")) throw new ResolveExportServiceError("RESOLVE_JOB_NOT_FOUND", "Resolve job does not exist");
   const job = await service.status(jobId);
   if (job.projectId !== projectId) throw new ResolveExportServiceError("RESOLVE_JOB_NOT_FOUND", "Resolve job does not exist");
   return job;
@@ -198,7 +198,7 @@ export function createResolveExportRouter(service: ResolveExportRouteService, op
 
   router.post("/resolve-launches/:launchToken/redeem", async (req: Request, res: Response) => {
     if (!peerIsLoopback(req.socket.remoteAddress)) return res.status(404).json(safeError(404, "LAUNCH_REDEMPTION_NOT_FOUND"));
-    if (!UUID.test(req.params.launchToken)) return res.status(404).json(safeError(404, "LAUNCH_TOKEN_INVALID"));
+    if (!isInfrastructureNonce(req.params.launchToken)) return res.status(404).json(safeError(404, "LAUNCH_TOKEN_INVALID"));
     try {
       const payload = await service.redeem(req.params.launchToken);
       return res.json({
@@ -221,11 +221,11 @@ export function createResolveExportRouter(service: ResolveExportRouteService, op
 
   router.get("/:projectId/exports/resolve/:jobId/artifacts/:name", async (req, res) => {
     if (!peerIsLoopback(req.socket.remoteAddress)) return res.status(404).json(safeError(404, "ARTIFACT_NOT_FOUND"));
-    if (!validProjectId(req.params.projectId) || !UUID.test(req.params.jobId) || !req.params.name || req.params.name === "." || req.params.name === ".." || req.params.name !== decodeURIComponent(req.params.name) || req.params.name.includes("/") || req.params.name.includes("\\")) {
+    if (!validProjectId(req.params.projectId) || !isDurableId(req.params.jobId, "resolve-job") || !req.params.name || req.params.name === "." || req.params.name === ".." || req.params.name !== decodeURIComponent(req.params.name) || req.params.name.includes("/") || req.params.name.includes("\\")) {
       return res.status(404).json(safeError(404, "ARTIFACT_NOT_FOUND"));
     }
     const capability = typeof req.query.capability === "string" ? req.query.capability : "";
-    if (!UUID.test(capability)) return res.status(404).json(safeError(404, "ARTIFACT_NOT_FOUND"));
+    if (!isInfrastructureNonce(capability)) return res.status(404).json(safeError(404, "ARTIFACT_NOT_FOUND"));
     try {
       const artifact = await service.readArtifact(req.params.projectId, req.params.jobId, req.params.name, capability);
       res.setHeader("Content-Type", artifact.mediaType);

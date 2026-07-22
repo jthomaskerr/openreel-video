@@ -33,7 +33,7 @@ MANIFEST_BYTES = (
     json.dumps(
         {
             "schemaVersion": "1.0",
-            "jobId": "11111111-1111-4111-8111-111111111111",
+            "jobId": "resolve-job-test-1",
             "projectId": "vintage-tokyo",
             "revision": "0123456789abcdef0123456789abcdef01234567",
             "planId": "plan-vintage-tokyo",
@@ -57,7 +57,7 @@ MANIFEST_BYTES = (
             ],
             "artifacts": [
                 {
-                    "path": "exports/resolve/11111111-1111-4111-8111-111111111111/Vintage Tokyo.fcpxml",
+                    "path": "exports/resolve/resolve-job-test-1/Vintage Tokyo.fcpxml",
                     "byteLength": len(FCPXML_BYTES),
                     "sha256": hashlib.sha256(FCPXML_BYTES).hexdigest(),
                 }
@@ -265,6 +265,7 @@ class OpenReelBridgeTests(unittest.TestCase):
         assert manager is not None
         self.assertEqual(manager.created_projects, [])
         self.assertEqual(manager.renames, [("OpenReel Import 123", "Vintage Tokyo")])
+        self.assertEqual(result["requestId"], "resolve-request-test-1")
         self.assertEqual(result["offlineMediaIds"], [])
         self.assertEqual(result["referencedMediaIds"], ["media-1", "media-2"])
         self.assertEqual(result["trackCounts"], {"video": 1, "audio": 1})
@@ -310,7 +311,7 @@ class OpenReelBridgeTests(unittest.TestCase):
         self.assertEqual(result["failure"]["code"], "ARTIFACT_HASH_MISMATCH")
         self.assertEqual(len(backend.posts), 1)
         diagnostic = json.dumps(result)
-        self.assertNotIn("22222222-2222-4222-8222-222222222222", diagnostic)
+        self.assertNotIn("nonce-test-artifact", diagnostic)
         self.assertNotIn("/Volumes/OpenReel", diagnostic)
 
     def test_reports_fcpxml_rejection_once(self):

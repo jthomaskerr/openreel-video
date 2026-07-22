@@ -22,6 +22,14 @@ const APP_PATH = path.resolve(__dirname, "../App.tsx");
 // 1. Source-level canary: createNewProject must always set explicitlyCreated:true
 // ---------------------------------------------------------------------------
 describe("createNewProject source guard", () => {
+  it("// [regression] startup and deletion keep no temporary project identity", () => {
+    const source = fs.readFileSync(STORE_PATH, "utf-8");
+
+    expect(source).toContain("project: createNoActiveProjectGuard()");
+    expect(source).not.toContain("createUnresolvedProject");
+    expect(source).not.toContain('id: "unresolved"');
+  });
+
   it(
     // [regression] Jun 29: 'projects are being automagically created' — the
     // flag explicitlyCreated:true inside createNewProject is the single guard
@@ -84,7 +92,7 @@ describe("createEmptyProject", () => {
     // code could silently fall back to creating another project.
     "// [regression] returns a project with required fields",
     () => {
-      const project = createEmptyProject();
+      const project = createEmptyProject("test-project");
 
       expect(project).toBeDefined();
       expect(typeof project.id).toBe("string");
@@ -101,14 +109,15 @@ describe("createEmptyProject", () => {
   );
 
   it(
-    // [regression] Each call must produce a new unique project — if IDs were
-    // ever shared, two separate user actions would corrupt each other's project.
-    "// [regression] each call produces a distinct project ID",
+    // [regression] The factory must retain the authoritative identity supplied
+    // by the backend instead of generating a provisional client identity.
+    "// [regression] retains the supplied backend project ID",
     () => {
-      const p1 = createEmptyProject();
-      const p2 = createEmptyProject();
+      const p1 = createEmptyProject("backend-project-one");
+      const p2 = createEmptyProject("backend-project-two");
 
-      expect(p1.id).not.toBe(p2.id);
+      expect(p1.id).toBe("backend-project-one");
+      expect(p2.id).toBe("backend-project-two");
     },
   );
 
@@ -117,7 +126,7 @@ describe("createEmptyProject", () => {
     // the user typed; a mismatch was a secondary symptom of the regression.
     "// [regression] respects a custom name argument",
     () => {
-      const project = createEmptyProject("My Regression Test Project");
+      const project = createEmptyProject("test-project", "My Regression Test Project");
 
       expect(project.name).toBe("My Regression Test Project");
     },
@@ -127,7 +136,7 @@ describe("createEmptyProject", () => {
     // [regression] Custom settings must be merged, not dropped.
     "// [regression] merges partial settings without discarding defaults",
     () => {
-      const project = createEmptyProject(undefined, { width: 3840, height: 2160 });
+      const project = createEmptyProject("test-project", undefined, { width: 3840, height: 2160 });
 
       expect(project.settings.width).toBe(3840);
       expect(project.settings.height).toBe(2160);

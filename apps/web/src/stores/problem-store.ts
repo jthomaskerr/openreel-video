@@ -81,7 +81,7 @@ const listeners = new Set<ProblemListener>();
 
 export const problemBus = {
   report(problem: ProblemInput): string {
-    const id = `problem-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    const id = createDurableId("problem");
     const fullProblem: Problem = {
       ...problem,
       id,
@@ -220,3 +220,4 @@ export const useProjectProblems = (projectId?: string) =>
       (p) => !p.resolved && (!projectId || !p.projectId || p.projectId === projectId),
     ),
   );
+import { createDurableId } from "@openreel/core";

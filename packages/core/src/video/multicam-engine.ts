@@ -49,7 +49,7 @@ export class MultiCamEngine {
   constructor() {}
 
   createGroup(name: string, clipIds: string[]): MultiCamGroup {
-    const id = `multicam_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
+    const id = createDurableId("multicam");
 
     const angles: CameraAngle[] = clipIds.map((clipId, index) => ({
       id: `angle_${index + 1}`,
@@ -96,7 +96,7 @@ export class MultiCamEngine {
 
     const index = group.angles.length;
     const angle: CameraAngle = {
-      id: `angle_${Date.now()}`,
+      id: createDurableId("multicam-angle"),
       name: name || `Angle ${index + 1}`,
       clipId,
       trackId: "",
@@ -159,7 +159,7 @@ export class MultiCamEngine {
     if (!angle) return null;
 
     const switchItem: AngleSwitch = {
-      id: `switch_${Date.now()}`,
+      id: createDurableId("multicam-switch"),
       groupId,
       angleId,
       time,
@@ -394,3 +394,4 @@ export class MultiCamEngine {
 }
 
 export const multicamEngine = new MultiCamEngine();
+import { createDurableId } from "../identity";

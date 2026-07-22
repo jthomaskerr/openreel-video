@@ -545,6 +545,7 @@ export function duplicatePath(path: VectorPath, offsetX: number = 10, offsetY: n
   const duplicate = translatePath(path, offsetX, offsetY);
   return {
     ...duplicate,
-    id: `${path.id}_copy_${Date.now()}`,
+    id: createDurableId('vector-path'),
   };
 }
+import { createDurableId } from '@openreel/core/identity/durable-id';

@@ -42,15 +42,13 @@ interface ProcessingState {
   clearCompleted: () => void;
 }
 
-let taskIdCounter = 0;
-
 export const useProcessingStore = create<ProcessingState>((set, get) => ({
   tasks: new Map(),
   isProcessing: false,
   currentTaskId: null,
 
   addTask: (clipId, type) => {
-    const taskId = `task-${++taskIdCounter}-${Date.now()}`;
+    const taskId = createDurableId("processing-task");
     const task: ProcessingTask = {
       id: taskId,
       clipId,
@@ -217,3 +215,4 @@ export const PROCESSING_TYPE_LABELS: Record<ProcessingType, string> = {
   "color-grading": "Color Grading",
   effects: "Video Effects",
 };
+import { createDurableId } from "@openreel/core";

@@ -144,9 +144,7 @@ export class SpeedEngine {
       throw new Error(`No speed data for clip ${clipId}`);
     }
 
-    const id = `speed-kf-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2, 11)}`;
+    const id = createDurableId("speed-keyframe");
     const keyframe: SpeedKeyframe = {
       id,
       time,
@@ -265,9 +263,7 @@ export class SpeedEngine {
       throw new Error(`No speed data for clip ${clipId}`);
     }
 
-    const id = `freeze-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2, 11)}`;
+    const id = createDurableId("clip");
     const freezeFrame: FreezeFrame = {
       id,
       clipId,
@@ -488,3 +484,4 @@ export function initializeSpeedEngine(
   speedEngineInstance = new SpeedEngine(animationEngine);
   return speedEngineInstance;
 }
+import { createDurableId } from "../identity";

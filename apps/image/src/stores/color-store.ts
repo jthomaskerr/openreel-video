@@ -28,7 +28,7 @@ interface ColorActions {
 const MAX_RECENT_COLORS = 12;
 const MAX_SAVED_COLORS = 24;
 
-const generateId = () => `palette_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+const generateId = () => createDurableId('palette');
 
 export const useColorStore = create<ColorState & ColorActions>()(
   persist(
@@ -116,3 +116,4 @@ export const useColorStore = create<ColorState & ColorActions>()(
     }
   )
 );
+import { createDurableId } from '@openreel/core/identity/durable-id';

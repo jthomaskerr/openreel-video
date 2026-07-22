@@ -3,6 +3,7 @@ import {
   createDurableId,
   createInfrastructureNonce,
   isDurableId,
+  isInfrastructureNonce,
   type DurableIdEntropy,
 } from "./durable-id";
 
@@ -34,11 +35,22 @@ describe("durable domain identity", () => {
     expect(first).not.toBe(second);
   });
 
+  it("validates hyphenated entity kinds without absorbing entropy into the kind", () => {
+    const id = createDurableId("resolve-job", fixedEntropy([4]));
+
+    expect(isDurableId(id)).toBe(true);
+    expect(isDurableId(id, "resolve-job")).toBe(true);
+    expect(isDurableId(id, "resolve-request")).toBe(false);
+  });
+
   it("keeps infrastructure nonces distinguishable from domain identities", () => {
     const nonce = createInfrastructureNonce(fixedEntropy([3]));
 
     expect(nonce).toMatch(/^nonce-[a-z0-9]+-[a-z0-9]+$/);
     expect(isDurableId(nonce)).toBe(false);
+    expect(isInfrastructureNonce(nonce)).toBe(true);
+    expect(isInfrastructureNonce("resolve-job-test-1")).toBe(false);
+    expect(isInfrastructureNonce("nonce-")).toBe(false);
     expect(nonce).not.toMatch(UUID_PATTERN);
   });
 });

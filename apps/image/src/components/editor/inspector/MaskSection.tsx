@@ -72,7 +72,7 @@ export function MaskSection({ layer }: Props) {
 
   const handleAddMask = (reveal: boolean) => {
     const baseMask: LayerMask = {
-      id: `mask-${Date.now()}`,
+      id: createDurableId('mask'),
       type: 'pixel',
       enabled: true,
       linked: true,
@@ -291,3 +291,4 @@ export function MaskSection({ layer }: Props) {
     </div>
   );
 }
+import { createDurableId } from '@openreel/core/identity/durable-id';
