@@ -75,6 +75,58 @@ async function withStore(run: (store: ProjectStore) => Promise<void>): Promise<v
   }
 }
 
+test("project summaries expose picker metadata from persisted projects", async () => {
+  const root = await mkdtemp(join(tmpdir(), "openreel-project-summary-"));
+  const project = {
+    ...projectWithMedia(),
+    description: "A summer edit",
+    timeline: {
+      duration: 3,
+      markers: [],
+      subtitles: [],
+      tracks: [{
+        id: "video-track",
+        name: "Video",
+        type: "video",
+        clips: [{ id: "clip-1" }, { id: "clip-2" }],
+        transitions: [],
+        locked: false,
+        hidden: false,
+        muted: false,
+        solo: false,
+      }],
+    },
+  } as unknown as Project;
+  await mkdir(join(root, project.id), { recursive: true });
+  await writeFile(join(root, project.id, "project.json"), JSON.stringify(project));
+  const gitStore = {
+    repoDir: root,
+    ensureSharedRepo: async () => undefined,
+    worktreePath: (id: string) => join(root, id),
+    withProjectTransaction: async (_projectId: string, operation: (transaction: unknown) => Promise<unknown>) =>
+      operation({}),
+  } as unknown as GitStore;
+
+  try {
+    const summaries = await new ProjectStore(gitStore).listProjects();
+
+    assert.deepEqual(summaries, [{
+      id: "vintage-tokyo",
+      name: "Vintage Tokyo",
+      description: "A summer edit",
+      createdAt: 1,
+      modifiedAt: 2,
+      duration: 3,
+      frameRate: 30,
+      trackCount: 1,
+      clipCount: 2,
+      representativeMediaId: "media-1",
+    }]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("backend rejects a saved project that omits externally referenced media", async () => {
   await withStore(async (store) => {
     const original = projectWithMedia();

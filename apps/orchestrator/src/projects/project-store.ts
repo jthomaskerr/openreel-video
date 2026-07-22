@@ -29,8 +29,14 @@ export {
 export interface ProjectSummary {
   readonly id: string;
   readonly name: string;
+  readonly description: string;
   readonly createdAt: number;
   readonly modifiedAt: number;
+  readonly duration: number;
+  readonly frameRate: number;
+  readonly trackCount: number;
+  readonly clipCount: number;
+  readonly representativeMediaId?: string;
 }
 
 export interface ProjectMediaAuditOptions {
@@ -134,8 +140,19 @@ export class ProjectStore {
             return {
               id: project.id,
               name: project.name,
+              description: project.description ?? "",
               createdAt: project.createdAt,
               modifiedAt: project.modifiedAt,
+              duration: project.timeline.duration,
+              frameRate: project.settings.frameRate,
+              trackCount: project.timeline.tracks.length,
+              clipCount: project.timeline.tracks.reduce(
+                (count, track) => count + track.clips.length,
+                0,
+              ) + project.timeline.subtitles.length,
+              representativeMediaId: project.mediaLibrary.items.find(
+                (media) => media.type === "video" || media.type === "image" || media.type === "audio",
+              )?.id,
             } as ProjectSummary;
           } catch {
             return null;
