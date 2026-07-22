@@ -1,7 +1,6 @@
 import {
   ResolveExportJobSchema,
   ResolvePreviewSchema,
-  type ResolveExportJob,
   type ResolvePreview,
 } from "@openreel/core";
 import { z } from "zod";
@@ -54,8 +53,42 @@ const ResolveExportStartRequestSchema = z
     "selection.range.endTime must be after selection.range.startTime",
   );
 
+export const ResolvePublicExportJobSchema = ResolveExportJobSchema
+  .omit({ bridgeLaunchUrl: true })
+  .strict();
+const ResolveJobRouteSchema = z.string().regex(
+  /^\/api\/projects\/[^/?#]+\/exports\/resolve\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+);
+export const ResolveExportStartResponseSchema = z
+  .object({
+    job: ResolvePublicExportJobSchema,
+    jobId: z.string().uuid(),
+    revision: z.string().min(1),
+    phase: ResolvePublicExportJobSchema.shape.phase,
+    statusUrl: ResolveJobRouteSchema,
+    cancelUrl: ResolveJobRouteSchema,
+    bridgeLaunchUrl: ResolveExportJobSchema.shape.bridgeLaunchUrl,
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (value.job.id !== value.jobId) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["jobId"], message: "jobId must match job.id" });
+    }
+    if (value.job.revision !== value.revision) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["revision"], message: "revision must match job.revision" });
+    }
+    if (value.job.phase !== value.phase) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["phase"], message: "phase must match job.phase" });
+    }
+    if (value.statusUrl !== value.cancelUrl) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: ["cancelUrl"], message: "cancelUrl must match statusUrl" });
+    }
+  });
+
 export type ResolveProjectListItem = z.infer<typeof ResolveProjectListItemSchema>;
 export type ResolveExportStartRequest = z.infer<typeof ResolveExportStartRequestSchema>;
+export type ResolvePublicExportJob = z.infer<typeof ResolvePublicExportJobSchema>;
+export type ResolveExportStartResponse = z.infer<typeof ResolveExportStartResponseSchema>;
 
 export interface ResolveBridgeRequestOptions {
   /** Cancels the browser request without changing the export job. */
@@ -104,6 +137,12 @@ async function responseJson(response: Response): Promise<unknown> {
   }
 }
 
+function isAbortRejection(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  return typeof error === "object" && error !== null &&
+    "name" in error && error.name === "AbortError";
+}
+
 async function request<T>(
   path: string,
   schema: z.ZodType<T>,
@@ -117,7 +156,7 @@ async function request<T>(
       signal: options?.signal,
     });
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") throw error;
+    if (isAbortRejection(error, options?.signal)) throw error;
     throw new ResolveBridgeClientError(
       "REQUEST_FAILED",
       "The Resolve export could not be reached.",
@@ -167,7 +206,7 @@ export async function startExport(
   projectId: string,
   input: ResolveExportStartRequest,
   options?: ResolveBridgeRequestOptions,
-): Promise<ResolveExportJob> {
+): Promise<ResolveExportStartResponse> {
   const parsed = ResolveExportStartRequestSchema.safeParse(input);
   if (!parsed.success) {
     throw new ResolveBridgeClientError(
@@ -177,7 +216,7 @@ export async function startExport(
   }
   return request(
     `/api/projects/${projectPath(projectId)}/exports/resolve`,
-    ResolveExportJobSchema,
+    ResolveExportStartResponseSchema,
     {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -191,10 +230,10 @@ export async function getExportJob(
   projectId: string,
   jobId: string,
   options?: ResolveBridgeRequestOptions,
-): Promise<ResolveExportJob> {
+): Promise<ResolvePublicExportJob> {
   return request(
     `/api/projects/${projectPath(projectId)}/exports/resolve/${jobPath(jobId)}`,
-    ResolveExportJobSchema,
+    ResolvePublicExportJobSchema,
     { method: "GET" },
     options,
   );
@@ -204,10 +243,10 @@ export async function cancelExport(
   projectId: string,
   jobId: string,
   options?: ResolveBridgeRequestOptions,
-): Promise<ResolveExportJob> {
+): Promise<ResolvePublicExportJob> {
   return request(
     `/api/projects/${projectPath(projectId)}/exports/resolve/${jobPath(jobId)}`,
-    ResolveExportJobSchema,
+    ResolvePublicExportJobSchema,
     { method: "DELETE" },
     options,
   );
