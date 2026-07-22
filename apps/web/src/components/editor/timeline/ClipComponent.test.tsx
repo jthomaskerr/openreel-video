@@ -18,22 +18,17 @@ vi.mock("../../../bridges/transition-bridge", () => ({
   }),
 }));
 
-const waveformBridgeMocks = vi.hoisted(() => ({
-  generateMultiResolutionWaveform: vi.fn(),
-}));
-
 const waveSurferMocks = vi.hoisted(() => ({
   create: vi.fn(),
   destroy: vi.fn(),
+  exportPeaks: vi.fn(),
+  getDuration: vi.fn(),
   load: vi.fn(),
+  loadBlob: vi.fn(),
   on: vi.fn(),
+  setOptions: vi.fn(),
+  setScroll: vi.fn(),
   zoom: vi.fn(),
-}));
-
-vi.mock("../../../bridges/media-bridge", () => ({
-  getMediaBridge: () => ({
-    generateMultiResolutionWaveform: waveformBridgeMocks.generateMultiResolutionWaveform,
-  }),
 }));
 
 vi.mock("wavesurfer.js", () => ({
@@ -906,19 +901,24 @@ describe("ClipComponent", () => {
 
   it("draws multi-resolution video-backed audio without mounting playback media", async () => {
     waveSurferMocks.load.mockResolvedValue(undefined);
-    waveSurferMocks.create.mockReturnValue({
+    waveSurferMocks.loadBlob.mockResolvedValue(undefined);
+    waveSurferMocks.getDuration.mockReturnValue(10);
+    waveSurferMocks.exportPeaks.mockReturnValue([
+      new Array(10_000).fill(0).map((_, index) => index % 2 === 0 ? 0.5 : -0.5),
+      new Array(10_000).fill(0).map((_, index) => index % 2 === 0 ? -0.4 : 0.4),
+    ]);
+    waveSurferMocks.create.mockReturnValueOnce({
+      destroy: waveSurferMocks.destroy,
+      exportPeaks: waveSurferMocks.exportPeaks,
+      getDuration: waveSurferMocks.getDuration,
+      loadBlob: waveSurferMocks.loadBlob,
+    }).mockReturnValue({
       destroy: waveSurferMocks.destroy,
       load: waveSurferMocks.load,
       on: waveSurferMocks.on,
+      setOptions: waveSurferMocks.setOptions,
+      setScroll: waveSurferMocks.setScroll,
       zoom: waveSurferMocks.zoom,
-    });
-    waveformBridgeMocks.generateMultiResolutionWaveform.mockResolvedValue({
-      mediaId: "media-1",
-      duration: 10,
-      resolutions: new Map([
-        [20, { peaks: new Float32Array(200).fill(0.25), rms: new Float32Array(200), sampleRate: 48_000, duration: 10, samplesPerSecond: 20 }],
-        [200, { peaks: new Float32Array(2_000).fill(0.5), rms: new Float32Array(2_000), sampleRate: 48_000, duration: 10, samplesPerSecond: 200 }],
-      ]),
     });
     const clip: Clip = { ...makeClip(), type: "audio", trackId: "audio-track" };
     const track: Track = { ...makeTrack(clip), id: "audio-track", type: "audio" };
@@ -946,13 +946,47 @@ describe("ClipComponent", () => {
     const { container, rerender } = render(<ClipComponent {...props} />);
 
     const waveform = await screen.findByTestId("timeline-waveform-clip-1");
-    await waitFor(() => expect(waveform).toHaveAttribute("data-samples-per-second", "20"));
-    expect(waveformBridgeMocks.generateMultiResolutionWaveform).toHaveBeenCalledWith(blob, "media-1");
+    await waitFor(() => expect(waveform).toHaveAttribute("data-samples-per-second", "50"));
+    expect(waveSurferMocks.loadBlob).toHaveBeenCalledWith(blob);
+    expect(waveSurferMocks.exportPeaks).toHaveBeenCalledWith({
+      channels: 2,
+      maxLength: 10_000,
+      precision: 1_000_000,
+    });
     expect(container.querySelector("audio, video")).toBeNull();
-    expect(waveSurferMocks.load).toHaveBeenCalledWith("", [expect.any(Float32Array)], 5);
+    expect(waveSurferMocks.load).toHaveBeenCalledWith(
+      "",
+      [expect.any(Float32Array), expect.any(Float32Array)],
+      5,
+    );
 
     rerender(<ClipComponent {...props} pixelsPerSecond={100} />);
     await waitFor(() => expect(waveform).toHaveAttribute("data-samples-per-second", "200"));
     await waitFor(() => expect(waveSurferMocks.zoom).toHaveBeenLastCalledWith(100));
+
+    rerender(<ClipComponent {...props} pixelsPerSecond={117} />);
+    await waitFor(() => expect(waveform).toHaveAttribute("data-samples-per-second", "500"));
+    await waitFor(() => expect(waveSurferMocks.zoom).toHaveBeenLastCalledWith(117));
+    const loadsAt117 = waveSurferMocks.load.mock.calls.length;
+
+    rerender(<ClipComponent {...props} pixelsPerSecond={168} />);
+    await waitFor(() => expect(waveSurferMocks.zoom).toHaveBeenLastCalledWith(168));
+    expect(waveSurferMocks.load).toHaveBeenCalledTimes(loadsAt117);
+
+    act(() => useTimelineStore.setState({ scrollX: 80, viewportWidth: 500 }));
+    await waitFor(() => expect(waveSurferMocks.setScroll).toHaveBeenLastCalledWith(80));
+
+    const heightUpdates = waveSurferMocks.setOptions.mock.calls.length;
+    rerender(
+      <ClipComponent
+        {...props}
+        pixelsPerSecond={168}
+        trackHeights={new Map([["audio-track", 96]])}
+      />,
+    );
+    await waitFor(() => {
+      expect(waveSurferMocks.setOptions.mock.calls.length).toBeGreaterThan(heightUpdates);
+      expect(waveSurferMocks.setOptions).toHaveBeenLastCalledWith({ height: "auto" });
+    });
   });
 });

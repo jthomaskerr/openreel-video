@@ -13,6 +13,7 @@ import {
 import type { SnapSettings } from "./types";
 import { ClipContextMenu } from "./ClipContextMenu";
 import { TimelineContextMenu } from "./TimelineContextMenu";
+import { TimelineWaveform } from "./TimelineWaveform";
 import { toast } from "../../../stores/notification-store";
 import { usePersistenceStatusStore } from "../../../stores/persistence-status-store";
 import { mediaAvailabilityRuntime } from "../../../services/media-verification";
@@ -917,15 +918,13 @@ export const ClipComponent: React.FC<ClipComponentProps> = ({
               <MetadataSummary clip={clip} />
             )}
 
-            {/* Waveform display — pending implementation */}
-            {(mediaType === "audio" || mediaType === "video") && (
-              <div className={`absolute inset-x-0 px-1 flex items-center justify-center ${
-                mediaType === "audio"
-                  ? "inset-y-0 opacity-40"
-                  : "bottom-0 h-1/3 opacity-20"
-              }`}>
-                <span className="text-[8px] text-text-muted font-mono">waveform pending</span>
-              </div>
+            {isAudio && mediaItem && (
+          <TimelineWaveform
+            clip={clip}
+            mediaItem={mediaItem}
+            pixelsPerSecond={pixelsPerSecond}
+            trackHeight={trackHeights.get(track.id) ?? 60}
+          />
             )}
 
             {/* Keyframe diamonds */}
