@@ -16,6 +16,9 @@ import { GenerationProjectActionAdapter } from "./services/generation/project-ac
 import { createReplaySafeGenerationOutputDownloader } from "./services/generation/output-downloader";
 import { WaveSpeedProvider } from "./services/wavespeed/client";
 import { WaveSpeedInputMaterializer } from "./services/wavespeed/input-materializer";
+import { ResolveExportJobStore } from "./resolve-exports/job-store";
+import { ResolveExportService } from "./resolve-exports/service";
+import { createResolveExportRouter } from "./resolve-exports/routes";
 import { mkdirSync } from "node:fs";
 import { timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
@@ -75,6 +78,14 @@ function inspectOutput(bytes: Uint8Array, mimeType: string) {
 export function createApp(options: CreateAppOptions = {}): Express {
   const gitStore = new GitStore(config.projectsRepo);
   const projectStore = new ProjectStore(gitStore);
+  const resolveExportService = new ResolveExportService({
+    git: gitStore,
+    projects: projectStore,
+    jobs: new ResolveExportJobStore({
+      projectDir: (projectId) => projectStore.projectDir(projectId),
+      listProjectIds: async () => (await projectStore.listProjects()).map((project) => project.id),
+    }),
+  });
   const generationRepository = new FileGenerationJobRepository(config.generationDataDir);
   const uploadRepository = new UploadRepository(`${config.generationDataDir}/uploads`);
   const routes = parseGenerationRouteManifest(config.generationRouteManifestJson);
@@ -154,6 +165,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
 
   app.use("/api/import/neuralframes", neuralframesRouter);
   app.use("/api/generate/wavespeed", wavespeedRouter);
+  app.use("/api/projects", createResolveExportRouter(resolveExportService));
   app.use("/api/projects", createProjectRouter(projectStore, gitStore));
 
   return app;
