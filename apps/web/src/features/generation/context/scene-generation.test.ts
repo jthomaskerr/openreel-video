@@ -14,6 +14,7 @@ import {
   resolveGenerationEntryContext,
   selectSceneGenerationContext,
   type GenerationEntryContext,
+  type SceneGenerationTiming,
   type SceneGenerationProjection,
 } from "./scene-generation";
 
@@ -663,6 +664,7 @@ describe("scene generation request fixture", () => {
       ...entryContext,
       placementPolicy: "create-linked-clip",
     });
+    const timing: SceneGenerationTiming | undefined = resolved.timing;
 
     const request = buildSceneGenerationRequest({
       id: "request-unlinked-range",
@@ -673,7 +675,7 @@ describe("scene generation request fixture", () => {
       selection: {
         status: "ready",
         includeAudio: false,
-        timing: resolved.timing,
+        timing,
       },
       target: { kind: "new-asset", placeholderMediaId: "placeholder-1" },
       placementPolicy: "create-linked-clip",

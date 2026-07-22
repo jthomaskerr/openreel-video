@@ -46,17 +46,16 @@ export interface SceneGenerationAudioInterval {
   sourceEndSeconds: number;
 }
 
+export type SceneGenerationTiming = GenerationTiming & {
+  source: "timeline" | "manual";
+};
+
 export type SceneGenerationContextResult =
   | {
       status: "ready";
       includeAudio: boolean;
       projection?: SceneGenerationProjection;
-      timing?: {
-        source: "timeline" | "manual";
-        startSeconds: number;
-        endSeconds: number;
-        durationSeconds: number;
-      };
+      timing?: SceneGenerationTiming;
       audioInterval?: SceneGenerationAudioInterval;
     }
   | { status: "disabled"; code: SceneGenerationDisabledCode; reason: string };
@@ -78,7 +77,7 @@ export interface GenerationEntryContextResult {
   kind: GenerationEntryContextInput["kind"];
   entryContext: GenerationEntryContext;
   timingAbsent: boolean;
-  timing?: GenerationTiming;
+  timing?: SceneGenerationTiming;
   projection?: SceneGenerationProjection;
   audioEligible: boolean;
   defaultPlacementPolicy: GenerationPlacementPolicy;
@@ -163,7 +162,7 @@ export function resolveGenerationEntryContext(
       };
     }
 
-    const timing: GenerationTiming = {
+    const timing: SceneGenerationTiming = {
       source: "manual",
       startSeconds: input.startTime,
       endSeconds: input.endTime,
@@ -212,7 +211,7 @@ export function resolveGenerationEntryContext(
     };
   }
 
-  const timing: GenerationTiming = {
+  const timing: SceneGenerationTiming = {
     source: "timeline",
     startSeconds: input.startTime,
     endSeconds: input.endTime,
