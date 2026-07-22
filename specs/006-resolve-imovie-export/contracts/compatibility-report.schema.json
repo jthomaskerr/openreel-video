@@ -1,0 +1,338 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openreel.local/contracts/export-handoff/compatibility-report-1.0.schema.json",
+  "title": "OpenReel Export Handoff Compatibility Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "project",
+    "target",
+    "range",
+    "artifacts",
+    "issues",
+    "substitutions",
+    "unsupportedItems",
+    "result",
+    "generatedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "project": {
+      "$ref": "#/$defs/project"
+    },
+    "target": {
+      "$ref": "#/$defs/target"
+    },
+    "range": {
+      "$ref": "#/$defs/range"
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/artifact"
+      }
+    },
+    "issues": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/issue"
+      }
+    },
+    "substitutions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/substitution"
+      }
+    },
+    "unsupportedItems": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/issue"
+      }
+    },
+    "result": {
+      "$ref": "#/$defs/result"
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "name"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "mode",
+        "contractVersion",
+        "applicationVersions"
+      ],
+      "properties": {
+        "id": {
+          "enum": [
+            "resolve",
+            "imovie"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "mode": {
+          "enum": [
+            "editable",
+            "flattened"
+          ]
+        },
+        "contractVersion": {
+          "type": "string",
+          "minLength": 1
+        },
+        "applicationVersions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "startFrame",
+        "endFrame",
+        "durationFrames",
+        "frameRate",
+        "startDisplay",
+        "endDisplay",
+        "durationDisplay"
+      ],
+      "properties": {
+        "startFrame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endFrame": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "durationFrames": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "frameRate": {
+          "type": "string",
+          "pattern": "^[1-9][0-9]*/[1-9][0-9]*$"
+        },
+        "startDisplay": {
+          "type": "string"
+        },
+        "endDisplay": {
+          "type": "string"
+        },
+        "durationDisplay": {
+          "type": "string"
+        }
+      }
+    },
+    "entity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "id",
+        "label"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "project",
+            "track",
+            "clip",
+            "media",
+            "export"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "issue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "severity",
+        "entity",
+        "message",
+        "action",
+        "retryable"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$"
+        },
+        "severity": {
+          "enum": [
+            "blocking",
+            "flattening",
+            "info"
+          ]
+        },
+        "entity": {
+          "$ref": "#/$defs/entity"
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "action": {
+          "type": "string",
+          "minLength": 1
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "relativePath",
+        "mediaType",
+        "required",
+        "status"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "fcpxml",
+            "movie",
+            "media",
+            "report"
+          ]
+        },
+        "relativePath": {
+          "type": "string",
+          "minLength": 1,
+          "not": {
+            "pattern": "(^/|^[A-Za-z]:|(?:^|/)\\.\\.(?:/|$))"
+          }
+        },
+        "mediaType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "required": {
+          "type": "boolean"
+        },
+        "byteLength": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "status": {
+          "enum": [
+            "written",
+            "failed",
+            "cancelled"
+          ]
+        }
+      }
+    },
+    "substitution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entity",
+        "description"
+      ],
+      "properties": {
+        "entity": {
+          "$ref": "#/$defs/entity"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "summary"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "completed",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "failedStage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retryable": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}
